@@ -33,6 +33,7 @@ from avg.config.settings_import import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.media.engine import MediaEngine
+from avg.media.workspace import render_workspace
 
 from .deps import require_token
 
@@ -231,6 +232,20 @@ def create_app(token: str, output_root: Path) -> FastAPI:
 
         def _worker() -> None:
             try:
+                # Renders run against a disposable COPY of the project, never
+                # the folder itself. render_project writes master_output.mp4
+                # into the folder it is given, so rendering in place would
+                # overwrite the finished video the user already has - their
+                # actual work, with no undo - and destroy the original that
+                # Slice 1 exists to compare the new output against.
+                with render_workspace(req.project_folder, keep=True) as workspace:
+                    _run_render(req.model_copy(update={"project_folder": workspace}))
+            finally:
+                app.state.render_thread = None
+                app.state.rendering_project_id = None
+
+        def _run_render(req: RenderRequest) -> None:
+            try:
                 # A plain `for` loop that is never broken out of early -
                 # this is what guarantees MediaEngine.render's generator
                 # (and the child-process join in its `finally`) runs to
@@ -250,9 +265,6 @@ def create_app(token: str, output_root: Path) -> FastAPI:
                         # the drain and leave the child process unjoined.
                         fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
                         fut.result()
-            finally:
-                app.state.render_thread = None
-                app.state.rendering_project_id = None
 
         app.state.rendering_project_id = project_id
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-render-{project_id}")
