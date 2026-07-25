@@ -245,26 +245,23 @@ def create_app(token: str, output_root: Path) -> FastAPI:
                 app.state.rendering_project_id = None
 
         def _run_render(req: RenderRequest) -> None:
-            try:
-                # A plain `for` loop that is never broken out of early -
-                # this is what guarantees MediaEngine.render's generator
-                # (and the child-process join in its `finally`) runs to
-                # completion even when it ends in PhaseFailed or
-                # RenderCancelled rather than RenderFinished. Nobody else
-                # consumes this generator, so if this loop stopped early
-                # the child would never be joined.
-                for event in app.state.engine.render(req, project_id):
-                    with suppress(Exception):
-                        # Both submitting to the loop and waiting for
-                        # delivery are inside the same suppress: if the
-                        # loop has gone away (or a socket write blows up)
-                        # `run_coroutine_threadsafe` itself raises
-                        # synchronously, before `fut.result()` is ever
-                        # reached. Either failure must never abort this
-                        # `for` loop early - that would skip the rest of
-                        # the drain and leave the child process unjoined.
-                        fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
-                        fut.result()
+            # A plain `for` loop that is never broken out of early - this is
+            # what guarantees MediaEngine.render's generator (and the
+            # child-process join in its `finally`) runs to completion even
+            # when it ends in PhaseFailed or RenderCancelled rather than
+            # RenderFinished. Nobody else consumes this generator, so if this
+            # loop stopped early the child would never be joined.
+            for event in app.state.engine.render(req, project_id):
+                with suppress(Exception):
+                    # Both submitting to the loop and waiting for delivery
+                    # are inside the same suppress: if the loop has gone away
+                    # (or a socket write blows up) `run_coroutine_threadsafe`
+                    # itself raises synchronously, before `fut.result()` is
+                    # ever reached. Either failure must never abort this
+                    # `for` loop early - that would skip the rest of the
+                    # drain and leave the child process unjoined.
+                    fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
+                    fut.result()
 
         app.state.rendering_project_id = project_id
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-render-{project_id}")
