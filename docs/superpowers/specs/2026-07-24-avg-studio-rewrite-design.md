@@ -25,7 +25,7 @@ The current app works but has hit four ceilings at once, all of which the user n
 | Registered safeguards | 36, with a real taxonomy |
 | Error-handling functions | 11+ overlapping, across 3 modules |
 | Tests | 0 |
-| Live projects in `output/` | 62 |
+| Live projects in `output/` | 10 (plus one scratch folder) |
 
 The 20k PowerShell lines are the problem. The 5.3k Python lines are the asset — `avg.py` encodes invariants that were paid for in production failures (zoompan single-frame, QSV fallback, RAM gating at 8 / 8.5 / 12 GB, segmented low-RAM render, safe-zone analysis, Ken Burns easing, filter compositing, caption burn). **Rewriting the media layer is the single largest risk in any plan and delivers nothing the user can see.**
 
