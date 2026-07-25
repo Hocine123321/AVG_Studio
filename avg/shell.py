@@ -18,22 +18,19 @@ Two things here are load-bearing for safety, not just style:
   a file, a config key, or an environment variable, and a new run always
   gets a new one.
 
-`OUTPUT_ROOT` is not derived from anything and nothing here derives
-`config.json` from it either - both are fixed by an explicit decision
-recorded after Task 7 (`.superpowers/sdd/progress.md`): for Slice 1 the
-legacy on-disk layout is `output_root = D:\\AI_Video_Gen\\output` and
-`config.json = D:\\AI_Video_Gen\\config\\config.json`. `create_app` already
-derives the second path from the first internally
-(`output_root.parent / "config" / "config.json"`), and for this exact
-`OUTPUT_ROOT` that derivation already lands on the right file - so
-`create_app`'s existing two-argument signature did not need widening;
-this module just has to pass the real root instead of a stand-in, which is
-what `OUTPUT_ROOT` below does.
+Where projects live is decided by `resolve_output_root()`, not by a constant.
+The legacy layout (`output_root = D:\\AI_Video_Gen\\output`, with
+`config.json` derived from it by `create_app` as
+`output_root.parent / "config" / "config.json"`) is right on the machine that
+grew it, but this app ships as an installer meant to be carried to another
+PC where that drive may not exist. See `resolve_output_root` for the order it
+tries and why.
 """
 
 from __future__ import annotations
 
 import secrets
+import os
 import socket
 import threading
 import time
@@ -49,10 +46,37 @@ from avg.media.ffmpeg_locate import prepend_to_path
 
 HOST = "127.0.0.1"
 
-# Fixed per the controller's decision after Task 7 (see module docstring) -
-# not guessed here, and nothing in this module derives one path from the
-# other.
-OUTPUT_ROOT = Path(r"D:\AI_Video_Gen\output")
+# The legacy PowerShell app's output folder on the development machine. Slice
+# 1 reads existing projects from here, and `create_app` derives the legacy
+# `config.json` from it (`output_root.parent / "config" / "config.json"`).
+_LEGACY_OUTPUT_ROOT = Path(r"D:\AI_Video_Gen\output")
+
+
+def resolve_output_root() -> Path:
+    """Decide where this installation reads and writes projects.
+
+    A hardcoded `D:\\AI_Video_Gen\\output` is correct on the machine that grew
+    it and meaningless anywhere else - the installer is meant to be carried to
+    another PC, where that drive may not even exist. The importer tolerates a
+    missing folder, so the app would start and simply show an empty library
+    forever, with no indication why.
+
+    Order:
+      1. `AVG_OUTPUT_ROOT` if set - the escape hatch for pointing a fresh
+         install at an existing library.
+      2. The legacy folder, if it actually exists - keeps the dev machine and
+         anyone upgrading from the PowerShell app working untouched.
+      3. `%USERPROFILE%/Videos/AVG Studio` - where a Windows user expects
+         their videos to be, and created on demand.
+    """
+    override = os.environ.get("AVG_OUTPUT_ROOT", "").strip()
+    if override:
+        return Path(override)
+    if _LEGACY_OUTPUT_ROOT.is_dir():
+        return _LEGACY_OUTPUT_ROOT
+    fallback = Path.home() / "Videos" / "AVG Studio"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 _READY_TIMEOUT_S = 10.0
 _READY_POLL_INTERVAL_S = 0.05
@@ -138,7 +162,7 @@ def main() -> None:
 
     port = pick_port()
     token = make_token()
-    app = create_app(token=token, output_root=OUTPUT_ROOT)
+    app = create_app(token=token, output_root=resolve_output_root())
 
     server = uvicorn.Server(
         uvicorn.Config(app, host=HOST, port=port, log_level="warning")

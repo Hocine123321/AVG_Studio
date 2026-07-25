@@ -1060,6 +1060,60 @@ The user will run the installer on their actual second machine as the final
 word. Your job is to make that attempt very likely to succeed, and to be
 honest about anything you could not verify from here.
 
+### Task 11.5: First-run welcome
+
+Added 2026-07-25 at the user's request. Replaces the old PowerShell app's
+"Quick Setup wizard" - **deliberately not a port of it.** That wizard asked
+six questions through numbered console menus; this asks one, because the rest
+either have a sane default or belong to a later slice.
+
+This also removes the last portability guess in the app: `resolve_output_root`
+currently *infers* where projects live. After this task the user is asked once,
+and the answer is stored.
+
+**Files:**
+- Create: `avg/config/settings.py` - the app's own settings document
+- Create: `web/src/Welcome.tsx`
+- Modify: `avg/api/app.py` (settings routes, folder scan), `avg/shell.py`, `web/src/App.tsx`
+
+**Settings document** at `%APPDATA%/AVG Studio/settings.json`:
+`{"schema_version": 1, "output_root": "<path>", "onboarded": true}`
+Absent or `onboarded` false means the welcome screen runs. Written atomically.
+
+**Routes:**
+- `GET  /api/settings` -> the document, plus `suggestions`
+- `POST /api/settings` -> save `{output_root}` and set `onboarded`
+- `GET  /api/settings/scan?path=` -> `{"project_count": N}` so the UI can say
+  what it found before the user commits
+
+**Suggestions the backend computes (this is the good bit):**
+1. If a legacy library exists and holds projects, offer it **with the count** -
+   "found 10 projects". Reuses `import_all`, which already tolerates a missing
+   folder and skips `_`-prefixed scratch dirs.
+2. Otherwise `%USERPROFILE%/Videos/AVG Studio`, created on accept.
+Never silently pick; the user confirms.
+
+**Three screens, no wizard chrome** - no Next/Back bar, no progress dots:
+1. **Welcome.** Caprasimo headline, one line of what this is, one button.
+2. **Your library.** The suggestion stated in plain words with its project
+   count, a Browse alternative, and a live count as the path changes.
+3. **Ready.** Two-line summary, then Start.
+
+Full-window, centred, warm canvas, terracotta for the single primary action
+per screen. Sentence case. Nothing may be amber/terracotta that is not the
+action the user is meant to take next.
+
+**Browse** uses pywebview's native folder dialog exposed to JS - a real
+Windows picker, not a text field pretending to be one.
+
+**Acceptance:**
+- Deleting `settings.json` makes the welcome screen appear again; completing it
+  never shows it twice.
+- On this machine step 2 offers the legacy folder and says "10 projects".
+- Pointing it at an empty folder is allowed and says "no projects yet".
+- After onboarding, `resolve_output_root` returns the stored value and the
+  inference path is only a fallback for a corrupt settings file.
+
 ### Task 12: Package it and prove the slice
 
 **Files:**
