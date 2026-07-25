@@ -87,7 +87,9 @@ Trade-off accepted: this is not literally zero-setup — first run needs interne
 
 ## 5. Data model
 
-### Layout
+### Runtime data layout
+
+Where the app keeps user data at run time. Separate from this repository, which holds only source.
 
 ```
 %APPDATA%/AVG Studio/
@@ -153,7 +155,7 @@ Zero tests exist today. Four layers, in descending value:
 
 ## 8. Interface design
 
-Full design: `docs/design/ui/` (published artifact: AVG Studio — interface design).
+Full design — screens, palette, type, shell anatomy: **[AVG Studio — interface design](https://claude.ai/code/artifact/bd86507a-729d-4f5f-933d-cdd18aee2614)** (published artifact; not yet mirrored into this repo).
 
 Load-bearing decisions:
 
@@ -188,7 +190,7 @@ Too large for one spec. Six sub-projects; each gets its own spec → plan → im
 - `MediaEngine` child process calling `avg.py`'s existing pure entry points with progress and cancel
 - A minimal web UI: pick an imported project → Render → live progress → play the result
 
-This touches P0, P1, P2 and a sliver of P5, and proves every risky assumption — bundling, in-process media, the bridge, WebView2, reading real data — before committing to rewriting 20k lines. Breadth follows: P3 → P4 → full P5.
+This touches P0, P1, P2 and a sliver of P5, and proves every risky assumption — bundling, child-process media, the bridge, WebView2, reading real data — before committing to rewriting 20k lines. Breadth follows: P3 → P4 → full P5.
 
 ## 10. Open questions and spikes
 
