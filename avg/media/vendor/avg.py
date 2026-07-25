@@ -76,6 +76,9 @@ def _resolve_input(*candidates):
     return candidates[0]
 
 
+PROGRESS_SINK = None
+
+
 def _write_progress(project_path, percent, message):
     """
     Writes progress.json ({percent, message}) to the project folder, throttled
@@ -91,6 +94,11 @@ def _write_progress(project_path, percent, message):
         path = os.path.join(render_dir, "progress.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"percent": int(percent), "message": message}, f)
+        if PROGRESS_SINK is not None:
+            try:
+                PROGRESS_SINK(int(percent), message)
+            except Exception:
+                pass
     except Exception:
         pass  # progress reporting is never allowed to fail the phase itself
 
