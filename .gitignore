@@ -31,7 +31,11 @@ desktop.ini
 # Build tooling
 .venv-build/
 *.spec
+# ...except the checked-in PyInstaller spec Task 11 builds from.
+!tools/avg.spec
 
+# Installer output (built by ISCC from installer/avg.iss)
+installer/*.exe
 
 # Bundled ffmpeg (128 MB, fetched by tools/fetch_ffmpeg.py)
 vendor/

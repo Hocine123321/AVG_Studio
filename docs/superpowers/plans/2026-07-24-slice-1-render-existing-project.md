@@ -1032,15 +1032,33 @@ private venv, and no per-component retry UI.**
 - Compression `lzma2/max`.
 
 **Acceptance - this is the point of the task:**
-1. `AVG-Setup.exe` exists; record its size.
-2. **Install and launch it in Windows Sandbox** (ships with Win 11 Pro - a
-   genuinely clean machine with no Python and no ffmpeg). The app must open
-   its window and list projects.
-3. The desktop shortcut works; uninstall removes the app.
-4. Record installed footprint and cold-start time on that clean machine.
 
-A build that works only on this dev box has proved nothing - the whole task is
-"works on another machine".
+Windows Sandbox is NOT available on this machine: it fails with
+`0x80070103` and `HypervisorPresent` is False. Enabling it needs admin rights
+and a reboot, which is the user's decision, not something to do mid-build.
+So the clean-machine proof is done by scrubbing the environment instead.
+
+1. `dist\AVG-Setup.exe` exists; record its size.
+2. Run the installer for real. It must complete with **no UAC prompt** and
+   install to `%LOCALAPPDATA%\Programs\AVG Studio`.
+3. **Scrubbed-environment launch.** Start the installed `AVG.exe` with an
+   environment that mimics a machine with none of this dev box's tooling:
+   - `PATH` reduced to `C:\Windows\system32;C:\Windows` (removes ffmpeg)
+   - `PYTHONPATH` and `PYTHONHOME` cleared (removes system Python)
+   The window must open and the app must work. This is what proves the bundle
+   is genuinely self-contained; ffmpeg and Python are exactly what a clean
+   machine lacks.
+4. **Dev-path audit.** Grep the installed tree for strings that would only
+   exist here - `D:\AVG_Studio`, `.venv-build`, `AppData\Local\Programs\Python`,
+   `D:\AI_Video_Gen`. Any hit is a portability bug: it would work here and
+   fail on the user's other machine.
+5. Desktop shortcut launches the app; uninstall removes it and leaves no
+   Start Menu entry behind.
+6. Record installed footprint and cold-start time.
+
+The user will run the installer on their actual second machine as the final
+word. Your job is to make that attempt very likely to succeed, and to be
+honest about anything you could not verify from here.
 
 ### Task 12: Package it and prove the slice
 

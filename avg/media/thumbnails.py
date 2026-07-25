@@ -6,10 +6,11 @@ still mid-pipeline), the first image file in the project's `images/` folder;
 if neither exists, no thumbnail at all - the UI shows its own fallback
 rather than a broken `<img>`.
 
-Extraction shells out to `ffmpeg`/`ffprobe` (must be on PATH - this project
-targets a machine that already has them for rendering) and is lazy: the
-first request for a project's thumbnail extracts and caches it, every
-request after that reads the cached JPEG straight off disk.
+Extraction shells out to `ffmpeg`/`ffprobe`, resolved via
+`avg.media.ffmpeg_locate` (the bundled binary in a frozen build, PATH in
+development) and is lazy: the first request for a project's thumbnail
+extracts and caches it, every request after that reads the cached JPEG
+straight off disk.
 
 The cache lives under the user's `%LOCALAPPDATA%`, never inside a project
 folder and never inside the (read-only, in Slice 1's dev environment)
@@ -30,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 from avg.core.models import ProjectDoc
+from avg.media.ffmpeg_locate import ffmpeg_exe, ffprobe_exe
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +71,7 @@ def _probe_duration_seconds(video: Path) -> float | None:
     try:
         result = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_exe(),
                 "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
@@ -108,7 +110,7 @@ def _extract_video_frame(video: Path, dest: Path) -> bool:
     timestamp = duration * _TIMESTAMP_FRACTION
     return _run_ffmpeg_still(
         [
-            "ffmpeg", "-y",
+            ffmpeg_exe(), "-y",
             "-ss", f"{timestamp:.3f}",
             "-i", str(video),
             "-frames:v", "1",
@@ -144,7 +146,7 @@ def _first_image_file(images_dir: Path) -> Path | None:
 def _extract_from_image(source: Path, dest: Path) -> bool:
     return _run_ffmpeg_still(
         [
-            "ffmpeg", "-y",
+            ffmpeg_exe(), "-y",
             "-i", str(source),
             "-vf", f"scale={THUMB_WIDTH}:-2",
             "-q:v", JPEG_QUALITY,

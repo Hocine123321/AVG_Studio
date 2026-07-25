@@ -45,6 +45,7 @@ import uvicorn
 import webview
 
 from avg.api.app import create_app
+from avg.media.ffmpeg_locate import prepend_to_path
 
 HOST = "127.0.0.1"
 
@@ -128,6 +129,13 @@ def main() -> None:
     at which point the server thread is told to stop and joined so nothing
     outlives the window.
     """
+    # Frozen builds ship their own ffmpeg/ffprobe (vendor/ffmpeg) because a
+    # clean target machine has neither on PATH. This must run before
+    # anything shells out - including a render child process, which
+    # inherits this modified PATH from the environment at the time it is
+    # spawned. No-op in development. See avg.media.ffmpeg_locate.
+    prepend_to_path()
+
     port = pick_port()
     token = make_token()
     app = create_app(token=token, output_root=OUTPUT_ROOT)
@@ -157,4 +165,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Required before anything else runs in a frozen build: avg.media.engine
+    # spawns render children via multiprocessing's "spawn" start method
+    # (the only one Windows has), which re-executes this same frozen exe
+    # with special argv. Without freeze_support() that re-execution would
+    # re-enter main() instead of the multiprocessing bootstrap and spawn
+    # copies of the whole app recursively. It is a no-op in development and
+    # a no-op on any platform other than Windows, so it is always safe here.
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     main()
