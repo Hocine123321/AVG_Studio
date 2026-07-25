@@ -16,7 +16,7 @@ export function getToken(): string {
   return TOKEN;
 }
 
-async function request<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
   const hasBody = body !== undefined;
   const res = await fetch(path, {
     method,
@@ -51,6 +51,10 @@ export function apiGet<T>(path: string): Promise<T> {
 
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>("POST", path, body);
+}
+
+export function apiDelete<T>(path: string): Promise<T> {
+  return request<T>("DELETE", path);
 }
 
 /** Builds a `/ws/...` URL carrying the token as a query param, since browsers cannot set headers on a WebSocket handshake. */
@@ -147,4 +151,81 @@ export function saveSettings(outputRoot: string): Promise<SavedSettings> {
 
 export function scanFolder(path: string): Promise<{ project_count: number }> {
   return apiGet<{ project_count: number }>(`/api/settings/scan?path=${encodeURIComponent(path)}`);
+}
+
+// ---- settings catalogue / channels / provider keys (Slice 2 Task 4) ----
+// Mirrors `avg.core.settings_schema.SettingSpec` and `avg.api.routes_settings`.
+
+export type SettingType = "bool" | "int" | "float" | "text" | "choice" | "path" | "secret";
+export type SettingScope = "app" | "channel";
+
+export interface SettingSpec {
+  id: string;
+  group: string;
+  label: string;
+  help: string;
+  type: SettingType;
+  default: unknown;
+  scope: SettingScope;
+  choices: string[] | null;
+}
+
+export interface SettingsSchemaResponse {
+  settings: SettingSpec[];
+}
+
+/** `app`/`channel` are already-resolved current values (default-filled) for
+ * every setting of that scope - a `type="secret"` id's "value" here is a
+ * boolean (whether a key is set), never the key itself; see
+ * `routes_settings._app_values`. */
+export interface SettingsValuesResponse {
+  app: Record<string, unknown>;
+  channel: Record<string, unknown>;
+  active_channel_id: string | null;
+}
+
+export interface ChannelDoc {
+  schema_version: number;
+  id: string;
+  label: string;
+  note: string;
+  settings: Record<string, unknown>;
+}
+
+export interface ChannelsResponse {
+  channels: ChannelDoc[];
+  active_channel_id: string | null;
+}
+
+export function getSettingsSchema(): Promise<SettingsSchemaResponse> {
+  return apiGet<SettingsSchemaResponse>("/api/settings/schema");
+}
+
+export function getSettingsValues(): Promise<SettingsValuesResponse> {
+  return apiGet<SettingsValuesResponse>("/api/settings/values");
+}
+
+/** Saves a batch of `{id: value}` pairs in one request - the server
+ * validates and (for channel-scoped ids) requires an active channel for
+ * the WHOLE batch before writing anything, so a mixed batch either lands
+ * completely or not at all (see `routes_settings.post_settings_values`). */
+export function saveSettingsValues(values: Record<string, unknown>): Promise<SettingsValuesResponse> {
+  return apiPost<SettingsValuesResponse>("/api/settings/values", { values });
+}
+
+export function getChannels(): Promise<ChannelsResponse> {
+  return apiGet<ChannelsResponse>("/api/channels");
+}
+
+/** `{provider: bool}` - whether a key is set, never the key. */
+export function getKeys(): Promise<Record<string, boolean>> {
+  return apiGet<Record<string, boolean>>("/api/keys");
+}
+
+export function setProviderKey(provider: string, key: string): Promise<Record<string, boolean>> {
+  return apiPost<Record<string, boolean>>(`/api/keys/${encodeURIComponent(provider)}`, { key });
+}
+
+export function deleteProviderKey(provider: string): Promise<Record<string, boolean>> {
+  return apiDelete<Record<string, boolean>>(`/api/keys/${encodeURIComponent(provider)}`);
 }

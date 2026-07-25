@@ -1,7 +1,7 @@
 import { IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
-export type RailSection = "home" | "studio";
+export type RailSection = "home" | "studio" | "settings";
 
 export interface RailProps {
   /** Which section is showing right now. The amber marker names "where you
@@ -10,6 +10,7 @@ export interface RailProps {
    * one pulses; this one doesn't). */
   active: RailSection;
   onHome: () => void;
+  onSettings: () => void;
   /** Owned by `App.tsx` (not this component) so the same choice also
    * applies to the welcome screens, which render before Rail ever mounts. */
   theme: Theme;
@@ -25,11 +26,11 @@ export interface RailProps {
  *   - A theme switch above Settings. It is a real control, not a tweak:
  *     Night is the default, Day is a full citizen, and the choice persists.
  *
- * The create wizard and settings screen are still out of scope for Slice 1,
- * so their icons render but stay disabled rather than pretending to open
- * something that doesn't exist yet.
+ * The create wizard is still out of scope, so its icon renders but stays
+ * disabled rather than pretending to open something that doesn't exist yet.
+ * Settings (Slice 2 Task 4) is now a real screen, reachable here.
  */
-export default function Rail({ active, onHome, theme, onToggleTheme }: RailProps) {
+export default function Rail({ active, onHome, onSettings, theme, onToggleTheme }: RailProps) {
   const night = theme === "night";
 
   return (
@@ -72,9 +73,11 @@ export default function Rail({ active, onHome, theme, onToggleTheme }: RailProps
 
       <button
         type="button"
-        className="rail__item rail__settings"
-        disabled
-        title="Settings — not available in this build"
+        className={`rail__item rail__settings${active === "settings" ? " rail__item--on" : ""}`}
+        onClick={onSettings}
+        title="Settings"
+        aria-label="Settings"
+        aria-current={active === "settings" ? "page" : undefined}
       >
         <IconSliders />
       </button>

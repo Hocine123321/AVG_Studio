@@ -11,13 +11,14 @@ import {
 } from "./api";
 import Home from "./Home";
 import Rail from "./Rail";
+import Settings from "./Settings";
 import Studio from "./Studio";
 import Transport from "./Transport";
 import Welcome from "./Welcome";
 import { useTheme } from "./theme";
 import { useEvents } from "./useEvents";
 
-type Screen = { name: "home" } | { name: "project"; id: string };
+type Screen = { name: "home" } | { name: "project"; id: string } | { name: "settings" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -183,6 +184,8 @@ export default function App() {
           <p className="home__empty">Unknown project: {screen.id}</p>
         </div>
       );
+    } else if (screen.name === "settings") {
+      content = <Settings />;
     } else {
       content = (
         <Home
@@ -199,8 +202,9 @@ export default function App() {
   return (
     <div className="app-shell">
       <Rail
-        active={screen.name === "project" ? "studio" : "home"}
+        active={screen.name === "project" ? "studio" : screen.name === "settings" ? "settings" : "home"}
         onHome={() => setScreen({ name: "home" })}
+        onSettings={() => setScreen({ name: "settings" })}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
