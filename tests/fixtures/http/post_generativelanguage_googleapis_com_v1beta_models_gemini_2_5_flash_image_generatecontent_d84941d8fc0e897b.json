@@ -1,0 +1,47 @@
+{
+  "request": {
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "a small red apple on a white background, simple illustration"
+            }
+          ]
+        }
+      ],
+      "generationConfig": {
+        "imageConfig": {
+          "aspectRatio": "1:1"
+        },
+        "responseModalities": [
+          "TEXT",
+          "IMAGE"
+        ]
+      }
+    },
+    "body_hash": "5b2825923b75d971c1db4205bfd655010c90e935e333adffbe2637937c768586",
+    "headers": {
+      "Content-Type": "application/json",
+      "x-goog-api-key": "***REDACTED***"
+    },
+    "method": "POST",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=%2A%2A%2AREDACTED%2A%2A%2A"
+  },
+  "response": {
+    "content_b64": "ewogICJlcnJvciI6IHsKICAgICJjb2RlIjogNDI5LAogICAgIm1lc3NhZ2UiOiAiWW91IGV4Y2VlZGVkIHlvdXIgY3VycmVudCBxdW90YSwgcGxlYXNlIGNoZWNrIHlvdXIgcGxhbiBhbmQgYmlsbGluZyBkZXRhaWxzLiBGb3IgbW9yZSBpbmZvcm1hdGlvbiBvbiB0aGlzIGVycm9yLCBoZWFkIHRvOiBodHRwczovL2FpLmdvb2dsZS5kZXYvZ2VtaW5pLWFwaS9kb2NzL3JhdGUtbGltaXRzLiBUbyBtb25pdG9yIHlvdXIgY3VycmVudCB1c2FnZSwgaGVhZCB0bzogaHR0cHM6Ly9haS5kZXYvcmF0ZS1saW1pdC4gXG4qIFF1b3RhIGV4Y2VlZGVkIGZvciBtZXRyaWM6IGdlbmVyYXRpdmVsYW5ndWFnZS5nb29nbGVhcGlzLmNvbS9nZW5lcmF0ZV9jb250ZW50X2ZyZWVfdGllcl9pbnB1dF90b2tlbl9jb3VudCwgbGltaXQ6IDAsIG1vZGVsOiBnZW1pbmktMi41LWZsYXNoLXByZXZpZXctaW1hZ2VcbiogUXVvdGEgZXhjZWVkZWQgZm9yIG1ldHJpYzogZ2VuZXJhdGl2ZWxhbmd1YWdlLmdvb2dsZWFwaXMuY29tL2dlbmVyYXRlX2NvbnRlbnRfZnJlZV90aWVyX3JlcXVlc3RzLCBsaW1pdDogMCwgbW9kZWw6IGdlbWluaS0yLjUtZmxhc2gtcHJldmlldy1pbWFnZVxuKiBRdW90YSBleGNlZWRlZCBmb3IgbWV0cmljOiBnZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vZ2VuZXJhdGVfY29udGVudF9mcmVlX3RpZXJfcmVxdWVzdHMsIGxpbWl0OiAwLCBtb2RlbDogZ2VtaW5pLTIuNS1mbGFzaC1wcmV2aWV3LWltYWdlXG5QbGVhc2UgcmV0cnkgaW4gNTkuMzY0MjM5NzExcy4iLAogICAgInN0YXR1cyI6ICJSRVNPVVJDRV9FWEhBVVNURUQiLAogICAgImRldGFpbHMiOiBbCiAgICAgIHsKICAgICAgICAiQHR5cGUiOiAidHlwZS5nb29nbGVhcGlzLmNvbS9nb29nbGUucnBjLkhlbHAiLAogICAgICAgICJsaW5rcyI6IFsKICAgICAgICAgIHsKICAgICAgICAgICAgImRlc2NyaXB0aW9uIjogIkxlYXJuIG1vcmUgYWJvdXQgR2VtaW5pIEFQSSBxdW90YXMiLAogICAgICAgICAgICAidXJsIjogImh0dHBzOi8vYWkuZ29vZ2xlLmRldi9nZW1pbmktYXBpL2RvY3MvcmF0ZS1saW1pdHMiCiAgICAgICAgICB9CiAgICAgICAgXQogICAgICB9LAogICAgICB7CiAgICAgICAgIkB0eXBlIjogInR5cGUuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLnJwYy5RdW90YUZhaWx1cmUiLAogICAgICAgICJ2aW9sYXRpb25zIjogWwogICAgICAgICAgewogICAgICAgICAgICAicXVvdGFNZXRyaWMiOiAiZ2VuZXJhdGl2ZWxhbmd1YWdlLmdvb2dsZWFwaXMuY29tL2dlbmVyYXRlX2NvbnRlbnRfZnJlZV90aWVyX2lucHV0X3Rva2VuX2NvdW50IiwKICAgICAgICAgICAgInF1b3RhSWQiOiAiR2VuZXJhdGVDb250ZW50SW5wdXRUb2tlbnNQZXJNb2RlbFBlck1pbnV0ZS1GcmVlVGllciIsCiAgICAgICAgICAgICJxdW90YURpbWVuc2lvbnMiOiB7CiAgICAgICAgICAgICAgImxvY2F0aW9uIjogImdsb2JhbCIsCiAgICAgICAgICAgICAgIm1vZGVsIjogImdlbWluaS0yLjUtZmxhc2gtcHJldmlldy1pbWFnZSIKICAgICAgICAgICAgfQogICAgICAgICAgfSwKICAgICAgICAgIHsKICAgICAgICAgICAgInF1b3RhTWV0cmljIjogImdlbmVyYXRpdmVsYW5ndWFnZS5nb29nbGVhcGlzLmNvbS9nZW5lcmF0ZV9jb250ZW50X2ZyZWVfdGllcl9yZXF1ZXN0cyIsCiAgICAgICAgICAgICJxdW90YUlkIjogIkdlbmVyYXRlUmVxdWVzdHNQZXJNaW51dGVQZXJQcm9qZWN0UGVyTW9kZWwtRnJlZVRpZXIiLAogICAgICAgICAgICAicXVvdGFEaW1lbnNpb25zIjogewogICAgICAgICAgICAgICJsb2NhdGlvbiI6ICJnbG9iYWwiLAogICAgICAgICAgICAgICJtb2RlbCI6ICJnZW1pbmktMi41LWZsYXNoLXByZXZpZXctaW1hZ2UiCiAgICAgICAgICAgIH0KICAgICAgICAgIH0sCiAgICAgICAgICB7CiAgICAgICAgICAgICJxdW90YU1ldHJpYyI6ICJnZW5lcmF0aXZlbGFuZ3VhZ2UuZ29vZ2xlYXBpcy5jb20vZ2VuZXJhdGVfY29udGVudF9mcmVlX3RpZXJfcmVxdWVzdHMiLAogICAgICAgICAgICAicXVvdGFJZCI6ICJHZW5lcmF0ZVJlcXVlc3RzUGVyRGF5UGVyUHJvamVjdFBlck1vZGVsLUZyZWVUaWVyIiwKICAgICAgICAgICAgInF1b3RhRGltZW5zaW9ucyI6IHsKICAgICAgICAgICAgICAibG9jYXRpb24iOiAiZ2xvYmFsIiwKICAgICAgICAgICAgICAibW9kZWwiOiAiZ2VtaW5pLTIuNS1mbGFzaC1wcmV2aWV3LWltYWdlIgogICAgICAgICAgICB9CiAgICAgICAgICB9CiAgICAgICAgXQogICAgICB9LAogICAgICB7CiAgICAgICAgIkB0eXBlIjogInR5cGUuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLnJwYy5SZXRyeUluZm8iLAogICAgICAgICJyZXRyeURlbGF5IjogIjU5cyIKICAgICAgfQogICAgXQogIH0KfQo=",
+    "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Sat, 25 Jul 2026 23:08:00 GMT",
+      "server": "scaffolding on HTTPServer2",
+      "server-timing": "gfet4t7; dur=137",
+      "vary": "Origin, X-Origin, Referer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
+      "x-gemini-service-tier": "standard",
+      "x-xss-protection": "0"
+    },
+    "status_code": 429
+  }
+}

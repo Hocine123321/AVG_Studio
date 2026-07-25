@@ -1,0 +1,37 @@
+{
+  "request": {
+    "body": null,
+    "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "headers": {
+      "Client-Agent": "AVG-Studio:1.0:local",
+      "Content-Type": "application/json",
+      "apikey": "***REDACTED***"
+    },
+    "method": "GET",
+    "url": "https://aihorde.net/api/v2/generate/check/cac34292-0527-4cf1-ad10-d9a1be8699d2"
+  },
+  "response": {
+    "content_b64": "eyJmaW5pc2hlZCI6IDEsICJwcm9jZXNzaW5nIjogMCwgInJlc3RhcnRlZCI6IDAsICJ3YWl0aW5nIjogMCwgImRvbmUiOiB0cnVlLCAiZmF1bHRlZCI6IGZhbHNlLCAid2FpdF90aW1lIjogMCwgInF1ZXVlX3Bvc2l0aW9uIjogMCwgImt1ZG9zIjogMzUuMCwgImlzX3Bvc3NpYmxlIjogdHJ1ZX0K",
+    "headers": {
+      "access-control-allow-headers": "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, apikey, Client-Agent, X-Fields, X-Forwarded-For, Proxied-For, Proxy-Authorization",
+      "access-control-allow-methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
+      "access-control-allow-origin": "*",
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20ed6a48986cbeb-MAD",
+      "connection": "keep-alive",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 25 Jul 2026 23:10:32 GMT",
+      "horde-node": "troll:7004:5.0.4",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=aYFx9S57zM1jU63FYj%2B%2BOolwPl%2FiLZYnHEGQCQBH%2FbUaQgYs3U6RuJLoXWFstz7EHLNxzduVjYUAW3HTc4zMqkOgawxgyrg4eIZyjLv3T6Y0eChB2rBnhxVki9G9yw%3D%3D\"}]}",
+      "retry-after": "0",
+      "server": "cloudflare",
+      "x-cache-status": "MISS",
+      "x-ratelimit-limit": "10",
+      "x-ratelimit-remaining": "9",
+      "x-ratelimit-reset": "1785021032"
+    },
+    "status_code": 200
+  }
+}

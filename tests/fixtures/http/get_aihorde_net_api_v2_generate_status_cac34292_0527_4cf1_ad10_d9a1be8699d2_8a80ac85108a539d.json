@@ -1,0 +1,37 @@
+{
+  "request": {
+    "body": null,
+    "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "headers": {
+      "Client-Agent": "AVG-Studio:1.0:local",
+      "Content-Type": "application/json",
+      "apikey": "***REDACTED***"
+    },
+    "method": "GET",
+    "url": "https://aihorde.net/api/v2/generate/status/cac34292-0527-4cf1-ad10-d9a1be8699d2"
+  },
+  "response": {
+    "content_b64": "eyJnZW5lcmF0aW9ucyI6IFt7ImltZyI6ICJodHRwczovL2EyMjM1MzljY2Y2Y2FhMmQ3NjQ1OWM5NzI3ZDI3NmU2LnIyLmNsb3VkZmxhcmVzdG9yYWdlLmNvbS9zdGFibGUtaG9yZGUvOGExNzdjZDMtOGVkNS00ODkxLTlhNDQtYTU1MGI2NjU1OTRjLndlYnA/WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD0yNDY3ODJjYzkxMDE3NjJiYTkxNDM1MGQ4MDU4Y2Q4MyUyRjIwMjYwNzI1JTJGYXV0byUyRnMzJTJGYXdzNF9yZXF1ZXN0JlgtQW16LURhdGU9MjAyNjA3MjVUMjMxMDMyWiZYLUFtei1FeHBpcmVzPTE4MDAmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0JlgtQW16LVNpZ25hdHVyZT1kMGU4YmE3NGNiMGVhMWE1M2Y0OTdiOWM0ZDI5ZmM1YTRmYWRkNGMyYTRiYTZlODczMzQyNTZmNTM2NjM3MmJkIiwgInNlZWQiOiAiNzUwMzY3NjY5IiwgImlkIjogIjhhMTc3Y2QzLThlZDUtNDg5MS05YTQ0LWE1NTBiNjY1NTk0YyIsICJjZW5zb3JlZCI6IGZhbHNlLCAiZ2VuX21ldGFkYXRhIjogW10sICJ3b3JrZXJfaWQiOiAiYjEwYWQ5MmMtNjA2My00MDVkLWE1Y2ItM2JkZmFiNDljZDUyIiwgIndvcmtlcl9uYW1lIjogIlBpbGxhcnMgb2YgY3JlYXRpb24iLCAibW9kZWwiOiAiRmx1eC4xLVNjaG5lbGwgZnA4IChDb21wYWN0KSIsICJzdGF0ZSI6ICJvayJ9XSwgInNoYXJlZCI6IGZhbHNlLCAiZmluaXNoZWQiOiAxLCAicHJvY2Vzc2luZyI6IDAsICJyZXN0YXJ0ZWQiOiAwLCAid2FpdGluZyI6IDAsICJkb25lIjogdHJ1ZSwgImZhdWx0ZWQiOiBmYWxzZSwgIndhaXRfdGltZSI6IDAsICJxdWV1ZV9wb3NpdGlvbiI6IDAsICJrdWRvcyI6IDM1LjAsICJpc19wb3NzaWJsZSI6IHRydWV9Cg==",
+    "headers": {
+      "access-control-allow-headers": "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, apikey, Client-Agent, X-Fields, X-Forwarded-For, Proxied-For, Proxy-Authorization",
+      "access-control-allow-methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
+      "access-control-allow-origin": "*",
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20ed6aa7b9bcbeb-MAD",
+      "connection": "keep-alive",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 25 Jul 2026 23:10:32 GMT",
+      "horde-node": "gremlin:7003:5.0.4",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=skV2sBkIT4DrBxuN8INV%2FsTUVwJc%2BroeP%2BXNXHcFYlyV023nJ1E8%2Bn3u5%2Fd5PFnYMwSCwACWNOob19rdIKibAw6BVIk0jR2HqyquMeqqbfjslKZgkgNWcgARZUmHqw%3D%3D\"}]}",
+      "retry-after": "60",
+      "server": "cloudflare",
+      "x-cache-status": "MISS",
+      "x-ratelimit-limit": "10",
+      "x-ratelimit-remaining": "9",
+      "x-ratelimit-reset": "1785021093"
+    },
+    "status_code": 200
+  }
+}

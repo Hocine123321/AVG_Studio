@@ -1,0 +1,53 @@
+{
+  "request": {
+    "body": {
+      "censor_nsfw": true,
+      "models": [
+        "Flux.1-Schnell fp8 (Compact)"
+      ],
+      "nsfw": false,
+      "params": {
+        "cfg_scale": 7,
+        "height": 256,
+        "n": 1,
+        "sampler_name": "k_euler_a",
+        "steps": 8,
+        "width": 256
+      },
+      "prompt": "a small red apple on a white background, simple illustration",
+      "r2": true
+    },
+    "body_hash": "b468132b016b28e90e0fd0572b0a1e8646d5452dc0410bbd69815d2c7b56fef4",
+    "headers": {
+      "Client-Agent": "AVG-Studio:1.0:local",
+      "Content-Type": "application/json",
+      "apikey": "***REDACTED***"
+    },
+    "method": "POST",
+    "url": "https://aihorde.net/api/v2/generate/async"
+  },
+  "response": {
+    "content_b64": "eyJpZCI6ICJjYWMzNDI5Mi0wNTI3LTRjZjEtYWQxMC1kOWExYmU4Njk5ZDIiLCAia3Vkb3MiOiA0LjAsICJ3YXJuaW5ncyI6IFt7ImNvZGUiOiAiQ2ZnU2NhbGVUb29MYXJnZSIsICJtZXNzYWdlIjogIlRoZSBjZmdfc2NhbGUgc3BlY2lmaWVkIGZvciB0aGlzIGdlbmVyYXRpb24gaXMgdG9vIGxhcmdlIGZvciB0aGlzIG1vZGVsLiJ9LCB7ImNvZGUiOiAiU2FtcGxlck1pc21hdGNoIiwgIm1lc3NhZ2UiOiAiVGhlIHJlcXVlc3RlZCBzYW1wbGVyIGRvZXMgbm90IG1hdGNoIHRoZSByZXF1aXJlbWVudHMgZm9yIG9uZSBvZiB0aGUgcmVxdWVzdGVkIG1vZGVscy4ifV19Cg==",
+    "headers": {
+      "access-control-allow-headers": "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, apikey, Client-Agent, X-Fields, X-Forwarded-For, Proxied-For, Proxy-Authorization",
+      "access-control-allow-methods": "POST, GET, OPTIONS, PUT, DELETE, PATCH",
+      "access-control-allow-origin": "*",
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20ed5d7ddfc038f-MAD",
+      "connection": "keep-alive",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 25 Jul 2026 23:09:59 GMT",
+      "horde-node": "kobold:7003:5.0.4",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=3xxCqSIBAGM8aZ7etgq2sjtFjfbPx%2BYx%2FtwwcPSTzDMvrt0qU8eOD4s83LJtaLR1R1Vv3NxgRhv717ALqXTPE%2Bhav9YOMiselM1Bfd8oCH7FXX4pYYsZ4JfLtUMlrw%3D%3D\"}]}",
+      "retry-after": "0",
+      "server": "cloudflare",
+      "x-cache-status": "MISS",
+      "x-ratelimit-limit": "2",
+      "x-ratelimit-remaining": "2",
+      "x-ratelimit-reset": "1785021000"
+    },
+    "status_code": 202
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "request": {
+    "body": {
+      "instances": [
+        {
+          "prompt": "a small red apple on a white background, simple illustration"
+        }
+      ],
+      "parameters": {
+        "aspectRatio": "1:1",
+        "outputMimeType": "image/jpeg",
+        "sampleCount": 1
+      }
+    },
+    "body_hash": "d527944c289afd51cb1174f3712d320f101004b3f825aab4c9211ab7c3fabe47",
+    "headers": {
+      "Content-Type": "application/json",
+      "x-goog-api-key": "***REDACTED***"
+    },
+    "method": "POST",
+    "url": "https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key=%2A%2A%2AREDACTED%2A%2A%2A"
+  },
+  "response": {
+    "content_b64": "ewogICJlcnJvciI6IHsKICAgICJjb2RlIjogNDA0LAogICAgIm1lc3NhZ2UiOiAiVGhpcyBtb2RlbCBtb2RlbHMvaW1hZ2VuLTQuMC1mYXN0LWdlbmVyYXRlLTAwMSBpcyBubyBsb25nZXIgYXZhaWxhYmxlIHRvIG5ldyB1c2Vycy4gUGxlYXNlIHVwZGF0ZSB5b3VyIGNvZGUgdG8gdXNlIGEgbmV3ZXIgbW9kZWwgZm9yIHRoZSBsYXRlc3QgZmVhdHVyZXMgYW5kIGltcHJvdmVtZW50cy4iLAogICAgInN0YXR1cyI6ICJOT1RfRk9VTkQiCiAgfQp9Cg==",
+    "headers": {
+      "alt-svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+      "content-type": "application/json; charset=UTF-8",
+      "date": "Sat, 25 Jul 2026 23:08:24 GMT",
+      "server": "scaffolding on HTTPServer2",
+      "server-timing": "gfet4t7; dur=127",
+      "vary": "Origin, X-Origin, Referer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN",
+      "x-xss-protection": "0"
+    },
+    "status_code": 404
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "request": {
+    "body": null,
+    "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "headers": {},
+    "method": "GET",
+    "url": "https://gen.pollinations.ai/image/auth%20failure%20probe%20please%20ignore?height=1024&model=flux&negative_prompt=text%2C+watermark%2C+logo%2C+blurry%2C+low+quality&safe=true&width=1024"
+  },
+  "response": {
+    "content_b64": "eyJzdWNjZXNzIjpmYWxzZSwiZXJyb3IiOnsibWVzc2FnZSI6IkF1dGhlbnRpY2F0aW9uIHJlcXVpcmVkLiBQbGVhc2UgcHJvdmlkZSBhbiBBUEkga2V5IHZpYSBBdXRob3JpemF0aW9uIGhlYWRlciAoQmVhcmVyIHRva2VuKSBvciA/a2V5PSBxdWVyeSBwYXJhbWV0ZXIuIiwiY29kZSI6IlVOQVVUSE9SSVpFRCIsInRpbWVzdGFtcCI6IjIwMjYtMDctMjVUMjM6MDc6MjIuMDY5WiJ9LCJzdGF0dXMiOjQwMX0=",
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-expose-headers": "*",
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cf-ray": "a20ed205e8858c07-MAD",
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "date": "Sat, 25 Jul 2026 23:07:22 GMT",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=34S%2BmZJW3P%2BLoG2TvLsrzP3CIxwMgOgosed4oXp99KuHz0KprhPWpaCZbkOc7gttcEwkQC4eLGHbmEESqm6fh7Kb9eCtfbpEl61JF2jy93GroJ9AW7m9aMQ23bFcN0W8IpPpFY42\"}]}",
+      "server": "cloudflare",
+      "x-cache": "MISS",
+      "x-request-id": "39a60e5d-b796-4cd7-90aa-1fdd0689b6e1",
+      "x-robots-tag": "noindex, nofollow"
+    },
+    "status_code": 401
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "request": {
+    "body": {
+      "inputs": "a small red apple on a white background, simple illustration"
+    },
+    "body_hash": "61093a5cb55fc6cdb71e73a9b82b6a7264f2ba5919e368b295d00765f509c47c",
+    "headers": {
+      "Accept": "image/png",
+      "Authorization": "***REDACTED***",
+      "Content-Type": "application/json",
+      "x-wait-for-model": "true"
+    },
+    "method": "POST",
+    "url": "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+  },
+  "response": {
+    "content_b64": "eyJlcnJvciI6IlRoZSByZXF1ZXN0ZWQgbW9kZWwgaXMgZGVwcmVjYXRlZCBhbmQgbm8gbG9uZ2VyIHN1cHBvcnRlZCBieSBwcm92aWRlciBoZi1pbmZlcmVuY2UifQ==",
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-expose-headers": "X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash",
+      "connection": "keep-alive",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "date": "Sat, 25 Jul 2026 23:07:15 GMT",
+      "etag": "W/\"5e-e22JWLAnwSTqFMGsLE+MzFPAdNM\"",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "vary": "Origin",
+      "via": "1.1 c1dea0aa72b287ac912450e6d64e135e.cloudfront.net (CloudFront)",
+      "x-amz-cf-id": "SmmaNGP-2xNxRG2xL7FnLAENCe2PZTOCpbExlVa1m9eOuWPaYS1qFg==",
+      "x-amz-cf-pop": "MRS52-P3",
+      "x-cache": "Error from cloudfront",
+      "x-error-message": "The requested model is deprecated and no longer supported by provider hf-inference",
+      "x-powered-by": "huggingface-moon",
+      "x-request-id": "Root=1-6a6541a3-58c3cfe8035e200d700f181d",
+      "x-robots-tag": "none"
+    },
+    "status_code": 410
+  }
+}
