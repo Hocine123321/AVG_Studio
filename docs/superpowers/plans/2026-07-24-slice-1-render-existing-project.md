@@ -984,71 +984,63 @@ Runs BEFORE Task 11 (installer) and Task 12 (acceptance).
 
 ---
 
-### Task 11: First-run installer
+### Task 11: One installer that packages everything
+
+**REPLACES the original "first-run installer" task, 2026-07-25.** The user's
+requirement is a single installer they can carry to another machine and run
+easily. That is incompatible with installing dependencies at first run: on
+someone else's PC that step needs internet, can hit a proxy, and can fail
+halfway leaving a broken app. The packaging spike found the fat bundle is
+~63 MB, not the ~400 MB that made a runtime install seem necessary. So
+**everything ships inside the installer. There is no pip at runtime, no
+private venv, and no per-component retry UI.**
 
 **Files:**
-- Create: `avg/setup/components.py`, `web/src/Setup.tsx`
-- Modify: `avg/api/app.py` (add `/api/setup/status` and `/api/setup/install`), `avg/shell.py` (route to setup when components are missing)
-- Test: `tests/setup/test_components.py`
+- Create: `tools/fetch_ffmpeg.py`, `tools/avg.spec`, `installer/avg.iss`
+- Modify: `tools/build.py`
+- Modify: `avg/media/thumbnails.py` and anything else invoking `ffmpeg`/`ffprobe` -
+  they must resolve the BUNDLED binary when frozen, not whatever is on PATH
 
-**Interfaces:**
-- Consumes: `create_app` (Task 7)
-- Produces: `COMPONENTS: list[Component]`, `verify() -> list[ComponentStatus]`, `install(name: str) -> Iterator[InstallProgress]`
+**Already done for you (do not redo):**
+- `vendor/ffmpeg/` holds a working 128 MB shared LGPL build: `ffmpeg.exe`,
+  `ffprobe.exe` and 7 DLLs. `avdevice-63.dll` is required even though nothing
+  captures devices - without it both exes die with `0xC0000135`. `ffplay.exe`
+  is deliberately absent. `vendor/` is gitignored; `tools/fetch_ffmpeg.py`
+  must reproduce it from
+  `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl-shared.zip`
+- Inno Setup 6 is installed at
+  `C:\Users\HO\AppData\Local\Programs\Inno Setup 6\ISCC.exe`
 
-Components: `numpy`, `Pillow`, `pydub`, `moviepy`, `edge-tts`, `assemblyai` into a private venv beside the exe, plus `ffmpeg` fetched into the app folder. Each row installs, verifies and **fails independently** — a failed FFmpeg download is one row with a retry, not "setup failed".
+**Build shape:**
+- **PyInstaller `--onedir`, not `--onefile`.** Onefile re-extracts ~250 MB to
+  temp on every launch; onedir starts immediately, and Inno Setup is what
+  turns the folder into one downloadable file.
+- Required flags, learned in Task 1 - without these the exe builds and dies at
+  launch with `No package metadata was found for imageio`:
+  `--copy-metadata imageio --copy-metadata imageio_ffmpeg --copy-metadata moviepy --copy-metadata numpy --copy-metadata Pillow`
+- Bundle `web/dist` and `vendor/ffmpeg` as data.
+- Entry point is `avg/shell.py`'s `main()`.
 
-- [ ] **Step 1: Write the failing test**
+**Installer shape:**
+- Output: **one `AVG-Setup.exe`** in `dist/`.
+- **Per-user install to `{localappdata}\Programs\AVG Studio`**, with
+  `PrivilegesRequired=lowest`. No UAC prompt, and the app can write beside
+  itself without admin.
+- Desktop shortcut and Start Menu entry, both to `AVG.exe`.
+- Proper uninstaller, appearing in Add/Remove Programs.
+- Fixed `AppId` so upgrades replace rather than stack.
+- Compression `lzma2/max`.
 
-```python
-# tests/setup/test_components.py
-from avg.setup.components import COMPONENTS, verify
+**Acceptance - this is the point of the task:**
+1. `AVG-Setup.exe` exists; record its size.
+2. **Install and launch it in Windows Sandbox** (ships with Win 11 Pro - a
+   genuinely clean machine with no Python and no ffmpeg). The app must open
+   its window and list projects.
+3. The desktop shortcut works; uninstall removes the app.
+4. Record installed footprint and cold-start time on that clean machine.
 
-def test_every_component_declares_a_verifier():
-    assert len(COMPONENTS) >= 7
-    for c in COMPONENTS:
-        assert c.name and callable(c.verify)
-
-def test_verify_reports_per_component_without_raising(monkeypatch):
-    monkeypatch.setattr("avg.setup.components._import_ok", lambda mod: False)
-    statuses = verify()
-    assert all(s.installed is False for s in statuses)
-    assert len(statuses) == len(COMPONENTS)
-
-def test_one_broken_verifier_does_not_sink_the_rest(monkeypatch):
-    def boom(mod):
-        if mod == "moviepy": raise OSError("dll load failed")
-        return True
-    monkeypatch.setattr("avg.setup.components._import_ok", boom)
-    statuses = {s.name: s for s in verify()}
-    assert statuses["moviepy"].installed is False
-    assert statuses["numpy"].installed is True
-```
-
-- [ ] **Step 2: Run it and watch it fail**
-
-Run: `pytest tests/setup -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'avg.setup'`
-
-- [ ] **Step 3: Implement it**
-
-`verify()` wraps each component's check in `try/except Exception` and records the failure text on that row. `install()` shells `python -m pip install` into the private venv and yields progress lines. FFmpeg is fetched to a temp path, checksum-verified, then moved into place — never extracted over a live binary.
-
-- [ ] **Step 4: Run it and watch it pass**
-
-Run: `pytest tests/setup -v`
-Expected: 3 passed
-
-- [ ] **Step 5: Build the setup screen**
-
-`Setup.tsx` renders one row per component with its own state dot, progress bar and retry, exactly as designed. `shell.py` routes here when `verify()` reports anything missing, and the same screen is later reachable as settings → components.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add avg/setup web/src/Setup.tsx avg/api avg/shell.py tests/setup && git commit -m "feat: first-run component installer"
-```
-
----
+A build that works only on this dev box has proved nothing - the whole task is
+"works on another machine".
 
 ### Task 12: Package it and prove the slice
 
