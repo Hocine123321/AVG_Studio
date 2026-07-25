@@ -1,0 +1,220 @@
+"""Parent-side lifecycle for a render running in a spawned child process.
+
+The dev machine has 7.9 GB of RAM and rendering is what exhausts it. Running
+the render in a child process (see `avg.media.child.run_child`) means an
+out-of-memory kill takes down the render, not the app: `MediaEngine.render`
+turns a dead child into an honest `PhaseFailed` event instead of crashing the
+caller, and `classify_exit` is what decides whether that death was a bug in
+the render code or a resource exhaustion.
+
+Uses `multiprocessing.get_context("spawn")` throughout: Windows has no fork,
+and spawn is what the packaged executable will use, so it is exercised here
+rather than only on whatever platform happens to run the tests.
+"""
+
+from __future__ import annotations
+
+import multiprocessing as mp
+import os
+import queue as queue_mod
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from avg.core.errors import ErrorKind
+from avg.core.events import PhaseFailed, ProgressEvent, RenderFinished
+from avg.core.models import RenderRequest
+from avg.media.child import run_child
+
+# How often the parent wakes up to check whether the child is still alive
+# while waiting for the next queue message. Small enough that tests (which
+# finish almost instantly) don't feel it, large enough not to busy-spin.
+_POLL_SECONDS = 0.1
+
+# How long cancel() (and the end-of-render cleanup) waits for a terminated
+# child to actually exit before escalating to kill().
+_JOIN_TIMEOUT = 5
+
+_CTX = mp.get_context("spawn")
+
+# avg/media/vendor/avg.py inserts its own directory at sys.path[0] as soon as
+# it's imported anywhere in this process (a legacy shim from when it lived as
+# a flat sibling script next to overlay_design.py — see its top-of-file
+# sys.path.insert). If that happens in THIS (parent) process — e.g. anything
+# here imports the vendor module directly, as tests exercising PROGRESS_SINK
+# do — multiprocessing's spawn snapshots sys.path when a child starts, and
+# ships the polluted list to the child. There, `avg/media/vendor` sits ahead
+# of the real package, so `import avg` inside the child resolves to
+# vendor/avg.py itself (a bare module, not a package) instead of the real
+# avg package, and everything downstream (including finding run_child)
+# fails before any of our own code runs. Stripped out, scoped tightly around
+# proc.start(), so the fix lives here rather than touching the vendored file.
+_VENDOR_DIR = os.path.normcase(os.path.abspath(str(Path(__file__).resolve().parent / "vendor")))
+
+
+@contextmanager
+def _clean_sys_path() -> Iterator[None]:
+    original = sys.path[:]
+    sys.path[:] = [p for p in sys.path if os.path.normcase(os.path.abspath(p)) != _VENDOR_DIR]
+    try:
+        yield
+    finally:
+        sys.path[:] = original
+
+
+def classify_exit(exitcode: int, saw_result: bool) -> ErrorKind | None:
+    """Turn a dead child's exit code into an ErrorKind, or None for success.
+
+    `render_project` (the vendored render entry point) may call
+    `sys.exit(1)` on hard errors — that is not a bug to fix, it's why
+    exitcode 1 with no result classifies as `bug` here rather than being
+    treated as some other failure mode.
+
+    - exitcode < 0: killed by a signal. On Windows this is what both an OOM
+      kill and an external TerminateProcess (our own cancel()/kill()) look
+      like — `resource`.
+    - exitcode >= 0 with a result seen: clean success — `None`.
+    - exitcode >= 0 without a result: either `render_project` called
+      `sys.exit(1)`, or the child returned normally without producing
+      output. Both are a `bug` — the render code should never exit clean
+      without either raising/exiting non-zero or reporting a result.
+    """
+    if exitcode < 0:
+        return ErrorKind.resource
+    if saw_result:
+        return None
+    return ErrorKind.bug
+
+
+def _request_to_kwargs(req: RenderRequest) -> dict[str, Any]:
+    """Translate a RenderRequest into render_project's kwargs.
+
+    Field names mirror render_project's parameters exactly except
+    project_folder -> project_path. Converted to a plain dict of
+    primitives (Path -> str) rather than sent as the pydantic model itself:
+    the child process is a fresh spawned interpreter, and a plain dict is
+    unambiguously picklable and needs nothing beyond stdlib to unpack, so
+    child.py has no reason to import pydantic at all.
+    """
+    return {
+        "project_path": str(req.project_folder),
+        "fps": req.fps,
+        "codec": req.codec,
+        "threads": req.threads,
+        "aspect_ratio": req.aspect_ratio,
+        "ken_burns": req.ken_burns,
+        "scene_count": req.scene_count,
+        "brief_path": req.brief_path,
+        "timeline_path": req.timeline_path,
+        "scene_map_path": req.scene_map_path,
+        "short_edge": req.short_edge,
+        "kb_intensity": req.kb_intensity,
+        "kb_mode": req.kb_mode,
+        "render_engine": req.render_engine,
+        "render_opts": req.render_opts,
+    }
+
+
+class MediaEngine:
+    """Runs one render at a time in a spawned child process."""
+
+    def __init__(self) -> None:
+        self._proc: mp.process.BaseProcess | None = None
+
+    def render(
+        self, req: RenderRequest, project_id: str
+    ) -> Iterator[ProgressEvent | PhaseFailed | RenderFinished]:
+        """Run a render in a child process, yielding events as it goes.
+
+        Yields a ProgressEvent per progress message the child reports, then
+        exactly one final event: RenderFinished on clean success, or
+        PhaseFailed (never a raised exception) on any other outcome — a
+        crashed or killed child becomes an event the caller can handle, not
+        something that takes the caller down with it.
+        """
+        q: mp.queues.Queue = _CTX.Queue()
+        proc = _CTX.Process(target=run_child, args=(_request_to_kwargs(req), q), daemon=True)
+        self._proc = proc
+        with _clean_sys_path():
+            proc.start()
+
+        result: dict[str, Any] = {"output": None, "size": 0, "seen": False}
+
+        def _consume(msg: tuple) -> ProgressEvent | None:
+            kind = msg[0]
+            if kind == "progress":
+                _, percent, message = msg
+                return ProgressEvent(project_id=project_id, percent=percent, message=message)
+            if kind == "result":
+                _, output, size = msg
+                result["output"] = output
+                result["size"] = size
+                result["seen"] = True
+            return None
+
+        try:
+            # Drain until the child is dead AND the queue has nothing left
+            # waiting — checking is_alive() first would race a child that
+            # exits between the check and the get().
+            while True:
+                try:
+                    msg = q.get(timeout=_POLL_SECONDS)
+                except queue_mod.Empty:
+                    if proc.is_alive():
+                        continue
+                    break
+                event = _consume(msg)
+                if event is not None:
+                    yield event
+
+            # Final non-blocking drain: child.py closes and joins its queue's
+            # feeder thread before exiting, so by the time is_alive() is
+            # False every message it put has already been flushed to the
+            # pipe — this catches anything that arrived in the gap between
+            # the last get() timeout and the is_alive() check above.
+            while True:
+                try:
+                    msg = q.get_nowait()
+                except queue_mod.Empty:
+                    break
+                event = _consume(msg)
+                if event is not None:
+                    yield event
+        finally:
+            proc.join(_JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(_JOIN_TIMEOUT)
+
+        # -1 (treated as "killed") only if the process still won't report an
+        # exit code after terminate+join+kill+join above — should not
+        # happen, but a render must never look like a clean success by
+        # accident.
+        exitcode = proc.exitcode if proc.exitcode is not None else -1
+        kind = classify_exit(exitcode, saw_result=result["seen"])
+        if kind is None:
+            yield RenderFinished(
+                project_id=project_id,
+                output=Path(result["output"]),
+                size_bytes=result["size"],
+            )
+        else:
+            yield PhaseFailed(
+                project_id=project_id,
+                phase="render",
+                kind=kind,
+                message=f"render child exited with code {exitcode}",
+            )
+
+    def cancel(self) -> None:
+        """Stop a running render. Safe to call even if nothing is running."""
+        proc = self._proc
+        if proc is None or not proc.is_alive():
+            return
+        proc.terminate()
+        proc.join(_JOIN_TIMEOUT)
+        if proc.is_alive():
+            proc.kill()
+            proc.join(_JOIN_TIMEOUT)
