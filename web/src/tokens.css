@@ -1,0 +1,224 @@
+/*
+ * Design tokens for AVG Studio.
+ *
+ * Ground is cool graphite, not neutral gray - the user spends this app's
+ * time judging images and video grades, and bright chrome around a 9:16
+ * frame lies about exposure. These values come from the approved UI design
+ * and are not re-invented here.
+ *
+ * --accent (amber) means exactly one thing: "happening right now". It must
+ * never be used decoratively - see Home.tsx / ProjectCard.tsx for the one
+ * place it is allowed to appear (the "running" status chip).
+ */
+:root {
+  --canvas: #0c0e12;
+  --panel: #13171d;
+  --panel-2: #1a1f27;
+  --line: #252b34;
+  --text: #e5e9ef;
+  --muted: #868f9c;
+
+  --accent: #e9a63f;
+  --accent-dim: #4a3717;
+
+  --ok: #57b67c;
+  --ok-dim: #12241a;
+  --ok-line: #1d3d2b;
+
+  --bad: #de5b52;
+  --bad-dim: #2a1413;
+  --bad-line: #4a211e;
+
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- shared chip / badge / button primitives ---- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.chip--amber {
+  border-color: var(--accent-dim);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.chip--ok {
+  border-color: var(--ok-line);
+  background: var(--ok-dim);
+  color: var(--ok);
+}
+
+.chip--bad {
+  border-color: var(--bad-line);
+  background: var(--bad-dim);
+  color: var(--bad);
+}
+
+.btn {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--panel-2);
+}
+
+.btn:focus-visible {
+  /* Deliberately not --accent: amber means "happening right now" and
+     nothing else, so a plain keyboard-focus ring (present on every button,
+     regardless of any project's state) must not borrow it. */
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+/* ---- home screen ---- */
+
+.home {
+  min-height: 100%;
+  padding: 24px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.home__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.home__count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.home__empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.project-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.project-card__thumb {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+.project-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 14px;
+  flex: 1;
+}
+
+.project-card__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.project-card__meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.project-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  flex-wrap: wrap;
+}
+
+.project-card__actions .btn {
+  font-size: 11.5px;
+  padding: 5px 10px;
+}

@@ -26,6 +26,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.staticfiles import StaticFiles
 
 from avg.config.legacy_import import import_all
 from avg.config.settings_import import load_render_settings
@@ -36,6 +37,12 @@ from avg.media.engine import MediaEngine
 from .deps import require_token
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
+
+# The built web UI (`cd web && npm run build`) - a sibling of `avg/` at the
+# repo root, not a package resource, since it is built by npm and gitignored
+# (`web/dist` and `web/node_modules`), never committed. `avg/api/app.py` ->
+# parents[0] is `avg/api`, parents[1] is `avg`, parents[2] is the repo root.
+WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
 
 def _total_ram_gb() -> float:
@@ -283,5 +290,19 @@ def create_app(token: str, output_root: Path) -> FastAPI:
             pass
         finally:
             app.state.manager.remove(websocket)
+
+    # Serves the built UI. Mounted last and at "/" deliberately: FastAPI
+    # matches routes in registration order, so the exact-path routes above
+    # (/api/..., /ws/events) are always tried first and this catch-all mount
+    # never shadows them - it only ever answers requests nothing above it
+    # claimed. `html=True` makes "/" resolve to index.html. Every test in
+    # `tests/api/test_app.py` builds `create_app` against a throwaway
+    # `tmp_path` with no built UI anywhere near it, and the real repo has no
+    # `web/dist` until someone runs `npm run build` (it is gitignored) - so
+    # this has to tolerate the directory not existing rather than raising,
+    # or every one of those tests (and a fresh clone before its first
+    # frontend build) would fail at app construction.
+    if WEB_DIST.is_dir():
+        app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")
 
     return app
