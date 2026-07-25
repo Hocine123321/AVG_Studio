@@ -28,7 +28,12 @@ from typing import Any
 # Messages put on the queue are plain tuples so they stay cheaply picklable:
 #   ("progress", percent: int, message: str)
 #   ("result", output_path: str, size_bytes: int)
-# Nothing is put on failure — the parent infers failure from the exit code.
+#   ("error", message: str)
+# A crash puts nothing — the parent infers that from the exit code.
+
+# Matches the old app's guard: an output file smaller than this never
+# represents a real render, however cleanly the render code returned.
+_MIN_OUTPUT_BYTES = 1024
 
 
 def run_child(kwargs: dict[str, Any], q: Any) -> None:
@@ -81,9 +86,21 @@ def run_child(kwargs: dict[str, Any], q: Any) -> None:
             finally:
                 vendor_avg.PROGRESS_SINK = None
 
+            # render_project can return normally having produced nothing —
+            # the old app guarded this explicitly (missing or <1KB output was
+            # a failure, not a success) and dropping that guard would report
+            # an empty render as finished. Report the reason rather than
+            # letting the parent infer a bare "exited with code 0".
             output = Path(kwargs["project_path"]) / "master_output.mp4"
             size = output.stat().st_size if output.exists() else 0
-            q.put(("result", str(output), size))
+            if size < _MIN_OUTPUT_BYTES:
+                q.put((
+                    "error",
+                    f"render finished but {output.name} is "
+                    f"{'missing' if size == 0 else f'only {size} bytes'}",
+                ))
+            else:
+                q.put(("result", str(output), size))
     finally:
         # multiprocessing.Queue buffers puts and feeds them to the
         # underlying pipe on a background thread. Closing and joining that

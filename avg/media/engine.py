@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from avg.core.errors import ErrorKind
-from avg.core.events import PhaseFailed, ProgressEvent, RenderFinished
+from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import RenderRequest
 from avg.media.child import run_child
 
@@ -122,10 +122,11 @@ class MediaEngine:
 
     def __init__(self) -> None:
         self._proc: mp.process.BaseProcess | None = None
+        self._cancelled = False
 
     def render(
         self, req: RenderRequest, project_id: str
-    ) -> Iterator[ProgressEvent | PhaseFailed | RenderFinished]:
+    ) -> Iterator[ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished]:
         """Run a render in a child process, yielding events as it goes.
 
         Yields a ProgressEvent per progress message the child reports, then
@@ -137,10 +138,11 @@ class MediaEngine:
         q: mp.queues.Queue = _CTX.Queue()
         proc = _CTX.Process(target=run_child, args=(_request_to_kwargs(req), q), daemon=True)
         self._proc = proc
+        self._cancelled = False
         with _clean_sys_path():
             proc.start()
 
-        result: dict[str, Any] = {"output": None, "size": 0, "seen": False}
+        result: dict[str, Any] = {"output": None, "size": 0, "seen": False, "error": None}
 
         def _consume(msg: tuple) -> ProgressEvent | None:
             kind = msg[0]
@@ -152,6 +154,10 @@ class MediaEngine:
                 result["output"] = output
                 result["size"] = size
                 result["seen"] = True
+            elif kind == "error":
+                # The child ran to completion but the render is not usable.
+                # Carries a reason the bare exit code cannot.
+                result["error"] = msg[1]
             return None
 
         try:
@@ -193,6 +199,14 @@ class MediaEngine:
         # happen, but a render must never look like a clean success by
         # accident.
         exitcode = proc.exitcode if proc.exitcode is not None else -1
+
+        # A cancelled render is terminated, which on Windows yields the same
+        # negative exit code as an OOM kill. Only the parent knows the
+        # difference, so it must be decided here rather than in classify_exit.
+        if self._cancelled:
+            yield RenderCancelled(project_id=project_id)
+            return
+
         kind = classify_exit(exitcode, saw_result=result["seen"])
         if kind is None:
             yield RenderFinished(
@@ -205,7 +219,8 @@ class MediaEngine:
                 project_id=project_id,
                 phase="render",
                 kind=kind,
-                message=f"render child exited with code {exitcode}",
+                message=result["error"] or f"render child exited with code {exitcode}",
+                detail=f"exit code {exitcode}",
             )
 
     def cancel(self) -> None:
@@ -213,6 +228,9 @@ class MediaEngine:
         proc = self._proc
         if proc is None or not proc.is_alive():
             return
+        # Set before terminating: render() reads this to tell a user-requested
+        # stop apart from a crash, and the child dies as soon as we terminate.
+        self._cancelled = True
         proc.terminate()
         proc.join(_JOIN_TIMEOUT)
         if proc.is_alive():
