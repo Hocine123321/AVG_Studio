@@ -47,6 +47,7 @@ from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image
 from avg.media.workspace import render_workspace
 
 from .deps import require_token
+from .routes_settings import router as settings_router
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
 
@@ -197,6 +198,8 @@ def create_app(
     output_root: Path,
     thumb_cache_dir: Path | None = None,
     settings_path: Path | None = None,
+    channels_dir: Path | None = None,
+    secrets_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -208,8 +211,12 @@ def create_app(
     `thumb_cache_dir` defaults to `avg.media.thumbnails.default_cache_dir()`
     (`%LOCALAPPDATA%/AVG Studio/thumbs`) - the optional override exists so
     tests can point it at a throwaway `tmp_path` instead of writing into the
-    real user profile on every test run. `settings_path` is the same idea
-    for `avg.config.settings`'s `%APPDATA%/AVG Studio/settings.json`.
+    real user profile on every test run. `settings_path`, `channels_dir`
+    and `secrets_path` are the same idea for `avg.config.settings`'s
+    `%APPDATA%/AVG Studio/settings.json`, `avg.config.channels`'s
+    `.../channels/` folder, and `avg.config.secrets`'s `.../secrets.dat` -
+    all three stay `None` by default so each module resolves its own real
+    default path, exactly like `settings_path` already did.
     """
     output_root = Path(output_root)
     app = FastAPI()
@@ -220,6 +227,8 @@ def create_app(
     app.state.manager = _ConnectionManager()
     app.state.thumb_cache_dir = Path(thumb_cache_dir) if thumb_cache_dir is not None else default_cache_dir()
     app.state.settings_path = Path(settings_path) if settings_path is not None else None
+    app.state.channels_dir = Path(channels_dir) if channels_dir is not None else None
+    app.state.secrets_path = Path(secrets_path) if secrets_path is not None else None
     # A single background thread at a time - MediaEngine itself only ever
     # tracks one child process (see its docstring), so a second render
     # starting while one is alive would silently overwrite that handle and
@@ -482,6 +491,15 @@ def create_app(
             pass
         finally:
             app.state.manager.remove(websocket)
+
+    # The settings/channels/keys surface (Task 3) - a separate router kept
+    # thin on purpose (validate, delegate to avg.config.*, return; see its
+    # own module docstring) rather than folded into this already-large
+    # function. Included before the static mount below for the same reason
+    # every /api/... route above is defined before it: registration order
+    # is match order, and the catch-all mount must never get first crack at
+    # an /api/ path.
+    app.include_router(settings_router)
 
     # Serves the built UI. Mounted last and at "/" deliberately: FastAPI
     # matches routes in registration order, so the exact-path routes above

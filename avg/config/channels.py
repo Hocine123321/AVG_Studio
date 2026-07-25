@@ -36,6 +36,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from avg.config.settings import load_settings, save_settings
+
 SCHEMA_VERSION = 1
 
 # Labels for the three starter channels, seeded only when the channels
@@ -73,23 +75,8 @@ def default_channels_dir() -> Path:
     return Path(base) / "AVG Studio" / "channels"
 
 
-def default_active_pointer_path() -> Path:
-    """`%APPDATA%/AVG Studio/active_channel.json`.
-
-    Deliberately its own small file rather than a field folded into the
-    app's general settings document: this module owns the active-channel
-    pointer end to end, with nothing else's schema to coordinate with.
-    """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "active_channel.json"
-
-
 def _resolve_dir(channels_dir: Path | None) -> Path:
     return Path(channels_dir) if channels_dir is not None else default_channels_dir()
-
-
-def _resolve_active_path(active_path: Path | None) -> Path:
-    return Path(active_path) if active_path is not None else default_active_pointer_path()
 
 
 def _channel_path(channels_dir: Path, channel_id: str) -> Path:
@@ -222,7 +209,7 @@ def create_channel(label: str, note: str = "", channels_dir: Path | None = None)
 def delete_channel(
     channel_id: str,
     channels_dir: Path | None = None,
-    active_path: Path | None = None,
+    settings_path: Path | None = None,
 ) -> None:
     """Delete a channel's document. A no-op if it doesn't exist.
 
@@ -235,36 +222,38 @@ def delete_channel(
     with suppress(FileNotFoundError):
         _channel_path(resolved, channel_id).unlink()
 
-    if active_channel_id(active_path) == channel_id:
-        set_active(None, active_path)
+    if active_channel_id(settings_path) == channel_id:
+        set_active(None, settings_path)
 
 
-def active_channel_id(active_path: Path | None = None) -> str | None:
-    """The active channel's id, or `None` if none is set / the pointer
-    file is absent or corrupt.
+def active_channel_id(settings_path: Path | None = None) -> str | None:
+    """The active channel's id, or `None` if none is set.
+
+    Storage: `avg.config.settings`'s `SettingsDoc.active_channel_id` (Task 2
+    originally gave this its own `active_channel.json` file; Task 3 folded
+    it onto the app's one settings document instead - see
+    `avg.config.settings.load_settings`'s migration of any existing value).
+    This function and `set_active` are kept as this module's public API so
+    callers written against Task 2's shape do not need to change; only the
+    storage moved.
 
     Every reader of a creative setting starts here: `None` means "no
     channel selected", and every function in this module and its callers
     must treat that as a valid, ordinary state rather than an error.
     """
-    resolved = _resolve_active_path(active_path)
-    try:
-        raw = json.loads(resolved.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(raw, dict):
-        return None
-    value = raw.get("active_channel_id")
-    return value if isinstance(value, str) else None
+    return load_settings(settings_path).active_channel_id
 
 
-def set_active(channel_id: str | None, active_path: Path | None = None) -> None:
-    """Set (or, with `None`, clear) the active-channel pointer atomically.
+def set_active(channel_id: str | None, settings_path: Path | None = None) -> None:
+    """Set (or, with `None`, clear) the active-channel pointer.
 
     Does not verify `channel_id` exists as a channel - callers that want
     "activate this channel" semantics should confirm via `get_channel`
     first. Passing `None` explicitly clears the pointer, matching what
-    `delete_channel` does when the active channel is removed.
+    `delete_channel` does when the active channel is removed. Writes
+    through `avg.config.settings.save_settings`, so this is atomic the
+    same way every other document in this app is.
     """
-    resolved = _resolve_active_path(active_path)
-    _atomic_write_json(resolved, json.dumps({"active_channel_id": channel_id}))
+    doc = load_settings(settings_path)
+    doc.active_channel_id = channel_id
+    save_settings(doc, settings_path)

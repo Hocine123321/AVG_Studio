@@ -2,7 +2,6 @@ from avg.config.channels import (
     Channel,
     active_channel_id,
     create_channel,
-    default_active_pointer_path,
     default_channels_dir,
     delete_channel,
     get_channel,
@@ -10,6 +9,7 @@ from avg.config.channels import (
     save_channel,
     set_active,
 )
+from avg.config.settings import load_settings
 
 
 def test_create_save_load_round_trip(tmp_path):
@@ -112,54 +112,59 @@ class TestSlugDeduplication:
 
 
 class TestActiveChannel:
+    """Storage moved onto avg.config.settings's SettingsDoc (Task 3) - these
+    exercise active_channel_id/set_active through a settings_path pointing
+    at a throwaway settings.json rather than the old dedicated pointer
+    file. See tests/config/test_settings.py for the migration itself."""
+
     def test_no_active_channel_by_default(self, tmp_path):
-        active_path = tmp_path / "active_channel.json"
-        assert active_channel_id(active_path=active_path) is None
+        settings_path = tmp_path / "settings.json"
+        assert active_channel_id(settings_path=settings_path) is None
 
     def test_set_active_round_trips(self, tmp_path):
-        active_path = tmp_path / "active_channel.json"
-        set_active("news_report", active_path=active_path)
-        assert active_channel_id(active_path=active_path) == "news_report"
+        settings_path = tmp_path / "settings.json"
+        set_active("news_report", settings_path=settings_path)
+        assert active_channel_id(settings_path=settings_path) == "news_report"
 
     def test_set_active_none_clears_it(self, tmp_path):
-        active_path = tmp_path / "active_channel.json"
-        set_active("news_report", active_path=active_path)
-        set_active(None, active_path=active_path)
-        assert active_channel_id(active_path=active_path) is None
+        settings_path = tmp_path / "settings.json"
+        set_active("news_report", settings_path=settings_path)
+        set_active(None, settings_path=settings_path)
+        assert active_channel_id(settings_path=settings_path) is None
 
-    def test_corrupt_active_pointer_yields_none_rather_than_raising(self, tmp_path):
-        active_path = tmp_path / "active_channel.json"
-        active_path.write_text("{ not valid json", encoding="utf-8")
-        assert active_channel_id(active_path=active_path) is None
+    def test_set_active_persists_to_the_settings_document(self, tmp_path):
+        settings_path = tmp_path / "settings.json"
+        set_active("news_report", settings_path=settings_path)
+        assert load_settings(settings_path).active_channel_id == "news_report"
 
     def test_deleting_the_active_channel_clears_the_pointer(self, tmp_path):
         channels_dir = tmp_path / "channels"
-        active_path = tmp_path / "active_channel.json"
+        settings_path = tmp_path / "settings.json"
         ch = create_channel("News", channels_dir=channels_dir)
-        set_active(ch.id, active_path=active_path)
+        set_active(ch.id, settings_path=settings_path)
 
-        delete_channel(ch.id, channels_dir=channels_dir, active_path=active_path)
+        delete_channel(ch.id, channels_dir=channels_dir, settings_path=settings_path)
 
-        assert active_channel_id(active_path=active_path) is None
+        assert active_channel_id(settings_path=settings_path) is None
         assert get_channel(ch.id, channels_dir=channels_dir) is None
 
     def test_deleting_a_non_active_channel_leaves_the_pointer_alone(self, tmp_path):
         channels_dir = tmp_path / "channels"
-        active_path = tmp_path / "active_channel.json"
+        settings_path = tmp_path / "settings.json"
         keep = create_channel("Keep Me", channels_dir=channels_dir)
         drop = create_channel("Drop Me", channels_dir=channels_dir)
-        set_active(keep.id, active_path=active_path)
+        set_active(keep.id, settings_path=settings_path)
 
-        delete_channel(drop.id, channels_dir=channels_dir, active_path=active_path)
+        delete_channel(drop.id, channels_dir=channels_dir, settings_path=settings_path)
 
-        assert active_channel_id(active_path=active_path) == keep.id
+        assert active_channel_id(settings_path=settings_path) == keep.id
 
     def test_deleting_a_missing_channel_is_a_noop(self, tmp_path):
         channels_dir = tmp_path / "channels"
-        active_path = tmp_path / "active_channel.json"
+        settings_path = tmp_path / "settings.json"
         # Must not raise even with nothing on disk yet.
-        delete_channel("never-existed", channels_dir=channels_dir, active_path=active_path)
-        assert active_channel_id(active_path=active_path) is None
+        delete_channel("never-existed", channels_dir=channels_dir, settings_path=settings_path)
+        assert active_channel_id(settings_path=settings_path) is None
 
 
 class TestSeeding:
@@ -212,5 +217,3 @@ class TestSeeding:
 
     def test_default_paths_live_under_appdata_avg_studio(self):
         assert default_channels_dir().parts[-2:] == ("AVG Studio", "channels")
-        assert default_active_pointer_path().name == "active_channel.json"
-        assert default_active_pointer_path().parent.name == "AVG Studio"
