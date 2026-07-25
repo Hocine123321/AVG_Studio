@@ -8,6 +8,29 @@
 
 **Tech Stack:** Python 3.12 · FastAPI · uvicorn · pywebview (WebView2) · multiprocessing · pytest · React 19 + Vite + Tailwind 4 · PyInstaller and Nuitka (spike) · FFmpeg (bundled binary)
 
+## Execution mode — speed over ceremony (set 2026-07-25)
+
+The user has explicitly accepted more risk in exchange for pace. This section
+**overrides** the per-step structure written into the tasks below.
+
+- **No per-step RED/GREEN cycle.** Write the code and the tests, then run the
+  suite once at the end of the task. Do not run pytest between every step and
+  do not capture RED output as evidence.
+- **One commit per task**, not per step.
+- **No front-end unit tests.** Skip vitest, jsdom and testing-library entirely
+  in Tasks 9 and 10 — do not scaffold them. The UI is verified by looking at
+  it. The `.test.tsx` files in those tasks are cancelled.
+- **Python tests stay.** They are already written out below, they run in
+  seconds, and they cover the things you cannot see by looking: exit-code
+  classification, the RAM gates, the importer against real data. Transcribe
+  them, run them once, move on.
+- **Reviews happen at three checkpoints**, not after every task: after Task 6
+  (engine complete), after Task 10 (UI complete), and the final whole-branch
+  review. Tasks in between go straight from implementation to the next task.
+- **Unchanged:** Task 12's acceptance pass in full, including the render
+  output comparison and the child-process kill test. That is the proof the
+  slice works and it is not a candidate for trimming.
+
 ## Global Constraints
 
 - **Windows only.** Windows 11 target; no cross-platform code paths.
