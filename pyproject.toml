@@ -1,0 +1,16 @@
+[project]
+name = "avg-studio"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi", "uvicorn[standard]", "pywebview", "pydantic>=2"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy", "httpx"]
+media = ["numpy", "Pillow", "pydub", "moviepy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+files = ["avg"]

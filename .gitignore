@@ -27,3 +27,8 @@ secrets.dat
 .idea/
 Thumbs.db
 desktop.ini
+
+# Build tooling
+.venv-build/
+*.spec
+
