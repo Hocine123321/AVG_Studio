@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Build output
+build/
+dist/
+*.spec.bak
+
+# Web
+node_modules/
+web/dist/
+
+# Runtime data — never commit
+runtime/
+output/
+logs/
+*.log
+secrets.dat
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
