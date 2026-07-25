@@ -9,6 +9,7 @@ import {
   type ProjectsResponse,
   type SettingsDoc,
 } from "./api";
+import Channels from "./Channels";
 import Home from "./Home";
 import Rail from "./Rail";
 import Settings from "./Settings";
@@ -18,7 +19,7 @@ import Welcome from "./Welcome";
 import { useTheme } from "./theme";
 import { useEvents } from "./useEvents";
 
-type Screen = { name: "home" } | { name: "project"; id: string } | { name: "settings" };
+type Screen = { name: "home" } | { name: "project"; id: string } | { name: "channels" } | { name: "settings" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -186,6 +187,8 @@ export default function App() {
       );
     } else if (screen.name === "settings") {
       content = <Settings />;
+    } else if (screen.name === "channels") {
+      content = <Channels />;
     } else {
       content = (
         <Home
@@ -202,8 +205,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <Rail
-        active={screen.name === "project" ? "studio" : screen.name === "settings" ? "settings" : "home"}
+        active={
+          screen.name === "project"
+            ? "studio"
+            : screen.name === "channels"
+              ? "channels"
+              : screen.name === "settings"
+                ? "settings"
+                : "home"
+        }
         onHome={() => setScreen({ name: "home" })}
+        onChannels={() => setScreen({ name: "channels" })}
         onSettings={() => setScreen({ name: "settings" })}
         theme={theme}
         onToggleTheme={toggleTheme}

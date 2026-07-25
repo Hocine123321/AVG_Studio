@@ -221,6 +221,25 @@ def test_create_activate_delete_channel_round_trip(client):
     assert listed_after["active_channel_id"] is None
 
 
+def test_patch_renames_a_channel_and_keeps_its_id(client, paths):
+    created = client.post("/api/channels", headers=AUTH, json={"label": "Original", "note": "n"}).json()
+
+    r = client.patch(f"/api/channels/{created['id']}", headers=AUTH, json={"label": "Renamed"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == created["id"]
+    assert body["label"] == "Renamed"
+    assert body["note"] == "n"
+
+    on_disk = get_channel(created["id"], paths["channels_dir"])
+    assert on_disk.label == "Renamed"
+
+
+def test_patch_unknown_channel_is_404(client):
+    r = client.patch("/api/channels/does-not-exist", headers=AUTH, json={"label": "x"})
+    assert r.status_code == 404
+
+
 def test_activating_an_unknown_channel_is_404(client):
     r = client.post("/api/channels/does-not-exist/activate", headers=AUTH)
     assert r.status_code == 404

@@ -13,6 +13,7 @@ and this router does not reintroduce one at the HTTP layer.
                                               channel-scope -> the active channel
     GET    /api/channels                  -> {"channels": [...], "active_channel_id": ...}
     POST   /api/channels                  -> create {"label": ..., "note": ...}
+    PATCH  /api/channels/{id}             -> rename / edit note {"label"?: ..., "note"?: ...}
     DELETE /api/channels/{id}             -> delete (no-op if absent)
     POST   /api/channels/{id}/activate    -> set the active channel
     GET    /api/keys                      -> {provider: bool} for every known provider
@@ -54,6 +55,14 @@ router = APIRouter(dependencies=[Depends(require_token)])
 class ChannelCreate(BaseModel):
     label: str
     note: str = ""
+
+
+class ChannelUpdate(BaseModel):
+    """Both fields optional and independently omittable - a rename that
+    only wants to touch the label must not require re-sending the note."""
+
+    label: str | None = None
+    note: str | None = None
 
 
 class SettingsValuesUpdate(BaseModel):
@@ -183,6 +192,17 @@ async def list_channels_route(request: Request) -> dict:
 async def create_channel_route(body: ChannelCreate, request: Request) -> dict:
     app_state = request.app.state
     channel = channels_config.create_channel(body.label, note=body.note, channels_dir=app_state.channels_dir)
+    return channel.model_dump()
+
+
+@router.patch("/api/channels/{channel_id}")
+async def update_channel_route(channel_id: str, body: ChannelUpdate, request: Request) -> dict:
+    app_state = request.app.state
+    channel = channels_config.update_channel(
+        channel_id, label=body.label, note=body.note, channels_dir=app_state.channels_dir
+    )
+    if channel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown channel")
     return channel.model_dump()
 
 

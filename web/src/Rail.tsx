@@ -1,7 +1,7 @@
-import { IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
+import { IconChannels, IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
-export type RailSection = "home" | "studio" | "settings";
+export type RailSection = "home" | "studio" | "channels" | "settings";
 
 export interface RailProps {
   /** Which section is showing right now. The amber marker names "where you
@@ -10,6 +10,7 @@ export interface RailProps {
    * one pulses; this one doesn't). */
   active: RailSection;
   onHome: () => void;
+  onChannels: () => void;
   onSettings: () => void;
   /** Owned by `App.tsx` (not this component) so the same choice also
    * applies to the welcome screens, which render before Rail ever mounts. */
@@ -30,7 +31,7 @@ export interface RailProps {
  * disabled rather than pretending to open something that doesn't exist yet.
  * Settings (Slice 2 Task 4) is now a real screen, reachable here.
  */
-export default function Rail({ active, onHome, onSettings, theme, onToggleTheme }: RailProps) {
+export default function Rail({ active, onHome, onChannels, onSettings, theme, onToggleTheme }: RailProps) {
   const night = theme === "night";
 
   return (
@@ -59,6 +60,17 @@ export default function Rail({ active, onHome, onSettings, theme, onToggleTheme 
       </span>
 
       <span className="rail__spacer" />
+
+      <button
+        type="button"
+        className={`rail__item${active === "channels" ? " rail__item--on" : ""}`}
+        onClick={onChannels}
+        title="Channels"
+        aria-label="Channels"
+        aria-current={active === "channels" ? "page" : undefined}
+      >
+        <IconChannels />
+      </button>
 
       <button
         type="button"

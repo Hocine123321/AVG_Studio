@@ -8,6 +8,7 @@ from avg.config.channels import (
     list_channels,
     save_channel,
     set_active,
+    update_channel,
 )
 from avg.config.settings import load_settings
 
@@ -66,6 +67,38 @@ def test_corrupt_channel_file_is_skipped_not_raised(tmp_path):
     # test below); a corrupt file inside it must just be skipped.
     assert list_channels(channels_dir=channels_dir) == []
     assert get_channel("seeded_marker", channels_dir=channels_dir) is None
+
+
+class TestUpdateChannel:
+    def test_rename_label_leaves_id_and_settings_untouched(self, tmp_path):
+        channels_dir = tmp_path / "channels"
+        ch = create_channel("My Channel", note="orig", channels_dir=channels_dir)
+        ch.settings["visual_tone"] = "gritty"
+        save_channel(ch, channels_dir=channels_dir)
+
+        updated = update_channel(ch.id, label="Renamed", channels_dir=channels_dir)
+
+        assert updated is not None
+        assert updated.id == ch.id
+        assert updated.label == "Renamed"
+        assert updated.note == "orig"
+        assert updated.settings == {"visual_tone": "gritty"}
+
+        reloaded = get_channel(ch.id, channels_dir=channels_dir)
+        assert reloaded.label == "Renamed"
+
+    def test_update_note_only_leaves_label_alone(self, tmp_path):
+        channels_dir = tmp_path / "channels"
+        ch = create_channel("Keep Label", channels_dir=channels_dir)
+
+        updated = update_channel(ch.id, note="new note", channels_dir=channels_dir)
+
+        assert updated.label == "Keep Label"
+        assert updated.note == "new note"
+
+    def test_update_missing_channel_returns_none(self, tmp_path):
+        channels_dir = tmp_path / "channels"
+        assert update_channel("does-not-exist", label="x", channels_dir=channels_dir) is None
 
 
 class TestSlugDeduplication:

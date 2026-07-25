@@ -191,6 +191,37 @@ def save_channel(ch: Channel, channels_dir: Path | None = None) -> None:
     _write_channel(ch, resolved)
 
 
+def update_channel(
+    channel_id: str,
+    label: str | None = None,
+    note: str | None = None,
+    channels_dir: Path | None = None,
+) -> Channel | None:
+    """Rename a channel and/or edit its note in place.
+
+    Unlike `create_channel`, this never touches `id` - a channel's id is
+    also its settings-scope key (`avg.core.settings_schema`'s
+    `scope="channel"` values live keyed by the *active* channel's document,
+    not by label), so re-slugging on rename would silently orphan whatever
+    settings the channel already pins. `label`/`note` left as `None` are
+    left unchanged; passing `""` for either is a deliberate clear, not a
+    no-op. Returns `None` (no-op, nothing written) if the channel doesn't
+    exist, matching `get_channel`'s "missing means None" contract rather
+    than raising.
+    """
+    resolved = _resolve_dir(channels_dir)
+    _ensure_channels_dir(resolved)
+    ch = _read_channel_file(_channel_path(resolved, channel_id))
+    if ch is None:
+        return None
+    if label is not None:
+        ch.label = label
+    if note is not None:
+        ch.note = note
+    _write_channel(ch, resolved)
+    return ch
+
+
 def create_channel(label: str, note: str = "", channels_dir: Path | None = None) -> Channel:
     """Create and persist a new channel with an empty `settings` dict.
 

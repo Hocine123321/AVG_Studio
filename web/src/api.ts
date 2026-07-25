@@ -16,7 +16,7 @@ export function getToken(): string {
   return TOKEN;
 }
 
-async function request<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   const hasBody = body !== undefined;
   const res = await fetch(path, {
     method,
@@ -215,6 +215,24 @@ export function saveSettingsValues(values: Record<string, unknown>): Promise<Set
 
 export function getChannels(): Promise<ChannelsResponse> {
   return apiGet<ChannelsResponse>("/api/channels");
+}
+
+export function createChannel(label: string, note = ""): Promise<ChannelDoc> {
+  return apiPost<ChannelDoc>("/api/channels", { label, note });
+}
+
+/** `label`/`note` omitted entirely leave that field untouched server-side
+ * (see `avg.api.routes_settings.ChannelUpdate`) - only send what changed. */
+export function updateChannel(id: string, patch: { label?: string; note?: string }): Promise<ChannelDoc> {
+  return request<ChannelDoc>("PATCH", `/api/channels/${encodeURIComponent(id)}`, patch);
+}
+
+export function deleteChannel(id: string): Promise<{ deleted: boolean }> {
+  return apiDelete<{ deleted: boolean }>(`/api/channels/${encodeURIComponent(id)}`);
+}
+
+export function activateChannel(id: string): Promise<{ active_channel_id: string }> {
+  return apiPost<{ active_channel_id: string }>(`/api/channels/${encodeURIComponent(id)}/activate`);
 }
 
 /** `{provider: bool}` - whether a key is set, never the key. */
