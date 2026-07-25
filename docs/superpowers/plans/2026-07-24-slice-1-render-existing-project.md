@@ -353,11 +353,30 @@ git add avg/core tests/core && git commit -m "feat: domain models, error kinds a
   - `ImportReport(imported: list[ProjectDoc], failed: list[tuple[Path, str]])`
   - `import_all(output_root: Path) -> ImportReport`
 
-The real shape, confirmed against `D:\AI_Video_Gen\output\`: `project.json` has 9 sections (`meta`, `script`, `beat_map`, `visuals`, `audio`, `render`, `graphics`, `captions`, `brief`); `pipeline_state.json` sits beside it with `topic`, `project_path`, `phase`, `created`, `last_updated`; media lives in `audio/`, `images/`, `render/`; `master_output.mp4` sits at the folder root. Note this differs from `CLAUDE.md`, which is stale — **follow the disk**.
+The real shape, **re-verified against `D:\AI_Video_Gen\output\` on 2026-07-25**: 11 folders, 10 carrying `project.json`, 1 (`_filters_preview`) that is scratch, not a project.
+
+`project.json` has 9 sections — `meta`, `script`, `beat_map`, `visuals`, `audio`, `render`, `graphics`, `captions`, `brief`. `pipeline_state.json` sits beside it with `topic`, `project_path`, `phase`, `created`, `last_updated`. Media lives in `audio/`, `images/`, `render/`; `master_output.mp4` sits at the folder root. This differs from `CLAUDE.md`, which is stale — **follow the disk**.
+
+**`meta`'s real keys are `topic`, `project_path`, `created`, `version`, `form`, `length`, `video_settings`, `phase`, `last_updated`.** There is **no `aspect_ratio` and no `short_edge`** — an earlier draft of this plan assumed both. Derive instead:
+
+- `aspect_ratio` from `meta.form`: `"shortform"` → `"9:16"`, `"longform"` → `"16:9"`. Anything else → `"9:16"`.
+- `short_edge` is not recorded per project; default to `1080`.
+- `meta.video_settings` is a nested dict (`content_shape`, `visual_tone`, `style_lock`, …). Slice 1 does not read it — leave it alone.
+
+**Observed `phase` values across the real projects are `render`, `images` and `complete`.** `"complete"` means every phase finished; it is not a phase name and must not be looked up in the phase order.
 
 - [ ] **Step 1: Build the fixture**
 
-Create `tests/fixtures/legacy_project/project.json` with the 9 sections, `meta` carrying `{"topic": "Test topic", "aspect_ratio": "9:16", "short_edge": 1080}`. Create `pipeline_state.json` with `{"topic": "Test topic", "phase": "render", "created": "2026-07-01T10:00:00.000+01:00", "last_updated": "2026-07-01T10:32:00.000+01:00"}`. Create a 1×1 PNG at `images/001.png`. Total fixture size must stay under 5 KB — no real media in the repo.
+Create `tests/fixtures/legacy_project/project.json` with the 9 sections and `meta` mirroring the **real** key set:
+
+```json
+{"meta": {"topic": "Test topic", "project_path": "C:\\old\\out\\test", "created": "2026-07-01T10:00:00.0000000+01:00", "version": "B2.19.10", "form": "shortform", "length": "60 seconds", "video_settings": {"content_shape": "documentary"}, "phase": "render", "last_updated": "2026-07-01T10:32:00.0000000+01:00"},
+ "script": {}, "beat_map": {}, "visuals": {}, "audio": {}, "render": {}, "graphics": {}, "captions": {}, "brief": {}}
+```
+
+Create `pipeline_state.json` with `{"topic": "Test topic", "phase": "render", "created": "2026-07-01T10:00:00.000+01:00", "last_updated": "2026-07-01T10:32:00.000+01:00"}`. Create a 1×1 PNG at `images/001.png`. Total fixture size must stay under 5 KB — no real media in the repo.
+
+Create a **second** fixture `tests/fixtures/legacy_complete/` identical except `phase` is `"complete"` in both files and `meta.form` is `"longform"` — it covers the two cases the first fixture cannot.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -369,16 +388,31 @@ from avg.config.legacy_import import import_project, import_all
 
 FIX = Path(__file__).parent.parent / "fixtures" / "legacy_project"
 
-def test_imports_title_and_format():
+COMPLETE = Path(__file__).parent.parent / "fixtures" / "legacy_complete"
+
+def test_imports_title_and_derives_aspect_from_form():
     doc = import_project(FIX)
     assert doc.title == "Test topic"
-    assert doc.aspect_ratio == "9:16"
+    assert doc.aspect_ratio == "9:16"        # meta.form == "shortform"
+    assert doc.short_edge == 1080            # never recorded per project
     assert doc.schema_version == 1
+
+def test_longform_maps_to_widescreen():
+    assert import_project(COMPLETE).aspect_ratio == "16:9"
 
 def test_marks_reached_phases_done():
     doc = import_project(FIX)
     assert doc.phases["brief"].status == "done"
     assert doc.phases["render"].status == "pending"
+
+def test_complete_marks_every_phase_done():
+    doc = import_project(COMPLETE)
+    assert {p.status for p in doc.phases.values()} == {"done"}
+
+def test_scratch_folders_are_skipped(tmp_path):
+    (tmp_path / "_filters_preview").mkdir()
+    report = import_all(tmp_path)
+    assert report.imported == [] and report.failed == []   # skipped, not failed
 
 def test_missing_project_json_is_reported_not_raised(tmp_path):
     (tmp_path / "empty_project").mkdir()
@@ -400,7 +434,14 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'avg.config'`
 
 - [ ] **Step 4: Implement the importer**
 
-Phase order is `["brief", "script", "director1", "visuals", "voice", "director2", "captions", "render"]`. `pipeline_state.json`'s `phase` names the phase the app would resume *into*, so every phase before it is `done` and that phase onward is `pending`. Legacy phase aliases must map: `prompts`→`script`, `images`/`visuals`→`visuals`, `audio`→`voice`, `scene_timings`/`smart_editing`→`director2`. Read `meta.topic` for the title, falling back to `pipeline_state.topic`, then the folder name. Any exception per folder becomes a `failed` row carrying `str(exc)`.
+Phase order is `["brief", "script", "director1", "visuals", "voice", "director2", "captions", "render"]`. `pipeline_state.json`'s `phase` names the phase the app would resume *into*, so every phase before it is `done` and that phase onward is `pending`.
+
+- Legacy aliases: `prompts`→`script`, `images`/`visuals`→`visuals`, `audio`→`voice`, `scene_timings`/`smart_editing`→`director2`.
+- **`"complete"` is not a phase** — it means all eight are `done`. Handle it before any lookup.
+- An unrecognised phase value marks everything `pending` rather than raising.
+- Title: `meta.topic`, falling back to `pipeline_state.topic`, then the folder name.
+- `import_all` **skips folders whose name starts with `_`** (scratch, e.g. `_filters_preview`) — skipped means absent from both lists, not a failure row.
+- Any exception on a real project folder becomes a `failed` row carrying `str(exc)`.
 
 - [ ] **Step 5: Run it and watch it pass**
 
@@ -413,7 +454,7 @@ Expected: 4 passed
 python -c "from pathlib import Path; from avg.config.legacy_import import import_all; r=import_all(Path(r'D:\AI_Video_Gen\output')); print(len(r.imported),'imported,',len(r.failed),'failed'); [print(' ',p.name,'-',e) for p,e in r.failed]"
 ```
 
-Expected: it reports on all 62 folders. Failures are acceptable output — they must be *reported*, not raised. If more than a third fail, stop and inspect the reasons before continuing; the fixture is probably missing a real-world shape.
+Expected: **10 imported, 0 failed** (11 folders, `_filters_preview` skipped). Failures are acceptable output — they must be *reported*, not raised — but at this scale every real project should import. If any fail, read the reason before continuing; the fixture is probably missing a real-world shape.
 
 - [ ] **Step 7: Commit**
 

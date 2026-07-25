@@ -99,7 +99,7 @@ Where the app keeps user data at run time. Separate from this repository, which 
     documentary.json   creative settings + models + voice + images + captions
     news-report.json
     zack-d-films.json
-  projects/index.json  cached card data for the home grid — no folder walk for 62 rows
+  projects/index.json  cached card data for the home grid — no folder walk for the project rows
 ```
 
 ### The one structural change that matters
@@ -123,7 +123,7 @@ Keeps today's good shape — `project.json` already has 9 sections, one per phas
 One-way, idempotent, dry-runnable.
 
 - `config.json` → `settings.json` + one channel per existing profile, **plus a `Default` channel built from the 6 loose scalars**, so a user with profiles off does not lose their setup.
-- 62 project folders → v2 documents **in place**. No media moves; the importer rewrites the JSON sidecar and nothing else, so a failed import costs nothing and the PowerShell app still opens the folder.
+- 10 project folders → v2 documents **in place**. No media moves; the importer rewrites the JSON sidecar and nothing else, so a failed import costs nothing and the PowerShell app still opens the folder.
 - Best-effort per project: an unreadable `project.json` is a row in the report with a reason, never a failed run. Inherits the legacy root-path fallbacks `Restore-ProjectDocument` handles.
 
 ## 6. Error handling
