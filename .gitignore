@@ -32,3 +32,6 @@ desktop.ini
 .venv-build/
 *.spec
 
+
+# Bundled ffmpeg (128 MB, fetched by tools/fetch_ffmpeg.py)
+vendor/
