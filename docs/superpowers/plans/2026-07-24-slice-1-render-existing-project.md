@@ -938,6 +938,52 @@ git add web && git commit -m "feat: studio view, phase rail and transport bar"
 
 ---
 
+### Task 10.5: Media serving and the content-forward visual pass
+
+Added 2026-07-25 after the first UI was judged to look like a dark admin
+dashboard. The diagnosis was not taste: a video app whose cards show grey
+rectangles cannot look like a video app. Approved design:
+https://claude.ai/code/artifact/b1b03e92-d328-45f0-a729-2529960d95fa
+
+Runs BEFORE Task 11 (installer) and Task 12 (acceptance).
+
+**Files:**
+- Create: `avg/media/thumbnails.py`
+- Modify: `avg/api/app.py` (two routes)
+- Modify: `web/src/Home.tsx`, `web/src/ProjectCard.tsx`, `web/src/Studio.tsx`, `web/src/App.tsx`, `web/src/tokens.css`
+- Create: `web/src/Rail.tsx`, `web/src/Player.tsx`
+- Test: `tests/media/test_thumbnails.py`
+
+**Interfaces:**
+- Produces: `thumbnail_for(project: ProjectDoc, cache_dir: Path) -> Path | None`
+- Produces: `GET /api/projects/{project_id}/thumbnail` -> `image/jpeg`
+- Produces: `GET /api/projects/{project_id}/video` -> `video/mp4`, **must honour `Range` and answer 206**, or seeking in a `<video>` element will not work
+
+**Thumbnail rules:**
+- Source order: `master_output.mp4` at 35% of duration; if absent, the first
+  file in `images/`; if neither, no thumbnail and the UI shows the fallback.
+  Mid-pipeline projects have no video, so the image fallback is what stops
+  them being blank.
+- 400px wide, JPEG quality 6, extracted with ffmpeg.
+- **Cached outside the user's project folder** — `%LOCALAPPDATA%/AVG Studio/thumbs/<project_id>.jpg`.
+  Nothing is ever written into `D:\AI_Video_Gen`.
+- Extraction is lazy (on first request) and cached; a missing or broken video
+  yields `None`, never an exception.
+
+**Visual pass — apply the approved design:**
+- Cards are the frame: metadata overlays the still, no grey block beneath.
+- A render in progress becomes a hero at the top of Home, showing its frame,
+  large mono percentage, and the message.
+- Restore the 58px icon rail with the amber active marker.
+- Radii 14px; surfaces carry a 1px top-edge highlight (`rgba(255,255,255,.05)`).
+- Play opens an inline `<video>` player fed by the video route.
+- **Amber remains reserved for "happening right now"** — progress fill, live
+  phase, pulsing dot. Never a border, focus ring, or decoration.
+
+- [ ] Implement, verify by looking at it with real projects, run the suite once, commit.
+
+---
+
 ### Task 11: First-run installer
 
 **Files:**
