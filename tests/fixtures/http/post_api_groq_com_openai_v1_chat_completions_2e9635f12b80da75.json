@@ -1,0 +1,48 @@
+{
+  "request": {
+    "body": {
+      "max_tokens": 8,
+      "messages": [
+        {
+          "content": "router fallback test: primary should fail",
+          "role": "user"
+        }
+      ],
+      "model": "llama-3.1-8b-instant",
+      "temperature": 0.7
+    },
+    "body_hash": "2aea244e4ed4560eff6ca2c01d756732ff2c2b466f167db6f7ab85fd78c54d38",
+    "headers": {
+      "Authorization": "***REDACTED***",
+      "Content-Type": "application/json"
+    },
+    "method": "POST",
+    "url": "https://api.groq.com/openai/v1/chat/completions"
+  },
+  "response": {
+    "content_b64": "eyJpZCI6ImNoYXRjbXBsLWMzNDhkOGRlLTU2MDUtNDE5NC1iYmZlLTI3YzQyY2Y5NGJjZSIsIm9iamVjdCI6ImNoYXQuY29tcGxldGlvbiIsImNyZWF0ZWQiOjE3ODUwMTQzNjQsIm1vZGVsIjoibGxhbWEtMy4xLThiLWluc3RhbnQiLCJjaG9pY2VzIjpbeyJpbmRleCI6MCwibWVzc2FnZSI6eyJyb2xlIjoiYXNzaXN0YW50IiwiY29udGVudCI6IioqUm91dGVyIEZhbGxiYWNrIFRlc3Q6IFByaW1hcnkgU2hvdWxkIn0sImxvZ3Byb2JzIjpudWxsLCJmaW5pc2hfcmVhc29uIjoibGVuZ3RoIn1dLCJ1c2FnZSI6eyJxdWV1ZV90aW1lIjowLjA0NDU4NTQyNSwicHJvbXB0X3Rva2VucyI6NDIsInByb21wdF90aW1lIjowLjAwMjc3NTM3NSwiY29tcGxldGlvbl90b2tlbnMiOjgsImNvbXBsZXRpb25fdGltZSI6MC4wMTA1Njg5NzgsInRvdGFsX3Rva2VucyI6NTAsInRvdGFsX3RpbWUiOjAuMDEzMzQ0MzUzfSwidXNhZ2VfYnJlYWtkb3duIjpudWxsLCJzeXN0ZW1fZmluZ2VycHJpbnQiOiJmcF9lMDllZTQyMWNmIiwieF9ncm9xIjp7ImlkIjoicmVxXzAxa3lkamJhY2hmN2ZhZXkyOHNhMTlkOWQyIiwic2VlZCI6MjA2ODcxMDY0MX0sInNlcnZpY2VfdGllciI6Im9uX2RlbWFuZCJ9Cg==",
+    "headers": {
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20e33e24b582834-ALG",
+      "connection": "keep-alive",
+      "content-type": "application/json",
+      "date": "Sat, 25 Jul 2026 21:19:24 GMT",
+      "server": "cloudflare",
+      "set-cookie": "***REDACTED***",
+      "strict-transport-security": "max-age=15552000",
+      "vary": "Origin",
+      "via": "1.1 google",
+      "x-groq-region": "fra",
+      "x-ratelimit-limit-requests": "14400",
+      "x-ratelimit-limit-tokens": "***REDACTED***",
+      "x-ratelimit-remaining-requests": "14399",
+      "x-ratelimit-remaining-tokens": "***REDACTED***",
+      "x-ratelimit-reset-requests": "6s",
+      "x-ratelimit-reset-tokens": "***REDACTED***",
+      "x-request-id": "req_01kydjbachf7faey28sa19d9d2"
+    },
+    "status_code": 200
+  }
+}

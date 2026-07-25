@@ -1,0 +1,43 @@
+{
+  "request": {
+    "body": {
+      "max_tokens": 8,
+      "messages": [
+        {
+          "content": "auth failure probe - please ignore",
+          "role": "user"
+        }
+      ],
+      "model": "llama-3.3-70b-versatile",
+      "temperature": 0.7
+    },
+    "body_hash": "1541f178cb7e6c7252924a537860af320985fa6cffe07a5fc5524c2ce11cba40",
+    "headers": {
+      "Authorization": "***REDACTED***",
+      "Content-Type": "application/json"
+    },
+    "method": "POST",
+    "url": "https://api.groq.com/openai/v1/chat/completions"
+  },
+  "response": {
+    "content_b64": "eyJlcnJvciI6eyJtZXNzYWdlIjoiSW52YWxpZCBBUEkgS2V5IiwidHlwZSI6ImludmFsaWRfcmVxdWVzdF9lcnJvciIsImNvZGUiOiJpbnZhbGlkX2FwaV9rZXkifX0K",
+    "headers": {
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20e235cfc35ba90-ALG",
+      "connection": "keep-alive",
+      "content-length": "96",
+      "content-type": "application/json",
+      "date": "Sat, 25 Jul 2026 21:08:07 GMT",
+      "server": "cloudflare",
+      "set-cookie": "***REDACTED***",
+      "strict-transport-security": "max-age=15552000",
+      "vary": "Origin",
+      "via": "1.1 google",
+      "x-groq-region": "fra",
+      "x-request-id": "req_01kydhpnhpe8rtjtsrz13qptf0"
+    },
+    "status_code": 401
+  }
+}

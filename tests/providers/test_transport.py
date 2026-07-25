@@ -226,6 +226,46 @@ def test_scrubbing_does_not_redact_legitimate_token_count_fields(tmp_path):
     assert data["request"]["body"]["max_tokens"] == 256
 
 
+def test_replaying_a_gzip_encoded_response_does_not_try_to_regunzip_it(tmp_path):
+    # httpx decodes a response's real Content-Encoding transparently the
+    # moment `.content` is read - so by the time `_write_fixture` stores
+    # `content_b64`, it is always the already-decoded body, never the
+    # compressed wire bytes. A response that declared "gzip" for real
+    # (as most production APIs do - discovered recording Slice 3 Task 3's
+    # real Groq/Pollinations fixtures) must not have that header survive
+    # into the fixture: `_replay()` reconstructs an `httpx.Response` from
+    # `headers` + `content` directly, and if `content-encoding: gzip` is
+    # still present, httpx believes the header over the bytes it was
+    # actually given and tries to gunzip already-decoded JSON - which
+    # raises `httpx.DecodingError`, not "unmatched fixture".
+    import gzip as gzip_module
+
+    # A genuinely gzip-compressed wire body plus the accurate header a real
+    # server sends - httpx's own client decodes this once, correctly, while
+    # `_send_with_retry` performs the real (mocked) request. The bug this
+    # guards against is what happens *after*: `_write_fixture` must not
+    # persist the now-stale `content-encoding` header alongside the
+    # already-decoded body it stores.
+    plaintext = b'{"choices":["hello"]}'
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=gzip_module.compress(plaintext),
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+        )
+
+    recorder = Transport(mode="record", fixtures_dir=tmp_path, client=_client(handler), sleep=lambda s: None)
+    recorder.request("GET", "https://api.example.com/v1/models", provider="testprov")
+
+    fixture = json_lib.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert "content-encoding" not in fixture["response"]["headers"]
+
+    replayer = Transport(mode="replay", fixtures_dir=tmp_path, client=_poison_client())
+    replayed = replayer.request("GET", "https://api.example.com/v1/models", provider="testprov")
+    assert replayed.json() == {"choices": ["hello"]}
+
+
 # ---------------------------------------------------------------------------
 # Retry/backoff comes from POLICY.
 # ---------------------------------------------------------------------------

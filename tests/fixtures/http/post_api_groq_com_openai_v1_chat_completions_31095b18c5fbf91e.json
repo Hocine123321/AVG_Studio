@@ -1,0 +1,29 @@
+{
+  "request": {
+    "body": {
+      "max_tokens": 8,
+      "messages": [
+        {
+          "content": "router fallback test: primary should fail",
+          "role": "user"
+        }
+      ],
+      "model": "llama-3.3-70b-versatile",
+      "temperature": 0.7
+    },
+    "body_hash": "250112e6d9216602b88fbbcce11e934bea2a21dec6e0b7afddbfcff24d928a6f",
+    "headers": {
+      "Authorization": "***REDACTED***",
+      "Content-Type": "application/json"
+    },
+    "method": "POST",
+    "url": "https://api.groq.com/openai/v1/chat/completions"
+  },
+  "response": {
+    "content_b64": "eyJlcnJvciI6IHsibWVzc2FnZSI6ICJSYXRlIGxpbWl0IHJlYWNoZWQgZm9yIHJlcXVlc3RzLCBwbGVhc2UgcmV0cnkgYWZ0ZXIgc29tZSB0aW1lLiIsICJ0eXBlIjogInJhdGVfbGltaXRfZXhjZWVkZWQiLCAiY29kZSI6ICJyYXRlX2xpbWl0X2V4Y2VlZGVkIn19",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "status_code": 429
+  }
+}

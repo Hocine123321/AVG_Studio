@@ -1,0 +1,45 @@
+{
+  "request": {
+    "body": {
+      "max_tokens": 8,
+      "messages": [
+        {
+          "content": "Reply with the single word: ok",
+          "role": "user"
+        }
+      ],
+      "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+      "temperature": 0.7
+    },
+    "body_hash": "0d368b96a987a6fe88c2329364254d60b903c69ae24db878ff23e6a6398b729c",
+    "headers": {
+      "Authorization": "***REDACTED***",
+      "Content-Type": "application/json"
+    },
+    "method": "POST",
+    "url": "https://router.huggingface.co/v1/chat/completions"
+  },
+  "response": {
+    "content_b64": "eyJlcnJvciI6eyJtZXNzYWdlIjoiVGhlIHJlcXVlc3RlZCBtb2RlbCAnbWV0YS1sbGFtYS9NZXRhLUxsYW1hLTMtOEItSW5zdHJ1Y3QnIGlzIG5vdCBzdXBwb3J0ZWQgYnkgYW55IHByb3ZpZGVyIHlvdSBoYXZlIGVuYWJsZWQuIiwidHlwZSI6ImludmFsaWRfcmVxdWVzdF9lcnJvciIsInBhcmFtIjoibW9kZWwiLCJjb2RlIjoibW9kZWxfbm90X3N1cHBvcnRlZCJ9fQ==",
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-expose-headers": "X-Repo-Commit,X-Request-Id,X-Error-Code,X-Error-Message,X-Total-Count,ETag,Link,Accept-Ranges,Content-Range,X-Linked-Size,X-Linked-ETag,X-Xet-Hash",
+      "connection": "keep-alive",
+      "content-length": "208",
+      "content-type": "application/json; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin",
+      "date": "Sat, 25 Jul 2026 21:08:08 GMT",
+      "etag": "W/\"d0-UET1xb548SIAJZTrkdpWV7MFeC0\"",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "vary": "Origin",
+      "via": "1.1 6420b771591b2927aaad391c05ef7460.cloudfront.net (CloudFront)",
+      "x-amz-cf-id": "MOYON8QLRJI3Tv82Kli9DYzCP8ltgidpBVOjR5rmZbXVZOCT2TSFug==",
+      "x-amz-cf-pop": "MRS52-P3",
+      "x-cache": "Error from cloudfront",
+      "x-powered-by": "huggingface-moon",
+      "x-request-id": "Root=1-6a6525b8-3daad1ad59be5e2a362aae44",
+      "x-robots-tag": "none"
+    },
+    "status_code": 400
+  }
+}

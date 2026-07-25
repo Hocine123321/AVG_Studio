@@ -135,6 +135,28 @@ def _scrub_headers(headers: dict[str, str] | None) -> dict[str, str]:
     return {k: (REDACTED if _is_credential_header(k) else v) for k, v in headers.items()}
 
 
+# httpx transparently gunzips (or brotli/deflate-decodes) a response's body
+# the moment anything reads `.content`/`.text`/`.json()` - by the time
+# `_write_fixture` stores `content_b64` (below), it is always the fully
+# *decoded* body, never the compressed wire bytes. But if the response's
+# original `Content-Encoding`/`Transfer-Encoding`/`Content-Length` headers
+# are stored alongside it verbatim, `_replay()`'s `httpx.Response(headers=...,
+# content=...)` reconstruction believes those headers over the bytes it was
+# actually given - and tries to gunzip already-decoded JSON, which is not
+# valid gzip and raises `httpx.DecodingError`. This was invisible in Task
+# 2's own tests (every one used a hand-built `httpx.Response(...)` with no
+# real compression header) and only surfaced once this task recorded fixtures
+# against real, gzip-compressing APIs (Groq, Pollinations). These three
+# headers describe how the *wire* body was transferred, not what the
+# decoded content *is* - stale once `content_b64` is the final, decoded
+# form - so they are dropped before a response is ever written to a fixture.
+_STALE_TRANSFER_HEADER_NAMES = {"content-encoding", "transfer-encoding", "content-length"}
+
+
+def _drop_stale_transfer_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in headers.items() if k.lower() not in _STALE_TRANSFER_HEADER_NAMES}
+
+
 def _redact_json(value: Any) -> Any:
     """Recursively replace key-shaped fields anywhere in a JSON value."""
     if isinstance(value, dict):
@@ -356,7 +378,7 @@ class Transport:
             },
             "response": {
                 "status_code": response.status_code,
-                "headers": _scrub_headers(dict(response.headers)),
+                "headers": _drop_stale_transfer_headers(_scrub_headers(dict(response.headers))),
                 "content_b64": base64.b64encode(response.content).decode("ascii"),
             },
         }

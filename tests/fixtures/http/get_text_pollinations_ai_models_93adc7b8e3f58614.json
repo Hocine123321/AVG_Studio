@@ -1,0 +1,29 @@
+{
+  "request": {
+    "body": null,
+    "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "headers": {
+      "Authorization": "***REDACTED***"
+    },
+    "method": "GET",
+    "url": "https://text.pollinations.ai/models"
+  },
+  "response": {
+    "content_b64": "W3sibmFtZSI6Im9wZW5haS1mYXN0IiwiZGVzY3JpcHRpb24iOiJHUFQtT1NTIDIwQiBSZWFzb25pbmcgTExNIChPVkgpIiwicmVhc29uaW5nIjp0cnVlLCJ0aWVyIjoiYW5vbnltb3VzIiwiY29tbXVuaXR5IjpmYWxzZSwiaW5wdXRfbW9kYWxpdGllcyI6WyJ0ZXh0Il0sIm91dHB1dF9tb2RhbGl0aWVzIjpbInRleHQiXSwidG9vbHMiOnRydWUsImFsaWFzZXMiOlsib3BlbmFpIiwiZ3B0LW9zcyIsImdwdC1vc3MtMjBiIiwib3ZoLXJlYXNvbmluZyJdLCJ2aXNpb24iOmZhbHNlLCJhdWRpbyI6ZmFsc2V9XQ==",
+    "headers": {
+      "access-control-allow-origin": "*",
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a20e20f9188e3429-MAD",
+      "connection": "keep-alive",
+      "content-type": "application/json; charset=utf-8",
+      "date": "Sat, 25 Jul 2026 21:06:30 GMT",
+      "etag": "W/\"11e-Fd6JEDDMrK3a9OtoxYkMHKWn4Ng\"",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=kVGSOAWdi9rKMiPfc0Wgu1zyws1tG4lmvqh8PdJwHT7R1rTQAbL1qlziaINsz2LqW1ogNO7FH9TC6OyfAYFzMCFaAXVy6uHpBrCbNgqZs4g6%2BCoKCPYgsXqvmq6FYUizTkMSmdD7vw%3D%3D\"}]}",
+      "server": "cloudflare",
+      "x-powered-by": "Express"
+    },
+    "status_code": 200
+  }
+}
