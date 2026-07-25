@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { apiGet, apiPost, type PhaseRecord, type ProjectDoc, type ProjectsResponse } from "./api";
+import {
+  apiGet,
+  apiPost,
+  getSettings,
+  type PhaseRecord,
+  type ProjectDoc,
+  type ProjectsResponse,
+  type SettingsDoc,
+} from "./api";
 import Home from "./Home";
 import Rail from "./Rail";
 import Studio from "./Studio";
 import Transport from "./Transport";
+import Welcome from "./Welcome";
+import { useTheme } from "./theme";
 import { useEvents } from "./useEvents";
 
 type Screen = { name: "home" } | { name: "project"; id: string };
@@ -60,17 +70,36 @@ function extractDetail(message: string): string {
  * something the user navigates back to check on.
  */
 export default function App() {
+  // Lifted here (not left inside Rail, where it lived before) so the
+  // stored night/day choice applies to Welcome too - Rail doesn't mount at
+  // all until onboarding is done, so if this stayed in Rail, a "day"
+  // preference from a previous run would silently not apply to any of the
+  // three welcome screens and only kick in once the user reached the
+  // library.
+  const { theme, toggle: toggleTheme } = useTheme();
+  const [settings, setSettings] = useState<SettingsDoc | null>(null);
   const [projects, setProjects] = useState<ProjectDoc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [startError, setStartError] = useState<string | null>(null);
   const events = useEvents();
 
+  // First-run gate: onboarding state decides whether the welcome screen or
+  // the real app shell renders at all, so it has to resolve before either
+  // does. Nothing else in this effect depends on it - `getSettings` is
+  // deliberately the very first network call the app makes.
   useEffect(() => {
+    getSettings()
+      .then(setSettings)
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  useEffect(() => {
+    if (!settings?.onboarded) return;
     apiGet<ProjectsResponse>("/api/projects")
       .then((res) => setProjects(res.projects))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
+  }, [settings?.onboarded]);
 
   async function startRender(id: string) {
     setStartError(null);
@@ -101,11 +130,28 @@ export default function App() {
     startRender(id);
   }
 
+  // First-run gate. Nothing below this - not even the Rail or Transport,
+  // per the brief's "no wizard chrome" - renders until onboarding either
+  // resolves (skip straight through) or the welcome screen has run and
+  // completed. A settings-load failure falls through to the ordinary error
+  // panel below instead of getting stuck here forever.
+  if (!error && settings === null) {
+    return <div className="welcome welcome--loading" />;
+  }
+  if (settings && !settings.onboarded) {
+    return (
+      <Welcome
+        settings={settings}
+        onComplete={(outputRoot) => setSettings({ ...settings, onboarded: true, output_root: outputRoot })}
+      />
+    );
+  }
+
   let content: ReactNode;
   if (error) {
     content = (
       <div className="home">
-        <p className="home__empty">Could not load projects: {error}</p>
+        <p className="home__empty">Could not load AVG Studio: {error}</p>
       </div>
     );
   } else if (projects === null) {
@@ -152,7 +198,12 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Rail active={screen.name === "project" ? "studio" : "home"} onHome={() => setScreen({ name: "home" })} />
+      <Rail
+        active={screen.name === "project" ? "studio" : "home"}
+        onHome={() => setScreen({ name: "home" })}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
       <div className="app-shell__main">
         <div className="app-shell__content">{content}</div>
         <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />

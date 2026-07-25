@@ -114,3 +114,37 @@ export interface ProjectDoc {
 export interface ProjectsResponse {
   projects: ProjectDoc[];
 }
+
+// ---- settings / first-run welcome ----
+
+export interface SettingsSuggestion {
+  path: string;
+  project_count: number;
+  source: "legacy" | "default";
+}
+
+/** `POST /api/settings`'s saved document - no `suggestion` field, unlike `SettingsDoc` below (that's only ever computed on a GET). */
+export interface SavedSettings {
+  schema_version: number;
+  output_root: string;
+  onboarded: boolean;
+}
+
+export interface SettingsDoc {
+  schema_version: number;
+  output_root: string | null;
+  onboarded: boolean;
+  suggestion: SettingsSuggestion;
+}
+
+export function getSettings(): Promise<SettingsDoc> {
+  return apiGet<SettingsDoc>("/api/settings");
+}
+
+export function saveSettings(outputRoot: string): Promise<SavedSettings> {
+  return apiPost<SavedSettings>("/api/settings", { output_root: outputRoot });
+}
+
+export function scanFolder(path: string): Promise<{ project_count: number }> {
+  return apiGet<{ project_count: number }>(`/api/settings/scan?path=${encodeURIComponent(path)}`);
+}

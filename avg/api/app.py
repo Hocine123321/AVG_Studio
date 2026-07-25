@@ -14,6 +14,9 @@ Routes (see the task-7 and task-10.5 briefs for the exact contract):
     GET  /api/projects/{project_id}/video        -> video/mp4 (honours Range -> 206)
     GET  /api/projects/{project_id}/images       -> {"images": [filename, ...]}
     GET  /api/projects/{project_id}/images/{f}   -> image/* (one file from images/)
+    GET  /api/settings                           -> the settings document, plus a "suggestion"
+    POST /api/settings                           -> save {"output_root": ...}, set onboarded
+    GET  /api/settings/scan?path=                -> {"project_count": N} for an arbitrary path
     WS   /ws/events                              -> a stream of avg.core.events models as JSON
 
 Construction goes exclusively through `create_app(token, output_root)` so
@@ -32,8 +35,10 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from avg.config.legacy_import import import_all
+from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
 from avg.config.settings_import import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
@@ -44,6 +49,19 @@ from avg.media.workspace import render_workspace
 from .deps import require_token
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
+
+
+class SettingsUpdate(BaseModel):
+    """`POST /api/settings`'s body. Module-level (not nested in `create_app`)
+    so FastAPI's `from __future__ import annotations`-deferred type
+    resolution can actually find it via the module's globals - a class
+    defined inside `create_app` is only reachable through the enclosing
+    function's locals, which FastAPI's dependant analysis does not see,
+    and the route silently degrades to expecting a query parameter instead
+    of a JSON body."""
+
+    output_root: str
+
 
 # The built web UI (`cd web && npm run build`) - a sibling of `avg/` at the
 # repo root, not a package resource, since it is built by npm and gitignored
@@ -174,7 +192,12 @@ def _apply_terminal_event(project: ProjectDoc | None, event: Event) -> None:
         record.error = None
 
 
-def create_app(token: str, output_root: Path, thumb_cache_dir: Path | None = None) -> FastAPI:
+def create_app(
+    token: str,
+    output_root: Path,
+    thumb_cache_dir: Path | None = None,
+    settings_path: Path | None = None,
+) -> FastAPI:
     """Build one isolated FastAPI instance.
 
     This is the only construction entry point - tests build a throwaway
@@ -185,7 +208,8 @@ def create_app(token: str, output_root: Path, thumb_cache_dir: Path | None = Non
     `thumb_cache_dir` defaults to `avg.media.thumbnails.default_cache_dir()`
     (`%LOCALAPPDATA%/AVG Studio/thumbs`) - the optional override exists so
     tests can point it at a throwaway `tmp_path` instead of writing into the
-    real user profile on every test run.
+    real user profile on every test run. `settings_path` is the same idea
+    for `avg.config.settings`'s `%APPDATA%/AVG Studio/settings.json`.
     """
     output_root = Path(output_root)
     app = FastAPI()
@@ -195,6 +219,7 @@ def create_app(token: str, output_root: Path, thumb_cache_dir: Path | None = Non
     app.state.engine = MediaEngine()
     app.state.manager = _ConnectionManager()
     app.state.thumb_cache_dir = Path(thumb_cache_dir) if thumb_cache_dir is not None else default_cache_dir()
+    app.state.settings_path = Path(settings_path) if settings_path is not None else None
     # A single background thread at a time - MediaEngine itself only ever
     # tracks one child process (see its docstring), so a second render
     # starting while one is alive would silently overwrite that handle and
@@ -234,6 +259,53 @@ def create_app(token: str, output_root: Path, thumb_cache_dir: Path | None = Non
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
         return {"projects": list(app.state.projects.values())}
+
+    @app.get("/api/settings", dependencies=[Depends(require_token)])
+    async def get_settings() -> dict:
+        # Read straight from disk (not app.state) - this is the one small
+        # document this app owns, and there is no in-memory copy to drift
+        # from it between requests. `suggest_output_root` is recomputed
+        # every call rather than cached, since it does its own directory
+        # walk and the welcome screen's whole point is a fresh, honest count.
+        doc = load_settings(app.state.settings_path)
+        path, count, source = suggest_output_root()
+        return {
+            **doc.model_dump(),
+            "suggestion": {"path": str(path), "project_count": count, "source": source},
+        }
+
+    @app.post("/api/settings", dependencies=[Depends(require_token)])
+    async def post_settings(body: SettingsUpdate) -> dict:
+        root = Path(body.output_root).expanduser()
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"can't use {root} as a library folder: {exc}",
+            ) from exc
+
+        doc = SettingsDoc(output_root=str(root), onboarded=True)
+        save_settings(doc, app.state.settings_path)
+
+        # Adopt the new root in this already-running process, exactly what
+        # create_app does at startup - so "Start" works immediately and
+        # never requires relaunching the app to see the chosen library.
+        app.state.output_root = root
+        report = import_all(root)
+        app.state.projects = {p.id: p for p in report.imported}
+        threading.Thread(target=_warm_thumbnails, daemon=True, name="avg-thumb-warm-onboard").start()
+
+        return doc.model_dump()
+
+    @app.get("/api/settings/scan", dependencies=[Depends(require_token)])
+    async def scan_settings(path: str) -> dict:
+        # Powers the live count next to Browse's chosen folder - tolerates a
+        # path that doesn't exist yet (import_all does) rather than 404ing,
+        # since a not-yet-created folder is a perfectly valid choice (it
+        # will be created on accept, see POST /api/settings above).
+        count = len(import_all(Path(path).expanduser()).imported)
+        return {"project_count": count}
 
     @app.post(
         "/api/projects/{project_id}/render",

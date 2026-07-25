@@ -1,5 +1,5 @@
 import { IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
-import { useTheme } from "./theme";
+import type { Theme } from "./theme";
 
 export type RailSection = "home" | "studio";
 
@@ -10,6 +10,10 @@ export interface RailProps {
    * one pulses; this one doesn't). */
   active: RailSection;
   onHome: () => void;
+  /** Owned by `App.tsx` (not this component) so the same choice also
+   * applies to the welcome screens, which render before Rail ever mounts. */
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 /**
@@ -25,8 +29,7 @@ export interface RailProps {
  * so their icons render but stay disabled rather than pretending to open
  * something that doesn't exist yet.
  */
-export default function Rail({ active, onHome }: RailProps) {
-  const { theme, toggle } = useTheme();
+export default function Rail({ active, onHome, theme, onToggleTheme }: RailProps) {
   const night = theme === "night";
 
   return (
@@ -59,7 +62,7 @@ export default function Rail({ active, onHome }: RailProps) {
       <button
         type="button"
         className="rail__item"
-        onClick={toggle}
+        onClick={onToggleTheme}
         title={night ? "Switch to day" : "Switch to night"}
         aria-label={night ? "Switch to day" : "Switch to night"}
         aria-pressed={!night}

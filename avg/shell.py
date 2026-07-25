@@ -42,38 +42,42 @@ import uvicorn
 import webview
 
 from avg.api.app import create_app
+from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings
 from avg.media.ffmpeg_locate import prepend_to_path
 
 HOST = "127.0.0.1"
-
-# The legacy PowerShell app's output folder on the development machine. Slice
-# 1 reads existing projects from here, and `create_app` derives the legacy
-# `config.json` from it (`output_root.parent / "config" / "config.json"`).
-_LEGACY_OUTPUT_ROOT = Path(r"D:\AI_Video_Gen\output")
 
 
 def resolve_output_root() -> Path:
     """Decide where this installation reads and writes projects.
 
-    A hardcoded `D:\\AI_Video_Gen\\output` is correct on the machine that grew
-    it and meaningless anywhere else - the installer is meant to be carried to
-    another PC, where that drive may not even exist. The importer tolerates a
-    missing folder, so the app would start and simply show an empty library
-    forever, with no indication why.
+    Task 11.5 removed the last guess here: once the user has been through
+    the welcome screen, their choice is stored (`avg.config.settings`) and
+    that stored value is authoritative - inference below is now only a
+    fallback for the first run (before onboarding has happened) or a
+    corrupt/unreadable settings file, never a substitute for an answer the
+    user already gave.
 
     Order:
       1. `AVG_OUTPUT_ROOT` if set - the escape hatch for pointing a fresh
-         install at an existing library.
-      2. The legacy folder, if it actually exists - keeps the dev machine and
-         anyone upgrading from the PowerShell app working untouched.
-      3. `%USERPROFILE%/Videos/AVG Studio` - where a Windows user expects
+         install at an existing library (dev/test convenience).
+      2. The stored settings document, if onboarding has completed.
+      3. The legacy folder, if it actually exists - keeps the dev machine and
+         anyone upgrading from the PowerShell app working before their first
+         onboarding.
+      4. `%USERPROFILE%/Videos/AVG Studio` - where a Windows user expects
          their videos to be, and created on demand.
     """
     override = os.environ.get("AVG_OUTPUT_ROOT", "").strip()
     if override:
         return Path(override)
-    if _LEGACY_OUTPUT_ROOT.is_dir():
-        return _LEGACY_OUTPUT_ROOT
+
+    settings = load_settings()
+    if settings.onboarded and settings.output_root:
+        return Path(settings.output_root)
+
+    if LEGACY_OUTPUT_ROOT.is_dir():
+        return LEGACY_OUTPUT_ROOT
     fallback = Path.home() / "Videos" / "AVG Studio"
     fallback.mkdir(parents=True, exist_ok=True)
     return fallback
@@ -98,6 +102,32 @@ def pick_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((HOST, 0))
         return sock.getsockname()[1]
+
+
+class _Api:
+    """Exposed to the web UI as `window.pywebview.api` (see `webview.create_window`'s `js_api=`).
+
+    The welcome screen's "Browse" needs a real Windows folder picker, not a
+    text field pretending to be one - `create_file_dialog(FOLDER_DIALOG)` is
+    pywebview's native dialog, and `js_api` is the only bridge from JS back
+    into this process (the FastAPI/HTTP bridge has no reason to know about
+    native dialogs at all, so this stays here rather than in `avg.api.app`).
+    """
+
+    def browse_folder(self) -> str | None:
+        """Open a native folder picker and return the chosen path, or `None` if cancelled.
+
+        `webview.windows[0]` is safe here because this app only ever opens
+        one window (see `main`); `create_file_dialog` returns a tuple of
+        paths (or `None` on cancel) even for a single-folder dialog, hence
+        the `[0]`. `FileDialog.FOLDER` (not the deprecated module-level
+        `FOLDER_DIALOG` alias, which this pywebview version warns on) is the
+        same dialog under its current name.
+        """
+        result = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
+        if not result:
+            return None
+        return result[0]
 
 
 def make_token() -> str:
@@ -179,6 +209,7 @@ def main() -> None:
     webview.create_window(
         "AVG Studio",
         f"http://{HOST}:{port}/?token={token}",
+        js_api=_Api(),
         width=1280,
         height=820,
     )

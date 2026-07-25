@@ -383,6 +383,86 @@ a:hover {
   overflow-y: auto;
 }
 
+/* ---- welcome (first run) ----
+   Three full-window, centred steps with no wizard chrome - no Rail, no
+   Transport, no Next/Back bar, no progress dots. `App.tsx` renders this in
+   place of the whole app shell while `GET /api/settings` reports
+   `onboarded: false`, so it owns the entire window rather than living
+   inside `.app-shell__content`. */
+
+.welcome {
+  height: 100%;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--canvas);
+  padding: 40px;
+}
+
+.welcome__panel {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 92vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.welcome__kicker {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0;
+}
+
+.welcome__headline {
+  font-family: var(--font-heading);
+  font-size: 44px;
+  line-height: 1.08;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.welcome__lede {
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+  max-width: 46ch;
+  overflow-wrap: anywhere;
+}
+
+.welcome__hint {
+  font-size: 13px;
+  color: var(--dim);
+  margin: -6px 0 0;
+}
+
+.welcome__error {
+  font-size: 13px;
+  color: var(--bad);
+  margin: 0;
+}
+
+.welcome__actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn--lg {
+  min-height: 46px;
+  padding: 0 26px;
+  font-size: 15px;
+}
+
 /* ---- rail ---- */
 
 .rail {
