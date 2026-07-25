@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { apiGet, apiPost, type PhaseRecord, type ProjectDoc, type ProjectsResponse } from "./api";
 import Home from "./Home";
+import Rail from "./Rail";
 import Studio from "./Studio";
 import Transport from "./Transport";
 import { useEvents } from "./useEvents";
@@ -125,7 +126,6 @@ export default function App() {
           cancelled={events.cancelled?.project_id === project.id ? events.cancelled : null}
           finished={events.finished?.project_id === project.id ? events.finished : null}
           startError={startError}
-          onBack={() => setScreen({ name: "home" })}
           onStartRender={() => startRender(project.id)}
           onCancel={() => cancelRender(project.id)}
         />
@@ -138,14 +138,25 @@ export default function App() {
         </div>
       );
     } else {
-      content = <Home projects={live} onOpen={openProject} onRender={openAndRender} />;
+      content = (
+        <Home
+          projects={live}
+          progress={events.progress}
+          onOpen={openProject}
+          onRender={openAndRender}
+          onCancel={cancelRender}
+        />
+      );
     }
   }
 
   return (
     <div className="app-shell">
-      <div className="app-shell__content">{content}</div>
-      <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
+      <Rail active={screen.name === "project" ? "studio" : "home"} onHome={() => setScreen({ name: "home" })} />
+      <div className="app-shell__main">
+        <div className="app-shell__content">{content}</div>
+        <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
+      </div>
     </div>
   );
 }

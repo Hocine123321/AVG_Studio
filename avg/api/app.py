@@ -5,12 +5,16 @@ This is the first layer allowed to face outward. Everything below it
 prompting - they emit typed events, and this layer decides what actually
 reaches the user, as an HTTP response or a WebSocket message.
 
-Routes (see the task-7 brief for the exact contract):
+Routes (see the task-7 and task-10.5 briefs for the exact contract):
 
-    GET  /api/projects                      -> {"projects": [ProjectDoc, ...]}
-    POST /api/projects/{project_id}/render   -> 202 {"started": true}
-    POST /api/projects/{project_id}/cancel   -> {"cancelled": true}
-    WS   /ws/events                          -> a stream of avg.core.events models as JSON
+    GET  /api/projects                          -> {"projects": [ProjectDoc, ...]}
+    POST /api/projects/{project_id}/render       -> 202 {"started": true}
+    POST /api/projects/{project_id}/cancel       -> {"cancelled": true}
+    GET  /api/projects/{project_id}/thumbnail    -> image/jpeg
+    GET  /api/projects/{project_id}/video        -> video/mp4 (honours Range -> 206)
+    GET  /api/projects/{project_id}/images       -> {"images": [filename, ...]}
+    GET  /api/projects/{project_id}/images/{f}   -> image/* (one file from images/)
+    WS   /ws/events                              -> a stream of avg.core.events models as JSON
 
 Construction goes exclusively through `create_app(token, output_root)` so
 tests (and `avg.shell`) can each build a fully isolated instance - no
@@ -26,6 +30,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from avg.config.legacy_import import import_all
@@ -33,6 +38,7 @@ from avg.config.settings_import import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.media.engine import MediaEngine
+from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.workspace import render_workspace
 
 from .deps import require_token
@@ -168,13 +174,18 @@ def _apply_terminal_event(project: ProjectDoc | None, event: Event) -> None:
         record.error = None
 
 
-def create_app(token: str, output_root: Path) -> FastAPI:
+def create_app(token: str, output_root: Path, thumb_cache_dir: Path | None = None) -> FastAPI:
     """Build one isolated FastAPI instance.
 
     This is the only construction entry point - tests build a throwaway
     instance per test (see `tests/api/test_app.py`), and `avg.shell` builds
     exactly one per process with a freshly generated token and the real
     output folder.
+
+    `thumb_cache_dir` defaults to `avg.media.thumbnails.default_cache_dir()`
+    (`%LOCALAPPDATA%/AVG Studio/thumbs`) - the optional override exists so
+    tests can point it at a throwaway `tmp_path` instead of writing into the
+    real user profile on every test run.
     """
     output_root = Path(output_root)
     app = FastAPI()
@@ -183,6 +194,7 @@ def create_app(token: str, output_root: Path) -> FastAPI:
     app.state.output_root = output_root
     app.state.engine = MediaEngine()
     app.state.manager = _ConnectionManager()
+    app.state.thumb_cache_dir = Path(thumb_cache_dir) if thumb_cache_dir is not None else default_cache_dir()
     # A single background thread at a time - MediaEngine itself only ever
     # tracks one child process (see its docstring), so a second render
     # starting while one is alive would silently overwrite that handle and
@@ -199,6 +211,25 @@ def create_app(token: str, output_root: Path) -> FastAPI:
     # here.
     report = import_all(output_root)
     app.state.projects: dict[str, ProjectDoc] = {p.id: p for p in report.imported}
+
+    def _warm_thumbnails() -> None:
+        """Generate every thumbnail once, in the background, at startup.
+
+        Extraction shells out to ffmpeg and is lazy per request. Without this,
+        a first launch loads the grid and fires one cold request per project
+        at the same instant - ten ffmpeg processes at once on an 8 GB machine
+        - and the images lose the race, so the user's first impression is a
+        wall of empty cards that only fills in on a reload.
+
+        Sequential on purpose: warming is background work and must not
+        contend with a render for CPU. Failures are per-project and silent
+        here; a genuinely missing thumbnail surfaces as the UI's fallback.
+        """
+        for proj in list(app.state.projects.values()):
+            with suppress(Exception):
+                thumbnail_for(proj, app.state.thumb_cache_dir)
+
+    threading.Thread(target=_warm_thumbnails, daemon=True, name="avg-thumb-warm").start()
 
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
@@ -275,6 +306,86 @@ def create_app(token: str, output_root: Path) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         app.state.engine.cancel()
         return {"cancelled": True}
+
+    @app.get("/api/projects/{project_id}/thumbnail", dependencies=[Depends(require_token)])
+    def project_thumbnail(project_id: str) -> FileResponse:
+        # A plain `def` (not `async def`) - FastAPI runs synchronous path
+        # operations in a worker thread automatically, so the blocking
+        # ffmpeg/ffprobe subprocess calls inside thumbnail_for() never stall
+        # the event loop (and, with it, every other in-flight request,
+        # including the WebSocket carrying live render progress).
+        project = app.state.projects.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
+
+        thumb = thumbnail_for(project, app.state.thumb_cache_dir)
+        if thumb is None:
+            # No master_output.mp4 AND no image in images/ (or ffmpeg itself
+            # is missing) - the UI's own placeholder covers this, so a plain
+            # 404 is honest rather than synthesizing a fake image.
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no thumbnail available")
+        return FileResponse(thumb, media_type="image/jpeg")
+
+    @app.get("/api/projects/{project_id}/video", dependencies=[Depends(require_token)])
+    def project_video(project_id: str) -> FileResponse:
+        # FileResponse honours an incoming Range header itself (it reads the
+        # request headers straight off the ASGI scope) and answers with a
+        # real 206 Partial Content + Content-Range - required for a <video>
+        # element's seek bar to work at all in WebView2. Verified with an
+        # actual ranged request against a real project's master_output.mp4
+        # rather than assumed - see the task-10.5 report.
+        project = app.state.projects.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
+
+        if project.master_output is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no video for this project")
+
+        video_path = Path(project.master_output)
+        if not video_path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video file missing on disk")
+
+        return FileResponse(video_path, media_type="video/mp4")
+
+    @app.get("/api/projects/{project_id}/images", dependencies=[Depends(require_token)])
+    def list_project_images(project_id: str) -> dict:
+        # Backs Studio's "visuals" panel: real filenames from the project's
+        # own images/ folder, not a fabricated per-scene manifest - Slice 1
+        # has no generation-progress data per scene, only whichever files
+        # have landed on disk so far.
+        project = app.state.projects.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
+        files = list_image_files(project.folder / "images")
+        return {"images": [f.name for f in files]}
+
+    @app.get("/api/projects/{project_id}/images/{filename}", dependencies=[Depends(require_token)])
+    def project_image(project_id: str, filename: str) -> FileResponse:
+        project = app.state.projects.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
+
+        # Belt and suspenders against path traversal: a "/" or "\\" in a
+        # single {filename} path segment can't actually reach here (Starlette's
+        # router wouldn't match this route for a request path containing an
+        # extra segment), but a bare ".." could still resolve upward, so both
+        # the character check and the resolved-path containment check below
+        # guard independently rather than trusting routing alone.
+        if "/" in filename or "\\" in filename or filename in (".", ".."):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+
+        images_dir = (project.folder / "images").resolve()
+        candidate = (images_dir / filename).resolve()
+        if candidate.parent != images_dir or candidate.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+        if not candidate.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+
+        media_type = {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".webp": "image/webp", ".bmp": "image/bmp",
+        }[candidate.suffix.lower()]
+        return FileResponse(candidate, media_type=media_type)
 
     @app.websocket("/ws/events")
     async def ws_events(websocket: WebSocket, token: str | None = None) -> None:

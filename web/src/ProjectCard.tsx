@@ -1,4 +1,7 @@
+import { useState } from "react";
 import type { ProjectDoc } from "./api";
+import { thumbnailUrl } from "./api";
+import { IconFrame } from "./Icons";
 
 type CardState = "done" | "failed" | "running" | "incomplete";
 
@@ -8,34 +11,22 @@ interface Resolved {
 }
 
 /**
- * Derives the card's state from the project's phases, per the product rule:
- *
- *   - every phase done + master_output present  -> done
- *   - any phase failed                           -> failed (name it)
- *   - a phase running                            -> running (amber)
- *   - otherwise                                  -> incomplete
- *
- * Failed takes priority over running: a pipeline that died mid-phase can
- * still show an earlier phase's stale "running" record (nothing ever set it
- * back to pending), so failed must win or a dead render would read as live.
+ * Derives the card's state from the project's phases. Unchanged logic —
+ * failed still takes priority over running, because a pipeline that died
+ * mid-phase can leave a stale "running" record behind and a dead render
+ * must never read as live.
  */
 function resolveState(project: ProjectDoc): Resolved {
   const phases = Object.entries(project.phases ?? {});
 
   const failed = phases.find(([, p]) => p.status === "failed");
-  if (failed) {
-    return { state: "failed", failedPhase: failed[0] };
-  }
+  if (failed) return { state: "failed", failedPhase: failed[0] };
 
   const running = phases.find(([, p]) => p.status === "running");
-  if (running) {
-    return { state: "running" };
-  }
+  if (running) return { state: "running" };
 
   const allDone = phases.length > 0 && phases.every(([, p]) => p.status === "done");
-  if (allDone && project.master_output) {
-    return { state: "done" };
-  }
+  if (allDone && project.master_output) return { state: "done" };
 
   return { state: "incomplete" };
 }
@@ -45,89 +36,106 @@ function formatCreated(iso?: string): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const month = d.toLocaleString("en-US", { month: "short" });
+  return `${d.getDate()} ${month} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export interface ProjectCardProps {
   project: ProjectDoc;
-  /** Navigate to the Studio view for this project - no side effect beyond
-   * that (Play on a done project, Open on an incomplete/failed one, Open
-   * studio on a running one). */
   onOpen: (id: string) => void;
-  /** Navigate to Studio AND kick off a fresh render - what "Run again" (a
-   * done project) and "Resume" (a failed one) actually do, now that Task 10
-   * gives the render endpoint a UI to call it from. Only "render" is a real
-   * phase this build can (re)run, so both buttons drive the same action;
-   * their distinct labels communicate distinct intent to the user even
-   * though the request they fire is identical. */
   onRender: (id: string) => void;
 }
 
-/** One project's card in the home grid. */
+/**
+ * One project's card. The card IS the frame — that principle is unchanged.
+ * What changed:
+ *
+ *   - The action strip no longer sits in a grey block under the still. The
+ *     buttons overlay the frame on hover/focus and the title fades out
+ *     under them, so at rest the grid is nothing but stills.
+ *   - Radii went to 28px and the whole card lifts 2px on hover.
+ *   - "Done" is sage, not green-ish grey; terracotta is reserved for the
+ *     card that is actually rendering.
+ *
+ * The empty state is a drawn frame icon rather than the `▤` glyph.
+ */
 export default function ProjectCard({ project, onOpen, onRender }: ProjectCardProps) {
   const { state, failedPhase } = resolveState(project);
   const created = formatCreated(project.created);
+  const [thumbBroken, setThumbBroken] = useState(false);
+
   const open = () => onOpen(project.id);
   const render = () => onRender(project.id);
 
-  let chipClass = "chip";
-  let chipLabel = "Incomplete";
+  let statusPillClass = "pill";
+  let statusLabel = "Incomplete";
   if (state === "done") {
-    chipClass = "chip chip--ok";
-    chipLabel = "Done";
+    statusPillClass = "pill pill--ok";
+    statusLabel = "Done";
   } else if (state === "failed") {
-    chipClass = "chip chip--bad";
-    chipLabel = failedPhase ? `Failed · ${failedPhase}` : "Failed";
+    statusPillClass = "pill pill--bad";
+    statusLabel = failedPhase ? `Failed · ${failedPhase}` : "Failed";
   } else if (state === "running") {
-    // The one place amber is allowed on this card: this status IS the thing
-    // that is happening right now.
-    chipClass = "chip chip--amber";
-    chipLabel = "Running";
+    statusPillClass = "pill pill--amber";
+    statusLabel = "Rendering";
   }
 
   return (
-    <article className="project-card">
-      <div className="project-card__thumb">
-        <span className={chipClass}>{chipLabel}</span>
-        <span className="chip mono">{project.aspect_ratio}</span>
+    <article className="project-card" onClick={open}>
+      <div className={`project-card__thumb${thumbBroken ? " project-card__thumb--empty" : ""}`}>
+        {thumbBroken ? (
+          <IconFrame size={30} />
+        ) : (
+          <img
+            className="washed"
+            src={thumbnailUrl(project.id)}
+            alt=""
+            loading="lazy"
+            onError={() => setThumbBroken(true)}
+          />
+        )}
       </div>
-      <div className="project-card__body">
+
+      <div className="project-card__scrim" />
+
+      <div className="project-card__badges">
+        <span className={statusPillClass}>{statusLabel}</span>
+        <span className="pill pill--ar">{project.aspect_ratio}</span>
+      </div>
+
+      <div className="project-card__bottom">
         <h3 className="project-card__title" dir="auto" title={project.title}>
           {project.title}
         </h3>
-        {created && <p className="project-card__meta mono">{created}</p>}
-        <div className="project-card__actions">
-          {state === "done" && (
-            <>
-              <button type="button" className="btn" onClick={open}>
-                Play
-              </button>
-              <button type="button" className="btn" onClick={render}>
-                Run again
-              </button>
-            </>
-          )}
-          {state === "failed" && (
-            <>
-              <button type="button" className="btn" onClick={render}>
-                Resume
-              </button>
-              <button type="button" className="btn" onClick={open}>
-                Open
-              </button>
-            </>
-          )}
-          {state === "running" && (
-            <button type="button" className="btn" onClick={open}>
-              Open studio
+        {created && <p className="project-card__date">{created}</p>}
+      </div>
+
+      <div className="project-card__actions" onClick={(e) => e.stopPropagation()}>
+        {state === "done" && (
+          <>
+            <button type="button" className="btn btn--primary" onClick={open}>
+              Play
             </button>
-          )}
-          {state === "incomplete" && (
+            <button type="button" className="btn" onClick={render}>
+              Run again
+            </button>
+          </>
+        )}
+        {state === "failed" && (
+          <>
+            <button type="button" className="btn btn--primary" onClick={render}>
+              Resume
+            </button>
             <button type="button" className="btn" onClick={open}>
               Open
             </button>
-          )}
-        </div>
+          </>
+        )}
+        {(state === "running" || state === "incomplete") && (
+          <button type="button" className="btn btn--primary" onClick={open}>
+            {state === "running" ? "Open studio" : "Open"}
+          </button>
+        )}
       </div>
     </article>
   );
