@@ -222,3 +222,266 @@ button {
   font-size: 11.5px;
   padding: 5px 10px;
 }
+
+/* ---- app shell (content area + transport bar) ---- */
+
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ---- studio screen ---- */
+
+.studio {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.studio__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.studio__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio__banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.studio__banner p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.studio__banner--bad {
+  background: var(--bad-dim);
+  color: var(--bad);
+  border-bottom-color: var(--bad-line);
+}
+
+.studio__banner--muted {
+  color: var(--muted);
+}
+
+.studio__body {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+}
+
+.phase-rail {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+
+.phase-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.phase-row:hover {
+  background: var(--panel-2);
+}
+
+.phase-row--selected {
+  background: var(--panel-2);
+  box-shadow: inset 3px 0 0 var(--muted);
+}
+
+.phase-row--selected.phase-row--running {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.phase-row--selected.phase-row--failed {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+
+.phase-row--selected.phase-row--done {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+
+.phase-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.phase-row__name {
+  font-size: 12.5px;
+}
+
+.phase-row__meta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.artifact-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 22px 26px;
+  overflow-y: auto;
+}
+
+.artifact-panel__title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.artifact-panel p {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.artifact-empty {
+  color: var(--muted);
+}
+
+.artifact-failed p:first-child {
+  color: var(--bad);
+}
+
+.artifact-progress__bar {
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.artifact-progress__fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+/* ---- transport bar (App.tsx, every screen) ---- */
+
+.transport {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 20px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.transport--idle,
+.transport--offline {
+  color: var(--muted);
+}
+
+.transport__open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+.transport__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transport__detail {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Amber only while a render is actually happening right now - the one
+   place besides the "running" status chip this color is allowed. */
+.transport--running .transport__label {
+  color: var(--accent);
+}
+
+.transport--running .transport__open {
+  flex: 1;
+  min-width: 0;
+}
+
+.transport__bar {
+  width: 140px;
+  flex-shrink: 0;
+  height: 4px;
+  background: var(--panel-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.transport__bar-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.transport__percent {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.transport--failed .transport__label {
+  color: var(--bad);
+}
+
+/* Deliberately NOT --bad: a cancel was the user's choice, not a crash, and
+   must never read as a red failure. Muted, same register as idle/offline. */
+.transport--cancelled .transport__label {
+  color: var(--muted);
+}
+
+.transport--finished .transport__label {
+  color: var(--ok);
+}

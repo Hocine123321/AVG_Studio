@@ -4,10 +4,11 @@ import ProjectCard from "./ProjectCard";
 export interface HomeProps {
   projects: ProjectDoc[];
   onOpen: (id: string) => void;
+  onRender: (id: string) => void;
 }
 
 /** The project grid - the first screen the user sees. */
-export default function Home({ projects, onOpen }: HomeProps) {
+export default function Home({ projects, onOpen, onRender }: HomeProps) {
   return (
     <div className="home">
       <div className="home__header">
@@ -19,7 +20,7 @@ export default function Home({ projects, onOpen }: HomeProps) {
       ) : (
         <div className="project-grid">
           {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} onOpen={onOpen} />
+            <ProjectCard key={project.id} project={project} onOpen={onOpen} onRender={onRender} />
           ))}
         </div>
       )}

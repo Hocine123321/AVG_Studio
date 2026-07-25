@@ -50,23 +50,25 @@ function formatCreated(iso?: string): string | null {
 
 export interface ProjectCardProps {
   project: ProjectDoc;
+  /** Navigate to the Studio view for this project - no side effect beyond
+   * that (Play on a done project, Open on an incomplete/failed one, Open
+   * studio on a running one). */
   onOpen: (id: string) => void;
+  /** Navigate to Studio AND kick off a fresh render - what "Run again" (a
+   * done project) and "Resume" (a failed one) actually do, now that Task 10
+   * gives the render endpoint a UI to call it from. Only "render" is a real
+   * phase this build can (re)run, so both buttons drive the same action;
+   * their distinct labels communicate distinct intent to the user even
+   * though the request they fire is identical. */
+  onRender: (id: string) => void;
 }
 
-/**
- * One project's card in the home grid.
- *
- * Every action button below - regardless of its label - calls `onOpen`.
- * Home's contract only exposes one callback; the labels communicate intent
- * to the user (play vs. resume vs. open), but at this point in the build
- * there is nowhere else for them to go yet. Task 10 (the Studio view) is
- * what gives "run again" / "resume" / "play" their own distinct behaviour
- * once the app actually lands somewhere after opening a project.
- */
-export default function ProjectCard({ project, onOpen }: ProjectCardProps) {
+/** One project's card in the home grid. */
+export default function ProjectCard({ project, onOpen, onRender }: ProjectCardProps) {
   const { state, failedPhase } = resolveState(project);
   const created = formatCreated(project.created);
   const open = () => onOpen(project.id);
+  const render = () => onRender(project.id);
 
   let chipClass = "chip";
   let chipLabel = "Incomplete";
@@ -100,14 +102,14 @@ export default function ProjectCard({ project, onOpen }: ProjectCardProps) {
               <button type="button" className="btn" onClick={open}>
                 Play
               </button>
-              <button type="button" className="btn" onClick={open}>
+              <button type="button" className="btn" onClick={render}>
                 Run again
               </button>
             </>
           )}
           {state === "failed" && (
             <>
-              <button type="button" className="btn" onClick={open}>
+              <button type="button" className="btn" onClick={render}>
                 Resume
               </button>
               <button type="button" className="btn" onClick={open}>
