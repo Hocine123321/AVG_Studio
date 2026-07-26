@@ -210,6 +210,18 @@ SETTINGS: list[SettingSpec] = [
         default=0,
         scope="channel",
     ),
+    SettingSpec(
+        id="font_family",
+        group="captions",
+        label="Font",
+        help=(
+            "The GLOBAL font (family name or a .ttf/.otf path) shared by captions AND "
+            "takeover cards - one setting, one look. Empty uses the system default."
+        ),
+        type="text",
+        default="",
+        scope="channel",
+    ),
     # --- voice provider and options ---
     SettingSpec(
         id="voice_provider",

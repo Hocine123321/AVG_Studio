@@ -27,7 +27,9 @@ from dataclasses import dataclass
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import Phase, PhaseContext
 from avg.pipeline.phases.brief import BriefPhase
+from avg.pipeline.phases.captions import CaptionsPhase
 from avg.pipeline.phases.director1 import Director1Phase
+from avg.pipeline.phases.director2 import Director2Phase
 from avg.pipeline.phases.script import ScriptPhase
 from avg.pipeline.phases.visuals import VisualsPhase
 from avg.pipeline.phases.voice import VoicePhase
@@ -65,22 +67,24 @@ class _StubPhase:
 # two-pass script's verbatim-partition invariant and Director I's structure
 # planning. Ids 3-4 (Task 4) are `avg.pipeline.phases.visuals/voice` - one
 # image per scene via a RAM-capped worker pool, and narration synthesis with
-# real `[pause]` silence, respectively. Ids 5-7 are still `_StubPhase`s: Task
-# 5 replaces them the same way, one module per phase, nothing here needing
-# to change but this tuple.
+# real `[pause]` silence, respectively. Ids 5-6 (Task 5) are
+# `avg.pipeline.phases.director2/captions` - the motion/grade + takeover-card
+# plan, and transcription-to-`.ass` (AssemblyAI or a derived estimate),
+# respectively. Id 7 is still a `_StubPhase`: a later task replaces it the
+# same way, nothing here needing to change but this tuple.
 #
 # Phase 7 ("render") is deliberately still a stub here: the real render
-# phase (Task 5/6's territory per the task brief) delegates to the already-
-# built `avg.media.engine.MediaEngine.render()` rather than reimplementing
-# rendering - this task only reserves its place in the order.
+# phase (a later task's territory per the task brief) delegates to the
+# already-built `avg.media.engine.MediaEngine.render()` rather than
+# reimplementing rendering - this task only reserves its place in the order.
 REGISTRY: tuple[Phase, ...] = (
     BriefPhase(),
     ScriptPhase(),
     Director1Phase(),
     VisualsPhase(),
     VoicePhase(),
-    _StubPhase(5, "director2", "Director II / AI Graphics"),
-    _StubPhase(6, "captions", "Captions & Takeover Text"),
+    Director2Phase(),
+    CaptionsPhase(),
     _StubPhase(7, "render", "Render"),
 )
 

@@ -493,3 +493,59 @@ def build_director_style_bible(
 - personality: {preset.description or preset.name}
 - visual tone: {tone_text}
 - emotional arc: {emotional_arc}{brand_line}"""
+
+
+def build_director2_prompt(
+    inputs: CreativeInputs,
+    scene_texts: list[str],
+    *,
+    personality: dict[str, PersonalityPreset] | None = None,
+    emotional_arc: str = "",
+) -> str:
+    """Phase 5 (Director II)'s motion/grade prompt: opens with
+    `build_director_style_bible`'s style-bible fragment, then asks for a
+    per-scene camera move/transition and one overall colour grade for the
+    whole video. Ported (simplified - no brand motion-feel table, no
+    external filters catalogue, both a separate, later concern - see
+    `avg.pipeline.phases.director1`'s identical simplification note) from
+    the corresponding section of `Get-AiDirectionPlan`
+    (`D:\\AI_Video_Gen\\modules\\ai.ps1`).
+
+    The vocabulary below (motion types, ease curves, transitions, grade
+    looks) is deliberately a closed set - `avg.pipeline.phases.director2`
+    sanitizes the reply against these exact same names, degrading anything
+    else to a safe default, mirroring the legacy app's own validated
+    lists."""
+    style_bible = build_director_style_bible(inputs, personality=personality, emotional_arc=emotional_arc)
+    numbered = "\n".join(f'[{i + 1}] "{text}"' for i, text in enumerate(scene_texts))
+
+    return f"""You are the DIRECTOR / EDITOR of a short AI-generated video built from still images with
+narration. Think like a bold human editor: your goal is to make THIS video feel special and
+intentional — a directed, edited piece, not images sliding by. You have real creative
+authority over pacing, camera movement, transitions and colour. Use contrast (calm vs.
+punchy scenes) and motion that rides the narration's energy — but stay coherent.
+
+{style_bible}
+
+SCENES (number, narration):
+{numbered}
+
+For EACH scene choose:
+- motion.type: zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down | still
+    (use 'still' rarely, only for a deliberate held beat.)
+- motion.intensity: 0.0-1.0 (higher = stronger move; push harder on high-energy moments,
+    gentler on calm/reflective lines. Avoid a flat 0 everywhere.)
+- motion.ease: ease_out_cubic | ease_in_out | ease_in | ease_out | linear
+    (ease_out_cubic settles nicely; use it as the default.)
+- transition_in: cut | fade | crossfade | dip | slide_left | slide_right | whip
+    (cut on rhythm; crossfade/dip on reflective moments; slide/whip on an energetic jump.
+     The FIRST scene should be "fade".)
+
+Also choose ONE overall grade (colour look) for the whole video that fits the style bible:
+- grade.look: none | warm | cool | cinematic | noir | vibrant | soft
+The SAME grade applies to every scene (set it once at top level).
+
+Return ONLY a JSON object, no preamble, no markdown fences. Schema:
+{{"version":1,"grade":{{"look":"..."}},
+ "scenes":[{{"scene":<int>,"motion":{{"type":"...","intensity":0.5,"ease":"ease_out_cubic"}},"transition_in":"..."}}]}}
+Every scene number above MUST appear exactly once."""
