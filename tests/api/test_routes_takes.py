@@ -26,6 +26,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from avg.api.app import create_app
+from avg.api.routes_takes import _folder_size_bytes
 from avg.config.channels import get_channel
 from avg.core.errors import ErrorKind
 from avg.core.events import PhaseFailed
@@ -165,6 +166,51 @@ def test_get_takes_lists_existing_takes(client, paths):
     body = r.json()
     assert {t["id"] for t in body["takes"]} == {1, 2}
     assert body["current_take_id"] == 1
+
+
+def test_get_takes_includes_disk_usage_in_bytes(client, paths):
+    """Task 4: the Studio header's disk-usage figure - computed server-side
+    from the WHOLE project folder (every take's own files), not walked by
+    the browser."""
+    project = _project(paths)
+    _seed_take1(project)
+    _add_second_take(project)
+    client.app.state.projects[project.id] = project
+
+    expected = sum(f.stat().st_size for f in project.folder.rglob("*") if f.is_file())
+    assert expected > 0  # the fixtures above really do write real files
+
+    r = client.get(f"/api/projects/{project.id}/takes", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["disk_bytes"] == expected
+
+
+def test_folder_size_bytes_of_a_nonexistent_folder_is_zero(tmp_path):
+    assert _folder_size_bytes(tmp_path / "does-not-exist") == 0
+
+
+def test_folder_size_bytes_sums_nested_files(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "one.txt").write_text("12345", encoding="utf-8")
+    (tmp_path / "a" / "b").mkdir()
+    (tmp_path / "a" / "b" / "two.txt").write_text("1234567890", encoding="utf-8")
+    assert _folder_size_bytes(tmp_path) == 15
+
+
+def test_get_takes_disk_usage_of_an_empty_project_matches_what_migration_wrote(client, paths):
+    """A brand-new (legacy, never-touched) project has no take artifacts of
+    its own - this route's own `_migrate_and_persist` call is what puts
+    anything on disk at all (take 1's empty folder plus the freshly written
+    `project.json`), so `disk_bytes` should match exactly that, not 0 and
+    not some larger stale figure."""
+    project = _project(paths, project_id="empty")
+    client.app.state.projects[project.id] = project
+
+    r = client.get(f"/api/projects/{project.id}/takes", headers=AUTH)
+    assert r.status_code == 200
+    expected = sum(f.stat().st_size for f in project.folder.rglob("*") if f.is_file())
+    assert r.json()["disk_bytes"] == expected
+    assert expected > 0  # migrate_to_takes + _migrate_and_persist's save_project both just ran
 
 
 # ---------------------------------------------------------------------------

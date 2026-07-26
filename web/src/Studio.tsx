@@ -1,22 +1,12 @@
 import { useEffect, useState } from "react";
-import { apiGet, imageUrl, videoUrl } from "./api";
-import type { PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse } from "./api";
+import { apiGet, deleteTake, getTakes, imageUrl, renameTake, videoUrl } from "./api";
+import type { PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, Take } from "./api";
 import type { PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
+import NewTakePanel from "./NewTakePanel";
+import { PHASE_ORDER } from "./phases";
 import Player from "./Player";
-
-/** Mirrors `avg.config.legacy_import.PHASE_ORDER`. Sentence case, per the
- * design rules, not the legacy app's title case. */
-const PHASE_ORDER: { key: string; label: string }[] = [
-  { key: "brief", label: "Brief" },
-  { key: "script", label: "Script" },
-  { key: "director1", label: "Director I" },
-  { key: "visuals", label: "Visuals" },
-  { key: "voice", label: "Voice & audio" },
-  { key: "director2", label: "Director II" },
-  { key: "captions", label: "Captions" },
-  { key: "render", label: "Render" },
-];
+import TakeStrip from "./TakeStrip";
 
 function formatDuration(ms?: number | null): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
@@ -45,16 +35,23 @@ function statusChipClass(status: PhaseStatus): string {
 }
 
 /** Which row the panel opens on: the failed one, else the running one, else
- * the last completed one, else the first. Unchanged. */
-function defaultPhase(project: ProjectDoc): string {
-  const failed = PHASE_ORDER.find(({ key }) => project.phases[key]?.status === "failed");
+ * the last completed one, else the first. Takes a plain phases dict now
+ * (a selected TAKE's own `phases`, not necessarily `ProjectDoc.phases` -
+ * see this file's own header comment on why those two can differ once a
+ * project has more than one take) rather than a whole `ProjectDoc`. */
+function defaultPhase(phases: Record<string, PhaseRecord>): string {
+  const failed = PHASE_ORDER.find(({ key }) => phases[key]?.status === "failed");
   if (failed) return failed.key;
-  const running = PHASE_ORDER.find(({ key }) => project.phases[key]?.status === "running");
+  const running = PHASE_ORDER.find(({ key }) => phases[key]?.status === "running");
   if (running) return running.key;
   for (let i = PHASE_ORDER.length - 1; i >= 0; i--) {
-    if (project.phases[PHASE_ORDER[i].key]?.status === "done") return PHASE_ORDER[i].key;
+    if (phases[PHASE_ORDER[i].key]?.status === "done") return PHASE_ORDER[i].key;
   }
   return PHASE_ORDER[0].key;
+}
+
+function totalDurationMs(phases: Record<string, PhaseRecord>): number {
+  return Object.values(phases).reduce((sum, p) => sum + (p.duration_ms ?? 0), 0);
 }
 
 function ArtifactDetail({
@@ -64,6 +61,8 @@ function ArtifactDetail({
   failure,
   finished,
   project,
+  take,
+  isCurrentTake,
   onStartRender,
   onCancel,
 }: {
@@ -73,6 +72,16 @@ function ArtifactDetail({
   failure: PhaseFailedEvent | null;
   finished: RenderFinishedEvent | null;
   project: ProjectDoc;
+  /** The selected take, when takes have loaded - `undefined` only in the
+   * brief window before the first `GET .../takes` response lands. */
+  take: Take | undefined;
+  /** Whether the SELECTED take is also the CURRENT one - `/video`,
+   * `/images` and `/thumbnail` only ever serve the current take's own
+   * files (see `avg/api/app.py`), so a selected take that isn't current
+   * can't actually play back its media through those routes yet. This
+   * panel says so honestly rather than silently showing the wrong take's
+   * video under the right take's label. */
+  isCurrentTake: boolean;
   onStartRender: () => void;
   onCancel: () => void;
 }) {
@@ -80,7 +89,10 @@ function ArtifactDetail({
 
   const [images, setImages] = useState<string[]>([]);
   useEffect(() => {
-    if (phaseKey !== "visuals") return;
+    if (phaseKey !== "visuals" || !isCurrentTake) {
+      setImages([]);
+      return;
+    }
     let cancelled = false;
     apiGet<ProjectImagesResponse>(`/api/projects/${encodeURIComponent(project.id)}/images`)
       .then((res) => {
@@ -92,7 +104,7 @@ function ArtifactDetail({
     return () => {
       cancelled = true;
     };
-  }, [phaseKey, project.id]);
+  }, [phaseKey, project.id, isCurrentTake]);
 
   // A running phase streams into the same view it is later inspected in.
   if (phaseKey === "render" && progress) {
@@ -137,6 +149,36 @@ function ArtifactDetail({
           </button>
           {kind && <span className="chip chip--bad">{kind}</span>}
         </div>
+      </div>
+    );
+  }
+
+  if (phaseKey === "render" && status === "done" && !isCurrentTake) {
+    // The video/thumbnail routes only ever serve the CURRENT take's file
+    // (see this component's own prop comment) - a selected take that isn't
+    // current gets an honest summary instead of a video player quietly
+    // showing the wrong take's output under the right take's label.
+    return (
+      <div className="artifact-summary" style={{ maxWidth: 480 }}>
+        <div className="artifact-summary__head">
+          <span className="artifact-summary__icon">
+            <IconCheck />
+          </span>
+          Render finished
+        </div>
+        <dl className="artifact-summary__grid">
+          {take?.master_output && (
+            <>
+              <dt>Output</dt>
+              <dd>{take.master_output}</dd>
+            </>
+          )}
+          <dt>Total time</dt>
+          <dd>{formatDuration(totalDurationMs(take?.phases ?? {}))}</dd>
+        </dl>
+        <p className="artifact-empty" style={{ marginTop: 12 }}>
+          Video preview isn't available for this take yet — only the current take can play back here.
+        </p>
       </div>
     );
   }
@@ -229,6 +271,14 @@ export interface StudioProps {
  * whichever one is running. The previous build drew eight independent rows
  * with a coloured dot each — correct, but it read as a status list rather
  * than as a pipeline with a direction.
+ *
+ * Slice 5 (Task 4) adds the other axis: takes run ACROSS the top, under the
+ * header, via `TakeStrip`. No new screen - selecting a take just repoints
+ * this same rail/panel at that take's own `phases` dict instead of
+ * `project.phases` (which, once a project has more than one take, only
+ * ever reflects a legacy pre-takes project or goes stale - see
+ * `avg.api.routes_takes`'s own docstring on why a take's re-run mutates
+ * `Take.phases`, never `ProjectDoc.phases`).
  */
 export default function Studio({
   project,
@@ -241,17 +291,120 @@ export default function Studio({
   onCancel,
   onBack,
 }: StudioProps) {
-  const [selected, setSelected] = useState<string>(() => defaultPhase(project));
+  const [selected, setSelected] = useState<string>(() => defaultPhase(project.phases));
 
+  // ---- takes (Slice 5, Task 4) ----
+  const [takes, setTakes] = useState<Take[] | null>(null);
+  const [currentTakeId, setCurrentTakeId] = useState<number | null>(null);
+  const [diskBytes, setDiskBytes] = useState<number>(0);
+  const [selectedTakeId, setSelectedTakeId] = useState<number | null>(null);
+  const [takesError, setTakesError] = useState<string | null>(null);
+  // Set the instant `NewTakePanel` reports a create succeeded, cleared on
+  // the first terminal event for this project - bridges the gap before the
+  // new take's own `phases` dict has recorded a single transition yet (see
+  // `TakeStrip.tsx`'s `resolveStatus`).
+  const [runningTakeId, setRunningTakeId] = useState<number | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  function refreshTakes() {
+    return getTakes(project.id).then((res) => {
+      setTakes(res.takes);
+      setCurrentTakeId(res.current_take_id);
+      setDiskBytes(res.disk_bytes);
+      setTakesError(null);
+      return res;
+    });
+  }
+
+  // (Re)load whenever the project changes - and reset every other bit of
+  // take state first, so a stale selection from a previously viewed project
+  // never briefly shows through.
   useEffect(() => {
-    if (progress) setSelected("render");
-  }, [progress]);
+    setTakes(null);
+    setSelectedTakeId(null);
+    setRunningTakeId(null);
+    refreshTakes()
+      .then((res) => setSelectedTakeId(res.current_take_id ?? res.takes[0]?.id ?? null))
+      .catch((err) => setTakesError(err instanceof Error ? err.message : String(err)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+
+  // While a take is running, poll for its phase-by-phase progress: the
+  // pipeline's own PhaseStarted/PhaseFinished events aren't wired into
+  // `useEvents` (only the render phase's own ProgressEvent/RenderFinished/
+  // PhaseFailed are - see `avg.pipeline.phases.render`), so this is what
+  // keeps the rail's pending/running/done nodes current for the phases
+  // before render. Stops the moment nothing is running.
+  useEffect(() => {
+    if (runningTakeId === null) return;
+    const id = setInterval(() => {
+      refreshTakes().catch(() => {});
+    }, 2500);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningTakeId]);
+
+  // Any event for this project means take data is worth refreshing (a
+  // render just failed/finished/was cancelled, or is progressing). A live
+  // render also snaps both the selected TAKE (to whichever one is actually
+  // running) and the selected PHASE to "render" - the running take must
+  // stay findable, matching the same jump this component already made for
+  // the single-take world.
+  useEffect(() => {
+    const forThisProject =
+      progress?.project_id === project.id ||
+      failure?.project_id === project.id ||
+      cancelled?.project_id === project.id ||
+      finished?.project_id === project.id;
+    if (!forThisProject) return;
+
+    refreshTakes().catch(() => {});
+    if (failure || cancelled || finished) setRunningTakeId(null);
+    if (progress?.project_id === project.id) {
+      setSelected("render");
+      if (runningTakeId !== null) setSelectedTakeId(runningTakeId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [progress, failure, cancelled, finished]);
+
+  const selectedTake = takes?.find((t) => t.id === selectedTakeId);
+  const isCurrentTake = selectedTakeId !== null && selectedTakeId === currentTakeId;
+
+  // Jump to the sensible default phase for whichever take just became
+  // selected - the same "failed, else running, else last done" rule
+  // `defaultPhase` already applies, just re-run per take instead of once.
+  useEffect(() => {
+    if (selectedTake) setSelected(defaultPhase(selectedTake.phases));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTakeId]);
+
+  async function handleDeleteTake(id: number) {
+    await deleteTake(project.id, id);
+    const res = await refreshTakes();
+    if (selectedTakeId === id) {
+      setSelectedTakeId(res.current_take_id ?? res.takes[0]?.id ?? null);
+    }
+  }
+
+  async function handleRenameTake(id: number, label: string) {
+    await renameTake(project.id, id, label);
+    await refreshTakes();
+  }
+
+  function handleTakeCreated(take: Take) {
+    setPanelOpen(false);
+    setRunningTakeId(take.id);
+    setSelectedTakeId(take.id);
+    refreshTakes().catch(() => {});
+  }
+
+  const phasesForSelected: Record<string, PhaseRecord> = selectedTake?.phases ?? project.phases;
 
   const renderStatus: PhaseStatus = project.phases.render?.status ?? "pending";
   const isRunning = renderStatus === "running";
   const actionLabel = isRunning ? "Cancel" : renderStatus === "pending" ? "Start render" : "Run again";
 
-  const record = project.phases[selected];
+  const record = phasesForSelected[selected];
   const selectedStatus: PhaseStatus = record?.status ?? "pending";
   const label = PHASE_ORDER.find((p) => p.key === selected)?.label ?? selected;
 
@@ -271,11 +424,33 @@ export default function Studio({
         </div>
         <span className="home__spacer" />
         <span className="chip">{project.aspect_ratio}</span>
+        <span className="chip" title="Total size on disk — takes are never auto-pruned">
+          {formatBytes(diskBytes)}
+        </span>
         <button type="button" className="btn btn--primary" onClick={isRunning ? onCancel : onStartRender}>
           {isRunning ? <IconStop /> : <IconPlay />}
           {actionLabel}
         </button>
       </header>
+
+      <TakeStrip
+        takes={takes ?? []}
+        loading={takes === null}
+        currentTakeId={currentTakeId}
+        selectedTakeId={selectedTakeId}
+        runningTakeId={runningTakeId}
+        onSelect={setSelectedTakeId}
+        onDelete={handleDeleteTake}
+        onRename={handleRenameTake}
+        onNewTake={() => setPanelOpen(true)}
+      />
+
+      {takesError && (
+        <div className="studio__banner studio__banner--bad">
+          <p>Couldn't load takes.</p>
+          <p>{takesError}</p>
+        </div>
+      )}
 
       {startError && (
         <div className="studio__banner studio__banner--bad">
@@ -298,9 +473,9 @@ export default function Studio({
           <div className="phase-rail__inner">
             <span className="phase-rail__thread" aria-hidden="true" />
             {PHASE_ORDER.map(({ key, label: rowLabel }) => {
-              const rowRecord = project.phases[key];
+              const rowRecord = phasesForSelected[key];
               const status: PhaseStatus = rowRecord?.status ?? "pending";
-              const live = key === "render" && progress;
+              const live = key === "render" && isCurrentTake && progress;
               return (
                 <button
                   key={key}
@@ -328,15 +503,26 @@ export default function Studio({
           <ArtifactDetail
             phaseKey={selected}
             record={record}
-            progress={selected === "render" ? progress : null}
+            progress={selected === "render" && isCurrentTake ? progress : null}
             failure={selected === "render" ? failure : null}
-            finished={selected === "render" ? finished : null}
+            finished={selected === "render" && isCurrentTake ? finished : null}
             project={project}
+            take={selectedTake}
+            isCurrentTake={isCurrentTake}
             onStartRender={onStartRender}
             onCancel={onCancel}
           />
         </div>
       </div>
+
+      {panelOpen && selectedTake && (
+        <NewTakePanel
+          projectId={project.id}
+          branchFromTake={selectedTake}
+          onClose={() => setPanelOpen(false)}
+          onCreated={handleTakeCreated}
+        />
+      )}
     </div>
   );
 }

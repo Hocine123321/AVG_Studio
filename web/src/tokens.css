@@ -2043,3 +2043,308 @@ a:hover {
   color: var(--muted);
   line-height: 1.55;
 }
+
+/* ---- take strip ----
+   Takes run ACROSS the top, under the project header - the second of the
+   two perpendicular axes Studio is built on (phases run down the rail).
+   Selection is an elevated surface with a STRONGER BORDER, never the
+   accent - terracotta stays reserved for the take that is actually
+   running (the status dot), or it would compete with the running take for
+   the eye and defeat the whole reason this strip exists. */
+
+.take-strip {
+  flex: none;
+  padding: 14px var(--pad);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.take-strip__row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.take-strip__loading {
+  font-size: 13px;
+  color: var(--dim);
+  padding: 8px 4px;
+}
+
+.take-strip__new {
+  flex: none;
+  align-self: center;
+}
+
+.take-strip__error {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--bad);
+}
+
+.take-chip {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  min-width: 132px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  position: relative;
+}
+
+/* The elevated-surface + stronger-border selection state. Deliberately no
+   accent anywhere in this rule. */
+.take-chip--selected {
+  background: var(--surface-2);
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-sm);
+}
+
+.take-chip__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px 26px 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  border-radius: inherit;
+}
+
+.take-chip__label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.take-chip__current {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.take-chip__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.take-chip__rename {
+  flex: 1;
+  min-width: 0;
+  margin: 8px 26px 8px 14px;
+  min-height: 30px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+
+.take-chip__delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.take-chip__delete:hover {
+  background: var(--bad-deep);
+  color: var(--bad);
+}
+
+.take-chip--confirm {
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  min-width: 200px;
+  border-color: color-mix(in srgb, var(--bad) 34%, transparent);
+}
+
+.take-chip--confirm p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--bad);
+  line-height: 1.4;
+}
+
+.take-chip__confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- new-take slide-over ----
+   Slides in from the right so the take being branched from stays visible
+   (dimmed, not hidden) behind the scrim. One terracotta action in here:
+   Create take - everything else (the re-roll picker, every field, Cancel)
+   stays unaccented. */
+
+.take-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 9, 7, 0.4);
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+}
+
+[data-theme="day"] .take-panel-overlay {
+  background: rgba(32, 28, 20, 0.28);
+}
+
+.take-panel {
+  width: min(460px, 92vw);
+  height: 100%;
+  background: var(--panel);
+  border-left: 1px solid var(--line-2);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.take-panel__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px var(--pad) 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.take-panel__title {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  margin: 2px 0 0;
+}
+
+.take-panel__close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.take-panel__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.take-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px var(--pad) 4px;
+}
+
+.take-panel__reroll {
+  margin-bottom: 20px;
+}
+
+.take-panel__reroll .field-select {
+  display: block;
+  width: 100%;
+  margin: 8px 0 6px;
+}
+
+.take-panel__warning {
+  margin: 0 0 16px;
+  font-size: 12.5px;
+  color: var(--bad);
+  line-height: 1.5;
+}
+
+.take-panel__preview {
+  flex: none;
+  padding: 14px var(--pad);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.take-panel__preview p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.take-panel__preview p:last-child {
+  margin-bottom: 0;
+}
+
+.take-panel__preview strong {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.take-panel__estimate {
+  color: var(--text) !important;
+  font-size: 14px !important;
+}
+
+.take-panel__hint {
+  color: var(--dim) !important;
+}
+
+.take-panel__error {
+  color: var(--bad) !important;
+}
+
+.take-panel__footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px var(--pad);
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.take-panel__footer .take-panel__error {
+  flex: 1;
+  margin: 0;
+  font-size: 12.5px;
+}

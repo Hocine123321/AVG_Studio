@@ -102,6 +102,10 @@ function Hero({ project, progress, onOpen, onCancel }: HeroProps) {
           <p className="hero__meta">
             <span>{project.aspect_ratio}</span>
             {project.short_edge ? <span>{project.short_edge}p</span> : null}
+            <span>
+              {Math.max(project.takes?.length ?? 0, 1)} take
+              {Math.max(project.takes?.length ?? 0, 1) === 1 ? "" : "s"}
+            </span>
           </p>
 
           <div className="hero__stat">

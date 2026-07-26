@@ -63,6 +63,12 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
   const { state, failedPhase } = resolveState(project);
   const created = formatCreated(project.created);
   const [thumbBroken, setThumbBroken] = useState(false);
+  // A project that predates Slice 5 (or has never been touched via the
+  // takes routes yet) reports `takes: []` from `GET /api/projects` - it is
+  // still, conceptually, exactly one take, so this never reads as "0
+  // takes" (see `avg.core.takes.migrate_to_takes`, which only actually
+  // creates that take once Studio's own `GET .../takes` call runs).
+  const takeCount = Math.max(project.takes?.length ?? 0, 1);
 
   const open = () => onOpen(project.id);
   const render = () => onRender(project.id);
@@ -107,7 +113,12 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
         <h3 className="project-card__title" dir="auto" title={project.title}>
           {project.title}
         </h3>
-        {created && <p className="project-card__date">{created}</p>}
+        <p className="project-card__date">
+          {created && <span>{created}</span>}
+          <span>
+            {takeCount} take{takeCount === 1 ? "" : "s"}
+          </span>
+        </p>
       </div>
 
       <div className="project-card__actions" onClick={(e) => e.stopPropagation()}>

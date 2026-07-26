@@ -57,6 +57,10 @@ export function apiDelete<T>(path: string): Promise<T> {
   return request<T>("DELETE", path);
 }
 
+export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>("PATCH", path, body);
+}
+
 /** Builds a `/ws/...` URL carrying the token as a query param, since browsers cannot set headers on a WebSocket handshake. */
 export function wsUrl(path: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -105,6 +109,21 @@ export interface PhaseRecord {
   error?: string | null;
 }
 
+/** Mirrors `avg.core.models.Take` (Slice 5). One attempt at a project - see
+ * `TakeStrip.tsx`/`NewTakePanel.tsx` for the screen built around this. */
+export interface Take {
+  schema_version: number;
+  id: number;
+  label: string;
+  created: string;
+  settings_snapshot: Record<string, unknown>;
+  changed_from: number | null;
+  changed_ids: string[];
+  rerolled_from: string | null;
+  phases: Record<string, PhaseRecord>;
+  master_output: string | null;
+}
+
 export interface ProjectDoc {
   id: string;
   title: string;
@@ -113,6 +132,13 @@ export interface ProjectDoc {
   short_edge?: number;
   master_output?: string | null;
   phases: Record<string, PhaseRecord>;
+  /** Both default-filled by the backend (`[]`/`null`) for a project that
+   * predates Slice 5 or has never been touched via the takes routes - see
+   * `avg.core.takes.migrate_to_takes`. Absent here only if a caller builds
+   * a `ProjectDoc`-shaped object by hand rather than from a real response;
+   * every real one already carries these two fields. */
+  takes?: Take[];
+  current_take_id?: number | null;
 }
 
 export interface ProjectsResponse {
@@ -255,4 +281,63 @@ export function setProviderKey(provider: string, key: string): Promise<Record<st
 
 export function deleteProviderKey(provider: string): Promise<Record<string, boolean>> {
   return apiDelete<Record<string, boolean>>(`/api/keys/${encodeURIComponent(provider)}`);
+}
+
+// ---- takes (Slice 5, Task 4) ----
+// Mirrors `avg.api.routes_takes` - see that module's docstring for the full
+// contract (current vs. selected, the one-job-at-a-time guard, etc).
+
+export interface TakesResponse {
+  takes: Take[];
+  current_take_id: number | null;
+  /** The whole project's size on disk, in bytes - server-computed (see
+   * `routes_takes._folder_size_bytes`), never walked from the browser. */
+  disk_bytes: number;
+}
+
+/** `POST .../takes/preview` and the real `POST .../takes` share this body
+ * shape - `overrides` is `{settingId: value}` for any `scope="channel"`
+ * catalogue id, `reroll_from` names a phase key to re-run with nothing
+ * changed. At least one of the two must be set (the route 400s otherwise). */
+export interface TakeRequestBody {
+  overrides?: Record<string, unknown>;
+  reroll_from?: string | null;
+}
+
+export interface TakePreviewResult {
+  rerun: string[];
+  keeps: string[];
+  /** `null` means "no history to estimate from" - never render a fabricated
+   * number (or the word "unknown") in its place; see `NewTakePanel.tsx`. */
+  estimate_seconds: number | null;
+  unknown: string[];
+}
+
+export function getTakes(projectId: string): Promise<TakesResponse> {
+  return apiGet<TakesResponse>(`/api/projects/${encodeURIComponent(projectId)}/takes`);
+}
+
+export function previewTake(projectId: string, body: TakeRequestBody): Promise<TakePreviewResult> {
+  return apiPost<TakePreviewResult>(`/api/projects/${encodeURIComponent(projectId)}/takes/preview`, body);
+}
+
+export function createTake(projectId: string, body: TakeRequestBody): Promise<Take> {
+  return apiPost<Take>(`/api/projects/${encodeURIComponent(projectId)}/takes`, body);
+}
+
+export function deleteTake(projectId: string, takeId: number): Promise<{ deleted: boolean; current_take_id: number | null }> {
+  return apiDelete(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}`);
+}
+
+/** Pins `takeId` as the project's CURRENT take - distinct from merely
+ * selecting it to look at in Studio, which never calls this (see
+ * `avg.core.takes`'s module docstring for why conflating the two would be
+ * a bug). Nothing in this slice's UI calls this yet; it exists so a later
+ * "make current" action has a ready-made client function. */
+export function selectTake(projectId: string, takeId: number): Promise<{ current_take_id: number }> {
+  return apiPost(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/select`);
+}
+
+export function renameTake(projectId: string, takeId: number, label: string): Promise<Take> {
+  return apiPatch<Take>(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}`, { label });
 }

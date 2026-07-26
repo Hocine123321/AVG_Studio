@@ -64,6 +64,7 @@ import asyncio
 import threading
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -264,6 +265,19 @@ def _auto_label(new_id: int, changed_ids: list[str], reroll_from: str | None, pl
     return label
 
 
+def _folder_size_bytes(folder: Path) -> int:
+    """Total size, in bytes, of every regular file under `folder` (Task 4:
+    the Studio header's disk-usage figure). Walked server-side - the browser
+    has no filesystem access in this app's loopback-API architecture, and
+    takes are deliberately never auto-pruned (spec section 8), so this
+    number is the only way the user learns a project is worth trimming.
+    Missing folder (a project whose files were removed out-of-band) is not
+    an error - it simply has nothing to count."""
+    if not folder.is_dir():
+        return 0
+    return sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+
+
 def _sync_current_take(project: ProjectDoc, take: Take) -> None:
     """Project a take onto `ProjectDoc`'s own canonical fields.
 
@@ -301,7 +315,16 @@ async def list_takes(project_id: str, request: Request) -> dict:
     # rather than living only in this process's memory until some later
     # mutation happens to save it.
     _migrate_and_persist(project)
-    return {"takes": list(project.takes), "current_take_id": project.current_take_id}
+    return {
+        "takes": list(project.takes),
+        "current_take_id": project.current_take_id,
+        # Task 4: the Studio header's disk-usage figure - see
+        # `_folder_size_bytes`. The WHOLE project folder (every take's own
+        # subfolder plus any legacy top-level artifacts), not one take's
+        # slice of it - "how much is this project costing me on disk" is a
+        # project-level question, matching the spec's own header placement.
+        "disk_bytes": _folder_size_bytes(Path(project.folder)),
+    }
 
 
 @router.post("/api/projects/{project_id}/takes/preview")
