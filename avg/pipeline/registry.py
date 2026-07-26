@@ -14,9 +14,10 @@ Anything needing "what order do phases run in" imports `REGISTRY` (or the
 
 Every phase started as a `_StubPhase` in Task 1 of this slice (always ready,
 does nothing). Task 3 replaced ids 0-2 (`BriefPhase`/`ScriptPhase`/
-`Director1Phase`) with real implementations; Tasks 4-5 replace the
-remaining `_StubPhase` entries the same way - one real class per id, of the
-same `avg.pipeline.phase.Phase` protocol shape, id/key/name unchanged.
+`Director1Phase`) with real implementations; Task 4 replaced ids 3-4
+(`VisualsPhase`/`VoicePhase`) the same way; Task 5 replaces the remaining
+`_StubPhase` entries identically - one real class per id, of the same
+`avg.pipeline.phase.Phase` protocol shape, id/key/name unchanged.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ from avg.pipeline.phase import Phase, PhaseContext
 from avg.pipeline.phases.brief import BriefPhase
 from avg.pipeline.phases.director1 import Director1Phase
 from avg.pipeline.phases.script import ScriptPhase
+from avg.pipeline.phases.visuals import VisualsPhase
+from avg.pipeline.phases.voice import VoicePhase
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +63,11 @@ class _StubPhase:
 # Ids 0-2 (Task 3 of this slice) are real implementations
 # (`avg.pipeline.phases.brief/script/director1`) - see those modules for the
 # two-pass script's verbatim-partition invariant and Director I's structure
-# planning. Ids 3-7 are still `_StubPhase`s: Tasks 4-5 replace them the same
-# way, one module per phase, nothing here needing to change but this tuple.
+# planning. Ids 3-4 (Task 4) are `avg.pipeline.phases.visuals/voice` - one
+# image per scene via a RAM-capped worker pool, and narration synthesis with
+# real `[pause]` silence, respectively. Ids 5-7 are still `_StubPhase`s: Task
+# 5 replaces them the same way, one module per phase, nothing here needing
+# to change but this tuple.
 #
 # Phase 7 ("render") is deliberately still a stub here: the real render
 # phase (Task 5/6's territory per the task brief) delegates to the already-
@@ -71,8 +77,8 @@ REGISTRY: tuple[Phase, ...] = (
     BriefPhase(),
     ScriptPhase(),
     Director1Phase(),
-    _StubPhase(3, "visuals", "Visuals"),
-    _StubPhase(4, "voice", "Voice & Audio"),
+    VisualsPhase(),
+    VoicePhase(),
     _StubPhase(5, "director2", "Director II / AI Graphics"),
     _StubPhase(6, "captions", "Captions & Takeover Text"),
     _StubPhase(7, "render", "Render"),

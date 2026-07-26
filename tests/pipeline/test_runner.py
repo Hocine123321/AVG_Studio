@@ -106,10 +106,13 @@ def test_full_sequence_runs_every_phase_in_order():
 def _fake_text_generator():
     """A minimal stand-in for `avg.providers.text.router.generate` covering
     the real Ids 0-2 phases' two AI calls each need (brief; script's two
-    passes; director1) - ids 3-7 are still `_StubPhase`s (Tasks 4-5's
-    territory) and never call this. Tracks its own call count for the
-    "script" phase since Pass 1 and Pass 2 share that phase key but need
-    different-shaped replies (see `avg.pipeline.phases.script`)."""
+    passes; director1) - ids 3-4 (visuals/voice) call image/voice providers
+    instead (see `test_default_registry_runs_all_eight_stub_phases_
+    successfully`'s own fakes for those), and ids 5-7 are still
+    `_StubPhase`s (Task 5's territory) - neither ever calls this. Tracks its
+    own call count for the "script" phase since Pass 1 and Pass 2 share that
+    phase key but need different-shaped replies (see
+    `avg.pipeline.phases.script`)."""
     narration = "This tiny invention quietly changed how ancient sailors found their way. [pause] Nobody expected a bronze box of gears to predict the sky decades in advance."
     scene_blocks = (
         "@@SCENE@@\n"
@@ -138,6 +141,23 @@ def _fake_text_generator():
     return _fake
 
 
+class _FakeImageProviderForSmokeTest:
+    name = "fake"
+
+    def generate(self, prompt: str, *, aspect_ratio: str, model: str) -> bytes:
+        return b"fake-image-bytes"
+
+
+class _FakeVoiceProviderForSmokeTest:
+    name = "fake"
+
+    def synthesize(self, text: str, *, voice_id: str, model: str) -> bytes:
+        return b"fake-audio-bytes"
+
+    def list_voices(self) -> list[dict[str, str]]:
+        return []
+
+
 def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, tmp_path):
     """Smoke test against the real production registry, not the fake.
 
@@ -146,12 +166,38 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     imports that as its own `generate_text` name, so it's patched per
     module rather than on `avg.providers.text.router` itself (patching the
     latter would not reach an already-bound `from ... import generate as
-    generate_text`). Ids 3-7 are still `_StubPhase`s and untouched by this.
+    generate_text`). Ids 3-4 (visuals/voice, Task 4 of this slice) are also
+    real now: their own provider construction (`_build_provider`) is patched
+    the same way, and voice's two `pydub`-touching calls
+    (`remove_silences_core`, `_assemble_with_gaps` - see
+    `avg.pipeline.phases.voice`'s module docstring on why `pydub` itself
+    can't run in this test venv) are replaced with no-op fakes. Ids 5-7 are
+    still `_StubPhase`s and untouched by any of this.
     """
     fake = _fake_text_generator()
     monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", fake)
     monkeypatch.setattr("avg.pipeline.phases.script.generate_text", fake)
     monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", fake)
+
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda name, transport: _FakeImageProviderForSmokeTest(),
+    )
+    monkeypatch.setattr(
+        "avg.pipeline.phases.voice._build_provider",
+        lambda name, transport: _FakeVoiceProviderForSmokeTest(),
+    )
+
+    def fake_remove_silences_core(inp, out, thresh, min_sil, keep, beat_map, timeline, scene_map, pause_map="", pause_target_ms=0):
+        Path(out).write_bytes(Path(inp).read_bytes())
+
+    monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove_silences_core)
+
+    def fake_assemble(segment_paths, gap_ms, out_path):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"assembled-audio")
+
+    monkeypatch.setattr("avg.pipeline.phases.voice._assemble_with_gaps", fake_assemble)
 
     project = _project(folder=tmp_path)
     for sub in ("script", "images", "audio", "render"):
