@@ -56,6 +56,7 @@ class SettingSpec(BaseModel):
     type: SettingType
     default: Any
     scope: Scope
+    invalidates: str | None
     choices: list[str] | None = None
 
 
@@ -78,6 +79,7 @@ SETTINGS: list[SettingSpec] = [
         type="path",
         default="python",
         scope="app",
+        invalidates=None,
     ),
     # --- runtime / UI preferences (app scope) ---
     SettingSpec(
@@ -92,6 +94,7 @@ SETTINGS: list[SettingSpec] = [
             "soft_dark", "monochrome_dark", "monochrome_light", "dark", "light",
             "high_contrast_light", "neon", "terminal_hacker", "editorial_cream",
         ],
+        invalidates=None,
     ),
     SettingSpec(
         id="performance_mode",
@@ -102,6 +105,7 @@ SETTINGS: list[SettingSpec] = [
         default="lightweight",
         scope="app",
         choices=["lightweight", "balanced", "max"],
+        invalidates=None,
     ),
     SettingSpec(
         id="run_as_admin",
@@ -111,6 +115,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=False,
         scope="app",
+        invalidates=None,
     ),
     # --- video format and length (channel scope: a production choice) ---
     SettingSpec(
@@ -122,6 +127,7 @@ SETTINGS: list[SettingSpec] = [
         default="shortform",
         scope="channel",
         choices=["shortform", "longform"],
+        invalidates="brief",
     ),
     SettingSpec(
         id="length_preset",
@@ -132,6 +138,7 @@ SETTINGS: list[SettingSpec] = [
         default="60s",
         scope="channel",
         choices=["30s", "60s", "90s", "2m", "4m", "8m"],
+        invalidates="script",
     ),
     SettingSpec(
         id="aspect_ratio",
@@ -142,6 +149,7 @@ SETTINGS: list[SettingSpec] = [
         default="9:16",
         scope="channel",
         choices=["9:16", "16:9", "1:1"],
+        invalidates="visuals",
     ),
     SettingSpec(
         id="fps",
@@ -151,6 +159,7 @@ SETTINGS: list[SettingSpec] = [
         type="int",
         default=30,
         scope="channel",
+        invalidates="render",
     ),
     SettingSpec(
         id="ken_burns",
@@ -160,6 +169,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=True,
         scope="channel",
+        invalidates="director2",
     ),
     # --- captions ---
     SettingSpec(
@@ -170,6 +180,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=True,
         scope="channel",
+        invalidates="captions",
     ),
     SettingSpec(
         id="captions_provider",
@@ -180,6 +191,7 @@ SETTINGS: list[SettingSpec] = [
         default="assemblyai",
         scope="channel",
         choices=["assemblyai", "whisper"],
+        invalidates="captions",
     ),
     SettingSpec(
         id="captions_position",
@@ -190,6 +202,7 @@ SETTINGS: list[SettingSpec] = [
         default="bottom",
         scope="channel",
         choices=["top", "center", "bottom"],
+        invalidates="captions",
     ),
     SettingSpec(
         id="captions_animation_style",
@@ -200,6 +213,7 @@ SETTINGS: list[SettingSpec] = [
         default="fade",
         scope="channel",
         choices=["none", "fade", "pop"],
+        invalidates="captions",
     ),
     SettingSpec(
         id="captions_font_size",
@@ -209,6 +223,7 @@ SETTINGS: list[SettingSpec] = [
         type="int",
         default=0,
         scope="channel",
+        invalidates="captions",
     ),
     SettingSpec(
         id="font_family",
@@ -221,6 +236,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="",
         scope="channel",
+        invalidates="captions",
     ),
     # --- voice provider and options ---
     SettingSpec(
@@ -232,6 +248,7 @@ SETTINGS: list[SettingSpec] = [
         default="elevenlabs",
         scope="channel",
         choices=["elevenlabs", "edge"],
+        invalidates="voice",
     ),
     SettingSpec(
         id="voice_id",
@@ -241,6 +258,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="",
         scope="channel",
+        invalidates="voice",
     ),
     SettingSpec(
         id="voice_model_id",
@@ -250,6 +268,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="",
         scope="channel",
+        invalidates="voice",
     ),
     SettingSpec(
         id="voice_stability",
@@ -259,6 +278,7 @@ SETTINGS: list[SettingSpec] = [
         type="float",
         default=0.5,
         scope="channel",
+        invalidates="voice",
     ),
     SettingSpec(
         id="voice_speed",
@@ -268,6 +288,7 @@ SETTINGS: list[SettingSpec] = [
         type="float",
         default=1.0,
         scope="channel",
+        invalidates="voice",
     ),
     SettingSpec(
         id="dynamic_pauses_enabled",
@@ -277,6 +298,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=True,
         scope="channel",
+        invalidates="script",
     ),
     # --- image provider and model ---
     SettingSpec(
@@ -288,6 +310,7 @@ SETTINGS: list[SettingSpec] = [
         default="pollinations",
         scope="channel",
         choices=["openai", "gemini", "pollinations", "stablehorde", "huggingface"],
+        invalidates="visuals",
     ),
     SettingSpec(
         id="image_model",
@@ -297,6 +320,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="flux",
         scope="channel",
+        invalidates="visuals",
     ),
     SettingSpec(
         id="image_quality",
@@ -307,6 +331,7 @@ SETTINGS: list[SettingSpec] = [
         default="medium",
         scope="channel",
         choices=["low", "medium", "high"],
+        invalidates="visuals",
     ),
     # --- render engine and quality ---
     SettingSpec(
@@ -318,6 +343,7 @@ SETTINGS: list[SettingSpec] = [
         default="auto",
         scope="channel",
         choices=["auto", "ffmpeg", "moviepy"],
+        invalidates="render",
     ),
     SettingSpec(
         id="render_codec",
@@ -328,6 +354,7 @@ SETTINGS: list[SettingSpec] = [
         default="libx264",
         scope="channel",
         choices=["libx264", "libx265"],
+        invalidates="render",
     ),
     # --- creative fields ---
     SettingSpec(
@@ -338,6 +365,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="documentary",
         scope="channel",
+        invalidates="brief",
     ),
     SettingSpec(
         id="visual_tone",
@@ -351,6 +379,7 @@ SETTINGS: list[SettingSpec] = [
             "documentary_cinematic", "news_broadcast", "dark_cinematic", "epic_cinematic",
             "realistic", "vibrant", "minimal", "wireframe", "custom",
         ],
+        invalidates="director1",
     ),
     SettingSpec(
         id="style_lock",
@@ -360,6 +389,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="",
         scope="channel",
+        invalidates="director1",
     ),
     SettingSpec(
         id="auto_style_lock",
@@ -369,6 +399,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=False,
         scope="channel",
+        invalidates="director1",
     ),
     SettingSpec(
         id="brand_preset",
@@ -382,25 +413,34 @@ SETTINGS: list[SettingSpec] = [
             "wireframe_ink", "modern_dark", "tiktok_viral", "neon_cyber", "warm_organic",
             "clean_light", "luxury_gold", "vsauce_curiosity", "academic_editorial", "tactical_terminal",
         ],
+        invalidates="director2",
     ),
     # --- provider API keys (app scope; value never lives here — see the
     # type="secret" note in this module's docstring) ---
     SettingSpec(id="openai", group="keys", label="OpenAI API key",
-                help="Used for OpenAI image generation.", type="secret", default=None, scope="app"),
+                help="Used for OpenAI image generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="gemini", group="keys", label="Gemini API key",
-                help="Used for Gemini text and image generation.", type="secret", default=None, scope="app"),
+                help="Used for Gemini text and image generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="elevenlabs", group="keys", label="ElevenLabs API key",
-                help="Used for ElevenLabs voice generation.", type="secret", default=None, scope="app"),
+                help="Used for ElevenLabs voice generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="pollinations", group="keys", label="Pollinations API key",
-                help="Used for Pollinations image generation.", type="secret", default=None, scope="app"),
+                help="Used for Pollinations image generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="stablehorde", group="keys", label="StableHorde API key",
-                help="Used for StableHorde image generation.", type="secret", default=None, scope="app"),
+                help="Used for StableHorde image generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="huggingface", group="keys", label="HuggingFace API key",
-                help="Used for HuggingFace text and image generation.", type="secret", default=None, scope="app"),
+                help="Used for HuggingFace text and image generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="groq", group="keys", label="Groq API key",
-                help="Used for Groq text generation.", type="secret", default=None, scope="app"),
+                help="Used for Groq text generation.", type="secret", default=None, scope="app",
+                invalidates=None),
     SettingSpec(id="assemblyai", group="keys", label="AssemblyAI API key",
-                help="Used for AssemblyAI caption transcription.", type="secret", default=None, scope="app"),
+                help="Used for AssemblyAI caption transcription.", type="secret", default=None, scope="app",
+                invalidates=None),
 ]
 
 BY_ID: dict[str, SettingSpec] = {s.id: s for s in SETTINGS}

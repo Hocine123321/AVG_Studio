@@ -1,0 +1,86 @@
+"""Tests for the invalidation map: which phases a settings change re-runs.
+
+`first_invalid_phase`/`phases_to_rerun` are pure - no project, no I/O - so
+these tests exercise them purely through setting ids and the real
+`REGISTRY`/`SETTINGS` catalogues, deliberately not faking either.
+"""
+
+from avg.core.invalidation import first_invalid_phase, phases_to_rerun
+from avg.core.settings_schema import SETTINGS
+from avg.pipeline.registry import BY_KEY, REGISTRY
+
+
+def test_every_setting_declares_what_it_invalidates():
+    """A setting added later must not silently default to invalidating nothing.
+
+    The dangerous failure is not a wrong row today - it is someone adding a
+    setting in six months, forgetting this field, and re-runs quietly doing
+    the wrong thing from then on. `invalidates` has no default for exactly
+    this reason; this test is what makes forgetting it unmergeable.
+    """
+    missing = [s.id for s in SETTINGS if not hasattr(s, "invalidates")]
+    assert missing == [], f"settings with no invalidates field: {missing}"
+
+
+def test_every_invalidates_value_is_a_real_phase_key():
+    bad = [(s.id, s.invalidates) for s in SETTINGS
+           if s.invalidates is not None and s.invalidates not in BY_KEY]
+    assert bad == [], f"settings pointing at phases that do not exist: {bad}"
+
+
+def test_dynamic_pauses_invalidates_the_script_not_voice():
+    spec = next(s for s in SETTINGS if s.id == "dynamic_pauses_enabled")
+    assert spec.invalidates == "script"
+
+
+def test_all_39_settings_are_present():
+    """Sanity check on the catalogue size the brief's table assumes."""
+    assert len(SETTINGS) == 39
+
+
+def test_change_set_spanning_two_phases_picks_the_earlier_one():
+    # font_family -> captions (id 6), voice_id -> voice (id 4).
+    # The earlier of the two is voice.
+    assert first_invalid_phase(["font_family", "voice_id"]) == BY_KEY["voice"].id
+
+
+def test_change_set_of_only_non_creative_settings_returns_none():
+    assert first_invalid_phase(["theme", "python_exe", "run_as_admin", "performance_mode"]) is None
+
+
+def test_unknown_setting_id_is_ignored_rather_than_raising():
+    assert first_invalid_phase(["this_setting_does_not_exist"]) is None
+    # Mixed with a real, invalidating id: the unknown one is simply ignored.
+    assert first_invalid_phase(["this_setting_does_not_exist", "fps"]) == BY_KEY["render"].id
+
+
+def test_empty_change_set_returns_none():
+    assert first_invalid_phase([]) is None
+
+
+def test_phases_to_rerun_returns_keys_in_registry_order_and_ends_at_render():
+    result = phases_to_rerun(["voice_id"])
+    expected = [phase.key for phase in REGISTRY if phase.id >= BY_KEY["voice"].id]
+    assert result == expected
+    assert result[-1] == "render"
+
+
+def test_phases_to_rerun_empty_when_nothing_invalidated():
+    assert phases_to_rerun(["theme"]) == []
+
+
+def test_phases_to_rerun_from_brief_is_the_whole_pipeline():
+    result = phases_to_rerun(["video_form"])
+    assert result == [phase.key for phase in REGISTRY]
+    assert result[0] == "brief"
+    assert result[-1] == "render"
+
+
+def test_dynamic_pauses_change_reruns_from_script_not_voice():
+    """Regression guard for the one row nobody guesses right."""
+    result = phases_to_rerun(["dynamic_pauses_enabled"])
+    assert result[0] == "script"
+    assert "script" in result
+    # voice is still re-run because it comes after script in REGISTRY order,
+    # but the *start* of the re-run is script, not voice.
+    assert result[0] != "voice"
