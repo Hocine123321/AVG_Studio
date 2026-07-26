@@ -218,6 +218,43 @@ regenerate over it.
 
 ---
 
+### Task 3.5: Persist the project document
+
+**Added mid-slice, 2026-07-26, after Task 3 exposed the gap.** `project.json`
+is written exactly once, by `avg/pipeline/create.py` at project creation, and
+never again. Phase completions, take creation, renames, deletions and
+`current_take_id` all live only in the API process's memory.
+
+Before takes this was survivable: the pipeline wrote its artifacts to disk and
+`avg/config/legacy_import.py` re-derived phase state by inspecting the folder on
+the next launch. **A take list cannot be re-derived that way** - which take
+changed which setting, what it was labelled, which one is current, and how long
+each phase took are facts about history, not about files on disk. Restart the
+app and every take is gone.
+
+Building Task 4's UI over data that evaporates would be building on sand.
+
+**Files:**
+- Modify: `avg/core/models.py` or `avg/pipeline/create.py` - one `save_project(doc)` writing `<folder>/project.json` atomically
+- Modify: `avg/pipeline/runner.py` - persist after each phase record changes
+- Modify: `avg/api/routes_takes.py` - persist after every take mutation
+- Modify: `avg/config/legacy_import.py` - read `takes` and `current_take_id` when present
+- Test: `tests/core/test_persistence.py`
+
+**Interfaces:**
+- Produces: `save_project(project: ProjectDoc) -> None` - atomic write (temp file then replace), the same discipline `avg/config/settings.py` already uses
+
+**Rules:**
+- **Write-through, not write-at-end.** A crash or a kill mid-pipeline must not lose the phases that already finished - that is precisely when the record matters most.
+- **Atomic.** A half-written `project.json` would make the project unreadable and there is no backup. Temp file plus replace, never a truncating write in place.
+- **The importer must round-trip.** A project written with takes reads back with the same takes, same labels, same `current_take_id`. A legacy project without a `takes` key still imports exactly as it does today - all ten real projects must keep working.
+- Persist on: phase status change, take create/delete/rename/select, and `current_take_id` change.
+
+- [ ] Implement, then test: a phase completing writes the file; killing mid-run keeps completed phases; a take survives a simulated restart (write, re-read, compare); a legacy project with no `takes` key still imports; an interrupted write leaves the previous file intact.
+- [ ] Run the suite once, commit.
+
+---
+
 ### Task 4: The take strip and new-take panel
 
 **Files:**
