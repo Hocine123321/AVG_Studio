@@ -20,7 +20,7 @@ import pytest
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled
+from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, ProgressEvent, RenderFinished
 from avg.core.models import ProjectDoc
 from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
@@ -220,6 +220,22 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     # Never rely on this machine merely happening to have no AssemblyAI key
     # configured - see docstring above.
     monkeypatch.setattr("avg.pipeline.phases.captions.has_key", lambda provider: False)
+
+    # Phase 7 is a real phase now, and a real MediaEngine spawns a child
+    # process that runs moviepy/ffmpeg for minutes. This is a registry smoke
+    # test, not a render test - stand in a fake engine that yields the same
+    # event sequence the real one does on success.
+    class _FakeEngine:
+        def render(self, request, project_id):
+            yield ProgressEvent(project_id=project_id, percent=100, message="rendered")
+            output = request.project_folder / "master_output.mp4"
+            output.write_bytes(b"video")
+            yield RenderFinished(project_id=project_id, output=output, size_bytes=5)
+
+        def cancel(self) -> None:
+            pass
+
+    monkeypatch.setattr("avg.pipeline.phases.render.MediaEngine", _FakeEngine)
 
     project = _project(folder=tmp_path)
     for sub in ("script", "images", "audio", "render"):

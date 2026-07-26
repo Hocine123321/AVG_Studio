@@ -33,6 +33,7 @@ from avg.pipeline.phases.director2 import Director2Phase
 from avg.pipeline.phases.script import ScriptPhase
 from avg.pipeline.phases.visuals import VisualsPhase
 from avg.pipeline.phases.voice import VoicePhase
+from avg.pipeline.phases.render import RenderPhase
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +71,14 @@ class _StubPhase:
 # real `[pause]` silence, respectively. Ids 5-6 (Task 5) are
 # `avg.pipeline.phases.director2/captions` - the motion/grade + takeover-card
 # plan, and transcription-to-`.ass` (AssemblyAI or a derived estimate),
-# respectively. Id 7 is still a `_StubPhase`: a later task replaces it the
-# same way, nothing here needing to change but this tuple.
+# respectively. Id 7 is `avg.pipeline.phases.render` - an adapter onto the
+# already-built `avg.media.engine.MediaEngine.render()`, which runs the
+# vendored render engine in a child process. It deliberately owns no
+# rendering logic of its own.
 #
-# Phase 7 ("render") is deliberately still a stub here: the real render
-# phase (a later task's territory per the task brief) delegates to the
-# already-built `avg.media.engine.MediaEngine.render()` rather than
-# reimplementing rendering - this task only reserves its place in the order.
+# Every phase began as a `_StubPhase` and was swapped for a real class of the
+# same id and key, nothing changing here but this tuple. `_StubPhase` is kept
+# because the runner's tests still build stub sequences with it.
 REGISTRY: tuple[Phase, ...] = (
     BriefPhase(),
     ScriptPhase(),
@@ -85,7 +87,7 @@ REGISTRY: tuple[Phase, ...] = (
     VoicePhase(),
     Director2Phase(),
     CaptionsPhase(),
-    _StubPhase(7, "render", "Render"),
+    RenderPhase(),
 )
 
 BY_KEY: dict[str, Phase] = {phase.key: phase for phase in REGISTRY}
