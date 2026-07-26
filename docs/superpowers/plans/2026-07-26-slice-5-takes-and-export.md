@@ -143,8 +143,8 @@ def test_dynamic_pauses_invalidates_the_script_not_voice():
 ```
 
 - [ ] Add `invalidates: str | None` to `SettingSpec` **with no default**, so a new entry cannot omit it, and fill in all 39 rows from the table above.
-- [ ] Implement `first_invalid_phase`, `phases_to_rerun`, `estimate_seconds` in `avg/core/invalidation.py`. Order comes from `REGISTRY` — never hardcode a phase list.
-- [ ] Add tests: a change set spanning two phases picks the **earlier** one; a change set of only non-creative settings returns `None`; `estimate_seconds` sums real history and reports unknowns; with no history at all it returns `(None, [...])`.
+- [ ] Implement `first_invalid_phase` and `phases_to_rerun` in `avg/core/invalidation.py`. Order comes from `REGISTRY` — never hardcode a phase list. This module must not import `ProjectDoc`; it maps setting ids to phases and nothing more.
+- [ ] Add tests: a change set spanning two phases picks the **earlier** one; a change set of only non-creative settings returns `None`; an unknown setting id is ignored rather than raising; `phases_to_rerun` returns keys in `REGISTRY` order and ends at `render`.
 - [ ] Run the suite once, commit.
 
 ---
