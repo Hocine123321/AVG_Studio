@@ -55,6 +55,7 @@ from avg.pipeline.runner import run as run_pipeline
 
 from .deps import require_token
 from .routes_settings import router as settings_router
+from .routes_takes import router as takes_router
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
 
@@ -625,6 +626,10 @@ def create_app(
     # is match order, and the catch-all mount must never get first crack at
     # an /api/ path.
     app.include_router(settings_router)
+
+    # The takes surface (Slice 5, Task 3) - same reasoning as settings_router
+    # above: a separate router kept thin, included before the static mount.
+    app.include_router(takes_router)
 
     # Serves the built UI. Mounted last and at "/" deliberately: FastAPI
     # matches routes in registration order, so the exact-path routes above
