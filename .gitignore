@@ -39,3 +39,8 @@ installer/*.exe
 
 # Bundled ffmpeg (128 MB, fetched by tools/fetch_ffmpeg.py)
 vendor/
+
+# Release output, produced by "Build Installer.bat" - always rebuildable from
+# source, never committed. "AVG APP" is a mirror of dist/AVG plus a launcher.
+AVG APP/
+dist/
