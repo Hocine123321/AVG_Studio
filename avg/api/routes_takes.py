@@ -13,6 +13,10 @@ the background-job machinery already living in `avg.api.app`:
     DELETE /api/projects/{id}/takes/{tid}
     POST   /api/projects/{id}/takes/{tid}/select
     PATCH  /api/projects/{id}/takes/{tid}       -> {"label": ...}, rename only
+    POST   /api/projects/{id}/takes/{tid}/export -> {"folder": "<path>"}
+                                                     assembles a CapCut-ready
+                                                     folder from THAT take
+                                                     (see `avg.export.capcut`)
 
 Routes stay thin on purpose (see `avg.api.routes_settings`'s own docstring
 for the same rule): validate, delegate to `avg.core.takes` / `avg.core.
@@ -76,6 +80,7 @@ from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
+from avg.export.capcut import export_take
 from avg.pipeline.create import save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.registry import BY_KEY, REGISTRY
@@ -525,3 +530,23 @@ async def rename_take_route(project_id: str, take_id: int, body: TakeRename, req
     take.label = label
     save_project(project)
     return take
+
+
+@router.post("/api/projects/{project_id}/takes/{take_id}/export")
+async def export_take_route(project_id: str, take_id: int, request: Request) -> dict:
+    """Export the SELECTED take (`take_id`), not whatever the project
+    currently treats as canonical - "you export what you are looking at"
+    (see `avg.export.capcut` module docstring). No pipeline runs and
+    nothing is generated, so this doesn't need the one-job-at-a-time guard
+    `create_take` enforces."""
+    project = _get_project(request.app.state, project_id)
+    _get_take(project, take_id)  # 404 before export_take's own (ValueError-based) checks
+
+    try:
+        folder = export_take(project, take_id)
+    except ValueError as exc:
+        # "no render yet" / "no images" - a business rule, not a missing
+        # resource (existence of the take itself is already confirmed above).
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return {"folder": str(folder)}
