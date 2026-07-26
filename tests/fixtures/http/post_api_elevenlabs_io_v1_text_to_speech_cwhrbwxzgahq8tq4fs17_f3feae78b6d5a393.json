@@ -1,0 +1,35 @@
+{
+  "request": {
+    "body": {
+      "model_id": "eleven_flash_v2_5",
+      "text": "invalid key check"
+    },
+    "body_hash": "32d7bf723ab483febdcec4d089d6fdd063f79dc702533356178e007e71c751a6",
+    "headers": {
+      "Accept": "audio/mpeg",
+      "Content-Type": "application/json",
+      "xi-api-key": "***REDACTED***"
+    },
+    "method": "POST",
+    "url": "https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17"
+  },
+  "response": {
+    "content_b64": "eyJkZXRhaWwiOnsidHlwZSI6ImF1dGhlbnRpY2F0aW9uX2Vycm9yIiwiY29kZSI6InVuYXV0aG9yaXplZCIsIm1lc3NhZ2UiOiJJbnZhbGlkIEFQSSBrZXkiLCJzdGF0dXMiOiJpbnZhbGlkX2FwaV9rZXkiLCJyZXF1ZXN0X2lkIjoiZDJkZDFmN2YyZWZiOTg0MjUwOTc2YzJhNDk2OTU4ZWYifX0=",
+    "headers": {
+      "access-control-allow-headers": "*",
+      "access-control-allow-methods": "POST, PATCH, OPTIONS, DELETE, GET, PUT",
+      "access-control-allow-origin": "*",
+      "access-control-max-age": "600",
+      "alt-svc": "h3=\":443\"; ma=2592000",
+      "content-type": "application/json",
+      "date": "Sat, 25 Jul 2026 23:33:53 GMT",
+      "server": "uvicorn",
+      "strict-transport-security": "max-age=1800;",
+      "vary": "Accept-Language, Accept-Encoding",
+      "via": "1.1 google",
+      "x-region": "europe-west4",
+      "x-trace-id": "d2dd1f7f2efb984250976c2a496958ef"
+    },
+    "status_code": 401
+  }
+}
