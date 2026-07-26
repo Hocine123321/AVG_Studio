@@ -207,6 +207,28 @@ def _slug_for(method: str, canonical_url: str, body_hash: str) -> str:
     body's hash - never from headers, never from the literal credential
     value - so the same logical request always resolves to the same file
     regardless of which machine (and which real/fake key) sent it.
+
+    KNOWN LIMITATION, hit independently by two tasks - read this before
+    recording anything:
+
+    Because credentials and headers are excluded by design, **two requests
+    that differ ONLY by which key they carry produce the same slug and
+    therefore the same file.** Recording a 401-with-a-bad-key over a 200
+    silently destroys the 200 - which is exactly how Task 5 lost a real,
+    paid-for ElevenLabs synthesis. When you need both outcomes for one
+    endpoint, **vary the request body** (e.g. "hi there" for the success
+    case, "auth probe" for the failure); different body, different hash,
+    different file.
+
+    The same property means a **polled** endpoint cannot be recorded as a
+    sequence: Stable Horde's check URL is identical on every poll, so only
+    the last response survives (Task 4). Multi-poll behaviour is tested
+    with a local mock instead, deliberately.
+
+    Both limits are consequences of the cross-machine matching guarantee
+    above, not defects to be fixed here - changing the key to include
+    headers would break fixture portability, which is the more valuable
+    property.
     """
     parts = urlsplit(canonical_url)
     readable = re.sub(r"[^a-zA-Z0-9]+", "_", f"{parts.netloc}{parts.path}").strip("_").lower()
