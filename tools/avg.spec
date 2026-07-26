@@ -20,6 +20,14 @@ Bundles three things beyond the pure-Python package:
 - `vendor/ffmpeg` as data, landing at `<frozen root>/vendor/ffmpeg` -
   matches what `avg.media.ffmpeg_locate.bundled_ffmpeg_dir()` looks for
   (`Path(sys._MEIPASS) / "vendor" / "ffmpeg"`).
+- `avg/assets` (the bundled `personality.txt` / `dynamic_options.txt`
+  prompt-building copy - see `avg.pipeline.personality`) as data, landing
+  at `<frozen root>/avg/assets` - PyInstaller's `Analysis` only follows
+  Python imports, so a non-`.py` file living inside a package directory is
+  NOT picked up automatically the way `.py` modules are; it must be listed
+  here explicitly, same reasoning as `web/dist` and `vendor/ffmpeg` above.
+  Matches what `avg.pipeline.personality.assets_dir()` looks for
+  (`Path(sys._MEIPASS) / "avg" / "assets"`).
 
 Run from the repo root with the build venv:
     python -m PyInstaller tools/avg.spec
@@ -40,6 +48,7 @@ REPO_ROOT = Path(SPECPATH).resolve().parent  # tools/ -> repo root
 ENTRY = REPO_ROOT / "avg" / "shell.py"
 WEB_DIST = REPO_ROOT / "web" / "dist"
 VENDOR_FFMPEG = REPO_ROOT / "vendor" / "ffmpeg"
+AVG_ASSETS = REPO_ROOT / "avg" / "assets"
 
 if not WEB_DIST.is_dir():
     raise SystemExit(
@@ -50,6 +59,10 @@ if not (VENDOR_FFMPEG / "ffmpeg.exe").is_file():
         f"{VENDOR_FFMPEG} is missing ffmpeg.exe - run "
         "`python tools/fetch_ffmpeg.py` before building the exe"
     )
+if not (AVG_ASSETS / "personality.txt").is_file():
+    raise SystemExit(
+        f"{AVG_ASSETS} is missing personality.txt - it should be checked into the repo"
+    )
 
 datas = []
 datas += copy_metadata("imageio")
@@ -59,6 +72,7 @@ datas += copy_metadata("numpy")
 datas += copy_metadata("Pillow")
 datas += [(str(WEB_DIST), "web/dist")]
 datas += [(str(VENDOR_FFMPEG), "vendor/ffmpeg")]
+datas += [(str(AVG_ASSETS), "avg/assets")]
 
 a = Analysis(
     [str(ENTRY)],
