@@ -406,6 +406,70 @@ No preamble, no commentary, no markdown, no code fences, no numbering.
 {narration}"""
 
 
+# ── Phase 2 (Director I): visual structure ──────────────────────────────
+
+def build_director1_prompt(
+    inputs: CreativeInputs,
+    scene_texts: list[str],
+    *,
+    min_images: int = 3,
+    max_images: int = 160,
+) -> str:
+    """Phase 2 (Director I)'s prompt: the finished, scene-segmented script is
+    FINAL - this decides the video's visual STRUCTURE around it (how many
+    distinct images the story needs, each scene's role/beat/visual-intent,
+    and which words deserve zoom emphasis). Ported from `Get-AiVideoMap`
+    (`D:\\AI_Video_Gen\\modules\\ai.ps1`), simplified: chapters/parts grouping
+    and per-scene filter assignment are a separate, later concern
+    (Director II owns filters; chapters are out of scope for this task) -
+    this is the non-chaptered, filter-free path only.
+
+    `scene_texts` is each scene's verbatim narration, in order (from
+    `avg.pipeline.phases.script`'s `scenes.json`) - the numbered list the
+    model classifies is built from these, never re-derived from raw
+    narration, so Director I always sees exactly the scenes the render will
+    actually use.
+    """
+    numbered = "\n".join(f'[{i + 1}] "{text}"' for i, text in enumerate(scene_texts))
+    current_count = len(scene_texts)
+
+    return f"""You are the STRUCTURE DIRECTOR for a short narrated video built from still images.
+The script below is FINAL. Your job is to decide its VISUAL STRUCTURE: how many
+distinct images the story needs, how each scene should feel, and what kind of image
+each scene wants.
+
+Personality: {inputs.content_shape}. Total length: ~{inputs.duration_seconds} seconds ({inputs.form_label}).
+The script has {current_count} scene(s). ONE image per scene is the default and almost
+always correct — the scene count reflects the content's own natural pacing, so scenes
+are intentionally uneven in length.
+
+SCRIPT (numbered narration lines):
+{numbered}
+
+Decide:
+- image_count: how many distinct images tell THIS story. KEEP THIS EQUAL to {current_count}
+  (one image per scene) unless the script is CLEARLY mis-sized for its length — only then
+  adjust. Must be between {min_images} and {max_images}. Do NOT change it for stylistic
+  preference; a changed count triggers a full script rewrite, so only diverge from
+  {current_count} when the script is genuinely broken.
+- scenes: one entry per EXISTING script scene (exactly {current_count}, indexed 1..{current_count}), each with:
+    - scene: the scene number
+    - role: hook | tension | reveal | proof | example | pause | hit | cta
+    - beat: none | HIT | PAUSE | ZOOM | SLOWDOWN  (HIT = hard punch; PAUSE = held breath;
+      ZOOM = one key word deserves zoom emphasis; SLOWDOWN = lower energy; none = normal)
+    - visual_intent: BACKGROUND | ASSET | POP
+        BACKGROUND = full-frame scene backdrop (most scenes)
+        ASSET = a floating graphic/icon/diagram composited over a clean background
+        POP = a bold full-frame impact graphic that cuts in hard
+- zoom_words: array of {{scene, word}} — for each ZOOM-beat scene, the single word to emphasize.
+
+Return ONLY a JSON object, no preamble, no markdown fences:
+{{"version":1,"image_count":<int>,
+ "scenes":[{{"scene":1,"role":"hook","beat":"HIT","visual_intent":"POP"}}],
+ "zoom_words":[{{"scene":<int>,"word":"<string>"}}],
+ "notes":"one line on your structural reasoning"}}"""
+
+
 # ── Phase 5 (Director II / AI Graphics): style bible ────────────────────
 
 def build_director_style_bible(

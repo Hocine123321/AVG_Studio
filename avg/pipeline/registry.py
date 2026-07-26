@@ -12,10 +12,11 @@ not the UI, not a test - may declare a second ordered list of phase keys.
 Anything needing "what order do phases run in" imports `REGISTRY` (or the
 `next_phase_id` helper below) rather than restating it.
 
-Every phase here is a stub for this task (Task 1 of Slice 4): always ready,
-does nothing. Tasks 3-5 replace each `_StubPhase` entry with a real
-implementation of the same `avg.pipeline.phase.Phase` protocol - the id/key/
-name triples themselves are not expected to change.
+Every phase started as a `_StubPhase` in Task 1 of this slice (always ready,
+does nothing). Task 3 replaced ids 0-2 (`BriefPhase`/`ScriptPhase`/
+`Director1Phase`) with real implementations; Tasks 4-5 replace the
+remaining `_StubPhase` entries the same way - one real class per id, of the
+same `avg.pipeline.phase.Phase` protocol shape, id/key/name unchanged.
 """
 
 from __future__ import annotations
@@ -23,7 +24,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from avg.core.models import ProjectDoc
-from avg.pipeline.phase import PhaseContext
+from avg.pipeline.phase import Phase, PhaseContext
+from avg.pipeline.phases.brief import BriefPhase
+from avg.pipeline.phases.director1 import Director1Phase
+from avg.pipeline.phases.script import ScriptPhase
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +36,7 @@ class _StubPhase:
 
     Always reports its inputs as ready (there is nothing real to check
     yet) and does nothing on `run` - the runner alone is responsible for
-    turning that into a recorded 'done' `PhaseRecord`. Task 3-5 authors:
+    turning that into a recorded 'done' `PhaseRecord`. Task 4-5 authors:
     replace the entry in `REGISTRY` below with a real class of the same
     shape; nothing outside this module needs to change.
     """
@@ -53,14 +57,20 @@ class _StubPhase:
 # slice's plan doc) - Brief, Script, Director I, Visuals, Voice & Audio,
 # Director II / AI Graphics, Captions & Takeover Text, Render.
 #
+# Ids 0-2 (Task 3 of this slice) are real implementations
+# (`avg.pipeline.phases.brief/script/director1`) - see those modules for the
+# two-pass script's verbatim-partition invariant and Director I's structure
+# planning. Ids 3-7 are still `_StubPhase`s: Tasks 4-5 replace them the same
+# way, one module per phase, nothing here needing to change but this tuple.
+#
 # Phase 7 ("render") is deliberately still a stub here: the real render
 # phase (Task 5/6's territory per the task brief) delegates to the already-
 # built `avg.media.engine.MediaEngine.render()` rather than reimplementing
 # rendering - this task only reserves its place in the order.
-REGISTRY: tuple[_StubPhase, ...] = (
-    _StubPhase(0, "brief", "Brief"),
-    _StubPhase(1, "script", "Script"),
-    _StubPhase(2, "director1", "Director I"),
+REGISTRY: tuple[Phase, ...] = (
+    BriefPhase(),
+    ScriptPhase(),
+    Director1Phase(),
     _StubPhase(3, "visuals", "Visuals"),
     _StubPhase(4, "voice", "Voice & Audio"),
     _StubPhase(5, "director2", "Director II / AI Graphics"),
@@ -68,7 +78,7 @@ REGISTRY: tuple[_StubPhase, ...] = (
     _StubPhase(7, "render", "Render"),
 )
 
-BY_KEY: dict[str, _StubPhase] = {phase.key: phase for phase in REGISTRY}
+BY_KEY: dict[str, Phase] = {phase.key: phase for phase in REGISTRY}
 
 
 def next_phase_id(project: ProjectDoc) -> int:

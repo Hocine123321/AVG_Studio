@@ -1,0 +1,147 @@
+"""Phase 1: the two-pass script.
+
+Split into two model calls because one call cannot reliably both write good
+prose AND segment it (the legacy app's B2.19.0 change,
+`D:\\AI_Video_Gen\\modules\\ai.ps1`'s `Invoke-NarrationDraft` +
+`Invoke-SceneSegmentation`):
+
+  - Pass 1 (`build_narration_prompt`) writes the narration as flowing prose:
+    no scene grid, no numbering, no stage directions - just the words a
+    narrator speaks, including inline `[pause]` markers (B2.13) and
+    `[[focus]]`/`((question))` markers, all of which are DELIVERY cues that
+    must survive Pass 2 untouched.
+  - Pass 2 (`build_scene_segmentation_prompt`) segments that exact prose into
+    scenes. It is an editor placing cuts, not a writer - it may not reword,
+    shorten, expand, or drop a single word. The scene count is a range
+    ([`_MIN_SCENES`, `_MAX_SCENES`]), not a fixed number; Pass 2 picks within
+    it based on the content.
+
+**The load-bearing invariant this phase enforces itself** (not just tests
+for): concatenating Pass 2's scene texts, once whitespace-normalised, must
+reproduce Pass 1's narration exactly. Nothing else about the text is
+normalised - a reworded, reordered, shortened, or padded scene fails this
+check the same way a dropped scene would. A violation raises `AvgError`
+rather than silently writing a script that quietly diverged from what the
+narrator will actually say (voice synthesis in Phase 4 reads the narration,
+not the scenes, so a silent divergence there would be invisible until the
+rendered video didn't match its own captions).
+
+Writes `<project>/script/narration.txt` (Pass 1's raw text) and
+`<project>/script/scenes.json` (Pass 2's segmentation: one
+`{"index", "text", "image_prompt", "label"}` per scene, 1-indexed).
+
+`inputs_ready` is always `True`: the brief (Phase 0) is optional enrichment
+here, not a hard dependency - see `_brief_context` below, which degrades to
+no extra context at all if `brief.json` is missing, matching the legacy
+app's "legacy blind mode".
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from avg.core.errors import AvgError, ErrorKind
+from avg.core.events import ProgressEvent
+from avg.pipeline.phase import PhaseContext
+from avg.pipeline.phases._parsing import parse_scene_blocks, strip_code_fence
+from avg.pipeline.phases._shared import creative_inputs, read_json, script_dir, write_json
+from avg.pipeline.prompts import build_narration_prompt, build_scene_segmentation_prompt
+from avg.providers.text.router import generate as generate_text
+
+# An organic (content-driven) range, not a fixed count - matches
+# `build_scene_count_rule`'s default bounds in `avg.pipeline.prompts`.
+_MIN_SCENES = 3
+_MAX_SCENES = 15
+
+
+def _brief_context(ctx: PhaseContext) -> str:
+    """The `CREATIVE DIRECTION (from the brief ...)` block Pass 1's prompt
+    gets as `extra_context`, ported verbatim (phrasing) from the legacy
+    `Invoke-ScriptAndPrompts`'s B2.3 brief-injection branch. Empty string -
+    not an error - when `brief.json` is missing or has nothing usable,
+    since the brief is optional context, not a requirement."""
+    brief = read_json(script_dir(ctx) / "brief.json")
+    if not isinstance(brief, dict):
+        return ""
+    arc = str(brief.get("emotional_arc") or "").strip()
+    tone = str(brief.get("tone") or "").strip()
+    angle = str(brief.get("angle") or "").strip()
+    if not (arc or tone or angle):
+        return ""
+    lines = [
+        "CREATIVE DIRECTION (from the brief — follow this intent, you decide the scene-by-scene execution):"
+    ]
+    if arc:
+        lines.append(f"Emotional arc: {arc}")
+    if tone:
+        lines.append(f"Tone: {tone}")
+    if angle:
+        lines.append(f"Angle: {angle}")
+    return "\n".join(lines)
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Collapse ALL whitespace (including newlines) to single spaces and
+    trim - the ONLY normalisation the verbatim-partition check applies.
+    Every other character (punctuation, case, `[pause]`/`[[focus]]`/
+    `((question))` markers) must survive untouched."""
+    return " ".join(text.split())
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptPhase:
+    id: int = 1
+    key: str = "script"
+    name: str = "Script"
+
+    def inputs_ready(self, ctx: PhaseContext) -> bool:
+        return True
+
+    def run(self, ctx: PhaseContext) -> None:
+        inputs = creative_inputs(ctx)
+        extra_context = _brief_context(ctx)
+
+        # ── Pass 1: flowing narration prose ─────────────────────────────
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Writing narration..."))
+        narration_prompt = build_narration_prompt(inputs, extra_context=extra_context)
+        narration_result = generate_text(narration_prompt, "script", config=ctx.router)
+        narration = strip_code_fence(narration_result.text).strip()
+        if not narration:
+            raise AvgError(ErrorKind.bug, "script phase: pass 1 produced no narration text")
+
+        # ── Pass 2: verbatim segmentation ───────────────────────────────
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=50, message="Segmenting into scenes..."))
+        segmentation_prompt = build_scene_segmentation_prompt(
+            inputs, narration, min_scenes=_MIN_SCENES, max_scenes=_MAX_SCENES
+        )
+        segmentation_result = generate_text(segmentation_prompt, "script", config=ctx.router)
+        scenes = parse_scene_blocks(segmentation_result.text)
+        if not scenes:
+            raise AvgError(ErrorKind.bug, "script phase: pass 2 produced no parseable scenes")
+
+        # The invariant: scenes, concatenated in order, must reproduce the
+        # narration - whitespace-normalised, nothing else. A model that
+        # rewords/reorders/drops/pads a scene fails here, not silently.
+        reconstructed = _normalize_whitespace(" ".join(scene["text"] for scene in scenes))
+        if reconstructed != _normalize_whitespace(narration):
+            raise AvgError(
+                ErrorKind.bug,
+                "script phase: pass 2's scenes are not a verbatim partition of the pass 1 narration",
+            )
+
+        sdir = script_dir(ctx)
+        sdir.mkdir(parents=True, exist_ok=True)
+        (sdir / "narration.txt").write_text(narration, encoding="utf-8")
+        write_json(
+            sdir / "scenes.json",
+            [
+                {
+                    "index": i + 1,
+                    "text": scene["text"],
+                    "image_prompt": scene["image_prompt"],
+                    "label": scene["label"],
+                }
+                for i, scene in enumerate(scenes)
+            ],
+        )
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Script complete."))

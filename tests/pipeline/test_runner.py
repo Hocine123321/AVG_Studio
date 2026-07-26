@@ -11,6 +11,7 @@ end-to-end with the actual production phase list.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.registry import REGISTRY
 from avg.pipeline.runner import UnknownPhaseError, run
+from avg.providers.text.router import TextResult
 
 # Drawn from the real REGISTRY rather than restated as a literal list - if
 # REGISTRY's order or naming ever changes, these fixtures follow it instead
@@ -101,9 +103,59 @@ def test_full_sequence_runs_every_phase_in_order():
     assert not any(isinstance(e, (PhaseFailed, PipelineCancelled)) for e in events)
 
 
-def test_default_registry_runs_all_eight_stub_phases_successfully():
-    """Smoke test against the real production registry, not the fake."""
-    project = _project()
+def _fake_text_generator():
+    """A minimal stand-in for `avg.providers.text.router.generate` covering
+    the real Ids 0-2 phases' two AI calls each need (brief; script's two
+    passes; director1) - ids 3-7 are still `_StubPhase`s (Tasks 4-5's
+    territory) and never call this. Tracks its own call count for the
+    "script" phase since Pass 1 and Pass 2 share that phase key but need
+    different-shaped replies (see `avg.pipeline.phases.script`)."""
+    narration = "This tiny invention quietly changed how ancient sailors found their way. [pause] Nobody expected a bronze box of gears to predict the sky decades in advance."
+    scene_blocks = (
+        "@@SCENE@@\n"
+        "This tiny invention quietly changed how ancient sailors found their way. [pause]\n"
+        "@@IMAGE@@\nA weathered bronze mechanism glowing under lantern light\n"
+        "@@LABEL@@\nHook\n"
+        "@@SCENE@@\n"
+        "Nobody expected a bronze box of gears to predict the sky decades in advance.\n"
+        "@@IMAGE@@\nAncient gears turning in golden light\n"
+        "@@LABEL@@\nReveal\n"
+    )
+    calls = {"script": 0}
+
+    def _fake(prompt: str, phase: str, *, config: Any) -> TextResult:
+        if phase == "brief":
+            text = json.dumps({"emotional_arc": "hook to payoff", "tone": "curious", "angle": "a fresh angle"})
+        elif phase == "script":
+            calls["script"] += 1
+            text = narration if calls["script"] == 1 else scene_blocks
+        elif phase == "director1":
+            text = json.dumps({"image_count": 2, "notes": "one image per scene"})
+        else:
+            raise AssertionError(f"unexpected phase {phase!r}")
+        return TextResult(text=text, provider="fake", model="fake")
+
+    return _fake
+
+
+def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, tmp_path):
+    """Smoke test against the real production registry, not the fake.
+
+    Ids 0-2 (brief/script/director1, Task 3 of this slice) are real phases
+    that call `avg.providers.text.router.generate` - each phase module
+    imports that as its own `generate_text` name, so it's patched per
+    module rather than on `avg.providers.text.router` itself (patching the
+    latter would not reach an already-bound `from ... import generate as
+    generate_text`). Ids 3-7 are still `_StubPhase`s and untouched by this.
+    """
+    fake = _fake_text_generator()
+    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.script.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", fake)
+
+    project = _project(folder=tmp_path)
+    for sub in ("script", "images", "audio", "render"):
+        (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
     events = list(run(project, channel=_channel()))
 
