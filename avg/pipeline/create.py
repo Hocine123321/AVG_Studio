@@ -1,12 +1,16 @@
 """Project creation - the other end of `avg.config.legacy_import` (which
 reads an existing project folder into a `ProjectDoc`; this writes a brand
-new one).
+new one) - and, since Slice 5 Task 3.5, the home of `save_project`, the one
+function anywhere in this codebase allowed to write `project.json`.
 
-`new_project` is the only entry point. It creates the project's folder on
-disk - including the input sub-folders the rest of this app already expects
-a project to have (`avg.media.workspace.render_workspace`'s `_INPUT_DIRS`:
-`images/`, `audio/`, `render/`, `script/`) - and returns a `ProjectDoc` with
-an empty `phases` dict, i.e. every phase `'pending'`.
+`new_project` is the only entry point for creating a project. It creates the
+project's folder on disk - including the input sub-folders the rest of this
+app already expects a project to have (`avg.media.workspace.render_workspace`'s
+`_INPUT_DIRS`: `images/`, `audio/`, `render/`, `script/`) - and returns a
+`ProjectDoc` with an empty `phases` dict, i.e. every phase `'pending'`.
+`save_project` (below) is what actually persists it, and every later mutation
+of that same document (a phase completing, a take being created/deleted/
+renamed/selected) goes through the same function - see its own docstring.
 
 That empty dict is the whole story behind this slice's "new-video start
 phase is 0" invariant: `avg.pipeline.registry.next_phase_id` reads it as
@@ -20,8 +24,10 @@ separate field to default.
 
 from __future__ import annotations
 
-import json
+import os
 import re
+import tempfile
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -67,19 +73,44 @@ def _unique_folder_name(slug: str, output_root: Path, now: datetime) -> str:
     return f"{base}_{n}"
 
 
-def _write_project_doc(doc: ProjectDoc) -> None:
-    """Write `doc` as `<folder>/project.json`.
+def save_project(project: ProjectDoc) -> None:
+    """Write `project` as `<project.folder>/project.json` - the ONE function
+    in this codebase allowed to write that file (Slice 5, Task 3.5).
 
-    A plain write, not the atomic temp-file-plus-`os.replace` dance
-    `avg.config.channels`/`avg.config.settings` use for a document that gets
-    repeatedly overwritten in place - `doc.folder` is freshly created by
-    this same call and nothing else can be reading `project.json` from it
-    yet, so there is no concurrent-reader/partial-write hazard to guard
-    against here.
+    Before takes, `project.json` was written exactly once, here, at creation,
+    and never touched again - the pipeline's own artifacts on disk were
+    enough for `avg.config.legacy_import` to re-derive phase state on the
+    next launch. A take list can't be re-derived that way (which take
+    changed what, its label, which one is current, are facts about history,
+    not about files in a folder), so this is now called on every mutation
+    that matters: a phase completing (`avg.pipeline.runner.run`'s
+    `on_phase_change` hook - see that module's docstring for why the hook
+    lives there rather than this function being called directly from inside
+    the runner), and every take create/delete/rename/select
+    (`avg.api.routes_takes`).
+
+    Same discipline as `avg.config.settings.save_settings`: a temp file in
+    `project.folder` itself, then `os.replace` over the real path - so
+    `project.json` always holds either its complete old contents or its
+    complete new contents, never a half-written file, even if the process
+    is killed between the two calls (`os.replace` is atomic within one
+    volume, which a temp file created via `dir=project.folder` guarantees -
+    see `tempfile.mkstemp`'s `dir` argument). The temp file is removed on
+    any failure so a crash never litters the project folder.
     """
-    (doc.folder / "project.json").write_text(
-        json.dumps(json.loads(doc.model_dump_json()), indent=2), encoding="utf-8"
-    )
+    folder = Path(project.folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / "project.json"
+
+    fd, tmp_name = tempfile.mkstemp(dir=folder, prefix=".project-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(project.model_dump_json(indent=2))
+        os.replace(tmp_name, target)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(tmp_name)
+        raise
 
 
 def new_project(topic: str, channel: Channel, output_root: Path) -> ProjectDoc:
@@ -115,5 +146,5 @@ def new_project(topic: str, channel: Channel, output_root: Path) -> ProjectDoc:
         created=now,
         phases={},
     )
-    _write_project_doc(doc)
+    save_project(doc)
     return doc

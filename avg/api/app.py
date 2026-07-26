@@ -49,7 +49,7 @@ from avg.core.settings_schema import SettingValidationError, get_spec, validate_
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.workspace import render_workspace
-from avg.pipeline.create import new_project
+from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.runner import run as run_pipeline
 
@@ -372,7 +372,13 @@ def create_app(
                 # no separate `_apply_terminal_event`-style step is needed
                 # here: a `GET /api/projects` (or this very object) already
                 # reflects each phase's outcome as it happens.
-                for event in run_pipeline(project, channel=effective_channel, start_from=0, cancel_token=cancel_token):
+                for event in run_pipeline(
+                    project,
+                    channel=effective_channel,
+                    start_from=0,
+                    cancel_token=cancel_token,
+                    on_phase_change=lambda: save_project(project),
+                ):
                     with suppress(Exception):
                         fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
                         fut.result()

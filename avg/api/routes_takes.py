@@ -48,6 +48,14 @@ whether any `PhaseFailed`/`PipelineCancelled` event was seen; only a clean
 run (no such event, `to_run` exhausted) calls `_sync_current_take`, mirroring
 `ProjectDoc`'s own docstring ("only ever advances to a take once IT finishes
 successfully").
+
+**Every mutation here is persisted (Slice 5, Task 3.5).** `avg.pipeline.
+create.save_project` is called after `migrate_to_takes` actually creates take
+1 (`_migrate_and_persist`), right after `clone_take` registers a new take
+(before its pipeline even starts), and after delete/select/rename. The
+re-run's own phase-by-phase progress is persisted separately, via the
+`on_phase_change` hook passed to `run_pipeline` below - see that call site's
+comment for why it closes over `project`, not `shadow_project`.
 """
 
 from __future__ import annotations
@@ -67,6 +75,7 @@ from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
+from avg.pipeline.create import save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.registry import BY_KEY, REGISTRY
 from avg.pipeline.runner import run as run_pipeline
@@ -106,6 +115,22 @@ def _get_take(project: ProjectDoc, take_id: int) -> Take:
     if take is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown take")
     return take
+
+
+def _migrate_and_persist(project: ProjectDoc) -> None:
+    """`migrate_to_takes`, persisting immediately if it actually created
+    take 1 (Slice 5, Task 3.5).
+
+    A no-op project (one that already has takes) must not trigger a write
+    on every plain `GET` - `migrate_to_takes` itself is already safe to call
+    unconditionally (idempotent), but "safe to call" and "worth persisting"
+    are different questions; only a project that just gained its first take
+    has anything new to lose to a crash.
+    """
+    had_takes = bool(project.takes)
+    migrate_to_takes(project)
+    if not had_takes and project.takes:
+        save_project(project)
 
 
 def _next_take_id(project: ProjectDoc) -> int:
@@ -271,8 +296,11 @@ async def list_takes(project_id: str, request: Request) -> dict:
     project = _get_project(request.app.state, project_id)
     # Safe on every call (idempotent, a no-op once takes exist) - see
     # `avg.core.takes.migrate_to_takes`'s own docstring. A legacy project
-    # that has never touched this API still shows a "Take 1".
-    migrate_to_takes(project)
+    # that has never touched this API still shows a "Take 1" - and, since
+    # Task 3.5, that take 1 is persisted immediately (`_migrate_and_persist`)
+    # rather than living only in this process's memory until some later
+    # mutation happens to save it.
+    _migrate_and_persist(project)
     return {"takes": list(project.takes), "current_take_id": project.current_take_id}
 
 
@@ -338,7 +366,7 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     # A legacy/never-touched project has no takes yet - this is the one
     # spot in this module allowed to create take 1 (unlike `preview`, this
     # route is already in the business of creating a take).
-    migrate_to_takes(project)
+    _migrate_and_persist(project)
     source_take_id = project.current_take_id
     assert source_take_id is not None  # migrate_to_takes always sets this
 
@@ -354,6 +382,11 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
         rerolled_from=stored_reroll,
         settings_snapshot=effective_settings,
     )
+    # Persisted immediately, before the pipeline even starts - a crash
+    # between here and the first phase completing must not lose this take's
+    # existence, label, or settings snapshot (the per-phase writes below
+    # only cover what happens once the runner is actually under way).
+    save_project(project)
 
     # The pipeline runs against the NEW take's own folder, never the
     # project root - see this module's docstring for why swapping `folder`
@@ -385,6 +418,14 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
                 channel=effective_channel,
                 start_from=plan.start_id,
                 cancel_token=cancel_token,
+                # Closes over the REAL project, not `shadow_project` -
+                # `shadow_project.folder` is the take's own folder (there is
+                # no `project.json` under `takes/<id>/`, see this module's
+                # docstring); `shadow_project.phases` is `new_take.phases` by
+                # reference, so the runner's in-place mutations already land
+                # on `project.takes[...]` before this callback ever runs -
+                # this just needs to write the ONE real `project.json`.
+                on_phase_change=lambda: save_project(project),
             ):
                 if isinstance(event, (PhaseFailed, PipelineCancelled)):
                     success = False
@@ -399,6 +440,13 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             new_take.master_output = shadow_project.master_output
             if success:
                 _sync_current_take(project, new_take)
+            # One more write even though `on_phase_change` already persisted
+            # every phase along the way: `master_output`/`current_take_id`
+            # (on success) are set here, AFTER the last phase's own
+            # `on_phase_change` call already fired, so they'd otherwise never
+            # reach disk until some unrelated later mutation happened to
+            # trigger a save.
+            save_project(project)
             app_state.render_thread = None
             app_state.rendering_project_id = None
             app_state.pipeline_cancel_token = None
@@ -424,6 +472,7 @@ async def delete_take_route(project_id: str, take_id: int, request: Request) -> 
         # a missing-resource error.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    save_project(project)
     return {"deleted": True, "current_take_id": project.current_take_id}
 
 
@@ -432,6 +481,7 @@ async def select_take_route(project_id: str, take_id: int, request: Request) -> 
     project = _get_project(request.app.state, project_id)
     take = _get_take(project, take_id)
     _sync_current_take(project, take)
+    save_project(project)
     return {"current_take_id": project.current_take_id}
 
 
@@ -450,4 +500,5 @@ async def rename_take_route(project_id: str, take_id: int, body: TakeRename, req
     # so simply overwriting it here can never be clobbered by a later
     # auto-label pass, because there isn't one.
     take.label = label
+    save_project(project)
     return take

@@ -22,7 +22,7 @@ swap of one generator for another, not a new consumption pattern.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -78,6 +78,7 @@ def run(
     only: str | None = None,
     cancel_token: CancellationToken | None = None,
     phases: Sequence[Phase] = REGISTRY,
+    on_phase_change: Callable[[], None] | None = None,
 ) -> Iterator[Any]:
     """Run `phases` (`REGISTRY` by default - see that module's docstring for
     why nothing else should ever pass a different order in production)
@@ -90,6 +91,32 @@ def run(
     failure, cleared otherwise. A phase's own `ctx.emit(event)` calls surface
     as ordinary items yielded from this generator, immediately before that
     phase's own `PhaseFinished`/`PhaseFailed`.
+
+    `on_phase_change`, if given, is called with no arguments immediately
+    after every one of those in-place mutations (pending/failed -> running,
+    and running -> done/failed) - BEFORE the corresponding event is yielded,
+    so the record on disk is never behind the record a caller's event stream
+    just announced. This is Slice 5 Task 3.5's write-through persistence
+    (`avg.pipeline.create.save_project`): a crash mid-pipeline must not lose
+    the phases that already finished, which means the write has to happen
+    the instant a phase's status changes, not whenever this generator is
+    next drained.
+
+    Deliberately a callback rather than this module importing `save_project`
+    and calling it directly: `run()` has no notion of `project` vs. "the
+    document that's actually supposed to land on disk", and for a take's
+    re-run (`avg.api.routes_takes.create_take`) those are two different
+    objects - the runner is handed a throwaway `model_copy` (`folder`
+    swapped to the take's own folder, `phases` swapped to the take's own
+    dict) so its in-place mutations land on `Take.phases`, but the file that
+    needs writing is the REAL project's `project.json`, not a nonexistent
+    one under the take's folder. Only the caller knows which object that is;
+    baking a fixed `save_project(project)` call into this loop would persist
+    the wrong file for every take re-run. A plain call embedded in the loop
+    (rather than leaving it to the caller's own event-consuming loop to
+    remember) is what makes this automatic for every current and future
+    caller instead of a discipline each one has to reimplement - see this
+    task's own report for the alternative considered and rejected.
 
     Stops the run - without raising - the first time:
       - a phase raises (an `AvgError` or anything else): that phase's record
@@ -125,6 +152,8 @@ def run(
         record.finished = None
         record.duration_ms = None
         record.error = None
+        if on_phase_change is not None:
+            on_phase_change()
 
         buffered: list[Any] = []
         ctx = PhaseContext(
@@ -141,6 +170,8 @@ def run(
             phase.run(ctx)
         except AvgError as exc:
             _mark_failed(record, t0, exc.message)
+            if on_phase_change is not None:
+                on_phase_change()
             yield from buffered
             yield PhaseFailed(
                 project_id=project.id,
@@ -152,6 +183,8 @@ def run(
             return
         except Exception as exc:  # noqa: BLE001 - any other bug still halts cleanly
             _mark_failed(record, t0, str(exc))
+            if on_phase_change is not None:
+                on_phase_change()
             yield from buffered
             yield PhaseFailed(
                 project_id=project.id,
@@ -164,5 +197,7 @@ def run(
         record.status = "done"
         record.finished = datetime.now(timezone.utc)
         record.duration_ms = int((time.monotonic() - t0) * 1000)
+        if on_phase_change is not None:
+            on_phase_change()
         yield from buffered
         yield PhaseFinished(project_id=project.id, phase=phase.key, duration_ms=record.duration_ms)
