@@ -10,6 +10,7 @@ import {
   type SettingsDoc,
 } from "./api";
 import Channels from "./Channels";
+import Create from "./Create";
 import Home from "./Home";
 import Rail from "./Rail";
 import Settings from "./Settings";
@@ -19,7 +20,12 @@ import Welcome from "./Welcome";
 import { useTheme } from "./theme";
 import { useEvents } from "./useEvents";
 
-type Screen = { name: "home" } | { name: "project"; id: string } | { name: "channels" } | { name: "settings" };
+type Screen =
+  | { name: "home" }
+  | { name: "project"; id: string }
+  | { name: "create" }
+  | { name: "channels" }
+  | { name: "settings" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -124,6 +130,18 @@ export default function App() {
     setScreen({ name: "project", id });
   }
 
+  /** `Create`'s `onCreated` - the project already exists and its pipeline
+   * is already running server-side (see `avg/api/app.py`'s `POST
+   * /api/projects`) by the time this fires, so this only has to fold it
+   * into the local cache (so Studio can find it without waiting on a fresh
+   * `GET /api/projects`) and navigate there - the running pipeline shows up
+   * through the same `/ws/events` wiring every other screen already uses. */
+  function handleProjectCreated(project: ProjectDoc) {
+    setProjects((prev) => (prev ? [project, ...prev] : [project]));
+    setStartError(null);
+    setScreen({ name: "project", id: project.id });
+  }
+
   /** What "Run again" (a done project) and "Resume" (a failed one) do:
    * open Studio AND immediately start a fresh render - distinct from Play
    * / Open, which only navigate. */
@@ -185,6 +203,10 @@ export default function App() {
           <p className="home__empty">Unknown project: {screen.id}</p>
         </div>
       );
+    } else if (screen.name === "create") {
+      content = (
+        <Create onCreated={handleProjectCreated} onGoToChannels={() => setScreen({ name: "channels" })} />
+      );
     } else if (screen.name === "settings") {
       content = <Settings />;
     } else if (screen.name === "channels") {
@@ -208,13 +230,16 @@ export default function App() {
         active={
           screen.name === "project"
             ? "studio"
-            : screen.name === "channels"
-              ? "channels"
-              : screen.name === "settings"
-                ? "settings"
-                : "home"
+            : screen.name === "create"
+              ? "create"
+              : screen.name === "channels"
+                ? "channels"
+                : screen.name === "settings"
+                  ? "settings"
+                  : "home"
         }
         onHome={() => setScreen({ name: "home" })}
+        onCreate={() => setScreen({ name: "create" })}
         onChannels={() => setScreen({ name: "channels" })}
         onSettings={() => setScreen({ name: "settings" })}
         theme={theme}

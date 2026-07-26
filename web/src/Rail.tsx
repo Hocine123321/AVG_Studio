@@ -1,7 +1,7 @@
 import { IconChannels, IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
-export type RailSection = "home" | "studio" | "channels" | "settings";
+export type RailSection = "home" | "studio" | "create" | "channels" | "settings";
 
 export interface RailProps {
   /** Which section is showing right now. The amber marker names "where you
@@ -10,6 +10,7 @@ export interface RailProps {
    * one pulses; this one doesn't). */
   active: RailSection;
   onHome: () => void;
+  onCreate: () => void;
   onChannels: () => void;
   onSettings: () => void;
   /** Owned by `App.tsx` (not this component) so the same choice also
@@ -27,11 +28,11 @@ export interface RailProps {
  *   - A theme switch above Settings. It is a real control, not a tweak:
  *     Night is the default, Day is a full citizen, and the choice persists.
  *
- * The create wizard is still out of scope, so its icon renders but stays
- * disabled rather than pretending to open something that doesn't exist yet.
- * Settings (Slice 2 Task 4) is now a real screen, reachable here.
+ * The create wizard (Slice 4, Task 6) is a real screen now, reachable
+ * here — the "+" button is no longer disabled. Settings (Slice 2 Task 4)
+ * is likewise a real screen, reachable here.
  */
-export default function Rail({ active, onHome, onChannels, onSettings, theme, onToggleTheme }: RailProps) {
+export default function Rail({ active, onHome, onCreate, onChannels, onSettings, theme, onToggleTheme }: RailProps) {
   const night = theme === "night";
 
   return (
@@ -51,7 +52,14 @@ export default function Rail({ active, onHome, onChannels, onSettings, theme, on
         <IconGrid />
       </button>
 
-      <button type="button" className="rail__item" disabled title="New video — not available in this build">
+      <button
+        type="button"
+        className={`rail__item${active === "create" ? " rail__item--on" : ""}`}
+        onClick={onCreate}
+        title="New video"
+        aria-label="New video"
+        aria-current={active === "create" ? "page" : undefined}
+      >
         <IconPlus />
       </button>
 

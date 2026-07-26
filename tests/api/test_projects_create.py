@@ -1,0 +1,248 @@
+"""Tests for `POST /api/projects` (Slice 4, Task 6 - the Create wizard's
+backend half).
+
+Every test in this file monkeypatches `avg.api.app.run_pipeline` (the
+`avg.pipeline.runner.run` generator, imported by name into `avg.api.app`) -
+the real `REGISTRY` phases call actual AI providers, and this suite must
+never make a real network call. The autouse `_stub_pipeline` fixture below
+installs an instant no-op fake for every test; individual tests that need
+to observe *how* the route drives the generator (event broadcast, the
+cancellation token, the one-job-at-a-time guard) install their own fake in
+their own body, which simply re-patches the same attribute for that test.
+
+Isolation mirrors `tests/api/test_routes_settings.py`'s `paths` fixture -
+every path is tmp_path-scoped so this suite never touches the real user
+profile's channels/settings/secrets.
+"""
+
+from __future__ import annotations
+
+import threading
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from avg.api.app import create_app
+from avg.config.channels import get_channel
+from avg.core.events import PhaseFinished, PhaseStarted
+
+TOKEN = "t0k"
+AUTH = {"X-AVG-Token": TOKEN}
+
+
+@pytest.fixture
+def paths(tmp_path):
+    return {
+        "settings_path": tmp_path / "settings.json",
+        "channels_dir": tmp_path / "channels",
+        "secrets_path": tmp_path / "secrets.dat",
+        "output_root": tmp_path / "output",
+        "thumb_cache_dir": tmp_path / "thumbs",
+    }
+
+
+@pytest.fixture
+def client(paths):
+    app = create_app(
+        token=TOKEN,
+        output_root=paths["output_root"],
+        thumb_cache_dir=paths["thumb_cache_dir"],
+        settings_path=paths["settings_path"],
+        channels_dir=paths["channels_dir"],
+        secrets_path=paths["secrets_path"],
+    )
+    return TestClient(app)
+
+
+def _instant_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+    """A fake `run_pipeline` that does nothing and finishes immediately -
+    never calls a phase, never makes a network call. Still a generator
+    function (the lone `yield` below is unreachable) so calling it returns
+    a generator object, matching `run_pipeline`'s real shape."""
+    return
+    yield  # pragma: no cover
+
+
+@pytest.fixture(autouse=True)
+def _stub_pipeline(monkeypatch):
+    monkeypatch.setattr("avg.api.app.run_pipeline", _instant_run)
+
+
+def _activate_channel(client: TestClient, label: str = "My Channel") -> str:
+    created = client.post("/api/channels", headers=AUTH, json={"label": label}).json()
+    client.post(f"/api/channels/{created['id']}/activate", headers=AUTH)
+    return created["id"]
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def test_create_requires_token(client):
+    assert client.post("/api/projects", json={"topic": "x"}).status_code == 401
+
+
+def test_create_without_active_channel_is_400(client):
+    r = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"})
+    assert r.status_code == 400
+    assert "active channel" in r.json()["detail"].lower()
+
+
+def test_create_rejects_an_empty_topic(client):
+    _activate_channel(client)
+    r = client.post("/api/projects", headers=AUTH, json={"topic": "   "})
+    assert r.status_code == 400
+
+
+def test_create_rejects_an_unknown_override_id(client):
+    _activate_channel(client)
+    r = client.post(
+        "/api/projects", headers=AUTH, json={"topic": "x", "overrides": {"not_a_real_setting": 1}}
+    )
+    assert r.status_code == 400
+    assert "not_a_real_setting" in r.json()["detail"]
+
+
+def test_create_rejects_an_app_scoped_override(client):
+    # `theme` is scope="app" - only a per-video (channel-scoped) setting may
+    # be overridden here.
+    _activate_channel(client)
+    r = client.post("/api/projects", headers=AUTH, json={"topic": "x", "overrides": {"theme": "neon"}})
+    assert r.status_code == 400
+
+
+def test_create_rejects_an_invalid_choice_override(client):
+    _activate_channel(client)
+    r = client.post(
+        "/api/projects", headers=AUTH, json={"topic": "x", "overrides": {"video_form": "not_a_real_form"}}
+    )
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Success path
+# ---------------------------------------------------------------------------
+
+
+def test_create_returns_201_with_the_new_project(client):
+    _activate_channel(client)
+    r = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["title"] == "How Rome Fell"
+    assert body["phases"] == {}
+    assert body["id"]
+
+
+def test_create_writes_the_project_folder_and_input_subfolders(client):
+    _activate_channel(client)
+    body = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"}).json()
+    folder = Path(body["folder"])
+    assert folder.is_dir()
+    for sub in ("script", "images", "audio", "render"):
+        assert (folder / sub).is_dir()
+
+
+def test_create_appears_in_a_subsequent_list(client):
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"}).json()
+    listed = client.get("/api/projects", headers=AUTH).json()["projects"]
+    assert any(p["id"] == created["id"] for p in listed)
+
+
+def test_create_override_never_persists_to_the_channel_document(client, paths):
+    channel_id = _activate_channel(client)
+    r = client.post(
+        "/api/projects", headers=AUTH, json={"topic": "x", "overrides": {"video_form": "longform"}}
+    )
+    assert r.status_code == 201
+
+    on_disk = get_channel(channel_id, paths["channels_dir"])
+    # The starter channel's own settings dict must be untouched - the
+    # override lived only on a throwaway copy this one request built.
+    assert "video_form" not in on_disk.settings
+
+
+def test_two_creates_from_the_same_topic_get_distinct_projects(client):
+    _activate_channel(client)
+    a = client.post("/api/projects", headers=AUTH, json={"topic": "Same Topic"}).json()
+    b = client.post("/api/projects", headers=AUTH, json={"topic": "Same Topic"}).json()
+    assert a["id"] != b["id"]
+
+
+# ---------------------------------------------------------------------------
+# The pipeline actually runs (via the stubbed generator) and streams events
+# ---------------------------------------------------------------------------
+
+
+def test_create_starts_the_pipeline_and_streams_its_events_over_the_socket(client, monkeypatch):
+    def fake_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        yield PhaseStarted(project_id=project.id, phase="brief")
+        yield PhaseFinished(project_id=project.id, phase="brief", duration_ms=5)
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", fake_run)
+    _activate_channel(client)
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+
+        r = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"})
+        assert r.status_code == 201
+
+        first = ws.receive_json()
+        assert first["type"] == "phase_started"
+        assert first["phase"] == "brief"
+
+        second = ws.receive_json()
+        assert second["type"] == "phase_finished"
+        assert second["phase"] == "brief"
+
+
+def test_a_second_create_while_one_is_running_is_409(client, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
+    _activate_channel(client)
+
+    try:
+        r1 = client.post("/api/projects", headers=AUTH, json={"topic": "First"})
+        assert r1.status_code == 201
+        assert started.wait(timeout=5)
+
+        r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
+        assert r2.status_code == 409
+    finally:
+        release.set()
+
+
+def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
+    _activate_channel(client)
+
+    try:
+        created = client.post("/api/projects", headers=AUTH, json={"topic": "x"}).json()
+        assert started.wait(timeout=5)
+
+        client.post(f"/api/projects/{created['id']}/cancel", headers=AUTH)
+        assert client.app.state.pipeline_cancel_token is not None
+        assert client.app.state.pipeline_cancel_token.cancelled is True
+    finally:
+        release.set()

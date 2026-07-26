@@ -8,6 +8,7 @@ reaches the user, as an HTTP response or a WebSocket message.
 Routes (see the task-7 and task-10.5 briefs for the exact contract):
 
     GET  /api/projects                          -> {"projects": [ProjectDoc, ...]}
+    POST /api/projects                           -> 201 ProjectDoc (creates + starts the full pipeline)
     POST /api/projects/{project_id}/render       -> 202 {"started": true}
     POST /api/projects/{project_id}/cancel       -> {"cancelled": true}
     GET  /api/projects/{project_id}/thumbnail    -> image/jpeg
@@ -31,20 +32,26 @@ import ctypes
 import threading
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from avg.config import channels as channels_config
 from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
 from avg.config.settings_import import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
+from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.workspace import render_workspace
+from avg.pipeline.create import new_project
+from avg.pipeline.phase import CancellationToken
+from avg.pipeline.runner import run as run_pipeline
 
 from .deps import require_token
 from .routes_settings import router as settings_router
@@ -62,6 +69,22 @@ class SettingsUpdate(BaseModel):
     of a JSON body."""
 
     output_root: str
+
+
+class ProjectCreate(BaseModel):
+    """`POST /api/projects`'s body: a topic plus any per-video overrides of
+    the active channel's creative settings (`avg.core.settings_schema`'s
+    `scope="channel"` ids only - anything else is rejected).
+
+    `overrides` never touches the channel document on disk: the route below
+    folds it onto a throwaway `Channel.model_copy`, never `save_channel`,
+    matching `avg.config.channels`'s "a channel's document is the only
+    place its settings live" rule - a per-video choice must not leak back
+    into the channel every other video on it will use.
+    """
+
+    topic: str
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 # The built web UI (`cd web && npm run build`) - a sibling of `avg/` at the
@@ -236,6 +259,12 @@ def create_app(
     # project at a time; this is what enforces that instead of assuming it.
     app.state.render_thread = None
     app.state.rendering_project_id = None
+    # Set only while a `POST /api/projects`-started full pipeline is
+    # running (never by `/render`'s MediaEngine path) - `/cancel` below
+    # pokes this in addition to `engine.cancel()` so "Cancel" works no
+    # matter which of the two job kinds is currently occupying
+    # `render_thread`.
+    app.state.pipeline_cancel_token = None
 
     # Imported exactly once, here, at construction time - not per-request,
     # and not behind an ASGI lifespan/startup event: TestClient only runs
@@ -268,6 +297,95 @@ def create_app(
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
         return {"projects": list(app.state.projects.values())}
+
+    @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
+    async def create_project(body: ProjectCreate) -> ProjectDoc:
+        """Create a project for `body.topic` under the active channel, then
+        run the whole pipeline (`avg.pipeline.registry.REGISTRY`, phase 0
+        on) against it on a background thread - the exact
+        drain-a-generator-and-broadcast pattern `start_render` below already
+        uses for `MediaEngine.render()`, reused rather than duplicated (see
+        this module's docstring on why that split exists). Returns the
+        freshly created `ProjectDoc` immediately, well before the pipeline
+        itself finishes, so the caller can navigate to Studio and watch it
+        run over `/ws/events`.
+        """
+        topic = body.topic.strip()
+        if not topic:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="topic must not be empty")
+
+        active_id = channels_config.active_channel_id(app.state.settings_path)
+        if active_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no active channel — activate a channel before creating a video",
+            )
+        channel = channels_config.get_channel(active_id, app.state.channels_dir)
+        if channel is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"active channel {active_id!r} no longer exists",
+            )
+
+        # Validate every override against the catalogue and fold it onto a
+        # THROWAWAY copy of the channel's settings dict - `channel` itself
+        # is never mutated or saved (see `ProjectCreate`'s docstring above).
+        effective_settings = dict(channel.settings)
+        for setting_id, raw_value in body.overrides.items():
+            spec = get_spec(setting_id)
+            if spec is None or spec.scope != "channel":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{setting_id!r} is not a per-video creative setting",
+                )
+            try:
+                effective_settings[setting_id] = validate_value(spec, raw_value)
+            except SettingValidationError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        effective_channel = channel.model_copy(update={"settings": effective_settings})
+
+        # The same one-job-at-a-time guard `start_render` enforces below -
+        # a full pipeline run and a `/render` MediaEngine run share the one
+        # `render_thread` slot, never a second job mechanism.
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"a pipeline is already running for project {app.state.rendering_project_id!r}",
+            )
+
+        project = new_project(topic, effective_channel, app.state.output_root)
+        app.state.projects[project.id] = project
+
+        cancel_token = CancellationToken()
+        app.state.pipeline_cancel_token = cancel_token
+        loop = asyncio.get_running_loop()
+
+        async def _dispatch(event: Any) -> None:
+            await app.state.manager.broadcast(event.model_dump(mode="json"))
+
+        def _worker() -> None:
+            try:
+                # `project` is the SAME object cached in `app.state.projects`
+                # - `run_pipeline` mutates its `.phases[key]` records in
+                # place (see `avg.pipeline.runner.run`'s own docstring), so
+                # no separate `_apply_terminal_event`-style step is needed
+                # here: a `GET /api/projects` (or this very object) already
+                # reflects each phase's outcome as it happens.
+                for event in run_pipeline(project, channel=effective_channel, start_from=0, cancel_token=cancel_token):
+                    with suppress(Exception):
+                        fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
+                        fut.result()
+            finally:
+                app.state.render_thread = None
+                app.state.rendering_project_id = None
+                app.state.pipeline_cancel_token = None
+
+        app.state.rendering_project_id = project.id
+        thread = threading.Thread(target=_worker, daemon=True, name=f"avg-pipeline-{project.id}")
+        app.state.render_thread = thread
+        thread.start()
+
+        return project
 
     @app.get("/api/settings", dependencies=[Depends(require_token)])
     async def get_settings() -> dict:
@@ -386,6 +504,13 @@ def create_app(
         if project_id not in app.state.projects:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         app.state.engine.cancel()
+        # Best-effort for a full-pipeline run too - a no-op if `render_thread`
+        # is currently a `/render` MediaEngine job instead (or nothing at
+        # all). The runner only checks this BETWEEN phases (see
+        # `avg.pipeline.runner.run`'s docstring), so this stops the run at
+        # the next phase boundary, not mid-phase.
+        if app.state.pipeline_cancel_token is not None:
+            app.state.pipeline_cancel_token.cancel()
         return {"cancelled": True}
 
     @app.get("/api/projects/{project_id}/thumbnail", dependencies=[Depends(require_token)])

@@ -1919,3 +1919,127 @@ a:hover {
 .btn--danger:hover {
   background: var(--bad-deep);
 }
+
+/* ---- create (new video) ----
+   One screen: topic -> confirm. The channel's creative defaults show as
+   overridable chips that are never terracotta themselves, so "Start" stays
+   the single accent action here - the same rule Channels.tsx and
+   Settings.tsx already follow. The no-active-channel state swaps the whole
+   form for a plain message plus one action instead of a dead, disabled
+   form - matching how Channels.tsx treats "no channel active" as an
+   ordinary, supported state rather than an error. */
+
+.create {
+  min-height: 100%;
+  padding: var(--pad) var(--pad) 40px;
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+}
+
+.create__header {
+  margin-bottom: 22px;
+}
+
+.create__topic {
+  width: 100%;
+  min-height: 130px;
+  padding: 20px 22px;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--text);
+  caret-color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  resize: vertical;
+}
+
+.create__topic::placeholder {
+  color: var(--dim);
+}
+
+.create__topic:hover {
+  border-color: color-mix(in srgb, var(--text) 32%, transparent);
+}
+
+.create__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  margin: 18px 0 0;
+}
+
+.create-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  border-radius: 999px;
+  padding: 5px 8px 5px 15px;
+  cursor: pointer;
+}
+
+.create-chip:hover {
+  border-color: color-mix(in srgb, var(--text) 32%, transparent);
+}
+
+/* Overridden-for-this-video is a neutral "unsaved" wash, same idea as
+   Settings.tsx's `.field-row--dirty` - never the accent, since this isn't
+   the screen's action. */
+.create-chip--dirty {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.create-chip__label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.create-chip__select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 20px 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.create__note {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.create__error {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--bad);
+}
+
+.create__actions {
+  margin-top: 26px;
+}
+
+.create__empty {
+  max-width: 52ch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.create__empty p {
+  margin: 0;
+  font-size: 14.5px;
+  color: var(--muted);
+  line-height: 1.55;
+}

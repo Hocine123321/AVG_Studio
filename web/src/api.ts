@@ -141,6 +141,15 @@ export interface SettingsDoc {
   suggestion: SettingsSuggestion;
 }
 
+/** `POST /api/projects` - creates a project for `topic` under the active
+ * channel and starts the full pipeline on it. `overrides` is `{id: value}`
+ * for any per-video override of a channel-scoped setting (see
+ * `avg.core.settings_schema`'s `scope="channel"` ids) - applied to this one
+ * video only, never written back to the channel document. */
+export function createProject(topic: string, overrides: Record<string, unknown> = {}): Promise<ProjectDoc> {
+  return apiPost<ProjectDoc>("/api/projects", { topic, overrides });
+}
+
 export function getSettings(): Promise<SettingsDoc> {
   return apiGet<SettingsDoc>("/api/settings");
 }
