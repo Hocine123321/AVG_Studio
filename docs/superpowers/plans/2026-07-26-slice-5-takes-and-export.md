@@ -92,7 +92,11 @@ The heart of the slice, and pure data — build it first so everything else can 
   - `SettingSpec.invalidates: str | None` — a phase **key** (`"brief"`, `"script"`, `"director1"`, `"visuals"`, `"voice"`, `"director2"`, `"captions"`, `"render"`) or `None` for settings that are not creative inputs.
   - `first_invalid_phase(changed_ids: Iterable[str]) -> int | None` — the lowest phase **id** any of those settings invalidates; `None` if none of them invalidate anything.
   - `phases_to_rerun(changed_ids: Iterable[str]) -> list[str]` — phase keys from that id onward, in `REGISTRY` order.
-  - `estimate_seconds(project: ProjectDoc, phase_keys: Sequence[str]) -> tuple[int | None, list[str]]` — `(seconds, unknown_phase_keys)`. For each key, the `duration_ms` from the most recent take in which that phase completed. Returns `(None, keys)` when **no** key has history.
+
+**`estimate_seconds` is deliberately NOT in this task.** It reads take
+history, and `ProjectDoc.takes` does not exist until Task 2 — so it lives
+there, alongside the model it depends on. This task stays pure: it maps
+setting ids to phases and nothing else, with no `ProjectDoc` import at all.
 
 **The map — assign exactly this, per the spec:**
 
@@ -161,6 +165,7 @@ def test_dynamic_pauses_invalidates_the_script_not_voice():
   - `clone_take(project, source_take_id, keep_phase_keys) -> Take` — creates the folder, copies only the artifacts of `keep_phase_keys`, registers the take **after** the copy succeeds
   - `delete_take(project, take_id) -> None` — refuses the last remaining take
   - `migrate_to_takes(project) -> None` — an existing single-output project becomes take 1, current
+  - `estimate_seconds(project: ProjectDoc, phase_keys: Sequence[str]) -> tuple[int | None, list[str]]` — moved here from Task 1, which cannot own it: it reads take history. Returns `(seconds, unknown_phase_keys)`. For each key, the `duration_ms` from the most recent take in which that phase **completed**. Returns `(None, keys)` when no key has any history — a fabricated estimate is worse than none.
 
 **Rules that must hold:**
 
@@ -169,7 +174,7 @@ def test_dynamic_pauses_invalidates_the_script_not_voice():
 - **Current vs selected.** `current_take_id` advances to each take that finishes successfully; the user can pin another. Viewing a take in the UI does not change it.
 - Phase→artifact mapping for the copy: `brief`→`script/brief.json`, `script`→`script/`, `director1`→`render/index.json`, `visuals`→`images/`, `voice`→`audio/`, `director2`→`render/direction_plan.json`+`render/card_plan.json`, `captions`→`render/captions.*`. Read each phase module to confirm before writing this — they are the authority, not this table.
 
-- [ ] Implement, then test: clone copies only kept artifacts; a cloned take has no `master_output`; a mid-copy failure leaves no take registered and no folder behind; deleting the last take is refused; deleting the current take moves `current_take_id` to another; `migrate_to_takes` on a legacy project yields exactly one take marked current.
+- [ ] Implement, then test: `estimate_seconds` sums the most recent completed run per phase, reports phases with no history as unknown, and returns `None` rather than `0` when nothing has ever run; clone copies only kept artifacts; a cloned take has no `master_output`; a mid-copy failure leaves no take registered and no folder behind; deleting the last take is refused; deleting the current take moves `current_take_id` to another; `migrate_to_takes` on a legacy project yields exactly one take marked current.
 - [ ] Run the suite once, commit.
 
 **CHECKPOINT REVIEW after this task.**
@@ -184,7 +189,7 @@ def test_dynamic_pauses_invalidates_the_script_not_voice():
 - Test: `tests/api/test_routes_takes.py`
 
 **Interfaces:**
-- Consumes: Task 1's `phases_to_rerun`/`estimate_seconds`, Task 2's `clone_take`/`delete_take`.
+- Consumes: Task 1's `first_invalid_phase`/`phases_to_rerun`; Task 2's `clone_take`/`delete_take`/`estimate_seconds`.
 - Produces:
   - `GET  /api/projects/{pid}/takes` → `{"takes": [...], "current_take_id": N}`
   - `POST /api/projects/{pid}/takes/preview` → body `{"overrides": {...}, "reroll_from": "script"|null}` (request field `reroll_from`; the stored `Take.rerolled_from` records what actually happened - the asymmetry is intentional) → `{"rerun": ["director1", ...], "keeps": ["brief","script"], "estimate_seconds": 252|null, "unknown": []}` — **computes only, creates nothing**
