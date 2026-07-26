@@ -12,18 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from avg.core.models import PhaseRecord, ProjectDoc
+from avg.pipeline.registry import REGISTRY
 
 # New pipeline's phase order (resume position, not the legacy phase names).
-PHASE_ORDER: list[str] = [
-    "brief",
-    "script",
-    "director1",
-    "visuals",
-    "voice",
-    "director2",
-    "captions",
-    "render",
-]
+# Derived from `avg.pipeline.registry.REGISTRY` - the single source of truth
+# for phase order (see that module's docstring) - rather than restated here.
+PHASE_ORDER: list[str] = [phase.key for phase in REGISTRY]
 
 # Legacy phase names that don't match the new order 1:1.
 _PHASE_ALIASES: dict[str, str] = {

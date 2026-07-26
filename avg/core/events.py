@@ -34,3 +34,35 @@ class RenderFinished(BaseModel):
     project_id: str
     output: Path
     size_bytes: int
+
+
+class PhaseStarted(BaseModel):
+    """A pipeline phase (`avg.pipeline.runner`) began running."""
+
+    type: str = "phase_started"
+    project_id: str
+    phase: str
+
+
+class PhaseFinished(BaseModel):
+    """A pipeline phase completed successfully."""
+
+    type: str = "phase_finished"
+    project_id: str
+    phase: str
+    duration_ms: int
+
+
+class PipelineCancelled(BaseModel):
+    """The pipeline run stopped because its `CancellationToken` was set.
+
+    Distinct from `PhaseFailed` for the same reason `RenderCancelled` is
+    distinct from it: a user-requested stop is not a bug in the phase that
+    didn't get to run, and the UI must not paint it as a red failure.
+    `phase` is the phase that was about to start when cancellation was
+    noticed - it never ran, so no `PhaseRecord` for it is touched.
+    """
+
+    type: str = "pipeline_cancelled"
+    project_id: str
+    phase: str
