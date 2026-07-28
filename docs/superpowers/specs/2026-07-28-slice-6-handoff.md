@@ -1,9 +1,17 @@
 # Slice 6 — handoff brief
 
 **Written 2026-07-28**, replacing `project handoff.md` (2026-07-26), which
-predates the file consolidation and carried three claims that no longer
-hold. Every fact below was re-verified against the code on the date above,
-not carried forward on trust. Assumes no prior context.
+predates the file consolidation and carried claims that no longer hold.
+Assumes no prior context.
+
+Every fact below was checked against the code. That is worth stating
+precisely, because the first draft of this document *also* claimed to be
+fully verified and a review then found three errors in it — a per-phase
+re-run described as missing when it is shipped, a count of dead theme
+choices that was off, and `partial` called a fourth status when it would be
+a fifth. All three are corrected below and flagged in place. **Check
+anything you are about to build on.** This document is a starting point, not
+an authority.
 
 ---
 
@@ -129,8 +137,9 @@ starting 4a.**
 
 ### 4b. The six features
 
-Each needs backend work that does not exist. All six premises were
-re-verified on 2026-07-28 and all six still hold.
+Five of the six need backend work that does not exist. **Item 5 does not** —
+it is largely shipped already and needs re-scoping rather than building; see
+below.
 
 **1. Models table** — columns `Phase | Model | Backup | If both fail | Cost per video`.
 `avg/providers/text/router.py` already supports per-phase routing; **there is
@@ -158,12 +167,23 @@ told the user their Gemini account was at zero quota before a video failed.
 `bulkClear`, an `Archived` state. Confirmed: `ProjectDoc` has no `archived`
 field. Needs the flag, persistence, and Home selection state.
 
-**5. Run again per phase** — `runner.run(only="script")` **already works**
-(`avg/pipeline/runner.py`, the `only` parameter); there is no route and no
-button. Small, high value.
+**5. Run again per phase** — **mostly already built; re-scope this item
+before doing anything.** A per-phase re-run *is* exposed today: `POST
+/api/projects/{id}/takes` accepts `reroll_from` (`avg/api/routes_takes.py`,
+`_build_plan`), and `web/src/NewTakePanel.tsx` renders a "Re-roll a phase"
+dropdown over the full `PHASE_ORDER`. What that path does is treat the
+chosen phase as a *start* phase: it re-runs that phase **and everything
+downstream of it**, in a new take.
 
-**6. A `partial` phase state** — a fourth status beyond
-`pending|running|done|failed`. Confirmed: `PhaseStatus` in
+The only thing genuinely missing is the *exact* single-phase run —
+`runner.run(only="script")`, which runs that phase alone and nothing after
+it. That capability exists in `avg/pipeline/runner.py` and has no route.
+Decide whether the mockup's "Run again" means the existing downstream
+re-roll (already shipped) or a new one-phase-only action, before building a
+second control that overlaps the first.
+
+**6. A `partial` phase state** — a **fifth** status alongside the four that
+exist (`pending|running|done|failed`). Confirmed: `PhaseStatus` in
 `avg/core/models.py` is still those four. The likely meaning is "visuals
 finished but 2 of 12 images failed", which the visuals phase already
 tolerates without recording. Nothing can emit `partial` today.
@@ -174,12 +194,15 @@ tolerates without recording. Nothing can emit `partial` today.
   catalogue's `theme` setting offers nine choices (`soft_dark`,
   `monochrome_dark`, `monochrome_light`, `dark`, `light`,
   `high_contrast_light`, `neon`, `terminal_hacker`, `editorial_cream`) while
-  `web/src/theme.ts` implements exactly two: `night` and `day`. The settings
-  screen offers eight themes that do nothing.
-  *(The previous handoff described this as "live settings hold
-  `monochrome_light`, a value the schema does not define." That is wrong —
-  the schema does define it. The real mismatch is schema-vs-frontend, and it
-  is larger.)*
+  `web/src/theme.ts` implements exactly two: `night` and `day`. **None of the
+  nine catalogue values is one of those two, so all nine do nothing** — and
+  the wiring is missing on both ends: `useTheme` reads its value from
+  `localStorage` only and never reads the settings document at all, so even
+  a matching id would not reach the UI. Treat this as "connect the theme
+  setting to the theme system", not "fix a stray value".
+  *(Two earlier descriptions of this were wrong. The 2026-07-26 handoff said
+  the schema does not define `monochrome_light` — it does. The first version
+  of this document said eight of nine choices are inert — it is all nine.)*
 - `/video`, `/images` and `/thumbnail` are **not take-scoped** — confirmed,
   all three take only `project_id`. Studio works around it by showing a text
   summary for non-current takes.
