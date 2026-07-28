@@ -69,18 +69,23 @@ class SettingValidationError(ValueError):
     """
 
 
+# Three entries were REMOVED here on 2026-07-28 as dead switches - settings
+# the UI rendered and saved and no Python code ever read:
+#
+#   python_exe       - nothing shells out to a Python executable. Rendering
+#                      runs in a multiprocessing child of THIS interpreter
+#                      (`avg.media.engine`), so there is no second Python to
+#                      point anywhere.
+#   performance_mode - the resource profile is derived from measured RAM in
+#                      `load_render_settings`. A second, contradicting knob
+#                      would have to win or lose against that measurement,
+#                      and neither answer is right.
+#   run_as_admin     - there is no elevation code path anywhere in the app.
+#
+# A leftover key in an existing settings.json or channel document is harmless:
+# both are plain dicts and nothing iterates them expecting only known ids.
+
 SETTINGS: list[SettingSpec] = [
-    # --- paths (app scope) ---
-    SettingSpec(
-        id="python_exe",
-        group="paths",
-        label="Python executable",
-        help="Path to the Python executable used for media rendering. Leave as 'python' to use whatever is on PATH.",
-        type="path",
-        default="python",
-        scope="app",
-        invalidates=None,
-    ),
     # --- runtime / UI preferences (app scope) ---
     SettingSpec(
         id="theme",
@@ -103,27 +108,6 @@ SETTINGS: list[SettingSpec] = [
         default="night",
         scope="app",
         choices=["night", "day"],
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="performance_mode",
-        group="runtime",
-        label="Performance mode",
-        help="Trade rendering speed against resource usage on lower-end machines.",
-        type="choice",
-        default="lightweight",
-        scope="app",
-        choices=["lightweight", "balanced", "max"],
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="run_as_admin",
-        group="runtime",
-        label="Run as administrator",
-        help="Relaunch elevated on startup.",
-        type="bool",
-        default=False,
-        scope="app",
         invalidates=None,
     ),
     # --- video format and length (channel scope: a production choice) ---

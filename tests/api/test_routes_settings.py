@@ -54,7 +54,6 @@ def test_schema_route_returns_the_whole_catalogue(client):
 
 def test_schema_entries_declare_scope_correctly(client):
     body = {s["id"]: s for s in client.get("/api/settings/schema", headers=AUTH).json()["settings"]}
-    assert body["python_exe"]["scope"] == "app"
     assert body["theme"]["scope"] == "app"
     assert body["video_form"]["scope"] == "channel"
     assert body["content_shape"]["scope"] == "channel"
@@ -101,9 +100,11 @@ def test_post_app_scope_value_persists_to_settings_json(client, paths):
 
 
 def test_post_app_scope_value_is_reflected_on_next_get(client):
-    client.post("/api/settings/values", headers=AUTH, json={"values": {"performance_mode": "max"}})
+    # `theme` is the only non-secret app-scoped setting left after the dead
+    # switches were removed.
+    client.post("/api/settings/values", headers=AUTH, json={"values": {"theme": "day"}})
     r = client.get("/api/settings/values", headers=AUTH)
-    assert r.json()["app"]["performance_mode"] == "max"
+    assert r.json()["app"]["theme"] == "day"
 
 
 def test_post_rejects_unknown_setting_id(client):

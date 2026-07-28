@@ -52,7 +52,7 @@ from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
-from avg.pipeline.phases.render import _thread_kwargs
+from avg.pipeline.phases.render import _render_kwargs
 from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
 from avg.providers.text.router import config_from_settings
@@ -149,7 +149,7 @@ def _total_ram_gb() -> float:
 
 
 def _build_render_request(
-    project: ProjectDoc, output_root: Path, *, render_threads: object = None
+    project: ProjectDoc, output_root: Path, *, channel_settings: dict | None = None
 ) -> RenderRequest:
     """Combine a project's folder with the legacy app's render settings.
 
@@ -170,7 +170,7 @@ def _build_render_request(
             project_folder=project.folder,
             aspect_ratio=project.aspect_ratio,
             short_edge=project.short_edge,
-            **_thread_kwargs(render_threads),
+            **_render_kwargs(channel_settings or {}),
         )
 
     return RenderRequest(
@@ -184,9 +184,10 @@ def _build_render_request(
         kb_mode=settings.kb_mode,
         render_engine=settings.render_engine,
         render_opts=settings.render_opts,
-        # Last, so the user's own setting wins over whatever the legacy
-        # config carried - that file predates this setting existing.
-        **_thread_kwargs(render_threads),
+        # Last, so the user's own channel settings win over whatever the
+        # legacy config.json carried - that file predates every one of them
+        # and the user cannot edit it from this app.
+        **_render_kwargs(channel_settings or {}),
     )
 
 
@@ -611,7 +612,7 @@ def create_app(
         req = _build_render_request(
             project,
             app.state.output_root,
-            render_threads=(channel.settings.get("render_threads") if channel else None),
+            channel_settings=(channel.settings if channel else None),
         )
         loop = asyncio.get_running_loop()
 

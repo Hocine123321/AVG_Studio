@@ -28,6 +28,35 @@ from avg.media.engine import MediaEngine
 from avg.pipeline.phase import PhaseContext
 
 
+def _render_kwargs(settings: dict) -> dict[str, object]:
+    """The channel's render settings, as `RenderRequest` keyword arguments.
+
+    Until this existed, `fps`, `ken_burns`, `render_codec` and
+    `render_engine` were dead switches in the catalogue: the settings screen
+    rendered them, saved them, and no render ever read them - the values
+    actually used came from the LEGACY `config.json`, which the user has no
+    way to edit from this app.
+
+    Only keys the channel actually carries are returned, so an unset setting
+    still falls through to `RenderRequest`'s own default rather than being
+    overwritten with a guess.
+    """
+    kwargs: dict[str, object] = {}
+    fps = settings.get("fps")
+    if isinstance(fps, int) and not isinstance(fps, bool) and fps > 0:
+        kwargs["fps"] = fps
+    if isinstance(settings.get("ken_burns"), bool):
+        kwargs["ken_burns"] = settings["ken_burns"]
+    codec = settings.get("render_codec")
+    if isinstance(codec, str) and codec:
+        kwargs["codec"] = codec
+    engine = settings.get("render_engine")
+    if isinstance(engine, str) and engine:
+        kwargs["render_engine"] = engine
+    kwargs.update(_thread_kwargs(settings.get("render_threads")))
+    return kwargs
+
+
 def _thread_kwargs(raw: object) -> dict[str, int]:
     """Translate the `render_threads` setting into a `RenderRequest` kwarg.
 
@@ -66,7 +95,7 @@ class RenderPhase:
             short_edge=ctx.project.short_edge,
             # `ctx.channel` is typed as a Channel but is None in the render
             # engine's own unit tests, which construct a context without one.
-            **_thread_kwargs(getattr(ctx.channel, "settings", {}).get("render_threads")),
+            **_render_kwargs(getattr(ctx.channel, "settings", {}) or {}),
         )
 
         engine = MediaEngine()

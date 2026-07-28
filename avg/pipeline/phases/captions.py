@@ -391,6 +391,20 @@ class CaptionsPhase:
         return _optimized_voice_path(ctx).exists()
 
     def run(self, ctx: PhaseContext) -> None:
+        # `captions_enabled` used to be a dead switch: the settings screen
+        # offered it, saved it, and this phase transcribed regardless -
+        # which for the AssemblyAI provider means a paid API call the user
+        # explicitly asked not to make. Off means off, and the phase
+        # completes rather than failing, because "no captions" is a valid
+        # finished state, not an error.
+        if ctx.channel is not None and ctx.channel.settings.get("captions_enabled") is False:
+            ctx.emit(
+                ProgressEvent(
+                    project_id=ctx.project.id, percent=100, message="Captions are switched off for this channel."
+                )
+            )
+            return
+
         audio_path = _optimized_voice_path(ctx)
         if not audio_path.exists():
             raise AvgError(ErrorKind.bug, "captions phase: no finished audio/optimized_voice.mp3 to transcribe")
