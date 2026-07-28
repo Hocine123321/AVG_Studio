@@ -67,7 +67,7 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import VOICE_MP3_BITRATE, remove_silences_core
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._shared import script_dir
+from avg.pipeline.phases._common import script_dir
 from avg.providers.transport import Transport
 from avg.providers.voice.base import VoiceProvider
 from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider

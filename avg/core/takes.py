@@ -66,7 +66,7 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 #     a file `script` actually produced.
 #   - `director1` writes `script/video_map.json`, not `render/index.json` -
 #     no phase in this codebase writes an `index.json` at all yet (the
-#     `render/` docstring in `avg.pipeline.phases._shared.render_dir`
+#     `render/` docstring in `avg.pipeline.phases._common.render_dir`
 #     mentions it only as a FUTURE Render-phase artifact).
 # One row from the task brief's own manual investigation held up exactly as
 # reported: `script/scenes.json` is written only by `script` - `director1`,

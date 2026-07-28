@@ -33,8 +33,13 @@ from dataclasses import dataclass
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._parsing import extract_json_object
-from avg.pipeline.phases._shared import creative_inputs, read_json, script_dir, write_json
+from avg.pipeline.phases._common import (
+    creative_inputs,
+    extract_json_object,
+    read_json,
+    script_dir,
+    write_json,
+)
 from avg.pipeline.prompts import build_director1_prompt
 from avg.providers.text.router import generate as generate_text
 

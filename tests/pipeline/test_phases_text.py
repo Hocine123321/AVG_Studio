@@ -32,7 +32,7 @@ from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases.brief import BriefPhase
 from avg.pipeline.phases.director1 import Director1Phase
 from avg.pipeline.phases.script import ScriptPhase
-from avg.pipeline.phases._shared import read_json, script_dir, write_json
+from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.providers.text.router import TextResult
 
 NARRATION = (

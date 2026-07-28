@@ -54,7 +54,7 @@ from pathlib import Path
 
 from avg.core.models import ProjectDoc
 from avg.core.takes import take_folder
-from avg.pipeline.phases._shared import read_json, strip_delivery_markers
+from avg.pipeline.phases._common import read_json, strip_delivery_markers
 
 _HOW_TO_IMPORT = """How to import this into CapCut
 

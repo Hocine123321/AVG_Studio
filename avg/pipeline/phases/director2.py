@@ -29,7 +29,7 @@ narration.
 per `((question))` marker found in `scenes.json`'s own scene text (ported
 from the legacy `Export-CardPlan`'s question-marker scan of a separate
 `markers.json` this codebase never builds - the markers are read directly
-off the scenes instead, see `avg.pipeline.phases._shared.
+off the scenes instead, see `avg.pipeline.phases._common.
 extract_question_markers`). AI-selected "Explainer" concept cards (the
 legacy app's `Get-AiEditPlan`) are deliberately NOT ported here - a second,
 AI-driven overlay-planning call is a separate, later concern, matching this
@@ -52,9 +52,9 @@ from dataclasses import dataclass
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._parsing import extract_json_object
-from avg.pipeline.phases._shared import (
+from avg.pipeline.phases._common import (
     creative_inputs,
+    extract_json_object,
     extract_question_markers,
     read_json,
     render_dir,

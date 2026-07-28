@@ -49,7 +49,7 @@ from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases import captions as captions_module
-from avg.pipeline.phases._shared import read_json, render_dir, resolve_font_family, script_dir, write_json
+from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, write_json
 from avg.pipeline.phases.captions import CaptionsPhase
 from avg.pipeline.phases.director2 import Director2Phase
 from avg.providers.text.router import TextResult

@@ -54,7 +54,7 @@ from pathlib import Path
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._shared import read_json, script_dir, write_json
+from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.providers.images.base import ImageProvider
 from avg.providers.images.community import (
     HuggingFaceImageProvider,

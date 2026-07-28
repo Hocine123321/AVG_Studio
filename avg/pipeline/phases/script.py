@@ -43,8 +43,14 @@ from dataclasses import dataclass
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._parsing import parse_scene_blocks, strip_code_fence
-from avg.pipeline.phases._shared import creative_inputs, read_json, script_dir, write_json
+from avg.pipeline.phases._common import (
+    creative_inputs,
+    parse_scene_blocks,
+    read_json,
+    script_dir,
+    strip_code_fence,
+    write_json,
+)
 from avg.pipeline.prompts import build_narration_prompt, build_scene_segmentation_prompt
 from avg.providers.text.router import generate as generate_text
 

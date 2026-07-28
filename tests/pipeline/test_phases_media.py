@@ -36,7 +36,7 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
-from avg.pipeline.phases._shared import read_json, script_dir, write_json
+from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.pipeline.phases.visuals import VisualsPhase
 from avg.pipeline.phases.voice import VoicePhase
 
