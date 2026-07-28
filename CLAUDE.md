@@ -65,7 +65,7 @@ web/                  React 19 + Vite + TypeScript, no router (screen union in A
 
 | Concern | Owner |
 |---|---|
-| Phase order | `avg/pipeline/registry.py` (`REGISTRY`) — a second copy existed once and was removed |
+| Phase order | `avg/pipeline/registry.py` (`REGISTRY`) — canonical on the backend; a second Python copy existed once and was removed. **`web/src/phases.ts` still restates all eight keys** and its own docstring admits it mirrors `REGISTRY`. That is live duplication, not a resolved problem: change phase order and both must move together until the frontend reads it from an endpoint |
 | Every user-configurable setting | `avg/core/settings_schema.py` (`SETTINGS`) — the UI renders itself from `GET /api/settings/schema`; adding a setting is one entry, no route or UI change |
 | What an HTTP status/body means | `avg/providers/errors.py` `classify()` — nowhere else greps an error string or branches on a status |
 | What to do about a failure | `avg/providers/errors.py` `POLICY` — a data table keyed by `ErrorKind`, never re-derived |
@@ -88,7 +88,7 @@ Each of these has caused a real defect at least once.
 
 - **No live API calls in tests, ever.** `avg/providers/transport.py` replays recorded fixtures from `tests/fixtures/http/` and raises `UnmatchedRequestError` on anything unmatched — there is structurally no path from replay mode to the network. Recording requires `AVG_HTTP_RECORD=1`. ElevenLabs / image providers cost real money; one paid recording was already lost.
 - **`avg/media/vendor/` is protected.** Byte-for-byte copies of the old render engine, pinned `-text` in `.gitattributes` because `core.autocrlf` silently corrupted the stored blob once while the working file looked fine. Never edit. The only change ever permitted was a 9-line progress hook.
-- **Exactly one terracotta (`#e08a4e`) action per screen.** Terracotta means "happening right now" and nothing else; sage `#aebf92` means settled/finished. Four tasks have had to fix violations.
+- **One terracotta (`#e08a4e`) *primary action* per screen** — `.btn--primary`, the filled one. Terracotta itself is the brand accent and appears freely as identity (links, `:focus-visible` rings, `::selection`, chips); what is scarce is the filled call-to-action. Sage `#aebf92` means settled/finished, and the pulsing halo — never colour alone — marks the live phase. `web/src/tokens.css`'s header is the authority here and says so explicitly ("Amber-means-one-thing is relaxed here on purpose… the accent carries identity as well as 'happening right now'"); the older, stricter "terracotta means happening right now and nothing else" wording in `docs/superpowers/specs/project handoff.md` predates the Organic Night theme and is superseded. Four tasks have had to fix over-use of the filled action.
 - **Never add a Google Fonts `@import`.** Caprasimo and Figtree are self-hosted in `web/public/fonts` so the app works offline and does not ping Google on launch.
 - **Every `SettingSpec` must declare `invalidates`** — a required field with no default, so omitting it fails at import. A test enforces completeness.
 - Tests must not write to the real `%APPDATA%/AVG Studio` — pass the `create_app` path overrides.

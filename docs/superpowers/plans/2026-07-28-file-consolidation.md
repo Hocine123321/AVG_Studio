@@ -39,6 +39,41 @@ L9  shell
 Rule used throughout: a merge is rejected if it would pull an L6+ module
 into anything at L2 or below.
 
+## The other hazard: colliding module-level globals
+
+Layering is not the only thing a merge can break. Sibling modules that do
+the same job tend to define the *same private names* — `_BASE_URL`,
+`_CHAT_URL`, `_MODELS_URL`, `_GENERATE_TIMEOUT_SECONDS`, `_SIZE_BY_RATIO`,
+`_extract_text`. Concatenating them into one module is silent: Python
+rebinds the name, last definition wins, and every method that reads it
+unqualified now resolves to some *other* provider's value at call time. A
+merged Pollinations would build its URL from Stable Horde's API root and
+fail every request, with no import error and no type error to catch it.
+
+So every merge below that combines siblings must, before anything else:
+
+1. **Diff the colliding names.** If two definitions are byte-identical
+   (`_scenes_json_path`, `_coerce_int` in the director pair), define once
+   and say so in the commit.
+2. **If they differ, prefix by provider** — `_GROQ_CHAT_URL`,
+   `_HF_CHAT_URL`, `_POLLINATIONS_BASE_URL`, `_STABLEHORDE_BASE_URL`,
+   `_extract_openai_text` / `_extract_pollinations_text`. Never keep the
+   bare name for "the main one".
+3. **Never merge two tables just because their current values match.**
+   Pollinations' and Stable Horde's `_SIZE_BY_RATIO` are equal today for
+   unrelated reasons (multiples of 8 vs multiples of 64), and a test
+   monkeypatches Stable Horde's via `setitem` — one shared dict would
+   silently mutate both.
+4. **Verify mechanically**, not by eye: parse the merged module and assert
+   no top-level name is defined twice.
+
+```bash
+.venv-build/Scripts/python.exe -c "import ast,sys; ns=[n.name for n in ast.parse(open(sys.argv[1],encoding='utf-8').read()).body if isinstance(n,(ast.ClassDef,ast.FunctionDef))]; d=[x for x in set(ns) if ns.count(x)>1]; print('DUPLICATE:',d) if d else print('ok')" avg/providers/text/community.py
+```
+
+This applies to merges 6, 7 and 8 (images, text, voice) most sharply, and
+to the director pair in merge 5.
+
 ---
 
 ## Merges to perform
@@ -90,6 +125,10 @@ Test files to update: 3.
 Both L5, same importers. Keep the two classes' docstrings verbatim — they
 carry the structure-planning and motion/grade contracts respectively.
 
+**Colliding globals:** `_scenes_json_path` and `_coerce_int` are defined in
+both files and are byte-identical — define once, above both sections, and
+note the dedup in the commit message.
+
 Test files to update: 2 (may overlap with #4 — both are in
 `tests/pipeline/test_phases_text.py` / `test_phases_polish.py`).
 
@@ -103,12 +142,26 @@ All L3; importers are `phases/visuals.py` and tests only. The free/paid
 split is a real distinction here (see the account-state note in CLAUDE.md:
 Pollinations and Stable Horde work, OpenAI and Gemini do not).
 
+**Colliding globals** (see the hazard section above): Pollinations and
+Stable Horde both define `_BASE_URL` with *different* values, and both
+define `_SIZE_BY_RATIO` with values that happen to match today for
+unrelated reasons. Prefix the URLs; keep the two size tables as separate
+objects. Hugging Face and Pollinations share an identical 180s
+`_GENERATE_TIMEOUT_SECONDS` and may share one definition.
+
 Test files to update: 1 (`tests/providers/test_images.py`).
 
 ### 7. `providers/text/{groq,huggingface,pollinations}.py` → `text/community.py`  (−2)
 
 All L3; importers are `router.py` and tests. `base.py`, `gemini.py`,
 `router.py` unchanged.
+
+**Colliding globals:** all three define `_CHAT_URL`, `_MODELS_URL` and the
+same two timeout names, and Groq/Hugging Face define byte-identical
+`_extract_text` functions while Pollinations' differs (it also accepts a
+bare JSON string reply, and its dict path raises where the other returns
+`""`). Prefix the URLs, share the timeouts, share ONE extractor between
+Groq and Hugging Face, and keep Pollinations' as a separate function.
 
 > Note: the original plan justified keeping `gemini.py` separate as "primary
 > provider." It is not — Gemini is at zero free-tier quota and **Groq is the
@@ -120,6 +173,8 @@ Test files to update: 2.
 ### 8. `providers/voice/{edge,elevenlabs}.py` → `voice/providers.py`  (−1)
 
 Both L3; importers are `phases/voice.py` and tests. `base.py` unchanged.
+No global collides between these two (Edge TTS goes through the `edge_tts`
+package rather than `Transport` and defines no URLs), but check anyway.
 
 Test files to update: 1.
 
@@ -223,6 +278,11 @@ Frontend commits additionally:
 ```bash
 cd web && npm run build && npm run lint
 ```
+
+**Duplicate-name check** — the guard against the colliding-globals hazard
+above. Run the one-liner from that section against every merged module; a
+silently rebound `_BASE_URL` produces no import error, no type error and no
+failing test until a request goes to the wrong API.
 
 **Import-order check** — the guard against exactly the cycles this plan
 rejects. A cycle can hide when the test suite always imports the deep
