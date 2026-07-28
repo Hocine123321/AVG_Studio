@@ -70,8 +70,7 @@ from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._shared import script_dir
 from avg.providers.transport import Transport
 from avg.providers.voice.base import VoiceProvider
-from avg.providers.voice.edge import EdgeVoiceProvider
-from avg.providers.voice.elevenlabs import ElevenLabsVoiceProvider
+from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider
 
 # Case/whitespace-tolerant, matching the legacy Convert-VoicePauseMarker regex
 # (`D:\AI_Video_Gen\modules\pipeline.ps1`) - splitting ON this pattern both
