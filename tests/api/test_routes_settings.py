@@ -412,3 +412,35 @@ def test_health_route_reports_a_broken_component_rather_than_failing(client, mon
     ffmpeg = next(c for c in body["components"] if c["name"] == "FFmpeg")
     assert ffmpeg["ok"] is False and "not found" in ffmpeg["detail"]
     health.clear_cache()
+
+
+def test_health_report_runs_all_three_stages_in_order(client):
+    assert client.get("/api/health/report").status_code == 401
+
+    body = client.get("/api/health/report", headers=AUTH).json()
+    # Order is meaningful: each stage assumes the one before it passed, so
+    # the screen must be able to render them exactly as returned.
+    assert [s["key"] for s in body["stages"]] == ["dependencies", "warmup", "safeguards"]
+    assert body["ok"] is all(s["ok"] for s in body["stages"])
+    for stage in body["stages"]:
+        assert stage["checks"], f"{stage['key']} ran no checks"
+        assert stage["ok"] is all(c["ok"] for c in stage["checks"])
+
+
+def test_health_report_checks_the_isolated_paths_not_the_real_profile(client, paths):
+    """The report must read app.state's paths, never resolve its own.
+
+    Otherwise this test would inspect the developer's real %APPDATA% and
+    the report would describe a different installation than the one the
+    window is showing.
+    """
+    body = client.get("/api/health/report", headers=AUTH).json()
+    warmup = next(s for s in body["stages"] if s["key"] == "warmup")
+    settings_check = next(c for c in warmup["checks"] if c["name"] == "Settings document")
+    # A fresh tmp_path settings file has no output root chosen yet - proof
+    # it read the injected path rather than the real one.
+    assert "not chosen yet" in settings_check["detail"]
+
+    safeguards = next(s for s in body["stages"] if s["key"] == "safeguards")
+    writable = next(c for c in safeguards["checks"] if c["name"] == "Library folder writable")
+    assert str(paths["output_root"]) in writable["detail"]

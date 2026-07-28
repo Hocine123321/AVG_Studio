@@ -9,6 +9,7 @@ import {
   type ProjectsResponse,
   type SettingsDoc,
 } from "./api";
+import AppHealth from "./AppHealth";
 import Channels from "./Channels";
 import Create from "./Create";
 import Home from "./Home";
@@ -26,7 +27,8 @@ type Screen =
   | { name: "project"; id: string }
   | { name: "create" }
   | { name: "channels" }
-  | { name: "settings" };
+  | { name: "settings" }
+  | { name: "health" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -236,6 +238,8 @@ export default function App() {
       );
     } else if (screen.name === "settings") {
       content = <Settings />;
+    } else if (screen.name === "health") {
+      content = <AppHealth />;
     } else if (screen.name === "channels") {
       content = <Channels />;
     } else {
@@ -264,12 +268,15 @@ export default function App() {
                 ? "channels"
                 : screen.name === "settings"
                   ? "settings"
-                  : "home"
+                  : screen.name === "health"
+                    ? "health"
+                    : "home"
         }
         onHome={() => setScreen({ name: "home" })}
         onCreate={() => setScreen({ name: "create" })}
         onChannels={() => setScreen({ name: "channels" })}
         onSettings={() => setScreen({ name: "settings" })}
+        onHealth={() => setScreen({ name: "health" })}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

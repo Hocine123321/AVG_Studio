@@ -137,3 +137,13 @@ export function IconFrame({ size = 26 }: IconProps) {
     </svg>
   );
 }
+
+/** App health: a heartbeat trace. Reads as "is this thing alive", which is
+ * exactly what that screen answers. */
+export function IconPulse({ size = 21 }: IconProps) {
+  return (
+    <svg width={size} height={size} {...base} aria-hidden="true">
+      <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />
+    </svg>
+  );
+}

@@ -226,6 +226,26 @@ export function getHealth(refresh = false): Promise<HealthResponse> {
   return apiGet<HealthResponse>(`/api/health${refresh ? "?refresh=true" : ""}`);
 }
 
+/** One stage of the App Health pipeline. The order the backend returns them
+ * in is meaningful - each stage assumes the one before it passed - so the
+ * screen must not sort or regroup these. */
+export interface HealthStage {
+  key: string;
+  name: string;
+  detail: string;
+  ok: boolean;
+  checks: HealthComponent[];
+}
+
+export interface HealthReport {
+  ok: boolean;
+  stages: HealthStage[];
+}
+
+export function getHealthReport(refresh = false): Promise<HealthReport> {
+  return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
+}
+
 // ---- cost table ----
 
 /** `GET /api/costs`. Served rather than hardcoded here on purpose: these

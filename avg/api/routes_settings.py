@@ -142,6 +142,43 @@ async def get_health(refresh: bool = False) -> dict:
     }
 
 
+@router.get("/api/health/report")
+async def get_health_report(request: Request, refresh: bool = False) -> dict:
+    """The three-stage startup report behind the App Health screen.
+
+    Dependency check -> App warmup -> Safeguards, in that order, because
+    each stage assumes the one before it passed and "which stage failed" is
+    the whole diagnosis when a launch goes wrong.
+
+    Paths come from `app.state`, never resolved inside `avg.core.health`, so
+    a test's isolated tmp_path is what gets checked rather than the real
+    `%APPDATA%`.
+    """
+    app_state = request.app.state
+    stages = health.report(
+        refresh=refresh,
+        settings_path=app_state.settings_path,
+        channels_dir=app_state.channels_dir,
+        output_root=app_state.output_root,
+    )
+    return {
+        "ok": all(stage.ok for stage in stages),
+        "stages": [
+            {
+                "key": stage.key,
+                "name": stage.name,
+                "detail": stage.detail,
+                "ok": stage.ok,
+                "checks": [
+                    {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail}
+                    for c in stage.checks
+                ],
+            }
+            for stage in stages
+        ],
+    }
+
+
 @router.get("/api/costs")
 async def get_costs() -> dict:
     """The maintained cost table, served rather than restated in the UI.

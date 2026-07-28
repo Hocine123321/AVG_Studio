@@ -1,7 +1,7 @@
-import { IconChannels, IconFilm, IconGrid, IconMoon, IconPlus, IconSliders, IconSun } from "./Icons";
+import { IconChannels, IconFilm, IconGrid, IconMoon, IconPlus, IconPulse, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
-export type RailSection = "home" | "studio" | "create" | "channels" | "settings";
+export type RailSection = "home" | "studio" | "create" | "channels" | "settings" | "health";
 
 export interface RailProps {
   /** Which section is showing right now. The amber marker names "where you
@@ -13,6 +13,7 @@ export interface RailProps {
   onCreate: () => void;
   onChannels: () => void;
   onSettings: () => void;
+  onHealth: () => void;
   /** Owned by `App.tsx` (not this component) so the same choice also
    * applies to the welcome screens, which render before Rail ever mounts. */
   theme: Theme;
@@ -32,7 +33,16 @@ export interface RailProps {
  * here — the "+" button is no longer disabled. Settings (Slice 2 Task 4)
  * is likewise a real screen, reachable here.
  */
-export default function Rail({ active, onHome, onCreate, onChannels, onSettings, theme, onToggleTheme }: RailProps) {
+export default function Rail({
+  active,
+  onHome,
+  onCreate,
+  onChannels,
+  onSettings,
+  onHealth,
+  theme,
+  onToggleTheme,
+}: RailProps) {
   const night = theme === "night";
 
   return (
@@ -78,6 +88,17 @@ export default function Rail({ active, onHome, onCreate, onChannels, onSettings,
         aria-current={active === "channels" ? "page" : undefined}
       >
         <IconChannels />
+      </button>
+
+      <button
+        type="button"
+        className={`rail__item${active === "health" ? " rail__item--on" : ""}`}
+        onClick={onHealth}
+        title="App health"
+        aria-label="App health"
+        aria-current={active === "health" ? "page" : undefined}
+      >
+        <IconPulse />
       </button>
 
       {/* A compact quick-toggle, not a full 48px rail item: switching theme

@@ -2821,3 +2821,110 @@ a:hover {
     transition: none;
   }
 }
+
+/* ---- App health ----
+   Three stages, read top to bottom. The number is not decoration: each stage
+   assumes the one before it passed, so the order is the diagnosis. */
+
+.health-stages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.health-stage {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 18px 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+.health-stage--bad {
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent);
+}
+
+.health-stage__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.health-stage__num {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--font-heading);
+  font-size: 14px;
+}
+
+.health-stage--bad .health-stage__num {
+  background: var(--bad-deep);
+  color: var(--bad);
+}
+
+.health-stage__title {
+  font-size: 18px;
+  margin: 0;
+}
+
+.health-stage__detail {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.health-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.health-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.health-check__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.health-check__dot--ok {
+  background: var(--sage);
+}
+
+.health-check__dot--bad {
+  background: var(--bad);
+}
+
+.health-check__name {
+  min-width: 12ch;
+}
+
+.health-check__version {
+  color: var(--muted);
+}
+
+/* The one column that can carry a long path or an exception message. */
+.health-check__detail {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
