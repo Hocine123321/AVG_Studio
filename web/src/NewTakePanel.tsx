@@ -55,6 +55,12 @@ export interface NewTakePanelProps {
    * slide-over (see this file's own header comment), and supplies the
    * baseline value for every field a user hasn't touched yet. */
   branchFromTake: Take;
+  /** Pre-selects the re-roll picker. Set when the panel was opened from a
+   * phase row's "Run again" rather than from the take strip's "New take" -
+   * the user has already named the phase they mean, and being made to pick
+   * it again from a dropdown would be asking twice. Must be a backend
+   * phase key; see `phases.ts`. */
+  initialRerollFrom?: string | null;
   onClose: () => void;
   onCreated: (take: Take) => void;
 }
@@ -73,7 +79,13 @@ export interface NewTakePanelProps {
  * One terracotta action here: *Create take*. Everything else (the re-roll
  * picker, every field, Cancel) is deliberately unaccented.
  */
-export default function NewTakePanel({ projectId, branchFromTake, onClose, onCreated }: NewTakePanelProps) {
+export default function NewTakePanel({
+  projectId,
+  branchFromTake,
+  initialRerollFrom = null,
+  onClose,
+  onCreated,
+}: NewTakePanelProps) {
   const [schema, setSchema] = useState<SettingSpec[] | null>(null);
   const [channelValues, setChannelValues] = useState<Record<string, unknown>>({});
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -81,7 +93,7 @@ export default function NewTakePanel({ projectId, branchFromTake, onClose, onCre
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [overrides, setOverrides] = useState<Record<string, unknown>>({});
-  const [rerollFrom, setRerollFrom] = useState<string | null>(null);
+  const [rerollFrom, setRerollFrom] = useState<string | null>(initialRerollFrom);
 
   const [preview, setPreview] = useState<TakePreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -245,8 +257,12 @@ export default function NewTakePanel({ projectId, branchFromTake, onClose, onCre
               ))}
             </select>
             <p className="field-row__help">
-              Re-run one phase with nothing else changed — for when a result was weak and deserves another
-              roll.
+              {/* Says what the route actually does. `reroll_from` is a START
+                  phase: `_build_plan` keeps everything before it and re-runs
+                  it and everything after. The old wording here promised one
+                  phase in isolation, which nothing implements. */}
+              Re-run this phase and everything after it, with nothing else changed — for when a result
+              was weak and deserves another roll.
             </p>
           </section>
 

@@ -340,6 +340,11 @@ export default function Studio({
   // `TakeStrip.tsx`'s `resolveStatus`).
   const [runningTakeId, setRunningTakeId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  // Which phase the new-take panel should open pre-set to re-roll from.
+  // `null` when the panel was opened from the take strip instead - always a
+  // backend phase key, never a Script display leaf, since the route 400s on
+  // anything outside `REGISTRY` (see `phases.ts`).
+  const [rerollTarget, setRerollTarget] = useState<string | null>(null);
   // The maintained cost table. Fetched once; a failure just hides the spend
   // chip rather than taking the screen down with it.
   const [costTable, setCostTable] = useState<CostTable | null>(null);
@@ -497,7 +502,10 @@ export default function Studio({
         onSelect={setSelectedTakeId}
         onDelete={handleDeleteTake}
         onRename={handleRenameTake}
-        onNewTake={() => setPanelOpen(true)}
+        onNewTake={() => {
+          setRerollTarget(null);
+          setPanelOpen(true);
+        }}
       />
 
       {takesError && (
@@ -558,6 +566,30 @@ export default function Studio({
           <div className="artifact-panel__head">
             <h2 className="artifact-panel__title">{label}</h2>
             <span className={statusChipClass(selectedStatus)}>{statusLabel(selectedStatus)}</span>
+            <span className="home__spacer" />
+            {/* The mockup's per-phase "Run again". It opens the new-take
+                panel with this phase pre-picked rather than adding a second
+                mechanism: `reroll_from` already re-runs the chosen phase and
+                everything downstream, in a new take, so the only thing
+                missing was a way to say it from the phase you are looking
+                at. Unaccented - the panel's own Create take is the
+                terracotta action once it opens. */}
+            <button
+              type="button"
+              className="btn"
+              disabled={isRunning || !selectedTake}
+              title={
+                isRunning
+                  ? "A job is already running"
+                  : `Re-run ${label} and everything after it, in a new take`
+              }
+              onClick={() => {
+                setRerollTarget(selected);
+                setPanelOpen(true);
+              }}
+            >
+              Run again
+            </button>
           </div>
           {selectedDef?.sub && (
             <div className="subphase" aria-label="Script sub-phases">
@@ -594,7 +626,11 @@ export default function Studio({
         <NewTakePanel
           projectId={project.id}
           branchFromTake={selectedTake}
-          onClose={() => setPanelOpen(false)}
+          initialRerollFrom={rerollTarget}
+          onClose={() => {
+            setPanelOpen(false);
+            setRerollTarget(null);
+          }}
           onCreated={handleTakeCreated}
         />
       )}
