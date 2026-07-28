@@ -7,6 +7,7 @@ against the schema, delegate to `avg.config.settings` / `avg.config.channels`
 stack - those modules already refuse to have one (see their docstrings)
 and this router does not reintroduce one at the HTTP layer.
 
+    GET    /api/costs                    -> the maintained cost table
     GET    /api/settings/schema           -> the catalogue
     GET    /api/settings/values           -> app values + the active channel's values
     POST   /api/settings/values           -> save; app-scope -> settings.json,
@@ -39,6 +40,7 @@ from pydantic import BaseModel
 from avg.config import channels as channels_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
+from avg.core import costs
 from avg.core.settings_schema import (
     KEY_PROVIDER_IDS,
     SETTINGS,
@@ -118,6 +120,26 @@ def _values_payload(app_state: Any) -> dict[str, Any]:
 @router.get("/api/settings/schema")
 async def get_settings_schema() -> dict:
     return {"settings": [s.model_dump() for s in SETTINGS]}
+
+
+@router.get("/api/costs")
+async def get_costs() -> dict:
+    """The maintained cost table, served rather than restated in the UI.
+
+    `web/src/phases.ts` is already a hand-kept copy of the phase order that
+    `avg.pipeline.registry` exists to be the only copy of; a second
+    hardcoded cost table in TypeScript would be the same mistake with money
+    attached. The frontend sums these against the phase statuses it already
+    has. See `avg.core.costs` - every figure is a maintained estimate, not
+    metered spend, and the UI must say so.
+    """
+    return {
+        "currency": costs.CURRENCY,
+        "leaf_cost": costs.LEAF_COST,
+        "phase_leaves": {key: list(leaves) for key, leaves in costs.PHASE_LEAVES.items()},
+        "length_multiplier": costs.LENGTH_MULTIPLIER,
+        "base_cost": costs.base_cost(),
+    }
 
 
 @router.get("/api/settings/values")

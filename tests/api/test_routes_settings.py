@@ -358,3 +358,19 @@ class TestNoRouteEverLeaksAKeyValue:
             assert SECRET_VALUE.encode("utf-8") not in channel_file.read_bytes()
         if paths["settings_path"].exists():
             assert SECRET_VALUE.encode("utf-8") not in paths["settings_path"].read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/costs (Slice 6B)
+
+
+def test_costs_route_serves_the_table_and_needs_a_token(client):
+    assert client.get("/api/costs").status_code == 401
+
+    body = client.get("/api/costs", headers=AUTH).json()
+    assert body["currency"] == "USD"
+    assert body["base_cost"] == sum(body["leaf_cost"].values())
+    # The phase -> leaf map is what lets the UI charge a partial Script for
+    # its draft only; without it the frontend would need its own copy.
+    assert body["phase_leaves"]["script"] == ["draft", "segmentation"]
+    assert set(body["length_multiplier"]) >= {"30s", "60s", "8m"}
