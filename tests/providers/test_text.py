@@ -52,9 +52,7 @@ import pytest
 from avg.core.errors import AvgError, ErrorKind
 from avg.providers import models as models_module
 from avg.providers.text.gemini import GeminiBackend
-from avg.providers.text.groq import GroqBackend
-from avg.providers.text.huggingface import HuggingFaceBackend
-from avg.providers.text.pollinations import PollinationsBackend
+from avg.providers.text.community import GroqBackend, HuggingFaceBackend, PollinationsBackend
 from avg.providers.transport import DEFAULT_FIXTURES_DIR, Transport
 
 
@@ -100,14 +98,14 @@ PROMPT_OK = "Reply with the single word: ok"
 
 
 def test_groq_generate_happy_path(monkeypatch):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     backend = GroqBackend(transport=_replay_transport())
     text = backend.generate(PROMPT_OK, "llama-3.3-70b-versatile", max_tokens=8, temperature=0.7)
     assert text == "ok"
 
 
 def test_groq_generate_auth_failure_raises_auth(monkeypatch):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     backend = GroqBackend(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         backend.generate(
@@ -117,7 +115,7 @@ def test_groq_generate_auth_failure_raises_auth(monkeypatch):
 
 
 def test_groq_generate_rate_limited_raises_rate_limit(monkeypatch):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     backend = GroqBackend(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         backend.generate(
@@ -130,7 +128,7 @@ def test_groq_generate_rate_limited_raises_rate_limit(monkeypatch):
 
 
 def test_groq_generate_without_key_raises_auth_and_never_reaches_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: None)
     backend = GroqBackend(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         backend.generate(PROMPT_OK, "llama-3.3-70b-versatile")
@@ -138,7 +136,7 @@ def test_groq_generate_without_key_raises_auth_and_never_reaches_transport(monke
 
 
 def test_groq_list_models_happy_path(monkeypatch):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     backend = GroqBackend(transport=_replay_transport())
     models = backend.list_models()
     assert models, "expected a non-empty live model list"
@@ -146,7 +144,7 @@ def test_groq_list_models_happy_path(monkeypatch):
 
 
 def test_groq_list_models_falls_back_to_cache_when_api_unreachable(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     cache_path = tmp_path / "model_cache.json"
     cache_path.write_text(json.dumps({"groq": ["cached-llama-a", "cached-llama-b"]}), encoding="utf-8")
     empty_fixtures = tmp_path / "empty_fixtures"
@@ -227,7 +225,7 @@ def test_huggingface_list_models_happy_path():
 
 
 def test_huggingface_generate_unsupported_model_raises_bug(monkeypatch):
-    monkeypatch.setattr("avg.providers.text.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     backend = HuggingFaceBackend(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         backend.generate(PROMPT_OK, "meta-llama/Meta-Llama-3-8B-Instruct", max_tokens=8, temperature=0.7)
@@ -240,7 +238,7 @@ def test_huggingface_generate_unsupported_model_raises_bug(monkeypatch):
 
 
 def test_huggingface_generate_happy_path_mocked(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.text.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
@@ -251,7 +249,7 @@ def test_huggingface_generate_happy_path_mocked(monkeypatch, tmp_path):
 
 
 def test_huggingface_generate_without_key_raises_auth_and_never_reaches_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.text.huggingface.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: None)
     backend = HuggingFaceBackend(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         backend.generate(PROMPT_OK, "some/model")
@@ -295,7 +293,7 @@ def test_pollinations_generate_bare_string_response(tmp_path):
 def test_pollinations_generate_works_without_a_key(monkeypatch, tmp_path):
     # The one backend where a missing key is NOT ErrorKind.auth - keyless
     # is Pollinations' primary, intended mode.
-    monkeypatch.setattr("avg.providers.text.pollinations.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: None)
     seen_headers: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

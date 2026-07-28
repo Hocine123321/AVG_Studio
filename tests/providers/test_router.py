@@ -34,9 +34,8 @@ def _fixture_keys(monkeypatch):
     """Every backend the router can construct sees a fixture-only fake key -
     matches test_text.py's approach; the literal value never affects
     fixture matching (headers are excluded from the match key)."""
-    monkeypatch.setattr("avg.providers.text.groq.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.text.community.get_key", lambda _p: "fixture-test-key")
     monkeypatch.setattr("avg.providers.text.gemini.get_key", lambda _p: "fixture-test-key")
-    monkeypatch.setattr("avg.providers.text.huggingface.get_key", lambda _p: "fixture-test-key")
 
 
 def test_generate_uses_phase_primary_when_configured():

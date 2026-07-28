@@ -45,9 +45,7 @@ from avg.core.errors import AvgError
 from avg.providers.errors import POLICY
 from avg.providers.text.base import TextBackend
 from avg.providers.text.gemini import GeminiBackend
-from avg.providers.text.groq import GroqBackend
-from avg.providers.text.huggingface import HuggingFaceBackend
-from avg.providers.text.pollinations import PollinationsBackend
+from avg.providers.text.community import GroqBackend, HuggingFaceBackend, PollinationsBackend
 from avg.providers.transport import Transport
 
 
