@@ -24,7 +24,7 @@ module provides a way to set it to an arbitrary take on a whim.
 `master_output.mp4` from its source take, regardless of `keep_phase_keys` -
 a failed render must not inherit the previous take's video and look
 successful, the same invariant `avg.media.engine.MediaEngine`/
-`avg.media.workspace.render_workspace` already carry for the same reason.
+`avg.media.environment.render_workspace` already carry for the same reason.
 
 **Register only after the copy succeeds.** If copying a kept phase's
 artifacts fails part-way (disk full, a permissions error, anything), the

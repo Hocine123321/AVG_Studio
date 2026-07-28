@@ -5,7 +5,7 @@ function anywhere in this codebase allowed to write `project.json`.
 
 `new_project` is the only entry point for creating a project. It creates the
 project's folder on disk - including the input sub-folders the rest of this
-app already expects a project to have (`avg.media.workspace.render_workspace`'s
+app already expects a project to have (`avg.media.environment.render_workspace`'s
 `_INPUT_DIRS`: `images/`, `audio/`, `render/`, `script/`) - and returns a
 `ProjectDoc` with an empty `phases` dict, i.e. every phase `'pending'`.
 `save_project` (below) is what actually persists it, and every later mutation
@@ -36,7 +36,7 @@ from avg.core.models import ProjectDoc
 from avg.core.settings_schema import channel_defaults
 
 # Sub-folders a fresh project needs before any phase can run, matching what
-# `avg.media.workspace.render_workspace` already copies out of an existing
+# `avg.media.environment.render_workspace` already copies out of an existing
 # project (`_INPUT_DIRS`) - a new project must look the same shape from day
 # one rather than growing folders ad hoc as each phase first writes to one.
 _PROJECT_DIRS: tuple[str, ...] = ("script", "images", "audio", "render")

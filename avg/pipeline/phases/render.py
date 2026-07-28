@@ -14,7 +14,7 @@ lets the pipeline reach that existing capability, nothing more.
 It renders **in place**, unlike the `/api/projects/{id}/render` route. That
 route re-renders a project the user already has, so it works on a disposable
 copy to avoid destroying the finished video they are comparing against
-(`avg.media.workspace`). Here the project is being made for the first time -
+(`avg.media.environment`). Here the project is being made for the first time -
 there is no earlier output to protect, and `master_output.mp4` belongs in the
 project folder, which is exactly where the engine writes it.
 """

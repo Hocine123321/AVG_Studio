@@ -48,7 +48,7 @@ from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
-from avg.media.workspace import render_workspace
+from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.runner import run as run_pipeline

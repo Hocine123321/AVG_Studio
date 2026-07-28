@@ -43,7 +43,7 @@ import webview
 
 from avg.api.app import create_app
 from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings
-from avg.media.ffmpeg_locate import prepend_to_path
+from avg.media.environment import prepend_to_path
 
 HOST = "127.0.0.1"
 
@@ -187,7 +187,7 @@ def main() -> None:
     # clean target machine has neither on PATH. This must run before
     # anything shells out - including a render child process, which
     # inherits this modified PATH from the environment at the time it is
-    # spawned. No-op in development. See avg.media.ffmpeg_locate.
+    # spawned. No-op in development. See avg.media.environment.
     prepend_to_path()
 
     port = pick_port()
