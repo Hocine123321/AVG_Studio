@@ -53,6 +53,19 @@ avg/core/             models, events, errors, settings catalogue, takes, invalid
 web/                  React 19 + Vite + TypeScript, no router (screen union in App.tsx)
 ```
 
+Providers and phases are grouped, not one file per implementation — a file
+consolidation landed 2026-07-28. Backends live in `providers/text/community.py`
+(Groq, Hugging Face, Pollinations), `providers/images/community.py` (the free
+three) and `providers/images/premium.py` (Gemini, OpenAI), `providers/voice/
+providers.py`; phases in `pipeline/phases/writing.py` (brief, script) and
+`pipeline/phases/director.py` (I and II). **Every document written before
+that date names the old per-implementation paths** — see the translation
+table in `docs/superpowers/specs/2026-07-28-slice-6-handoff.md`. Before
+merging any two modules again, read the "colliding module-level globals"
+section of `docs/superpowers/plans/2026-07-28-file-consolidation.md`: sibling
+modules define the same private names, Python rebinds silently, and no test
+catches it.
+
 **Nothing below `avg/api/` may print or prompt.** Lower layers emit typed Pydantic events (`avg/core/events.py`); the API layer decides what reaches the user, as an HTTP response or a `/ws/events` WebSocket message. This replaced 914 `Write-Host` calls.
 
 **Generators of typed events** are the app's one concurrency pattern. `MediaEngine.render()` and `pipeline.runner.run()` are both generators; `create_app`'s background-thread workers drain them and broadcast each event. Wiring a new long job in means writing another generator, not a new mechanism. A drain loop is never broken out of early — that is what guarantees the child process gets joined.
@@ -97,11 +110,11 @@ Each of these has caused a real defect at least once.
 
 Every slice: brainstorm → spec → plan → subagent-driven execution, using the `superpowers` skills. One fresh subagent per task, checkpoint reviews, one commit per task. Speed over ceremony: no per-step RED/GREEN, no frontend unit tests, Python tests kept.
 
-- `docs/superpowers/specs/` and `docs/superpowers/plans/` — the design and plan per slice. `docs/superpowers/specs/project handoff.md` is the cold-start brief.
+- `docs/superpowers/specs/` and `docs/superpowers/plans/` — the design and plan per slice. **`docs/superpowers/specs/2026-07-28-slice-6-handoff.md` is the current cold-start brief**; the Slice 1–5 plans are historical and name pre-consolidation module paths.
 - `.superpowers/sdd/progress.md` — the running ledger of every decision and defect found. Sessions have died mid-slice six times; **that file plus `git log` is what makes resuming possible. Trust it over recollection.**
 - `docs/decisions/` — packaging and other standing decisions.
 
-All slices have continued on `main`/`slice-1` lineage. Slices 1–5 are done (installer, config, providers, 8-phase pipeline, takes + CapCut export). Slice 6 is the six features from the user-supplied mockup; two of them (cost tracking, the `partial` phase state) still need design decisions.
+Slices 1–5 are done (installer, config, providers, 8-phase pipeline, takes + CapCut export), 537 tests passing. Slice 6 is the six features from the user-supplied mockup; two of them (cost tracking, the `partial` phase state) still need design decisions, and the restyle is blocked on one unanswered question (shadows or no shadows — the current app deliberately has none).
 
 ## Account state (affects what you can actually exercise)
 
