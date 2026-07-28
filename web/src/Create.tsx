@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Select from "./Select";
 import {
   createProject,
   getChannels,
@@ -167,18 +168,12 @@ export default function Create({
           return (
             <label key={id} className={`create-chip${isOverridden(id) ? " create-chip--dirty" : ""}`}>
               <span className="create-chip__label">{CHIP_LABELS[id] ?? spec.label}</span>
-              <select
-                className="create-chip__select"
-                aria-label={`${CHIP_LABELS[id] ?? spec.label} for this video`}
+              <Select
                 value={valueFor(id)}
-                onChange={(e) => setOverrides((o) => ({ ...o, [id]: e.target.value }))}
-              >
-                {spec.choices.map((choice) => (
-                  <option key={choice} value={choice}>
-                    {choice}
-                  </option>
-                ))}
-              </select>
+                options={spec.choices}
+                ariaLabel={`${CHIP_LABELS[id] ?? spec.label} for this video`}
+                onChange={(next) => setOverrides((o) => ({ ...o, [id]: next }))}
+              />
             </label>
           );
         })}

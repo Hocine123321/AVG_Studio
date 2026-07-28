@@ -80,9 +80,13 @@ export default function Rail({ active, onHome, onCreate, onChannels, onSettings,
         <IconChannels />
       </button>
 
+      {/* A compact quick-toggle, not a full 48px rail item: switching theme
+          is a preference flip, not navigation, and giving it the same weight
+          as Library/Settings overstated it. Half height, same width, so it
+          still lines up with the column. */}
       <button
         type="button"
-        className="rail__item"
+        className="rail__item rail__item--mini"
         onClick={onToggleTheme}
         title={night ? "Switch to day" : "Switch to night"}
         aria-label={night ? "Switch to day" : "Switch to night"}

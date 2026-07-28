@@ -9,6 +9,8 @@
  * header, whatever) this is the only file that has to change.
  */
 
+import { beginActivity, labelForRequest } from "./activity";
+
 const TOKEN = new URLSearchParams(location.search).get("token") ?? "";
 
 /** The token this session was opened with, for callers that need it directly (e.g. the `/ws/events` query param). */
@@ -18,14 +20,23 @@ export function getToken(): string {
 
 async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
   const hasBody = body !== undefined;
-  const res = await fetch(path, {
-    method,
-    headers: {
-      "X-AVG-Token": TOKEN,
-      ...(hasBody ? { "Content-Type": "application/json" } : {}),
-    },
-    body: hasBody ? JSON.stringify(body) : undefined,
-  });
+  // Registered here, in the ONE wrapper every call goes through, so the
+  // global status bar can never be missing a request that is genuinely in
+  // flight - and so no screen has to remember to report its own.
+  const endActivity = beginActivity(labelForRequest(method, path));
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: {
+        "X-AVG-Token": TOKEN,
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+      },
+      body: hasBody ? JSON.stringify(body) : undefined,
+    });
+  } finally {
+    endActivity();
+  }
 
   if (!res.ok) {
     let detail = "";

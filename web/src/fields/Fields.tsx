@@ -1,5 +1,6 @@
 import type { FieldProps } from "./types";
 import { DeferredInput } from "./DeferredInput";
+import Select from "../Select";
 
 /**
  * The six ordinary field renderers, one per `SettingSpec.type` that isn't
@@ -42,24 +43,20 @@ export function BoolField({ spec, ctx, disabled }: FieldProps) {
 
 // ── Choice Field ────────────────────────────────────────────
 
-/** A closed set of options - a native `<select>`, since the app has no
- * form-widget library and this is a solved problem without one. */
+/** A closed set of options. Uses the app's own `Select` rather than a native
+ * `<select>`: the native dropdown list is drawn by Windows and cannot be
+ * styled, so it opened in OS grey with square corners in the middle of a
+ * warm, rounded interface. See `Select.tsx`. */
 export function ChoiceField({ spec, ctx, disabled }: FieldProps) {
   const value = String(ctx.getValue(spec) ?? "");
   return (
-    <select
-      className="field-select"
-      aria-label={spec.label}
+    <Select
       value={value}
+      options={spec.choices ?? []}
       disabled={disabled}
-      onChange={(e) => ctx.onCommit(spec, e.target.value)}
-    >
-      {(spec.choices ?? []).map((choice) => (
-        <option key={choice} value={choice}>
-          {choice}
-        </option>
-      ))}
-    </select>
+      ariaLabel={spec.label}
+      onChange={(next) => ctx.onCommit(spec, next)}
+    />
   );
 }
 

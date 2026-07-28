@@ -15,6 +15,7 @@ import Home from "./Home";
 import Rail from "./Rail";
 import Settings from "./Settings";
 import Studio from "./Studio";
+import StatusBar from "./StatusBar";
 import Transport from "./Transport";
 import Welcome from "./Welcome";
 import { useTheme } from "./theme";
@@ -273,8 +274,14 @@ export default function App() {
         onToggleTheme={toggleTheme}
       />
       <div className="app-shell__main">
-        <div className="app-shell__content">{content}</div>
+        {/* `key` on the screen name, not the content: remounting on a route
+            change is what lets the enter transition actually run each time
+            rather than only on first paint. */}
+        <div className="app-shell__content screen-enter" key={screen.name}>
+          {content}
+        </div>
         <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
+        <StatusBar connected={events.connected} />
       </div>
     </div>
   );

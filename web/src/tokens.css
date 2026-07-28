@@ -2608,3 +2608,216 @@ a:hover {
   text-overflow: ellipsis;
   color: var(--muted);
 }
+
+/* ---- compact theme quick-toggle ----
+   A preference flip, not a destination. Half the height of a rail item so it
+   reads as secondary, same width so the rail column stays aligned. */
+
+.rail__item--mini {
+  height: 28px;
+  border-radius: 10px;
+  color: var(--dim);
+}
+
+.rail__item--mini svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- custom select (Select.tsx) ----
+   Replaces the native <select>, whose popup Windows draws itself and which
+   therefore ignored every token in this file. */
+
+.sel {
+  position: relative;
+  min-width: 0;
+}
+
+.sel__button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+
+.sel__button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.sel__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sel__value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A caret drawn in CSS rather than an icon import - it is two borders. */
+.sel__caret {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.18s;
+}
+
+.sel--open .sel__caret {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.sel__list {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 5px);
+  /* Right-aligned and sized to its content, not stretched to the button.
+     The trigger is often narrow (a settings row's right column), and a list
+     clamped to it truncated every option to "bala…". Capped so a long value
+     cannot run off the panel. */
+  right: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: 280px;
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  animation: sel-in 0.13s ease-out;
+}
+
+@keyframes sel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.sel__option {
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Keyboard and mouse share one "active" row, so arrowing and hovering never
+   disagree about which option is about to be chosen. */
+.sel__option--active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.sel__option--on {
+  color: var(--sage);
+}
+
+/* ---- global status bar (StatusBar.tsx) ---- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 var(--pad);
+  height: 26px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--dim);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.statusbar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: background 0.2s;
+}
+
+.statusbar--busy .statusbar__dot {
+  background: var(--accent);
+}
+
+.statusbar--busy .statusbar__label {
+  color: var(--muted);
+}
+
+.statusbar__clock {
+  color: var(--muted);
+}
+
+.statusbar__more {
+  margin-left: auto;
+}
+
+/* ---- transitions ----
+   Deliberately small and fast. A desktop tool should feel immediate; these
+   exist to stop panels appearing from nowhere, not to be noticed. Anyone who
+   has asked the OS for less motion gets none of it. */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.screen-enter {
+  animation: rise-in 0.18s ease-out;
+}
+
+.take-panel,
+.modal,
+.popup {
+  animation: rise-in 0.16s ease-out;
+}
+
+.studio__banner {
+  animation: fade-in 0.16s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter,
+  .take-panel,
+  .modal,
+  .popup,
+  .studio__banner,
+  .sel__list {
+    animation: none;
+  }
+
+  .project-card,
+  .sel__caret {
+    transition: none;
+  }
+}

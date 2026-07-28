@@ -12,6 +12,7 @@ import {
 import SettingsGroup from "./SettingsGroup";
 import type { SettingsCtx } from "./fields/types";
 import { PHASE_ORDER } from "./phases";
+import Select from "./Select";
 
 /** Nicer display names for the handful of groups a per-video override can
  * ever land in - `scope="channel"` settings only span these six (see
@@ -241,21 +242,15 @@ export default function NewTakePanel({
             <label className="lbl" htmlFor="take-panel-reroll">
               Re-roll a phase
             </label>
-            <select
+            {/* PHASE_ORDER intentionally excludes the display-only Draft /
+                Segmentation leaves: the backend accepts only REGISTRY keys. */}
+            <Select
               id="take-panel-reroll"
-              className="field-select"
               value={rerollFrom ?? ""}
-              onChange={(e) => setRerollFrom(e.target.value || null)}
-            >
-              <option value="">No re-roll</option>
-              {/* PHASE_ORDER intentionally excludes the display-only Draft /
-                  Segmentation leaves: the backend accepts only REGISTRY keys. */}
-              {PHASE_ORDER.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+              options={[{ value: "", label: "No re-roll" }, ...PHASE_ORDER.map((p) => ({ value: p.key, label: p.label }))]}
+              onChange={(next) => setRerollFrom(next || null)}
+              ariaLabel="Re-roll a phase"
+            />
             <p className="field-row__help">
               {/* Says what the route actually does. `reroll_from` is a START
                   phase: `_build_plan` keeps everything before it and re-runs
