@@ -66,14 +66,16 @@ import base64
 import httpx
 import pytest
 
-import avg.providers.images.stablehorde as stablehorde_module
+import avg.providers.images.community as images_community
 from avg.core.errors import AvgError, ErrorKind
 from avg.providers.errors import POLICY
-from avg.providers.images.gemini import GeminiImageProvider
-from avg.providers.images.huggingface import HuggingFaceImageProvider
-from avg.providers.images.openai import OpenAIImageProvider, _size_for as openai_size_for
-from avg.providers.images.pollinations import PollinationsImageProvider, _normalize_model
-from avg.providers.images.stablehorde import StableHordeImageProvider
+from avg.providers.images.community import (
+    HuggingFaceImageProvider,
+    PollinationsImageProvider,
+    StableHordeImageProvider,
+    _normalize_model,
+)
+from avg.providers.images.premium import GeminiImageProvider, OpenAIImageProvider, _size_for as openai_size_for
 from avg.providers.transport import DEFAULT_FIXTURES_DIR, Transport
 
 PROMPT_APPLE = "a small red apple on a white background, simple illustration"
@@ -121,7 +123,7 @@ def _mock_record_transport(tmp_path, handler, *, sleep=lambda _seconds: None) ->
 
 
 def test_openai_generate_auth_failure_real_fixture(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.openai.get_key", lambda _p: "sk-deliberately-invalid-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "sk-deliberately-invalid-test-key")
     provider = OpenAIImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gpt-image-1")
@@ -129,7 +131,7 @@ def test_openai_generate_auth_failure_real_fixture(monkeypatch):
 
 
 def test_openai_generate_without_key_raises_auth_and_never_reaches_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.openai.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: None)
     provider = OpenAIImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gpt-image-1")
@@ -137,7 +139,7 @@ def test_openai_generate_without_key_raises_auth_and_never_reaches_transport(mon
 
 
 def test_openai_generate_happy_path_mocked_b64(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.openai.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(b"fake-png-bytes").decode()}]})
@@ -150,7 +152,7 @@ def test_openai_generate_happy_path_mocked_b64(monkeypatch, tmp_path):
 def test_openai_generate_happy_path_mocked_url(monkeypatch, tmp_path):
     # Ported quirk: the API can answer with a `url` instead of inline
     # base64 - the provider must fetch it with a second request.
-    monkeypatch.setattr("avg.providers.images.openai.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "images/generations" in str(request.url):
@@ -163,7 +165,7 @@ def test_openai_generate_happy_path_mocked_url(monkeypatch, tmp_path):
 
 
 def test_openai_dalle2_rejects_non_square_aspect_ratio_without_reaching_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.openai.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
     provider = OpenAIImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="9:16", model="dall-e-2")
@@ -192,7 +194,7 @@ def test_openai_supports_the_three_canonical_ratios():
 
 
 def test_gemini_generate_native_model_billing_failure_real_fixture(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
     provider = GeminiImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gemini-2.5-flash-image")
@@ -200,7 +202,7 @@ def test_gemini_generate_native_model_billing_failure_real_fixture(monkeypatch):
 
 
 def test_gemini_generate_imagen_model_missing_real_fixture(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
     provider = GeminiImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="imagen-4.0-fast-generate-001")
@@ -208,7 +210,7 @@ def test_gemini_generate_imagen_model_missing_real_fixture(monkeypatch):
 
 
 def test_gemini_generate_without_key_raises_auth_and_never_reaches_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: None)
     provider = GeminiImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gemini-2.5-flash-image")
@@ -216,7 +218,7 @@ def test_gemini_generate_without_key_raises_auth_and_never_reaches_transport(mon
 
 
 def test_gemini_generate_unsupported_aspect_ratio_raises_bug_without_reaching_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
     provider = GeminiImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="4:3", model="gemini-2.5-flash-image")
@@ -224,7 +226,7 @@ def test_gemini_generate_unsupported_aspect_ratio_raises_bug_without_reaching_tr
 
 
 def test_gemini_generate_content_happy_path_mocked(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert "gemini-3.1-flash-image:generateContent" in str(request.url)
@@ -242,7 +244,7 @@ def test_gemini_generate_content_happy_path_mocked(monkeypatch, tmp_path):
 
 
 def test_gemini_generate_imagen_happy_path_mocked(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert ":predict" in str(request.url)
@@ -255,7 +257,7 @@ def test_gemini_generate_imagen_happy_path_mocked(monkeypatch, tmp_path):
 
 
 def test_gemini_generate_blocked_content_raises_content_filter_mocked(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -286,7 +288,7 @@ def test_gemini_supports_the_three_canonical_ratios():
 
 
 def test_pollinations_generate_happy_path_real_fixture(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.pollinations.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
     provider = PollinationsImageProvider(transport=_replay_transport())
     data = provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux")
     assert data, "expected real image bytes"
@@ -298,7 +300,7 @@ def test_pollinations_generate_auth_failure_real_fixture(monkeypatch):
     # rejected (Pollinations added this after the legacy PowerShell app,
     # which treated a key as optional here, was written). See module
     # docstring / the task report.
-    monkeypatch.setattr("avg.providers.images.pollinations.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: None)
     provider = PollinationsImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         provider.generate("auth failure probe please ignore", aspect_ratio="1:1", model="flux")
@@ -336,7 +338,7 @@ def test_pollinations_supports_the_three_canonical_ratios():
 
 
 def test_huggingface_generate_deprecated_model_real_fixture(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
     provider = HuggingFaceImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="black-forest-labs/FLUX.1-schnell")
@@ -344,7 +346,7 @@ def test_huggingface_generate_deprecated_model_real_fixture(monkeypatch):
 
 
 def test_huggingface_generate_without_key_raises_auth_and_never_reaches_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.huggingface.get_key", lambda _p: None)
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: None)
     provider = HuggingFaceImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="some/model")
@@ -352,7 +354,7 @@ def test_huggingface_generate_without_key_raises_auth_and_never_reaches_transpor
 
 
 def test_huggingface_generate_non_square_aspect_ratio_refused_without_reaching_transport(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
     provider = HuggingFaceImageProvider(transport=_poison_transport(tmp_path))
     with pytest.raises(AvgError) as excinfo:
         provider.generate(PROMPT_APPLE, aspect_ratio="9:16", model="some/model")
@@ -360,7 +362,7 @@ def test_huggingface_generate_non_square_aspect_ratio_refused_without_reaching_t
 
 
 def test_huggingface_generate_happy_path_mocked(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"fake-png-bytes", headers={"content-type": "image/png"})
@@ -371,7 +373,7 @@ def test_huggingface_generate_happy_path_mocked(monkeypatch, tmp_path):
 
 
 def test_huggingface_generate_in_band_json_error_at_200_is_classified(monkeypatch, tmp_path):
-    monkeypatch.setattr("avg.providers.images.huggingface.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"error": "currently loading, please try again"}, headers={"content-type": "application/json"})
@@ -407,9 +409,9 @@ def test_stablehorde_generate_happy_path_real_recording(monkeypatch):
     # the anonymous key had enough kudos for either). Patching these two
     # module constants to match is what lets the real fixtures replay
     # exactly; nothing about the production defaults themselves changes.
-    monkeypatch.setattr("avg.providers.images.stablehorde.get_key", lambda _p: None)
-    monkeypatch.setitem(stablehorde_module._SIZE_BY_RATIO, "1:1", (256, 256))
-    monkeypatch.setattr(stablehorde_module, "_DEFAULT_STEPS", 8)
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: None)
+    monkeypatch.setitem(images_community._SIZE_BY_RATIO, "1:1", (256, 256))
+    monkeypatch.setattr(images_community, "_DEFAULT_STEPS", 8)
 
     provider = StableHordeImageProvider(transport=_replay_transport(), sleep=lambda _seconds: None)
     progress: list[tuple[int, int]] = []
@@ -581,7 +583,7 @@ def test_stablehorde_supports_the_three_canonical_ratios():
 
 
 def test_billing_failure_switches_provider_per_policy(monkeypatch):
-    monkeypatch.setattr("avg.providers.images.gemini.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
     gemini = GeminiImageProvider(transport=_replay_transport())
     with pytest.raises(AvgError) as excinfo:
         gemini.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gemini-2.5-flash-image")
@@ -590,7 +592,7 @@ def test_billing_failure_switches_provider_per_policy(monkeypatch):
 
     # Per POLICY, on a billing failure a caller should try a different
     # provider next - Pollinations' real, keyed success stands in for that.
-    monkeypatch.setattr("avg.providers.images.pollinations.get_key", lambda _p: "fixture-test-key")
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: "fixture-test-key")
     pollinations = PollinationsImageProvider(transport=_replay_transport())
     data = pollinations.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux")
     assert data, "the backup provider should have produced real image bytes"

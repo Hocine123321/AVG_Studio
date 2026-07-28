@@ -56,11 +56,12 @@ from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._shared import read_json, script_dir, write_json
 from avg.providers.images.base import ImageProvider
-from avg.providers.images.gemini import GeminiImageProvider
-from avg.providers.images.huggingface import HuggingFaceImageProvider
-from avg.providers.images.openai import OpenAIImageProvider
-from avg.providers.images.pollinations import PollinationsImageProvider
-from avg.providers.images.stablehorde import StableHordeImageProvider
+from avg.providers.images.community import (
+    HuggingFaceImageProvider,
+    PollinationsImageProvider,
+    StableHordeImageProvider,
+)
+from avg.providers.images.premium import GeminiImageProvider, OpenAIImageProvider
 from avg.providers.transport import Transport
 
 # Matches avg.core.settings_schema's own `image_provider` choices/default.
