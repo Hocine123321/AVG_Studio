@@ -77,6 +77,12 @@ class ProjectDoc(BaseModel):
     # take. See `avg.core.takes` module docstring for the full rule.
     takes: list[Take] = Field(default_factory=list)
     current_take_id: int | None = None
+    # Slice 6C: hidden from Home's default view, nothing more. Archiving
+    # never touches a file, so it is reversible and cheap - `False` for
+    # every project that predates it, and for every legacy import, without
+    # a migration. Deliberately NOT a deletion or a move: the folder is the
+    # user's work and the app does not relocate it behind their back.
+    archived: bool = False
 
 class RenderRequest(BaseModel):
     project_folder: Path

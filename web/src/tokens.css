@@ -2514,3 +2514,81 @@ a:hover {
   margin: 0;
   font-size: 12.5px;
 }
+
+/* ---- bulk select and archive (Home) ----
+   The checkbox sits over the card rather than inside it: `ProjectCard`
+   already owns its whole surface as a click target, and a control nested
+   inside that would be fighting it for the same click. */
+
+.project-cell {
+  position: relative;
+}
+
+/* Centred, just BELOW the chip row - the only part of a card nothing else
+   ever claims. Every corner is taken: top-left is the status chip, which is
+   as wide as "Failed · render" and reaches the middle; top-right is the
+   aspect ratio; and the bottom half fills with the title and, on hover,
+   Resume/Open - which is exactly when this appears. */
+.select-dot {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--canvas) 72%, transparent);
+  border: 1px solid var(--line-2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+/* Visible on hover, and always once checked - an invisible checked box
+   would hide the very state the select bar is acting on. */
+.project-cell:hover .select-dot,
+.select-dot--on,
+.select-dot:focus-within {
+  opacity: 1;
+}
+
+.select-dot--on {
+  border-color: var(--sage);
+  background: var(--sage-deep);
+}
+
+.select-dot input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--sage);
+  cursor: pointer;
+}
+
+.select-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: var(--gap) calc(var(--pad) * -1) 0;
+  padding: 12px var(--pad);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.select-bar > span:first-child {
+  margin-right: auto;
+}
+
+/* The "Archived (n)" toggle when it is on. Sage, not terracotta: this is a
+   settled state, and Home's one filled action lives on the cards. */
+.btn--on {
+  border-color: var(--sage);
+  color: var(--sage);
+}

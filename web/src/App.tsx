@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   apiGet,
@@ -117,12 +117,22 @@ export default function App() {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
+  /** The one place the project list is (re)loaded. Returned as a promise so
+   * a caller that just changed something server-side - a bulk archive, say -
+   * can await the refreshed truth instead of guessing at it locally. */
+  const reloadProjects = useCallback(async () => {
+    try {
+      const res = await apiGet<ProjectsResponse>("/api/projects");
+      setProjects(res.projects);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   useEffect(() => {
     if (!settings?.onboarded) return;
-    apiGet<ProjectsResponse>("/api/projects")
-      .then((res) => setProjects(res.projects))
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, [settings?.onboarded]);
+    void reloadProjects();
+  }, [settings?.onboarded, reloadProjects]);
 
   async function startRender(id: string) {
     setStartError(null);
@@ -235,6 +245,7 @@ export default function App() {
           onOpen={openProject}
           onRender={openAndRender}
           onCancel={cancelRender}
+          onArchived={reloadProjects}
         />
       );
     }

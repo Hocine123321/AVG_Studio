@@ -75,6 +75,18 @@ class SettingsUpdate(BaseModel):
     output_root: str
 
 
+class ArchiveRequest(BaseModel):
+    """`POST /api/projects/archive` - one call for a whole selection.
+
+    `archived` is explicit rather than a toggle: a mixed selection has no
+    sensible thing to toggle to, and the caller always knows which of
+    "Archive" or "Restore" the user pressed.
+    """
+
+    ids: list[str]
+    archived: bool = True
+
+
 class ProjectCreate(BaseModel):
     """`POST /api/projects`'s body: a topic plus any per-video overrides of
     the active channel's creative settings (`avg.core.settings_schema`'s
@@ -317,6 +329,31 @@ def create_app(
                 }
             )
         return {"projects": projects}
+
+    @app.post("/api/projects/archive", dependencies=[Depends(require_token)])
+    async def archive_projects(body: ArchiveRequest) -> dict:
+        """Archive or unarchive a set of projects in one call.
+
+        A set rather than one id per request because Home's select bar acts
+        on a selection: five separate PATCHes could half-succeed and leave
+        the user looking at a partially-applied bulk action. Unknown ids are
+        a 404 naming them, checked before anything is written - so this
+        either applies to every id or to none.
+
+        Archiving hides a project from Home's default view and does nothing
+        else. No file moves, nothing is deleted, and it is reversible by
+        sending the same ids with `archived: false`.
+        """
+        unknown = [pid for pid in body.ids if pid not in app.state.projects]
+        if unknown:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown project(s): {unknown}"
+            )
+        for pid in body.ids:
+            project = app.state.projects[pid]
+            project.archived = body.archived
+            save_project(project)
+        return {"archived": body.archived, "ids": list(body.ids)}
 
     @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
     async def create_project(body: ProjectCreate) -> ProjectDoc:

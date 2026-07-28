@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectDoc } from "./api";
-import { thumbnailUrl } from "./api";
+import { archiveProjects, thumbnailUrl } from "./api";
 import type { ProgressEvent } from "./useEvents";
 import { IconFrame, IconStop } from "./Icons";
 import ProjectCard from "./ProjectCard";
@@ -14,6 +14,10 @@ export interface HomeProps {
   onOpen: (id: string) => void;
   onRender: (id: string) => void;
   onCancel: (id: string) => void;
+  /** Reload the project list after a bulk archive/restore. Home holds no
+   * copy of its own - `App` owns the list, so the only honest way to show
+   * the result is to ask for it again. */
+  onArchived: () => Promise<void>;
 }
 
 function formatClock(ms: number): string {
@@ -147,17 +151,54 @@ function Hero({ project, progress, onOpen, onCancel }: HeroProps) {
  * than none. Add `channel` to `avg/core/models.py` and the importer, and
  * the chips drop straight in — see PORTING.md.
  */
-export default function Home({ projects, progress, onOpen, onRender, onCancel }: HomeProps) {
+export default function Home({ projects, progress, onOpen, onRender, onCancel, onArchived }: HomeProps) {
   const [query, setQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
   const renderingProject = progress ? (projects.find((p) => p.id === progress.project_id) ?? null) : null;
+
+  const archivedCount = projects.filter((p) => p.archived).length;
 
   const gridProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
     return projects
       .filter((p) => !(renderingProject && p.id === renderingProject.id))
+      // Archived projects are hidden, not gone - `showArchived` is the only
+      // way to see them, and it shows ONLY them so "Restore" has an obvious
+      // place to act.
+      .filter((p) => Boolean(p.archived) === showArchived)
       .filter((p) => (q ? p.title.toLowerCase().includes(q) : true));
-  }, [projects, renderingProject, query]);
+  }, [projects, renderingProject, query, showArchived]);
+
+  // A selection only ever means something for rows currently on screen;
+  // dropping the rest avoids archiving something the user cannot see.
+  const visibleSelected = gridProjects.filter((p) => selected.has(p.id)).map((p) => p.id);
+
+  function toggleSelected(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  async function applyArchive(archived: boolean) {
+    if (visibleSelected.length === 0) return;
+    setBusy(true);
+    try {
+      await archiveProjects(visibleSelected, archived);
+      setSelected(new Set());
+      await onArchived();
+    } catch {
+      // The list is reloaded either way, so a failure simply leaves
+      // everything as it was rather than showing a state that never landed.
+      await onArchived();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="home">
@@ -170,6 +211,18 @@ export default function Home({ projects, progress, onOpen, onRender, onCancel }:
           <h1 className="home__title">Your videos</h1>
         </div>
         <span className="home__spacer" />
+        {(archivedCount > 0 || showArchived) && (
+          <button
+            type="button"
+            className={`btn${showArchived ? " btn--on" : ""}`}
+            onClick={() => {
+              setShowArchived((on) => !on);
+              setSelected(new Set());
+            }}
+          >
+            {showArchived ? "Back to library" : `Archived (${archivedCount})`}
+          </button>
+        )}
         <input
           className="home__search"
           placeholder="Search topics"
@@ -193,13 +246,48 @@ export default function Home({ projects, progress, onOpen, onRender, onCancel }:
 
       {gridProjects.length === 0 ? (
         <p className="home__empty">
-          {projects.length === 0 ? "No projects yet." : query ? `Nothing matches "${query}".` : "Nothing else to show."}
+          {projects.length === 0
+            ? "No projects yet."
+            : query
+              ? `Nothing matches "${query}".`
+              : showArchived
+                ? "Nothing archived."
+                : "Nothing else to show."}
         </p>
       ) : (
         <div className="project-grid">
           {gridProjects.map((project) => (
-            <ProjectCard key={project.id} project={project} onOpen={onOpen} onRender={onRender} />
+            <div key={project.id} className="project-cell">
+              <ProjectCard project={project} onOpen={onOpen} onRender={onRender} />
+              <label
+                className={`select-dot${selected.has(project.id) ? " select-dot--on" : ""}`}
+                title={showArchived ? "Select to restore" : "Select to archive"}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(project.id)}
+                  onChange={() => toggleSelected(project.id)}
+                  aria-label={`Select ${project.title}`}
+                />
+              </label>
+            </div>
           ))}
+        </div>
+      )}
+
+      {visibleSelected.length > 0 && (
+        <div className="select-bar" role="region" aria-label="Bulk actions">
+          <span>
+            {visibleSelected.length} selected
+          </span>
+          <button type="button" className="btn" onClick={() => setSelected(new Set())} disabled={busy}>
+            Clear
+          </button>
+          {/* Archiving hides; it never deletes or moves a folder, so it needs
+              no confirmation and stays a plain action. */}
+          <button type="button" className="btn" onClick={() => applyArchive(!showArchived)} disabled={busy}>
+            {busy ? "Working…" : showArchived ? "Restore" : "Archive"}
+          </button>
         </div>
       )}
     </div>

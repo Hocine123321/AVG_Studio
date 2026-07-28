@@ -144,6 +144,9 @@ export interface ProjectDoc {
    * take's artifacts. `POST /api/projects` returns the persisted ProjectDoc
    * directly, so callers must tolerate it being absent until the next list. */
   script_substate?: ScriptSubstate;
+  /** Hidden from Home's default view. Absent on documents written before
+   * Slice 6C, which is why every read treats undefined as false. */
+  archived?: boolean;
 }
 
 export interface ProjectsResponse {
@@ -179,6 +182,15 @@ export interface SettingsDoc {
  * video only, never written back to the channel document. */
 export function createProject(topic: string, overrides: Record<string, unknown> = {}): Promise<ProjectDoc> {
   return apiPost<ProjectDoc>("/api/projects", { topic, overrides });
+}
+
+/** `POST /api/projects/archive`. One call for a whole selection, never one
+ * request per project: a bulk action that half-applies is worse than one
+ * that fails outright, and the route validates every id before it writes
+ * anything. Archiving only hides a project from Home - no file is moved or
+ * deleted, and the same call with `archived: false` undoes it. */
+export function archiveProjects(ids: string[], archived: boolean): Promise<{ archived: boolean; ids: string[] }> {
+  return apiPost<{ archived: boolean; ids: string[] }>("/api/projects/archive", { ids, archived });
 }
 
 // ---- cost table ----

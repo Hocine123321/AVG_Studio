@@ -334,3 +334,69 @@ def test_create_with_a_malformed_model_setting_is_a_400_and_starts_nothing(clien
     assert "provider/model" in response.json()["detail"]
     # A bad setting must be rejected before any work begins.
     assert not started.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Archive (Slice 6C)
+
+
+def test_archive_hides_projects_and_survives_a_reload(client, paths):
+    _activate_channel(client)
+    first = client.post("/api/projects", headers=AUTH, json={"topic": "One"}).json()
+    second = client.post("/api/projects", headers=AUTH, json={"topic": "Two"}).json()
+
+    listed = client.get("/api/projects", headers=AUTH).json()["projects"]
+    assert all(p["archived"] is False for p in listed)
+
+    r = client.post("/api/projects/archive", headers=AUTH, json={"ids": [first["id"]], "archived": True})
+    assert r.status_code == 200
+
+    by_id = {p["id"]: p for p in client.get("/api/projects", headers=AUTH).json()["projects"]}
+    assert by_id[first["id"]]["archived"] is True
+    assert by_id[second["id"]]["archived"] is False
+
+    # Persisted, not just held in memory - a fresh app over the same output
+    # root must still see it archived.
+    from avg.api.app import create_app
+
+    reloaded = TestClient(
+        create_app(
+            token=TOKEN,
+            output_root=paths["output_root"],
+            thumb_cache_dir=paths["thumb_cache_dir"],
+            settings_path=paths["settings_path"],
+            channels_dir=paths["channels_dir"],
+            secrets_path=paths["secrets_path"],
+        )
+    )
+    again = {p["id"]: p for p in reloaded.get("/api/projects", headers=AUTH).json()["projects"]}
+    assert again[first["id"]]["archived"] is True
+
+
+def test_archiving_is_reversible(client):
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "One"}).json()
+
+    client.post("/api/projects/archive", headers=AUTH, json={"ids": [created["id"]], "archived": True})
+    client.post("/api/projects/archive", headers=AUTH, json={"ids": [created["id"]], "archived": False})
+
+    listed = {p["id"]: p for p in client.get("/api/projects", headers=AUTH).json()["projects"]}
+    assert listed[created["id"]]["archived"] is False
+
+
+def test_archive_applies_to_all_ids_or_none(client):
+    """A bulk action must not half-apply - that is the whole reason this is
+    one route rather than N per-project calls."""
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "One"}).json()
+
+    r = client.post(
+        "/api/projects/archive",
+        headers=AUTH,
+        json={"ids": [created["id"], "no-such-project"], "archived": True},
+    )
+    assert r.status_code == 404
+    assert "no-such-project" in r.json()["detail"]
+
+    listed = {p["id"]: p for p in client.get("/api/projects", headers=AUTH).json()["projects"]}
+    assert listed[created["id"]]["archived"] is False
