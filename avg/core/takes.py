@@ -59,7 +59,7 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 # Two corrections against the brief's own hypothesis tables, confirmed by
 # reading the phase code itself:
 #   - `voice` does NOT write `script/narration.txt` - that file is written
-#     by `script` (`avg.pipeline.phases.script.ScriptPhase.run`, Pass 1's
+#     by `script` (`avg.pipeline.phases.writing.ScriptPhase.run`, Pass 1's
 #     raw text); `voice` only ever reads it
 #     (`avg.pipeline.phases.voice._narration_path`). Attributing it to
 #     `voice` would make a take that reran only `voice` claim ownership of

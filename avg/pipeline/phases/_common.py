@@ -114,7 +114,7 @@ def parse_scene_blocks(text: str) -> list[dict[str, str]]:
     skipped (the same tolerance the legacy parser applies), a missing
     `@@LABEL@@` degrades to an empty label, and a reply with no recognisable
     blocks at all simply returns `[]`. The caller decides whether an empty
-    result is fatal (it is, for Pass 2 - see `avg.pipeline.phases.script`)."""
+    result is fatal (it is, for Pass 2 - see `avg.pipeline.phases.writing`)."""
     cleaned = strip_code_fence(text)
     chunks = _SCENE_SPLIT_RE.split(cleaned)
     scenes: list[dict[str, str]] = []
@@ -213,7 +213,7 @@ def strip_delivery_markers(text: str) -> str:
     SPOKEN: `[pause]` (no spoken content) removed outright, `[[focus]]`/
     `((question))` unwrapped to their inner words (the brackets are a
     delivery cue, not something a narrator says or a caption should show).
-    Whitespace is collapsed the same way `avg.pipeline.phases.script`'s own
+    Whitespace is collapsed the same way `avg.pipeline.phases.writing`'s own
     `_normalize_whitespace` does."""
     cleaned = _PAUSE_MARKER_RE.sub(" ", text)
     cleaned = _FOCUS_MARKER_RE.sub(r"\1", cleaned)

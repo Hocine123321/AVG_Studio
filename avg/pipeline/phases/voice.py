@@ -2,7 +2,7 @@
 
 Runs after Visuals (Phase 3), before Director II (Phase 5). Reads the
 finished script's flat narration (`script/narration.txt`, Pass 1's raw
-prose - `avg.pipeline.phases.script.ScriptPhase`), synthesizes it through
+prose - `avg.pipeline.phases.writing.ScriptPhase`), synthesizes it through
 Slice 3's voice providers (`avg/providers/voice/`), and writes
 `audio/raw_voice.mp3` + `audio/optimized_voice.mp3` - the same two filenames
 the vendored render engine (`avg/media/vendor/avg.py`'s `render_project`/
@@ -53,7 +53,7 @@ are fixed constants below, mirroring the legacy app's own shipped defaults
 - `silence_thresh_dbfs=-40`, `min_silence_len_ms=400`, `keep_silence_ms=100`,
 `dynamic_pauses.length_ms=700` for its default "medium" frequency) - the
 same "generous, fixed default until a real setting exists" pattern
-`avg.pipeline.phases.director1`'s `_MIN_IMAGES`/`_MAX_IMAGES` already uses.
+`avg.pipeline.phases.director`'s `_MIN_IMAGES`/`_MAX_IMAGES` already uses.
 """
 
 from __future__ import annotations

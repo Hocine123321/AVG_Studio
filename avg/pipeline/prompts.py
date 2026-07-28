@@ -425,7 +425,7 @@ def build_director1_prompt(
     this is the non-chaptered, filter-free path only.
 
     `scene_texts` is each scene's verbatim narration, in order (from
-    `avg.pipeline.phases.script`'s `scenes.json`) - the numbered list the
+    `avg.pipeline.phases.writing`'s `scenes.json`) - the numbered list the
     model classifies is built from these, never re-derived from raw
     narration, so Director I always sees exactly the scenes the render will
     actually use.
@@ -507,12 +507,12 @@ def build_director2_prompt(
     per-scene camera move/transition and one overall colour grade for the
     whole video. Ported (simplified - no brand motion-feel table, no
     external filters catalogue, both a separate, later concern - see
-    `avg.pipeline.phases.director1`'s identical simplification note) from
+    `avg.pipeline.phases.director`'s identical simplification note) from
     the corresponding section of `Get-AiDirectionPlan`
     (`D:\\AI_Video_Gen\\modules\\ai.ps1`).
 
     The vocabulary below (motion types, ease curves, transitions, grade
-    looks) is deliberately a closed set - `avg.pipeline.phases.director2`
+    looks) is deliberately a closed set - `avg.pipeline.phases.director`
     sanitizes the reply against these exact same names, degrading anything
     else to a safe default, mirroring the legacy app's own validated
     lists."""

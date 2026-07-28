@@ -111,7 +111,7 @@ def _fake_text_generator():
     eight_stub_phases_successfully`'s own fakes for those), and id 7 is
     still a `_StubPhase` and never calls this. Tracks its own call count
     for the "script" phase since Pass 1 and Pass 2 share that phase key
-    but need different-shaped replies (see `avg.pipeline.phases.script`)."""
+    but need different-shaped replies (see `avg.pipeline.phases.writing`)."""
     narration = "This tiny invention quietly changed how ancient sailors found their way. [pause] Nobody expected a bronze box of gears to predict the sky decades in advance."
     scene_blocks = (
         "@@SCENE@@\n"
@@ -192,10 +192,10 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     voice's are. Id 7 is still a `_StubPhase` and untouched by any of this.
     """
     fake = _fake_text_generator()
-    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", fake)
-    monkeypatch.setattr("avg.pipeline.phases.script.generate_text", fake)
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", fake)
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", fake)
 
     monkeypatch.setattr(
         "avg.pipeline.phases.visuals._build_provider",

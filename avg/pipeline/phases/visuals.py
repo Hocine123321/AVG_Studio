@@ -2,7 +2,7 @@
 
 Runs after Director I (Phase 2), before Voice & Audio (Phase 4). Reads the
 finished script's per-scene image prompts (`scenes.json`, written by
-`avg.pipeline.phases.script.ScriptPhase`) and generates one image per scene
+`avg.pipeline.phases.writing.ScriptPhase`) and generates one image per scene
 through Slice 3's image providers (`avg/providers/images/`), in parallel,
 capped by the machine's RAM profile.
 

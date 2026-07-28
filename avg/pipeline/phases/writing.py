@@ -1,4 +1,28 @@
-"""Phase 1: the two-pass script.
+"""The two text-writing phases: Brief (id 0) and Script (id 1).
+
+Brief turns the user's topic into the creative brief every later phase reads;
+Script turns that brief into narration and then partitions it into scenes.
+They are one unit in practice - Script's first act is to read what Brief
+wrote, and the verbatim-partition invariant below is the seam between them.
+
+── Brief Phase ─────────────────────────────────────────────
+
+Phase 0: the Creative Brief.
+
+The first AI call of a run: high-level creative intention (emotional arc,
+tone, angle) that Script (Phase 1) and Director I (Phase 2) read as
+context, not a per-scene plan - see `avg.pipeline.prompts.build_brief_prompt`
+for why (ported from the legacy app's B2.3 "brief is creative-intention
+only" rewrite). Writes `<project>/script/brief.json`.
+
+Nothing downstream *requires* the brief to exist (see `ScriptPhase`'s own
+docstring: brief context is optional enrichment, matching the legacy app's
+"legacy blind mode"), so `inputs_ready` has nothing to check - it can always
+run, needing only the project's own topic.
+
+── Script Phase ────────────────────────────────────────────
+
+Phase 1: the two-pass script.
 
 Split into two model calls because one call cannot reliably both write good
 prose AND segment it (the legacy app's B2.19.0 change,
@@ -45,14 +69,63 @@ from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._common import (
     creative_inputs,
+    extract_json_object,
     parse_scene_blocks,
     read_json,
     script_dir,
     strip_code_fence,
     write_json,
 )
-from avg.pipeline.prompts import build_narration_prompt, build_scene_segmentation_prompt
+from avg.pipeline.prompts import (
+    build_brief_prompt,
+    build_narration_prompt,
+    build_scene_segmentation_prompt,
+)
 from avg.providers.text.router import generate as generate_text
+
+
+# ── Brief Phase ────────────────────────────────────
+
+@dataclass(frozen=True, slots=True)
+class BriefPhase:
+    id: int = 0
+    key: str = "brief"
+    name: str = "Brief"
+
+    def inputs_ready(self, ctx: PhaseContext) -> bool:
+        return True
+
+    def run(self, ctx: PhaseContext) -> None:
+        inputs = creative_inputs(ctx)
+        prompt = build_brief_prompt(inputs)
+
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Writing creative brief..."))
+        result = generate_text(prompt, "brief", config=ctx.router)
+
+        try:
+            parsed = extract_json_object(result.text)
+        except ValueError as exc:
+            raise AvgError(ErrorKind.bug, f"brief phase: {exc}") from exc
+
+        # A brief with no emotional_arc is useless direction for every later
+        # phase (matches the legacy `Invoke-CreativeBrief`'s own "$hasArc"
+        # check) - treat it as a failed generation rather than writing an
+        # empty/meaningless brief.json that would look like a success.
+        emotional_arc = str(parsed.get("emotional_arc") or "").strip()
+        if not emotional_arc:
+            raise AvgError(ErrorKind.bug, "brief phase: model response had no emotional_arc")
+
+        brief = {
+            "emotional_arc": emotional_arc,
+            "tone": str(parsed.get("tone") or "").strip(),
+            "angle": str(parsed.get("angle") or "").strip(),
+            "notes": str(parsed.get("notes") or "").strip(),
+        }
+        write_json(script_dir(ctx) / "brief.json", brief)
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Creative brief complete."))
+
+
+# ── Script Phase ──────────────────────────────────
 
 # An organic (content-driven) range, not a fixed count - matches
 # `build_scene_count_rule`'s default bounds in `avg.pipeline.prompts`.
