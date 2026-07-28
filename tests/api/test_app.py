@@ -16,7 +16,11 @@ def test_requests_without_a_token_are_rejected(client):
 
 def test_requests_with_the_token_succeed(client):
     r = client.get("/api/projects", headers={"X-AVG-Token": "t0k"})
-    assert r.status_code == 200 and r.json() == {"projects": []}
+    # `loading` reports whether the startup library scan has finished. The
+    # route waits for that scan, so by the time it answers it is always
+    # False - the flag exists for the UI, which polls before this route can
+    # be sure, not to describe this response.
+    assert r.status_code == 200 and r.json() == {"projects": [], "loading": False}
 
 def test_render_of_an_unknown_project_is_404(client):
     r = client.post("/api/projects/nope/render", headers={"X-AVG-Token": "t0k"})

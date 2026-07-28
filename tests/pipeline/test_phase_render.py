@@ -121,3 +121,25 @@ def test_cancelling_the_pipeline_reaches_the_render_child(tmp_path, monkeypatch)
         render_mod.RenderPhase().run(ctx)
 
     assert engines[0].cancelled, "cancelling the pipeline did not cancel the render child"
+
+
+# ---------------------------------------------------------------------------
+# render_threads
+
+
+def test_render_threads_setting_reaches_the_request():
+    """0 (the default) must mean auto, not one thread.
+
+    Auto is expressed by NOT passing `threads`, so `RenderRequest`'s own
+    `os.cpu_count()` default stands - passing a number this code guessed
+    would be a second, wrong source of truth for "auto".
+    """
+    from avg.pipeline.phases.render import _thread_kwargs
+
+    assert _thread_kwargs(4) == {"threads": 4}
+    assert _thread_kwargs("4") == {"threads": 4}
+    # Auto / unset / nonsense all defer to the model default.
+    assert _thread_kwargs(0) == {}
+    assert _thread_kwargs(None) == {}
+    assert _thread_kwargs(-1) == {}
+    assert _thread_kwargs("plenty") == {}

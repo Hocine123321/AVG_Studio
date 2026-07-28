@@ -28,6 +28,23 @@ from avg.media.engine import MediaEngine
 from avg.pipeline.phase import PhaseContext
 
 
+def _thread_kwargs(raw: object) -> dict[str, int]:
+    """Translate the `render_threads` setting into a `RenderRequest` kwarg.
+
+    `0` (the default) means "auto", which is `RenderRequest`'s own
+    `os.cpu_count()` default - so auto is expressed by passing NOTHING and
+    letting that default stand, never by passing a number this module
+    guessed. Anything unset, unparseable or below 1 is treated as auto for
+    the same reason: a bad value must not silently pin the encoder to one
+    thread.
+    """
+    try:
+        threads = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return {}
+    return {"threads": threads} if threads >= 1 else {}
+
+
 class RenderPhase:
     """Composite the finished assets into `master_output.mp4`."""
 
@@ -47,6 +64,9 @@ class RenderPhase:
             project_folder=ctx.project.folder,
             aspect_ratio=ctx.project.aspect_ratio,
             short_edge=ctx.project.short_edge,
+            # `ctx.channel` is typed as a Channel but is None in the render
+            # engine's own unit tests, which construct a context without one.
+            **_thread_kwargs(getattr(ctx.channel, "settings", {}).get("render_threads")),
         )
 
         engine = MediaEngine()

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ProjectDoc } from "./api";
 import { archiveProjects, thumbnailUrl } from "./api";
 import type { ProgressEvent } from "./useEvents";
 import { IconFrame, IconStop } from "./Icons";
 import ProjectCard from "./ProjectCard";
+import { useRenderClock } from "./renderClock";
 
 export interface HomeProps {
   projects: ProjectDoc[];
@@ -30,38 +31,6 @@ function formatClock(ms: number): string {
 function formatRemaining(ms: number): string {
   const minutes = Math.round(ms / 60000);
   return minutes < 1 ? "<1 min left" : `~${minutes} min left`;
-}
-
-/** Unchanged from the previous build. The engine's `ProgressEvent` carries
- * no timestamps, so elapsed is measured from the first progress event this
- * hook saw for the current project and remaining is a straight-line
- * projection. Resets when a different project starts rendering. */
-function useRenderClock(progress: ProgressEvent | null): { elapsedMs: number; remainingMs: number | null } {
-  const startRef = useRef<{ id: string; at: number } | null>(null);
-  const [, tick] = useState(0);
-
-  useEffect(() => {
-    if (!progress) {
-      startRef.current = null;
-      return;
-    }
-    if (!startRef.current || startRef.current.id !== progress.project_id) {
-      startRef.current = { id: progress.project_id, at: Date.now() };
-    }
-  }, [progress]);
-
-  useEffect(() => {
-    if (!progress) return;
-    const id = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progress?.project_id]);
-
-  if (!progress || !startRef.current) return { elapsedMs: 0, remainingMs: null };
-  const elapsedMs = Date.now() - startRef.current.at;
-  if (progress.percent <= 0) return { elapsedMs, remainingMs: null };
-  const total = (elapsedMs / progress.percent) * 100;
-  return { elapsedMs, remainingMs: Math.max(total - elapsedMs, 0) };
 }
 
 interface HeroProps {

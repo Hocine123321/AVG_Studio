@@ -52,6 +52,7 @@ from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
+from avg.pipeline.phases.render import _thread_kwargs
 from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
 from avg.providers.text.router import config_from_settings
@@ -109,6 +110,11 @@ class ProjectCreate(BaseModel):
 # parents[0] is `avg/api`, parents[1] is `avg`, parents[2] is the repo root.
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
+# How long a request will wait for the startup library scan before answering
+# with whatever it has. Generous: the scan is local filesystem work and this
+# is a ceiling, not a delay anyone normally pays.
+_LIBRARY_WAIT_S = 30.0
+
 
 def _total_ram_gb() -> float:
     """Best-effort total physical RAM in GB, for `load_render_settings`'s RAM gates.
@@ -142,7 +148,9 @@ def _total_ram_gb() -> float:
         return 8.0
 
 
-def _build_render_request(project: ProjectDoc, output_root: Path) -> RenderRequest:
+def _build_render_request(
+    project: ProjectDoc, output_root: Path, *, render_threads: object = None
+) -> RenderRequest:
     """Combine a project's folder with the legacy app's render settings.
 
     Slice 1 has no settings-editing UI yet (that is Task 11's territory),
@@ -162,6 +170,7 @@ def _build_render_request(project: ProjectDoc, output_root: Path) -> RenderReque
             project_folder=project.folder,
             aspect_ratio=project.aspect_ratio,
             short_edge=project.short_edge,
+            **_thread_kwargs(render_threads),
         )
 
     return RenderRequest(
@@ -175,6 +184,9 @@ def _build_render_request(project: ProjectDoc, output_root: Path) -> RenderReque
         kb_mode=settings.kb_mode,
         render_engine=settings.render_engine,
         render_opts=settings.render_opts,
+        # Last, so the user's own setting wins over whatever the legacy
+        # config carried - that file predates this setting existing.
+        **_thread_kwargs(render_threads),
     )
 
 
@@ -288,8 +300,43 @@ def create_app(
     # which the brief's own fixture does not do, and the real app only ever
     # calls create_app() once per process anyway. "Once at startup" means
     # here.
-    report = import_all(output_root)
-    app.state.projects: dict[str, ProjectDoc] = {p.id: p for p in report.imported}
+    # Scanned on a background thread, NOT here. Reading and parsing every
+    # project on disk used to happen inline at construction, which meant the
+    # server could not bind, `_wait_until_ready` could not return, and the
+    # window could not open until the whole library had been walked - the
+    # user stared at nothing for the length of a filesystem scan that has
+    # nothing to do with drawing a window.
+    #
+    # The cost of deferring it is a brief window where the library is empty
+    # and a project id is genuinely not found yet. `projects_loading` is
+    # what makes that honest rather than indistinguishable from "you have no
+    # projects": `GET /api/projects` reports it, and the UI says "Loading"
+    # instead of "No projects yet".
+    app.state.projects: dict[str, ProjectDoc] = {}
+    app.state.projects_loading = True
+    # Set once the first scan has finished, successfully or not. Requests
+    # wait on this; the WINDOW never does, which is the whole point.
+    app.state.library_loaded = threading.Event()
+
+    def _load_library() -> None:
+        """Scan the output root, then warm thumbnails. One thread, in order.
+
+        Sequential and in this order on purpose: the grid needs the project
+        list to show anything at all, and a thumbnail is useless before the
+        card it belongs to exists.
+        """
+        try:
+            report = import_all(output_root)
+            app.state.projects = {p.id: p for p in report.imported}
+        except Exception:
+            # A library that fails to scan leaves the app usable and empty
+            # rather than dead. Nothing below the API layer may print, and
+            # there is no user yet to tell.
+            pass
+        finally:
+            app.state.projects_loading = False
+            app.state.library_loaded.set()
+        _warm_thumbnails()
 
     def _warm_thumbnails() -> None:
         """Generate every thumbnail once, in the background, at startup.
@@ -308,10 +355,34 @@ def create_app(
             with suppress(Exception):
                 thumbnail_for(proj, app.state.thumb_cache_dir)
 
-    threading.Thread(target=_warm_thumbnails, daemon=True, name="avg-thumb-warm").start()
+    threading.Thread(target=_load_library, daemon=True, name="avg-library-load").start()
+
+    def _library() -> dict[str, ProjectDoc]:
+        """The project cache, once the startup scan has had its chance.
+
+        Every by-id lookup goes through this rather than touching
+        `app.state.projects` directly. Without it, deferring the scan off
+        the startup path would turn "open the app straight into a project"
+        into a 404 for as long as the scan took - a real race for anyone
+        deep-linking, not just a test artifact.
+
+        Blocking here is safe and blocking at construction was not: this
+        waits inside ONE request, while the window and every other route
+        carry on.
+        """
+        app.state.library_loaded.wait(_LIBRARY_WAIT_S)
+        return app.state.projects
 
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
+        # Waits for the first scan, but only here - a REQUEST may block on
+        # the library; the window may not. That split is what makes startup
+        # fast without ever answering "you have no projects" to someone who
+        # has fifteen. The bound exists so a pathological library cannot
+        # hang the route forever; past it, the partial list plus
+        # `loading: true` is the honest answer.
+        await asyncio.to_thread(app.state.library_loaded.wait, _LIBRARY_WAIT_S)
+
         # ``script_substate`` is derived from artifacts at read time, not put
         # on ProjectDoc: the document is persisted, while this display-only
         # value must always reflect the current take's files.
@@ -328,7 +399,7 @@ def create_app(
                     "script_substate": script_substate(root / "script"),
                 }
             )
-        return {"projects": projects}
+        return {"projects": projects, "loading": bool(app.state.projects_loading)}
 
     @app.post("/api/projects/archive", dependencies=[Depends(require_token)])
     async def archive_projects(body: ArchiveRequest) -> dict:
@@ -344,13 +415,14 @@ def create_app(
         else. No file moves, nothing is deleted, and it is reversible by
         sending the same ids with `archived: false`.
         """
-        unknown = [pid for pid in body.ids if pid not in app.state.projects]
+        library = _library()
+        unknown = [pid for pid in body.ids if pid not in library]
         if unknown:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown project(s): {unknown}"
             )
         for pid in body.ids:
-            project = app.state.projects[pid]
+            project = library[pid]
             project.archived = body.archived
             save_project(project)
         return {"archived": body.archived, "ids": list(body.ids)}
@@ -501,6 +573,7 @@ def create_app(
         app.state.output_root = root
         report = import_all(root)
         app.state.projects = {p.id: p for p in report.imported}
+        app.state.projects_loading = False
         threading.Thread(target=_warm_thumbnails, daemon=True, name="avg-thumb-warm-onboard").start()
 
         return doc.model_dump()
@@ -520,7 +593,7 @@ def create_app(
         dependencies=[Depends(require_token)],
     )
     async def start_render(project_id: str) -> dict:
-        project = app.state.projects.get(project_id)
+        project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
@@ -530,7 +603,16 @@ def create_app(
                 detail=f"a render is already running for project {app.state.rendering_project_id!r}",
             )
 
-        req = _build_render_request(project, app.state.output_root)
+        # The active channel's render_threads, when a channel is active -
+        # a direct /render has no channel context of its own, so it reads
+        # the same setting the pipeline's render phase would have used.
+        active_id = channels_config.active_channel_id(app.state.settings_path)
+        channel = channels_config.get_channel(active_id, app.state.channels_dir) if active_id else None
+        req = _build_render_request(
+            project,
+            app.state.output_root,
+            render_threads=(channel.settings.get("render_threads") if channel else None),
+        )
         loop = asyncio.get_running_loop()
 
         async def _dispatch(event: Event) -> None:
@@ -581,7 +663,7 @@ def create_app(
 
     @app.post("/api/projects/{project_id}/cancel", dependencies=[Depends(require_token)])
     async def cancel_render(project_id: str) -> dict:
-        if project_id not in app.state.projects:
+        if project_id not in _library():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         app.state.engine.cancel()
         # Best-effort for a full-pipeline run too - a no-op if `render_thread`
@@ -600,7 +682,7 @@ def create_app(
         # ffmpeg/ffprobe subprocess calls inside thumbnail_for() never stall
         # the event loop (and, with it, every other in-flight request,
         # including the WebSocket carrying live render progress).
-        project = app.state.projects.get(project_id)
+        project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
@@ -620,7 +702,7 @@ def create_app(
         # element's seek bar to work at all in WebView2. Verified with an
         # actual ranged request against a real project's master_output.mp4
         # rather than assumed - see the task-10.5 report.
-        project = app.state.projects.get(project_id)
+        project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
@@ -639,7 +721,7 @@ def create_app(
         # own images/ folder, not a fabricated per-scene manifest - Slice 1
         # has no generation-progress data per scene, only whichever files
         # have landed on disk so far.
-        project = app.state.projects.get(project_id)
+        project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         files = list_image_files(project.folder / "images")
@@ -647,7 +729,7 @@ def create_app(
 
     @app.get("/api/projects/{project_id}/images/{filename}", dependencies=[Depends(require_token)])
     def project_image(project_id: str, filename: str) -> FileResponse:
-        project = app.state.projects.get(project_id)
+        project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 

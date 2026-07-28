@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { wsUrl } from "./api";
+import { clearRenderClock } from "./renderClock";
 
 /**
  * Mirrors `avg.core.events` on the Python side (see `avg/core/events.py`).
@@ -100,6 +101,20 @@ const INITIAL_STATE: EventsState = {
  * event deliberately retains its preceding phase_started association because
  * the backend's progress payload itself has no phase key. */
 function reduce(previous: EventsState, payload: { type: string } & Record<string, unknown>): EventsState {
+  // The render clock lives outside React (see `renderClock.ts`, which is
+  // what stops a route change from resetting it). Nothing unmounts to tell
+  // it a job ended, so the terminal events do - otherwise the next run on
+  // the same project would measure from the previous run's start.
+  if (
+    payload.type === "render_finished" ||
+    payload.type === "render_cancelled" ||
+    payload.type === "pipeline_cancelled" ||
+    payload.type === "phase_failed"
+  ) {
+    const id = payload.project_id;
+    if (typeof id === "string") clearRenderClock(id);
+  }
+
   switch (payload.type) {
     case "phase_started":
       return { ...INITIAL_STATE, connected: true, phaseStarted: payload as unknown as PhaseStartedEvent };

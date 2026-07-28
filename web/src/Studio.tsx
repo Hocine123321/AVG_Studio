@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiGet, deleteTake, getCosts, getTakes, imageUrl, renameTake, videoUrl } from "./api";
+import { apiGet, createTake, deleteTake, getCosts, getTakes, imageUrl, renameTake, videoUrl } from "./api";
 import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
 import { formatUsd, projectSpend } from "./costs";
 import type { PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
@@ -19,6 +19,13 @@ function formatBytes(n?: number | null): string {
   if (!n || n <= 0) return "—";
   const mb = n / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
+}
+
+/** Same trick every other screen uses: show the server's own refusal
+ * sentence, not the "POST ... failed: 400 - {...}" wrapper around it. */
+function extractDetail(message: string): string {
+  const match = message.match(/"detail"\s*:\s*"([^"]*)"/);
+  return match ? match[1] : message;
 }
 
 function statusLabel(status: DisplayPhaseStatus): string {
@@ -50,6 +57,29 @@ function defaultPhase(phases: Record<string, PhaseRecord>): string {
     if (phases[PHASE_ORDER[i].key]?.status === "done") return PHASE_ORDER[i].key;
   }
   return PHASE_ORDER[0].key;
+}
+
+/** What the primary action should do, given where this take actually got to.
+ *
+ * The bug this replaces: the CTA read `project.phases.render` and nothing
+ * else, so a project that stopped at Captions - or at Brief - offered
+ * "Start render", because `render` was `pending` in all three cases. It
+ * ignored both the other seven phases and the take being viewed.
+ *
+ * The rule now is the first phase in REGISTRY order that is not done:
+ *
+ *   - nothing left        -> "Run again", a straight re-render
+ *   - only `render` left  -> "Start render", the same re-render
+ *   - anything else left  -> resume THERE, by creating a take that re-rolls
+ *     from that phase (`reroll_from` re-runs it and everything after it -
+ *     which for the first unfinished phase is exactly "carry on").
+ *
+ * A failed phase counts as unfinished, so a run that died at Visuals offers
+ * to resume at Visuals rather than pretending the video is renderable.
+ */
+function resumeTarget(phases: Record<string, PhaseRecord>): { key: string; label: string } | null {
+  const next = PHASE_ORDER.find(({ key }) => phases[key]?.status !== "done");
+  return next ? { key: next.key, label: next.label } : null;
 }
 
 function totalDurationMs(phases: Record<string, PhaseRecord>): number {
@@ -345,6 +375,11 @@ export default function Studio({
   // backend phase key, never a Script display leaf, since the route 400s on
   // anything outside `REGISTRY` (see `phases.ts`).
   const [rerollTarget, setRerollTarget] = useState<string | null>(null);
+  // The primary action's own in-flight/error state. Separate from the
+  // render start error above: resuming creates a take, which can be refused
+  // for reasons a render cannot (no active channel, for one).
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   // The maintained cost table. Fetched once; a failure just hides the spend
   // chip rather than taking the screen down with it.
   const [costTable, setCostTable] = useState<CostTable | null>(null);
@@ -451,9 +486,44 @@ export default function Studio({
   const selectedScriptSubstate = isCurrentTake ? project.script_substate : undefined;
   const statuses = displayStatuses(phasesForSelected, selectedScriptSubstate, activePhase);
 
-  const renderStatus: PhaseStatus = project.phases.render?.status ?? "pending";
-  const isRunning = renderStatus === "running";
-  const actionLabel = isRunning ? "Cancel" : renderStatus === "pending" ? "Start render" : "Run again";
+  // Anything in this take mid-flight counts as running, not just `render` -
+  // a project generating images is as busy as one encoding video, and the
+  // CTA has to say Cancel for both.
+  const isRunning =
+    runningTakeId === selectedTakeId ||
+    PHASE_ORDER.some(({ key }) => phasesForSelected[key]?.status === "running");
+  const resume = resumeTarget(phasesForSelected);
+  const actionLabel = isRunning
+    ? "Cancel"
+    : resume === null
+      ? "Run again"
+      : resume.key === "render"
+        ? "Start render"
+        : `Continue · ${resume.label}`;
+
+  /** The CTA. Only the two render-shaped cases hit `/render`; every other
+   * unfinished phase resumes the pipeline from there instead, which is what
+   * the old "Start render" label was wrong about. */
+  async function handlePrimaryAction() {
+    if (isRunning) {
+      onCancel();
+      return;
+    }
+    if (resume === null || resume.key === "render") {
+      onStartRender();
+      return;
+    }
+    setResumeError(null);
+    setResuming(true);
+    try {
+      const take = await createTake(project.id, { overrides: {}, reroll_from: resume.key });
+      handleTakeCreated(take);
+    } catch (err) {
+      setResumeError(extractDetail(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setResuming(false);
+    }
+  }
 
   const record = phasesForSelected[selected];
   const selectedDef = PHASE_DEFS.find((def) => def.key === selected);
@@ -487,9 +557,14 @@ export default function Studio({
             ~{formatUsd(projectSpend(phasesForSelected, costTable, selectedScriptSubstate))}
           </span>
         )}
-        <button type="button" className="btn btn--primary" onClick={isRunning ? onCancel : onStartRender}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => void handlePrimaryAction()}
+          disabled={resuming}
+        >
           {isRunning ? <IconStop /> : <IconPlay />}
-          {actionLabel}
+          {resuming ? "Starting…" : actionLabel}
         </button>
       </header>
 
@@ -519,6 +594,13 @@ export default function Studio({
         <div className="studio__banner studio__banner--bad">
           <p>Couldn't start the render.</p>
           <p>{startError}</p>
+        </div>
+      )}
+
+      {resumeError && (
+        <div className="studio__banner studio__banner--bad">
+          <p>Couldn't resume this project.</p>
+          <p>{resumeError}</p>
         </div>
       )}
 

@@ -409,6 +409,19 @@ SETTINGS: list[SettingSpec] = [
     ),
     # --- render engine and quality ---
     SettingSpec(
+        id="render_threads",
+        group="render",
+        label="Render threads",
+        help=(
+            "How many CPU threads the encoder may use. 0 means auto — one per core. "
+            "Lower it to keep the machine responsive while a long render runs."
+        ),
+        type="int",
+        default=0,
+        scope="channel",
+        invalidates="render",
+    ),
+    SettingSpec(
         id="render_engine",
         group="render",
         label="Render engine",

@@ -111,6 +111,14 @@ class TakeRename(BaseModel):
 
 
 def _get_project(app_state: Any, project_id: str) -> ProjectDoc:
+    # The project cache is filled by a background scan at startup (see
+    # `avg.api.app`), so a request that arrives during it would otherwise
+    # 404 on a project that exists. Waiting inside the request is the point:
+    # startup stays fast, correctness does not depend on timing. `getattr`
+    # because tests build app states by hand without this event.
+    loaded = getattr(app_state, "library_loaded", None)
+    if loaded is not None:
+        loaded.wait(30.0)
     project = app_state.projects.get(project_id)
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")

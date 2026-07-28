@@ -25,6 +25,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from avg.media.environment import suppress_console_windows
+
 # Messages put on the queue are plain tuples so they stay cheaply picklable:
 #   ("progress", percent: int, message: str)
 #   ("result", output_path: str, size_bytes: int)
@@ -56,6 +58,14 @@ def run_child(kwargs: dict[str, Any], q: Any) -> None:
                                  queue-drain and exit-classification plumbing
                                  in the engine; it does not bypass it.
     """
+    # Before anything else, and before the vendored engine is imported
+    # below: this is the process that shells out to ffmpeg dozens of times
+    # per render, and every one of those calls would otherwise flash a
+    # console window on the user's desktop. The vendored engine and moviepy
+    # both make those calls and neither can be edited, so the suppression is
+    # installed process-wide here. See `environment.suppress_console_windows`.
+    suppress_console_windows()
+
     if os.environ.get("AVG_CHILD_CRASH"):
         raise RuntimeError("AVG_CHILD_CRASH: forced crash for testing")
 

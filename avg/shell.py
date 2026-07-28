@@ -43,7 +43,7 @@ import webview
 
 from avg.api.app import create_app
 from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings
-from avg.media.environment import prepend_to_path
+from avg.media.environment import prepend_to_path, suppress_console_windows
 
 HOST = "127.0.0.1"
 
@@ -153,6 +153,12 @@ def _wait_until_ready(url: str, token: str, timeout: float = _READY_TIMEOUT_S) -
     wired - is actually answering, not just that something is listening on
     the port.
 
+    Probes `/api/settings/schema` rather than `/api/projects` on purpose:
+    the schema is a constant, while the project list waits for the startup
+    library scan (see `avg.api.app`). Polling the list here would put that
+    scan back on the critical path for opening the window, which is exactly
+    what deferring it was for.
+
     Retries on any connection-level failure (nobody home yet) every
     `_READY_POLL_INTERVAL_S` seconds until `timeout` elapses, then raises a
     `RuntimeError` naming what never answered - never lets the window open
@@ -190,6 +196,12 @@ def main() -> None:
     # spawned. No-op in development. See avg.media.environment.
     prepend_to_path()
 
+    # Same reasoning, for window flashes rather than binaries: this process
+    # warms thumbnails by shelling out to ffprobe/ffmpeg, and a windowed
+    # build has no console for them to inherit, so each call would pop one.
+    # Installed here, once, before the server thread starts.
+    suppress_console_windows()
+
     port = pick_port()
     token = make_token()
     app = create_app(token=token, output_root=resolve_output_root())
@@ -201,7 +213,7 @@ def main() -> None:
     server_thread.start()
 
     try:
-        _wait_until_ready(f"http://{HOST}:{port}/api/projects", token)
+        _wait_until_ready(f"http://{HOST}:{port}/api/settings/schema", token)
     except RuntimeError:
         server.should_exit = True
         raise
