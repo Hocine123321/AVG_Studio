@@ -18,7 +18,7 @@ Bundles three things beyond the pure-Python package:
   frozen `avg/api/app.py` resolves to `<frozen root>/web/dist`, matching
   this layout without any code change.
 - `vendor/ffmpeg` as data, landing at `<frozen root>/vendor/ffmpeg` -
-  matches what `avg.media.ffmpeg_locate.bundled_ffmpeg_dir()` looks for
+  matches what `avg.media.environment.bundled_ffmpeg_dir()` looks for
   (`Path(sys._MEIPASS) / "vendor" / "ffmpeg"`).
 - `avg/assets` (the bundled `personality.txt` / `dynamic_options.txt`
   prompt-building copy - see `avg.pipeline.personality`) as data, landing

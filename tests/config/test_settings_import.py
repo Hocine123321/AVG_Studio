@@ -1,7 +1,7 @@
 """Tests for render settings importer."""
 
 import json
-from avg.config.settings_import import load_render_settings
+from avg.config.settings import load_render_settings
 
 
 def _write(tmp_path, cfg):

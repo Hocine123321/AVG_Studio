@@ -1,0 +1,127 @@
+import type { FieldProps } from "./types";
+import { DeferredInput } from "./DeferredInput";
+
+/**
+ * The six ordinary field renderers, one per `SettingSpec.type` that isn't
+ * `secret`. Each is a handful of lines whose only real difference is the
+ * input element and how a raw string turns back into a value, so they live
+ * together rather than in six files that would each be a single import and
+ * a single component.
+ *
+ * `SecretField` stays in its own file on purpose: its value never enters
+ * the pending-draft batch these six share, it talks to `/api/keys/{provider}`
+ * directly, and it carries per-provider busy/error state (see `types.ts`'s
+ * `SettingsCtx` for that split). `DeferredInput` likewise stays separate -
+ * it is the shared input primitive four of these wrap, not a renderer.
+ *
+ * `index.tsx` is what maps a type to one of these; nothing here knows about
+ * that map.
+ */
+
+// ── Bool Field ──────────────────────────────────────────────
+
+/** A toggle switch. Commits immediately (there's nothing to "finish
+ * typing") - it just joins the pending draft batch like every other
+ * non-secret field; nothing hits the network until Save. */
+export function BoolField({ spec, ctx, disabled }: FieldProps) {
+  const value = Boolean(ctx.getValue(spec));
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={value}
+      aria-label={spec.label}
+      className={`switch${value ? " switch--on" : ""}`}
+      onClick={() => ctx.onCommit(spec, !value)}
+      disabled={disabled}
+    >
+      <span className="switch__thumb" aria-hidden="true" />
+    </button>
+  );
+}
+
+// ── Choice Field ────────────────────────────────────────────
+
+/** A closed set of options - a native `<select>`, since the app has no
+ * form-widget library and this is a solved problem without one. */
+export function ChoiceField({ spec, ctx, disabled }: FieldProps) {
+  const value = String(ctx.getValue(spec) ?? "");
+  return (
+    <select
+      className="field-select"
+      aria-label={spec.label}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => ctx.onCommit(spec, e.target.value)}
+    >
+      {(spec.choices ?? []).map((choice) => (
+        <option key={choice} value={choice}>
+          {choice}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// ── Text Field ──────────────────────────────────────────────
+
+export function TextField({ spec, ctx, disabled }: FieldProps) {
+  const value = String(ctx.getValue(spec) ?? "");
+  return <DeferredInput value={value} disabled={disabled} onCommit={(raw) => ctx.onCommit(spec, raw)} />;
+}
+
+// ── Path Field ──────────────────────────────────────────────
+
+/** A filesystem path. Plain text entry (no native browse dialog wired up
+ * here - the only folder picker the app has, `window.pywebview`'s
+ * `browse_folder`, is specific to the first-run library folder in
+ * `Welcome.tsx` and picks directories, not the executables/files most
+ * `type="path"` settings name). `.mono` gives it the same tabular-figures
+ * treatment as every other data-shaped value in the app. */
+export function PathField({ spec, ctx, disabled }: FieldProps) {
+  const value = String(ctx.getValue(spec) ?? "");
+  return (
+    <DeferredInput
+      value={value}
+      disabled={disabled}
+      className="mono"
+      onCommit={(raw) => ctx.onCommit(spec, raw)}
+    />
+  );
+}
+
+// ── Int Field ───────────────────────────────────────────────
+
+export function IntField({ spec, ctx, disabled }: FieldProps) {
+  const value = String(Number(ctx.getValue(spec) ?? 0));
+  return (
+    <DeferredInput
+      value={value}
+      disabled={disabled}
+      inputMode="numeric"
+      className="mono field-input--num"
+      onCommit={(raw) => {
+        const n = Number.parseInt(raw, 10);
+        if (Number.isFinite(n)) ctx.onCommit(spec, n);
+      }}
+    />
+  );
+}
+
+// ── Float Field ─────────────────────────────────────────────
+
+export function FloatField({ spec, ctx, disabled }: FieldProps) {
+  const value = String(Number(ctx.getValue(spec) ?? 0));
+  return (
+    <DeferredInput
+      value={value}
+      disabled={disabled}
+      inputMode="decimal"
+      className="mono field-input--num"
+      onCommit={(raw) => {
+        const n = Number.parseFloat(raw);
+        if (Number.isFinite(n)) ctx.onCommit(spec, n);
+      }}
+    />
+  );
+}

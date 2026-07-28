@@ -42,13 +42,13 @@ from pydantic import BaseModel, Field
 from avg.config import channels as channels_config
 from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
-from avg.config.settings_import import load_render_settings
+from avg.config.settings import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
-from avg.media.workspace import render_workspace
+from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.runner import run as run_pipeline

@@ -1,5 +1,5 @@
 """Tests for the two "polish" phases wired into ids 5-6 of
-`avg.pipeline.registry.REGISTRY`: `avg.pipeline.phases.director2.
+`avg.pipeline.registry.REGISTRY`: `avg.pipeline.phases.director.
 Director2Phase` and `avg.pipeline.phases.captions.CaptionsPhase`.
 
 No live API calls anywhere in this file:
@@ -49,9 +49,9 @@ from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases import captions as captions_module
-from avg.pipeline.phases._shared import read_json, render_dir, resolve_font_family, script_dir, write_json
+from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, write_json
 from avg.pipeline.phases.captions import CaptionsPhase
-from avg.pipeline.phases.director2 import Director2Phase
+from avg.pipeline.phases.director import Director2Phase
 from avg.providers.text.router import TextResult
 
 # ── shared test scaffolding (mirrors test_phases_text.py/test_phases_media.py) ──
@@ -152,7 +152,7 @@ def test_director2_writes_direction_plan_matching_the_real_schema(tmp_path, monk
         ],
     })
     fake = _QueueGenerator([reply])
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", fake)
 
     project = _project(tmp_path)
     ctx, events = _ctx(project)
@@ -182,7 +182,7 @@ def test_director2_degrades_unknown_vocabulary_to_safe_defaults(tmp_path, monkey
              "transition_in": "explode"},
         ],
     })
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -197,7 +197,7 @@ def test_director2_degrades_unknown_vocabulary_to_safe_defaults(tmp_path, monkey
 
 def test_director2_scene_naming_an_unknown_scene_number_is_dropped(tmp_path, monkeypatch):
     reply = json.dumps({"grade": {"look": "warm"}, "scenes": [{"scene": 99, "motion": {}, "transition_in": "cut"}]})
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -212,7 +212,7 @@ def test_director2_scene_naming_an_unknown_scene_number_is_dropped(tmp_path, mon
 
 def test_director2_writes_focused_cards_from_question_markers(tmp_path, monkeypatch):
     reply = json.dumps({"grade": {"look": "none"}, "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut"}]})
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -230,7 +230,7 @@ def test_director2_writes_focused_cards_from_question_markers(tmp_path, monkeypa
 
 def test_director2_card_plan_is_empty_without_any_question_markers(tmp_path, monkeypatch):
     reply = json.dumps({"grade": {"look": "none"}, "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut"}]})
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -245,7 +245,7 @@ def test_director2_caps_card_frequency_to_roughly_one_per_three_scenes(tmp_path,
         "grade": {"look": "none"},
         "scenes": [{"scene": i + 1, "motion": {}, "transition_in": "cut"} for i in range(6)],
     })
-    monkeypatch.setattr("avg.pipeline.phases.director2.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)

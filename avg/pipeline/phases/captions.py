@@ -31,7 +31,7 @@ same "patch the phase module's own seam" convention
 `avg.pipeline.phases.visuals`/`.voice`'s `_build_provider` already
 established - no live call is ever made in this repo's test suite.
 
-**Respects the global font setting** (`avg.pipeline.phases._shared.
+**Respects the global font setting** (`avg.pipeline.phases._common.
 resolve_font_family`) - the ONE resolver shared with (a future) takeover-
 card renderer, so the two can never drift the way the legacy PowerShell/
 Python resolvers did. The resolved family name reaches the `.ass` file's
@@ -64,7 +64,7 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import _target_size
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._shared import read_json, render_dir, resolve_font_family, script_dir, strip_delivery_markers, write_json
+from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, strip_delivery_markers, write_json
 
 _ASSEMBLYAI_BASE = "https://api.assemblyai.com/v2"
 _ASSEMBLYAI_UPLOAD_TIMEOUT = 120.0

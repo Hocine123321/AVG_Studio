@@ -2,7 +2,7 @@
 
 Runs after Visuals (Phase 3), before Director II (Phase 5). Reads the
 finished script's flat narration (`script/narration.txt`, Pass 1's raw
-prose - `avg.pipeline.phases.script.ScriptPhase`), synthesizes it through
+prose - `avg.pipeline.phases.writing.ScriptPhase`), synthesizes it through
 Slice 3's voice providers (`avg/providers/voice/`), and writes
 `audio/raw_voice.mp3` + `audio/optimized_voice.mp3` - the same two filenames
 the vendored render engine (`avg/media/vendor/avg.py`'s `render_project`/
@@ -53,7 +53,7 @@ are fixed constants below, mirroring the legacy app's own shipped defaults
 - `silence_thresh_dbfs=-40`, `min_silence_len_ms=400`, `keep_silence_ms=100`,
 `dynamic_pauses.length_ms=700` for its default "medium" frequency) - the
 same "generous, fixed default until a real setting exists" pattern
-`avg.pipeline.phases.director1`'s `_MIN_IMAGES`/`_MAX_IMAGES` already uses.
+`avg.pipeline.phases.director`'s `_MIN_IMAGES`/`_MAX_IMAGES` already uses.
 """
 
 from __future__ import annotations
@@ -67,11 +67,10 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import VOICE_MP3_BITRATE, remove_silences_core
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._shared import script_dir
+from avg.pipeline.phases._common import script_dir
 from avg.providers.transport import Transport
 from avg.providers.voice.base import VoiceProvider
-from avg.providers.voice.edge import EdgeVoiceProvider
-from avg.providers.voice.elevenlabs import ElevenLabsVoiceProvider
+from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider
 
 # Case/whitespace-tolerant, matching the legacy Convert-VoicePauseMarker regex
 # (`D:\AI_Video_Gen\modules\pipeline.ps1`) - splitting ON this pattern both

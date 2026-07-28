@@ -26,14 +26,12 @@ from dataclasses import dataclass
 
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import Phase, PhaseContext
-from avg.pipeline.phases.brief import BriefPhase
 from avg.pipeline.phases.captions import CaptionsPhase
-from avg.pipeline.phases.director1 import Director1Phase
-from avg.pipeline.phases.director2 import Director2Phase
-from avg.pipeline.phases.script import ScriptPhase
+from avg.pipeline.phases.director import Director1Phase, Director2Phase
+from avg.pipeline.phases.render import RenderPhase
 from avg.pipeline.phases.visuals import VisualsPhase
 from avg.pipeline.phases.voice import VoicePhase
-from avg.pipeline.phases.render import RenderPhase
+from avg.pipeline.phases.writing import BriefPhase, ScriptPhase
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,12 +62,12 @@ class _StubPhase:
 # Director II / AI Graphics, Captions & Takeover Text, Render.
 #
 # Ids 0-2 (Task 3 of this slice) are real implementations
-# (`avg.pipeline.phases.brief/script/director1`) - see those modules for the
-# two-pass script's verbatim-partition invariant and Director I's structure
-# planning. Ids 3-4 (Task 4) are `avg.pipeline.phases.visuals/voice` - one
+# (`avg.pipeline.phases.writing` for Brief and Script, `.director` for
+# Director I) - see those modules for the two-pass script's
+# verbatim-partition invariant and Director I's structure planning. Ids 3-4 (Task 4) are `avg.pipeline.phases.visuals/voice` - one
 # image per scene via a RAM-capped worker pool, and narration synthesis with
 # real `[pause]` silence, respectively. Ids 5-6 (Task 5) are
-# `avg.pipeline.phases.director2/captions` - the motion/grade + takeover-card
+# `avg.pipeline.phases.director` (Director II) and `.captions` - the motion/grade + takeover-card
 # plan, and transcription-to-`.ass` (AssemblyAI or a derived estimate),
 # respectively. Id 7 is `avg.pipeline.phases.render` - an adapter onto the
 # already-built `avg.media.engine.MediaEngine.render()`, which runs the

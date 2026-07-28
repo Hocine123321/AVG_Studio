@@ -34,7 +34,7 @@ throwaway `Channel.model_copy` - `channels_config.save_channel` is never
 called from anywhere in this module.
 
 **The re-run targets the new take's own folder.** Every real phase resolves
-its paths from `ctx.project.folder` alone (see `avg.pipeline.phases._shared`
+its paths from `ctx.project.folder` alone (see `avg.pipeline.phases._common`
 and each phase module) - there is no second "which folder" concept for a
 phase to know about. So redirecting a re-run into `takes/<id>/` is exactly
 one field: the `ProjectDoc` handed to `avg.pipeline.runner.run` is a
@@ -294,7 +294,7 @@ def _sync_current_take(project: ProjectDoc, take: Take) -> None:
     from the take's own `settings_snapshot` (present since `avg.pipeline.
     create.new_project`/the create route below always records it) rather
     than added as a new field on `Take` - every real phase reads
-    `ctx.project.aspect_ratio` directly (see `avg.pipeline.phases._shared`),
+    `ctx.project.aspect_ratio` directly (see `avg.pipeline.phases._common`),
     so this is what makes an `aspect_ratio` override actually take effect
     for the phases that ran, and what a later `select` of a different take
     restores correctly.

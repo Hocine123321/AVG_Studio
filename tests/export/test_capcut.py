@@ -8,7 +8,7 @@ anything: nothing except a `render/scene_timings.json` (as
 `avg.pipeline.phases.render` already writes it via the vendored engine),
 a real `render/captions.ass` (in the exact shape `avg.pipeline.phases.
 captions._dialogue_line`/`_ass_header` produce), and a real `script/
-scenes.json` (as `avg.pipeline.phases.script` writes it).
+scenes.json` (as `avg.pipeline.phases.writing` writes it).
 """
 
 from __future__ import annotations

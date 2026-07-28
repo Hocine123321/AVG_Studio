@@ -52,9 +52,8 @@ import pytest
 
 from avg.core.errors import AvgError, ErrorKind
 from avg.providers.transport import DEFAULT_FIXTURES_DIR, Transport
-from avg.providers.voice import edge as edge_module
-from avg.providers.voice.edge import EdgeVoiceProvider
-from avg.providers.voice.elevenlabs import ElevenLabsVoiceProvider
+from avg.providers.voice import providers as voice_module
+from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider
 
 VOICE_ID = "CwhRBWXzGAHq8TQ4Fs17"
 MODEL = "eleven_flash_v2_5"
@@ -110,7 +109,7 @@ def _patch_keys(monkeypatch, *, primary: str | None, backup: str | None) -> None
             return backup
         raise AssertionError(f"unexpected secrets.get_key({name!r}) call")
 
-    monkeypatch.setattr("avg.providers.voice.elevenlabs.get_key", fake_get_key)
+    monkeypatch.setattr("avg.providers.voice.providers.get_key", fake_get_key)
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +262,7 @@ def test_elevenlabs_synthesize_5xx_does_not_switch_keys(monkeypatch, tmp_path):
             )
         raise AssertionError(f"unexpected secrets.get_key({name!r}) call")
 
-    monkeypatch.setattr("avg.providers.voice.elevenlabs.get_key", fake_get_key)
+    monkeypatch.setattr("avg.providers.voice.providers.get_key", fake_get_key)
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
@@ -321,7 +320,7 @@ def test_both_elevenlabs_keys_failing_falls_through_to_edge_tts(monkeypatch, tmp
         def stream_sync(self):
             yield {"type": "audio", "data": edge_audio}
 
-    monkeypatch.setattr(edge_module.edge_tts, "Communicate", _FakeCommunicate)
+    monkeypatch.setattr(voice_module.edge_tts, "Communicate", _FakeCommunicate)
     edge_provider = EdgeVoiceProvider()
 
     text = "both keys fail, fall back to edge"
@@ -364,7 +363,7 @@ def test_edge_list_voices_happy_path_mocked(monkeypatch):
             {"ShortName": "en-US-GuyNeural", "FriendlyName": "Microsoft Guy Online", "Locale": "en-US", "Gender": "Male"}
         ]
 
-    monkeypatch.setattr(edge_module.edge_tts, "list_voices", fake_list_voices)
+    monkeypatch.setattr(voice_module.edge_tts, "list_voices", fake_list_voices)
     provider = EdgeVoiceProvider()
     voices = provider.list_voices()
     assert voices == [
@@ -382,7 +381,7 @@ def test_edge_synthesize_happy_path_mocked(monkeypatch):
         def stream_sync(self):
             yield {"type": "audio", "data": edge_audio}
 
-    monkeypatch.setattr(edge_module.edge_tts, "Communicate", _FakeCommunicate)
+    monkeypatch.setattr(voice_module.edge_tts, "Communicate", _FakeCommunicate)
     provider = EdgeVoiceProvider()
     audio = provider.synthesize("edge happy path", voice_id="en-US-GuyNeural", model="unused")
     assert audio == edge_audio
@@ -397,7 +396,7 @@ def test_edge_synthesize_wraps_exceptions_as_avg_error_without_touching_network(
             raise RuntimeError("simulated websocket failure")
             yield  # pragma: no cover - unreachable, makes this a generator
 
-    monkeypatch.setattr(edge_module.edge_tts, "Communicate", _ExplodingCommunicate)
+    monkeypatch.setattr(voice_module.edge_tts, "Communicate", _ExplodingCommunicate)
     provider = EdgeVoiceProvider()
     with pytest.raises(AvgError):
         provider.synthesize("boom", voice_id="en-US-GuyNeural", model="unused")

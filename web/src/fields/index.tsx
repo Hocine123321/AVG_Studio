@@ -1,12 +1,7 @@
 import type { ComponentType } from "react";
 import type { SettingType } from "../api";
-import BoolField from "./BoolField";
-import ChoiceField from "./ChoiceField";
-import FloatField from "./FloatField";
-import IntField from "./IntField";
-import PathField from "./PathField";
+import { BoolField, ChoiceField, FloatField, IntField, PathField, TextField } from "./Fields";
 import SecretField from "./SecretField";
-import TextField from "./TextField";
 import type { FieldProps } from "./types";
 
 export type { FieldProps, SettingsCtx } from "./types";

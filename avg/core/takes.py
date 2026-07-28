@@ -24,7 +24,7 @@ module provides a way to set it to an arbitrary take on a whim.
 `master_output.mp4` from its source take, regardless of `keep_phase_keys` -
 a failed render must not inherit the previous take's video and look
 successful, the same invariant `avg.media.engine.MediaEngine`/
-`avg.media.workspace.render_workspace` already carry for the same reason.
+`avg.media.environment.render_workspace` already carry for the same reason.
 
 **Register only after the copy succeeds.** If copying a kept phase's
 artifacts fails part-way (disk full, a permissions error, anything), the
@@ -59,14 +59,14 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 # Two corrections against the brief's own hypothesis tables, confirmed by
 # reading the phase code itself:
 #   - `voice` does NOT write `script/narration.txt` - that file is written
-#     by `script` (`avg.pipeline.phases.script.ScriptPhase.run`, Pass 1's
+#     by `script` (`avg.pipeline.phases.writing.ScriptPhase.run`, Pass 1's
 #     raw text); `voice` only ever reads it
 #     (`avg.pipeline.phases.voice._narration_path`). Attributing it to
 #     `voice` would make a take that reran only `voice` claim ownership of
 #     a file `script` actually produced.
 #   - `director1` writes `script/video_map.json`, not `render/index.json` -
 #     no phase in this codebase writes an `index.json` at all yet (the
-#     `render/` docstring in `avg.pipeline.phases._shared.render_dir`
+#     `render/` docstring in `avg.pipeline.phases._common.render_dir`
 #     mentions it only as a FUTURE Render-phase artifact).
 # One row from the task brief's own manual investigation held up exactly as
 # reported: `script/scenes.json` is written only by `script` - `director1`,

@@ -20,7 +20,35 @@
  * the pulsing halo (never colour alone) is what marks the live phase.
  */
 
-@import url("./fonts.css");
+/* ── Font Faces ─────────────────────────────────────────────
+   Self-hosted so the app's identity survives with no internet.
+   Downloaded from Google Fonts (latin subset), served from web/public/fonts.
+
+   Do NOT replace this with an @import from fonts.googleapis.com: a desktop
+   app must not wait on a network round trip before first paint, must not
+   ping Google on every launch, and offline the whole design silently falls
+   back to Georgia and Segoe UI.
+
+   Figtree is a VARIABLE font - one file covers 400-700, which is why there
+   is a single figtree-var.woff2 rather than one file per weight. */
+
+@font-face {
+  font-family: "Caprasimo";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/caprasimo-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/figtree-var.woff2") format("woff2-variations");
+}
+
+/* ── Design Tokens ──────────────────────────────────────── */
 
 :root {
   /* ---- Organic role tokens, night ---- */

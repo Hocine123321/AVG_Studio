@@ -7,7 +7,7 @@ if neither exists, no thumbnail at all - the UI shows its own fallback
 rather than a broken `<img>`.
 
 Extraction shells out to `ffmpeg`/`ffprobe`, resolved via
-`avg.media.ffmpeg_locate` (the bundled binary in a frozen build, PATH in
+`avg.media.environment` (the bundled binary in a frozen build, PATH in
 development) and is lazy: the first request for a project's thumbnail
 extracts and caches it, every request after that reads the cached JPEG
 straight off disk.
@@ -31,7 +31,7 @@ import subprocess
 from pathlib import Path
 
 from avg.core.models import ProjectDoc
-from avg.media.ffmpeg_locate import ffmpeg_exe, ffprobe_exe
+from avg.media.environment import ffmpeg_exe, ffprobe_exe
 
 logger = logging.getLogger(__name__)
 

@@ -2,12 +2,12 @@
 
 Runs after Director I (Phase 2), before Voice & Audio (Phase 4). Reads the
 finished script's per-scene image prompts (`scenes.json`, written by
-`avg.pipeline.phases.script.ScriptPhase`) and generates one image per scene
+`avg.pipeline.phases.writing.ScriptPhase`) and generates one image per scene
 through Slice 3's image providers (`avg/providers/images/`), in parallel,
 capped by the machine's RAM profile.
 
 **RAM gate.** This app's own 8GB dev box is the reason
-`avg.config.settings_import.load_render_settings` caps render workers at 2
+`avg.config.settings.load_render_settings` caps render workers at 2
 below 8.5/8GB - exceeding that is what made the legacy PowerShell app die
 mid-render on this hardware (see that module's docstring and this repo's
 `dev-machine-8gb` memory note). This phase applies the identical rule
@@ -54,13 +54,14 @@ from pathlib import Path
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._shared import read_json, script_dir, write_json
+from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.providers.images.base import ImageProvider
-from avg.providers.images.gemini import GeminiImageProvider
-from avg.providers.images.huggingface import HuggingFaceImageProvider
-from avg.providers.images.openai import OpenAIImageProvider
-from avg.providers.images.pollinations import PollinationsImageProvider
-from avg.providers.images.stablehorde import StableHordeImageProvider
+from avg.providers.images.community import (
+    HuggingFaceImageProvider,
+    PollinationsImageProvider,
+    StableHordeImageProvider,
+)
+from avg.providers.images.premium import GeminiImageProvider, OpenAIImageProvider
 from avg.providers.transport import Transport
 
 # Matches avg.core.settings_schema's own `image_provider` choices/default.
@@ -74,7 +75,7 @@ _PROVIDERS: dict[str, type] = {
 _DEFAULT_PROVIDER = "pollinations"
 _DEFAULT_MODEL = "flux"
 
-# The render phase's identical RAM gate (avg.config.settings_import.
+# The render phase's identical RAM gate (avg.config.settings.
 # load_render_settings: `worker_cap = 2 if total_ram_gb <= 8 else 4`) -
 # restated here, see module docstring for why this isn't a shared import.
 _LOW_RAM_GB_CEILING = 8.0

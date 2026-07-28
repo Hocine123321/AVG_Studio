@@ -84,7 +84,7 @@ def assets_dir() -> Path:
 
     Frozen (PyInstaller): `tools/avg.spec` must bundle `avg/assets` as
     `datas` landing at `avg/assets` under `sys._MEIPASS` (mirroring how
-    `avg.media.ffmpeg_locate.bundled_ffmpeg_dir` locates `vendor/ffmpeg`
+    `avg.media.environment.bundled_ffmpeg_dir` locates `vendor/ffmpeg`
     the same way) - this app ships as an installer to machines where
     `D:\\AI_Video_Gen` does not exist, so these files must travel inside
     the package, never be read from that path at runtime.

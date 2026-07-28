@@ -1,5 +1,5 @@
 """Tests for the three real text-writing phases wired into ids 0-2 of
-`avg.pipeline.registry.REGISTRY`: `avg.pipeline.phases.brief`, `.script`,
+`avg.pipeline.registry.REGISTRY`: `avg.pipeline.phases.writing`, `.script`,
 and `.director1`.
 
 No live API calls: `avg.providers.text.router.generate` is mocked directly
@@ -11,7 +11,7 @@ should prefer.
 
 The load-bearing test in this file is
 `test_script_phase_rejects_a_reworded_scene_as_not_verbatim`: it proves the
-verbatim-partition check in `avg.pipeline.phases.script.ScriptPhase.run`
+verbatim-partition check in `avg.pipeline.phases.writing.ScriptPhase.run`
 actually rejects a PARAPHRASED scene, not just a dropped one - a check that
 only ever compares scene *count* would pass a reworded scene right through.
 """
@@ -29,10 +29,10 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
-from avg.pipeline.phases.brief import BriefPhase
-from avg.pipeline.phases.director1 import Director1Phase
-from avg.pipeline.phases.script import ScriptPhase
-from avg.pipeline.phases._shared import read_json, script_dir, write_json
+from avg.pipeline.phases.writing import BriefPhase
+from avg.pipeline.phases.director import Director1Phase
+from avg.pipeline.phases.writing import ScriptPhase
+from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.providers.text.router import TextResult
 
 NARRATION = (
@@ -107,7 +107,7 @@ def test_brief_phase_writes_brief_json_from_a_clean_json_reply(tmp_path, monkeyp
         "angle": "the machine that shouldn't have existed yet", "notes": "keep it tight",
     })
     fake = _QueueGenerator([reply])
-    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
 
     project = _project(tmp_path)
     ctx, events = _ctx(project)
@@ -131,7 +131,7 @@ def test_brief_phase_unwraps_markdown_fence_and_surrounding_prose(tmp_path, monk
         + json.dumps({"emotional_arc": "hook to payoff", "tone": "urgent", "angle": "an angle"})
         + "\n```\nHope that helps!"
     )
-    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -142,7 +142,7 @@ def test_brief_phase_unwraps_markdown_fence_and_surrounding_prose(tmp_path, monk
 
 
 def test_brief_phase_raises_avg_error_on_unparseable_reply(tmp_path, monkeypatch):
-    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", _QueueGenerator(["not json at all, sorry"]))
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator(["not json at all, sorry"]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -154,7 +154,7 @@ def test_brief_phase_raises_avg_error_on_unparseable_reply(tmp_path, monkeypatch
 
 def test_brief_phase_raises_avg_error_when_emotional_arc_is_missing(tmp_path, monkeypatch):
     reply = json.dumps({"tone": "curious", "angle": "an angle"})
-    monkeypatch.setattr("avg.pipeline.phases.brief.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -174,7 +174,7 @@ def test_brief_phase_inputs_ready_is_always_true(tmp_path):
 
 def test_script_phase_writes_narration_and_a_verbatim_scene_partition(tmp_path, monkeypatch):
     fake = _QueueGenerator([NARRATION, SCENE_BLOCKS])
-    monkeypatch.setattr("avg.pipeline.phases.script.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
 
     project = _project(tmp_path)
     ctx, events = _ctx(project)
@@ -198,7 +198,7 @@ def test_script_phase_writes_narration_and_a_verbatim_scene_partition(tmp_path, 
 
 def test_script_phase_preserves_pause_markers_through_segmentation(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "avg.pipeline.phases.script.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS])
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS])
     )
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -225,7 +225,7 @@ def test_script_phase_rejects_a_reworded_scene_as_not_verbatim(tmp_path, monkeyp
         "@@LABEL@@\nReveal\n"
     )
     monkeypatch.setattr(
-        "avg.pipeline.phases.script.generate_text", _QueueGenerator([NARRATION, reworded_blocks])
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, reworded_blocks])
     )
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -248,7 +248,7 @@ def test_script_phase_rejects_a_dropped_scene(tmp_path, monkeypatch):
         "@@LABEL@@\nHook\n"
     )
     monkeypatch.setattr(
-        "avg.pipeline.phases.script.generate_text", _QueueGenerator([NARRATION, dropped_blocks])
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, dropped_blocks])
     )
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -259,7 +259,7 @@ def test_script_phase_rejects_a_dropped_scene(tmp_path, monkeypatch):
 
 
 def test_script_phase_raises_when_pass_one_produces_no_narration(tmp_path, monkeypatch):
-    monkeypatch.setattr("avg.pipeline.phases.script.generate_text", _QueueGenerator(["   "]))
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator(["   "]))
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
 
@@ -271,7 +271,7 @@ def test_script_phase_raises_when_pass_one_produces_no_narration(tmp_path, monke
 
 def test_script_phase_raises_when_pass_two_has_no_parseable_scenes(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "avg.pipeline.phases.script.generate_text",
+        "avg.pipeline.phases.writing.generate_text",
         _QueueGenerator([NARRATION, "Sorry, I can't format that as scenes."]),
     )
     project = _project(tmp_path)
@@ -290,7 +290,7 @@ def test_script_phase_injects_brief_context_when_brief_json_exists(tmp_path, mon
         encoding="utf-8",
     )
     fake = _QueueGenerator([NARRATION, SCENE_BLOCKS])
-    monkeypatch.setattr("avg.pipeline.phases.script.generate_text", fake)
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -305,7 +305,7 @@ def test_script_phase_runs_without_a_brief_present(tmp_path, monkeypatch):
     """The brief is optional enrichment, not a hard dependency - a project
     with no brief.json at all must still produce a script."""
     monkeypatch.setattr(
-        "avg.pipeline.phases.script.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS])
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS])
     )
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -360,7 +360,7 @@ def test_director1_writes_video_map_from_a_clean_reply(tmp_path, monkeypatch):
         "zoom_words": [{"scene": 1, "word": "bronze"}],
         "notes": "one image per scene",
     })
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, events = _ctx(project)
@@ -380,7 +380,7 @@ def test_director1_writes_video_map_from_a_clean_reply(tmp_path, monkeypatch):
 
 def test_director1_raises_avg_error_on_unparseable_reply(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "avg.pipeline.phases.director1.generate_text", _QueueGenerator(["not json, sorry"])
+        "avg.pipeline.phases.director.generate_text", _QueueGenerator(["not json, sorry"])
     )
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -394,7 +394,7 @@ def test_director1_raises_avg_error_on_unparseable_reply(tmp_path, monkeypatch):
 
 def test_director1_missing_image_count_degrades_to_scene_count(tmp_path, monkeypatch):
     reply = json.dumps({"scenes": [], "notes": ""})
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -407,7 +407,7 @@ def test_director1_missing_image_count_degrades_to_scene_count(tmp_path, monkeyp
 
 def test_director1_clamps_image_count_to_sane_bounds(tmp_path, monkeypatch):
     reply = json.dumps({"image_count": 99999, "scenes": [], "notes": ""})
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -428,7 +428,7 @@ def test_director1_degrades_invalid_scene_fields_instead_of_raising(tmp_path, mo
         "zoom_words": [{"scene": 0, "word": "dropped-invalid-scene"}, {"scene": 1, "word": "kept"}],
         "notes": "",
     })
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
@@ -445,7 +445,7 @@ def test_director1_degrades_invalid_scene_fields_instead_of_raising(tmp_path, mo
 
 def test_director1_all_scenes_invalid_degrades_to_default_per_scene(tmp_path, monkeypatch):
     reply = json.dumps({"image_count": 2, "scenes": [{"role": "hook"}, {"scene": 0}], "notes": ""})
-    monkeypatch.setattr("avg.pipeline.phases.director1.generate_text", _QueueGenerator([reply]))
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
 
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
