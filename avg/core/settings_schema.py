@@ -86,14 +86,23 @@ SETTINGS: list[SettingSpec] = [
         id="theme",
         group="runtime",
         label="Color theme",
-        help="Visual theme for the app UI.",
+        help="Visual theme for the app UI. Night is the default — a dark surround tells the truth about a frame's exposure.",
         type="choice",
-        default="soft_dark",
+        # These are the two themes `web/src/theme.ts` actually implements,
+        # and this catalogue is now the source of truth for the choice: the
+        # UI reads it on load and writes back on toggle.
+        #
+        # This list used to offer nine values carried over from the legacy
+        # app (`soft_dark`, `monochrome_dark`, `monochrome_light`, `dark`,
+        # `light`, `high_contrast_light`, `neon`, `terminal_hacker`,
+        # `editorial_cream`). None of them was one of the two implemented
+        # themes, and `useTheme` never read this setting at all, so all
+        # nine did nothing in either direction. Offering a choice that
+        # cannot happen is worse than offering two that can; a stored value
+        # from the old list is treated as unset (see `theme.ts`).
+        default="night",
         scope="app",
-        choices=[
-            "soft_dark", "monochrome_dark", "monochrome_light", "dark", "light",
-            "high_contrast_light", "neon", "terminal_hacker", "editorial_cream",
-        ],
+        choices=["night", "day"],
         invalidates=None,
     ),
     SettingSpec(

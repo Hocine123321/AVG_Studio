@@ -77,7 +77,7 @@ def test_values_route_returns_defaults_with_no_active_channel(client):
     assert r.status_code == 200
     body = r.json()
     assert body["active_channel_id"] is None
-    assert body["app"]["theme"] == "soft_dark"
+    assert body["app"]["theme"] == "night"
     assert body["channel"]["video_form"] == "shortform"
     assert body["channel"]["brand_preset"] == "modern_dark"
 
@@ -92,12 +92,12 @@ def test_values_requires_token(client):
 
 
 def test_post_app_scope_value_persists_to_settings_json(client, paths):
-    r = client.post("/api/settings/values", headers=AUTH, json={"values": {"theme": "neon"}})
+    r = client.post("/api/settings/values", headers=AUTH, json={"values": {"theme": "day"}})
     assert r.status_code == 200
-    assert r.json()["app"]["theme"] == "neon"
+    assert r.json()["app"]["theme"] == "day"
 
     on_disk = load_settings(paths["settings_path"])
-    assert on_disk.values["theme"] == "neon"
+    assert on_disk.values["theme"] == "day"
 
 
 def test_post_app_scope_value_is_reflected_on_next_get(client):
@@ -152,7 +152,11 @@ def test_post_channel_scope_value_fails_cleanly_with_no_active_channel(client, p
 def test_post_channel_scope_value_does_not_leak_into_app_scope_write(client, paths):
     # A mixed request where the channel half fails must not silently apply
     # the app half either - the whole POST fails together.
-    client.post("/api/settings/values", headers=AUTH, json={"values": {"theme": "neon", "video_form": "longform"}})
+    # The app half must be VALID, or this passes for the wrong reason: a
+    # bad theme would fail validation before the "is a channel active"
+    # check ever runs, and the test would no longer prove anything about
+    # the channel half failing.
+    client.post("/api/settings/values", headers=AUTH, json={"values": {"theme": "day", "video_form": "longform"}})
     on_disk = load_settings(paths["settings_path"])
     assert "theme" not in on_disk.values
 
