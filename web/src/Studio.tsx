@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { apiGet, deleteTake, getTakes, imageUrl, renameTake, videoUrl } from "./api";
-import type { PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
+import { apiGet, deleteTake, getCosts, getTakes, imageUrl, renameTake, videoUrl } from "./api";
+import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
+import { formatUsd, projectSpend } from "./costs";
 import type { PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
 import NewTakePanel from "./NewTakePanel";
@@ -339,6 +340,13 @@ export default function Studio({
   // `TakeStrip.tsx`'s `resolveStatus`).
   const [runningTakeId, setRunningTakeId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  // The maintained cost table. Fetched once; a failure just hides the spend
+  // chip rather than taking the screen down with it.
+  const [costTable, setCostTable] = useState<CostTable | null>(null);
+
+  useEffect(() => {
+    getCosts().then(setCostTable).catch(() => setCostTable(null));
+  }, []);
 
   function refreshTakes() {
     return getTakes(project.id).then((res) => {
@@ -466,6 +474,14 @@ export default function Studio({
         <span className="chip" title="Total size on disk — takes are never auto-pruned">
           {formatBytes(diskBytes)}
         </span>
+        {costTable && (
+          <span
+            className="chip mono"
+            title="Estimated from a maintained price table, not metered usage. Counts phases that are done or running in the take you are looking at."
+          >
+            ~{formatUsd(projectSpend(phasesForSelected, costTable, selectedScriptSubstate))}
+          </span>
+        )}
         <button type="button" className="btn btn--primary" onClick={isRunning ? onCancel : onStartRender}>
           {isRunning ? <IconStop /> : <IconPlay />}
           {actionLabel}

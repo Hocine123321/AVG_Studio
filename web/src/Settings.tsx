@@ -10,6 +10,7 @@ import {
   type ChannelDoc,
   type SettingSpec,
 } from "./api";
+import ModelsPanel from "./ModelsPanel";
 import SettingsGroup from "./SettingsGroup";
 import type { SettingsCtx } from "./fields/types";
 
@@ -26,6 +27,7 @@ const GROUP_LABELS: Record<string, string> = {
   images: "Images",
   render: "Render",
   creative: "Creative",
+  models: "Models & cost",
   keys: "Provider keys",
 };
 
@@ -111,6 +113,14 @@ export default function Settings() {
     if (spec.type === "secret") return keys[spec.id] ?? false;
     const source = spec.scope === "app" ? appValues : channelValues;
     return Object.prototype.hasOwnProperty.call(source, spec.id) ? source[spec.id] : spec.default;
+  }
+
+  /** `getValue` by id rather than by spec, as a string - what the read-only
+   * Models overview needs. Goes through `getValue`, so it shows unsaved
+   * edits, not just what is on disk. */
+  function valueById(id: string): string {
+    const spec = schema?.find((s) => s.id === id);
+    return spec ? String(getValue(spec) ?? "") : "";
   }
 
   function isDirty(id: string): boolean {
@@ -302,7 +312,21 @@ export default function Settings() {
           {visibleGroups.length === 0 ? (
             <p className="home__empty">Nothing matches &ldquo;{search.trim()}&rdquo;.</p>
           ) : (
-            visibleGroups.map((g) => <SettingsGroup key={g.group} title={g.label} specs={g.specs} ctx={ctx} />)
+            visibleGroups.map((g) => (
+              <div key={g.group}>
+                {/* Only when the whole group is on screen: while searching,
+                    a filtered subset of the model fields would give the
+                    overview table nothing coherent to summarise. */}
+                {g.group === "models" && !searching && (
+                  <ModelsPanel
+                    specs={g.specs}
+                    valueOf={valueById}
+                    lengthPreset={valueById("length_preset") || "60s"}
+                  />
+                )}
+                <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />
+              </div>
+            ))
           )}
         </div>
       </div>

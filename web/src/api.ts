@@ -181,6 +181,25 @@ export function createProject(topic: string, overrides: Record<string, unknown> 
   return apiPost<ProjectDoc>("/api/projects", { topic, overrides });
 }
 
+// ---- cost table ----
+
+/** `GET /api/costs`. Served rather than hardcoded here on purpose: these
+ * are maintained estimates that change, and `phases.ts` is already one
+ * hand-kept copy of backend data too many. `leaf_cost` is keyed by DISPLAY
+ * leaf (`draft`/`segmentation`, not `script`); `phase_leaves` maps each
+ * pipeline phase key onto its leaves. */
+export interface CostTable {
+  currency: string;
+  leaf_cost: Record<string, number>;
+  phase_leaves: Record<string, string[]>;
+  length_multiplier: Record<string, number>;
+  base_cost: number;
+}
+
+export function getCosts(): Promise<CostTable> {
+  return apiGet<CostTable>("/api/costs");
+}
+
 export function getSettings(): Promise<SettingsDoc> {
   return apiGet<SettingsDoc>("/api/settings");
 }

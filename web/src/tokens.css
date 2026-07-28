@@ -1897,6 +1897,80 @@ a:hover {
   color: var(--bad);
 }
 
+/* ---- models & cost overview (Settings) ----
+   Read-only summary above the editable model fields. No filled terracotta
+   anywhere in here: this screen's one primary action is "Save changes" in
+   the save bar. The accent appears only as the spend figure's identity
+   colour, which tokens.css's header explicitly allows. */
+
+.models-panel {
+  margin-bottom: 18px;
+}
+
+.spend-card {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex-wrap: wrap;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+
+.spend-card b {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 24px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.spend-card__note {
+  margin-left: auto;
+  max-width: 34ch;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* The table is the widest thing on this screen; it scrolls inside its own
+   box rather than making the settings page scroll sideways. */
+.models-scroll {
+  overflow-x: auto;
+}
+
+.models {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.models th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 0 14px 9px 0;
+  white-space: nowrap;
+}
+
+.models td {
+  padding: 10px 14px 10px 0;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.models__inherited {
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* ---- channels ----
    The one terracotta action on this screen is "New channel" - "Set active"
    stays a plain .btn (an active channel reads as settled via the sage
