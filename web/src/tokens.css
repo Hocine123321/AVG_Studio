@@ -2592,3 +2592,19 @@ a:hover {
   border-color: var(--sage);
   color: var(--sage);
 }
+
+/* ---- components table (Settings) ---- */
+
+.health--bad {
+  color: var(--bad) !important;
+}
+
+/* The only column here that can carry a long string (an absolute ffmpeg
+   path, or an import error). It truncates rather than forcing the table
+   wider than the screen; the full text is in the title attribute. */
+.models__detail {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}

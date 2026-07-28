@@ -8,6 +8,7 @@ stack - those modules already refuse to have one (see their docstrings)
 and this router does not reintroduce one at the HTTP layer.
 
     GET    /api/costs                    -> the maintained cost table
+    GET    /api/health                   -> component states (?refresh=true to recheck)
     GET    /api/settings/schema           -> the catalogue
     GET    /api/settings/values           -> app values + the active channel's values
     POST   /api/settings/values           -> save; app-scope -> settings.json,
@@ -40,7 +41,7 @@ from pydantic import BaseModel
 from avg.config import channels as channels_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
-from avg.core import costs
+from avg.core import costs, health
 from avg.core.settings_schema import (
     KEY_PROVIDER_IDS,
     SETTINGS,
@@ -120,6 +121,25 @@ def _values_payload(app_state: Any) -> dict[str, Any]:
 @router.get("/api/settings/schema")
 async def get_settings_schema() -> dict:
     return {"settings": [s.model_dump() for s in SETTINGS]}
+
+
+@router.get("/api/health")
+async def get_health(refresh: bool = False) -> dict:
+    """Component states for the settings screen's Components table.
+
+    `refresh=true` is the Recheck button and skips the cache, paying for the
+    `ffmpeg -version` subprocess again. Never raises for an unhealthy
+    component: a failure is an ordinary row with `ok: false` and a reason,
+    which is what lets this screen report a broken FFmpeg instead of 500ing
+    about it.
+    """
+    components = health.check_all(refresh=refresh)
+    return {
+        "components": [
+            {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail} for c in components
+        ],
+        "ok": all(c.ok for c in components),
+    }
 
 
 @router.get("/api/costs")

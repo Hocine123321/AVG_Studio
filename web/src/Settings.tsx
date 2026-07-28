@@ -10,6 +10,7 @@ import {
   type ChannelDoc,
   type SettingSpec,
 } from "./api";
+import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
 import SettingsGroup from "./SettingsGroup";
 import type { SettingsCtx } from "./fields/types";
@@ -19,7 +20,7 @@ import type { SettingsCtx } from "./fields/types";
  * value on the backend needs no matching entry here to show up correctly;
  * this map only ever improves on the fallback, never gates it. */
 const GROUP_LABELS: Record<string, string> = {
-  paths: "Paths",
+  paths: "Paths & components",
   runtime: "Runtime",
   video: "Video format",
   captions: "Captions",
@@ -317,6 +318,13 @@ export default function Settings() {
                 {/* Only when the whole group is on screen: while searching,
                     a filtered subset of the model fields would give the
                     overview table nothing coherent to summarise. */}
+                {/* Components sits with Paths rather than getting a nav
+                    entry of its own: both answer "where are this app's
+                    tools and do they work", and Paths owns the Python
+                    executable setting. Hidden while searching for the same
+                    reason the models table is - a filtered field list has
+                    nothing coherent to head. */}
+                {g.group === "paths" && !searching && <HealthPanel />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}

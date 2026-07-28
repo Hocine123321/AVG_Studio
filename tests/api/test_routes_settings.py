@@ -378,3 +378,36 @@ def test_costs_route_serves_the_table_and_needs_a_token(client):
     # its draft only; without it the frontend would need its own copy.
     assert body["phase_leaves"]["script"] == ["draft", "segmentation"]
     assert set(body["length_multiplier"]) >= {"30s", "60s", "8m"}
+
+
+# ---------------------------------------------------------------------------
+# GET /api/health (Slice 6C)
+
+
+def test_health_route_reports_every_component_and_needs_a_token(client):
+    assert client.get("/api/health").status_code == 401
+
+    body = client.get("/api/health", headers=AUTH).json()
+    names = [c["name"] for c in body["components"]]
+    assert "FFmpeg" in names and "Pillow" in names
+    assert body["ok"] is all(c["ok"] for c in body["components"])
+
+
+def test_health_route_reports_a_broken_component_rather_than_failing(client, monkeypatch):
+    """A broken FFmpeg must render as a row, not as a 500 - the whole point
+    of the screen is to tell the user what is wrong."""
+    from avg.core import health
+
+    health.clear_cache()
+    monkeypatch.setattr(
+        "avg.core.health._check_ffmpeg",
+        lambda: health.Component(name="FFmpeg", ok=False, detail="not found (ffmpeg)"),
+    )
+
+    r = client.get("/api/health?refresh=true", headers=AUTH)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    ffmpeg = next(c for c in body["components"] if c["name"] == "FFmpeg")
+    assert ffmpeg["ok"] is False and "not found" in ffmpeg["detail"]
+    health.clear_cache()

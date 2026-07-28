@@ -193,6 +193,28 @@ export function archiveProjects(ids: string[], archived: boolean): Promise<{ arc
   return apiPost<{ archived: boolean; ids: string[] }>("/api/projects/archive", { ids, archived });
 }
 
+// ---- component health ----
+
+export interface HealthComponent {
+  name: string;
+  ok: boolean;
+  version: string;
+  detail: string;
+}
+
+export interface HealthResponse {
+  components: HealthComponent[];
+  ok: boolean;
+}
+
+/** `GET /api/health`. `refresh` is the Recheck button and skips the
+ * backend's five-minute cache, paying for the `ffmpeg -version` subprocess
+ * again. A broken component is a row with `ok: false`, never an error
+ * response - reporting the breakage is the point. */
+export function getHealth(refresh = false): Promise<HealthResponse> {
+  return apiGet<HealthResponse>(`/api/health${refresh ? "?refresh=true" : ""}`);
+}
+
 // ---- cost table ----
 
 /** `GET /api/costs`. Served rather than hardcoded here on purpose: these
