@@ -1,11 +1,23 @@
-"""The app's own settings document.
+"""The app's own settings document, and the read-only import of the legacy
+app's `config.json`.
 
-Distinct from the legacy app's `config.json` (imported read-only via
-`avg.config.settings_import`) - this is a small file AVG Studio itself owns
-and writes, currently holding exactly one durable decision: where the
-user's project library lives. Reading and writing only happen here; no
-HTTP, no UI concerns - `avg.api.app` calls into this module and shapes the
-result into routes, `avg.shell` calls into it to decide `resolve_output_root()`.
+Two directions over the same subject. The first half is a small file AVG
+Studio itself owns and writes, currently holding exactly one durable
+decision: where the user's project library lives. The second half
+(`load_render_settings`) only ever *reads*, from the old PowerShell app's
+`config.json`, and never writes anything - it exists so a project imported
+from `D:\\AI_Video_Gen` renders with the settings it was made under.
+
+Reading and writing only happen here; no HTTP, no UI concerns -
+`avg.api.app` calls into this module and shapes the result into routes,
+`avg.shell` calls into it to decide `resolve_output_root()`.
+
+Deliberately NOT folded in here: `avg.config.legacy_import`, which imports
+whole legacy *project folders* rather than settings. It depends on
+`avg.pipeline.registry` for phase order, and this module sits below
+`avg.config.channels` -> `avg.pipeline.phase` -> the phases -> that same
+registry, so merging it would close an import cycle. `suggest_output_root`
+below reaches it through a function-local import for the same reason.
 """
 
 from __future__ import annotations
@@ -18,6 +30,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+# ── App Settings Document ────────────────────────────
 
 SCHEMA_VERSION = 1
 
@@ -178,3 +192,103 @@ def suggest_output_root() -> tuple[Path, int, str]:
     fallback = Path.home() / "Videos" / "AVG Studio"
     count = len(import_all(fallback).imported) if fallback.exists() else 0
     return fallback, count, "default"
+
+
+# ── Legacy Render-Settings Import ───────────────────────────
+#
+# Reads only four groups from the old 21-key config.json: video.*, edit.*,
+# video_format.*, runtime.*. Everything else (AI providers, API keys, voice,
+# images, channel profiles) is out of scope - those are owned by
+# `avg.core.settings_schema` and `avg.config.channels` in this app, not
+# imported from the legacy one.
+
+
+class RenderSettings(BaseModel):
+    """Render settings extracted from legacy app config."""
+
+    fps: int
+    codec: str
+    aspect_ratio: str
+    short_edge: int
+    ken_burns: bool
+    kb_intensity: int
+    kb_mode: str
+    render_engine: str
+    render_opts: dict
+    worker_cap: int
+    drop_grain: bool
+    skip_prebuild: bool
+
+
+def _get(cfg: dict, dotted_path: str, default=None):
+    """Get a value from nested dict using dotted path notation.
+
+    Never raises on missing branches. Returns default if any intermediate
+    level is missing or is not a dict (e.g., null, a scalar).
+
+    Examples:
+        _get({"video": {"fps": 24}}, "video.fps", 24) -> 24
+        _get({}, "video.fps", 24) -> 24
+        _get({"video": None}, "video.fps", 24) -> 24
+    """
+    parts = dotted_path.split(".")
+    current = cfg
+
+    for part in parts:
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            # current is not a dict (None, scalar, list, etc.)
+            return default
+
+    return current if current is not None else default
+
+
+def load_render_settings(config_path: Path, total_ram_gb: float) -> RenderSettings:
+    """Load render settings from legacy app config, applying RAM gates.
+
+    Args:
+        config_path: Path to config.json
+        total_ram_gb: Total system RAM in GB (used for RAM gates)
+
+    Returns:
+        RenderSettings object with all render-relevant settings
+
+    RAM gates:
+        - worker_cap = 2 if total_ram_gb <= 8 else 4
+        - drop_grain = total_ram_gb <= 8.5
+        - skip_prebuild = total_ram_gb < 12
+    """
+    config_path = Path(config_path)
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+
+    # Extract values with sensible defaults
+    fps = _get(cfg, "video.fps", 24)
+    codec = _get(cfg, "video.codec", "libx264")
+    aspect_ratio = _get(cfg, "video_format.aspect_ratio", "9:16")
+    short_edge = _get(cfg, "video_format.short_edge", 1080)
+    ken_burns = _get(cfg, "video.ken_burns", False)
+    kb_intensity = _get(cfg, "video.kb_intensity", 100)
+    kb_mode = _get(cfg, "video.kb_mode", "flat")
+    render_engine = _get(cfg, "video.render_engine", "auto")
+    render_opts = _get(cfg, "runtime.render_opts", {})
+
+    # Apply RAM gates
+    worker_cap = 2 if total_ram_gb <= 8 else 4
+    drop_grain = total_ram_gb <= 8.5
+    skip_prebuild = total_ram_gb < 12
+
+    return RenderSettings(
+        fps=fps,
+        codec=codec,
+        aspect_ratio=aspect_ratio,
+        short_edge=short_edge,
+        ken_burns=ken_burns,
+        kb_intensity=kb_intensity,
+        kb_mode=kb_mode,
+        render_engine=render_engine,
+        render_opts=render_opts,
+        worker_cap=worker_cap,
+        drop_grain=drop_grain,
+        skip_prebuild=skip_prebuild,
+    )

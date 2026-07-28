@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from avg.config import channels as channels_config
 from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
-from avg.config.settings_import import load_render_settings
+from avg.config.settings import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
