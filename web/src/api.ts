@@ -99,6 +99,7 @@ export interface ProjectImagesResponse {
 // ---- API-shaped types (mirrors avg.core.models on the Python side) ----
 
 export type PhaseStatus = "pending" | "running" | "done" | "failed";
+export type ScriptSubstate = "pending" | "partial" | "done";
 
 export interface PhaseRecord {
   name?: string;
@@ -139,6 +140,10 @@ export interface ProjectDoc {
    * every real one already carries these two fields. */
   takes?: Take[];
   current_take_id?: number | null;
+  /** Present on `GET /api/projects`, where it is derived from the current
+   * take's artifacts. `POST /api/projects` returns the persisted ProjectDoc
+   * directly, so callers must tolerate it being absent until the next list. */
+  script_substate?: ScriptSubstate;
 }
 
 export interface ProjectsResponse {

@@ -1112,6 +1112,10 @@ a:hover {
   color: var(--text);
 }
 
+.phase-row--partial {
+  color: var(--text);
+}
+
 .phase-row--failed {
   color: var(--bad);
 }
@@ -1168,6 +1172,15 @@ a:hover {
   background: var(--bad);
 }
 
+.phase-row--partial .phase-row__node {
+  border-color: var(--sage);
+  background: conic-gradient(var(--sage-deep) 0 180deg, transparent 180deg 360deg);
+}
+
+.phase-row--partial .phase-row__node::after {
+  background: var(--sage);
+}
+
 .phase-row__name {
   flex: 1;
   min-width: 0;
@@ -1175,6 +1188,19 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase-row__sub {
+  font-size: 10px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0 5px;
+  line-height: 1.5;
 }
 
 .phase-row__dur {
@@ -1186,6 +1212,44 @@ a:hover {
 
 .phase-row--selected .phase-row__dur {
   color: var(--muted);
+}
+
+.subphase {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.subphase__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+}
+
+.subphase__row .mut {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.subphase__row .dot--done {
+  background: var(--sage);
+}
+
+.subphase__row .dot--failed {
+  background: var(--bad);
+}
+
+.subphase__row .dot--running {
+  background: var(--accent);
+}
+
+.subphase__row .dot--pending {
+  background: var(--dim);
 }
 
 /* ---- artifact panel ---- */

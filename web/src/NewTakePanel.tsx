@@ -236,6 +236,8 @@ export default function NewTakePanel({ projectId, branchFromTake, onClose, onCre
               onChange={(e) => setRerollFrom(e.target.value || null)}
             >
               <option value="">No re-roll</option>
+              {/* PHASE_ORDER intentionally excludes the display-only Draft /
+                  Segmentation leaves: the backend accepts only REGISTRY keys. */}
               {PHASE_ORDER.map((p) => (
                 <option key={p.key} value={p.key}>
                   {p.label}

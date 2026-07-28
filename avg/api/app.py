@@ -7,7 +7,7 @@ reaches the user, as an HTTP response or a WebSocket message.
 
 Routes (see the task-7 and task-10.5 briefs for the exact contract):
 
-    GET  /api/projects                          -> {"projects": [ProjectDoc, ...]}
+    GET  /api/projects                          -> {"projects": [ProjectDoc-shaped dict + script_substate, ...]}
     POST /api/projects                           -> 201 ProjectDoc (creates + starts the full pipeline)
     POST /api/projects/{project_id}/render       -> 202 {"started": true}
     POST /api/projects/{project_id}/cancel       -> {"cancelled": true}
@@ -46,11 +46,13 @@ from avg.config.settings import load_render_settings
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
+from avg.core.takes import take_folder
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
+from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
 
 from .deps import require_token
@@ -297,7 +299,23 @@ def create_app(
 
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
-        return {"projects": list(app.state.projects.values())}
+        # ``script_substate`` is derived from artifacts at read time, not put
+        # on ProjectDoc: the document is persisted, while this display-only
+        # value must always reflect the current take's files.
+        projects = []
+        for project in app.state.projects.values():
+            root = (
+                take_folder(project, project.current_take_id)
+                if project.current_take_id is not None
+                else Path(project.folder)
+            )
+            projects.append(
+                {
+                    **project.model_dump(mode="json"),
+                    "script_substate": script_substate(root / "script"),
+                }
+            )
+        return {"projects": projects}
 
     @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
     async def create_project(body: ProjectCreate) -> ProjectDoc:

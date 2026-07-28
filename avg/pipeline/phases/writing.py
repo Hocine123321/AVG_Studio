@@ -63,6 +63,8 @@ app's "legacy blind mode".
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
@@ -131,6 +133,23 @@ class BriefPhase:
 # `build_scene_count_rule`'s default bounds in `avg.pipeline.prompts`.
 _MIN_SCENES = 3
 _MAX_SCENES = 15
+
+
+def script_substate(script_dir: Path) -> Literal["pending", "partial", "done"]:
+    """Derive the two-pass Script display state from its own artifacts.
+
+    This deliberately accepts a script directory rather than a project so
+    callers can use either a project's legacy root or one of its take folders.
+    It is display state only: persisting it alongside ``ProjectDoc.phases``
+    would create a second source of truth that could drift from the files.
+    """
+    has_narration = (script_dir / "narration.txt").is_file()
+    has_scenes = (script_dir / "scenes.json").is_file()
+    if has_narration and has_scenes:
+        return "done"
+    if has_narration:
+        return "partial"
+    return "pending"
 
 
 def _brief_context(ctx: PhaseContext) -> str:

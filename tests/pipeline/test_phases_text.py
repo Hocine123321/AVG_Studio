@@ -29,7 +29,7 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
-from avg.pipeline.phases.writing import BriefPhase
+from avg.pipeline.phases.writing import BriefPhase, script_substate
 from avg.pipeline.phases.director import Director1Phase
 from avg.pipeline.phases.writing import ScriptPhase
 from avg.pipeline.phases._common import read_json, script_dir, write_json
@@ -171,6 +171,19 @@ def test_brief_phase_inputs_ready_is_always_true(tmp_path):
 
 
 # ── ScriptPhase ──────────────────────────────────────────────────────────
+
+
+def test_script_substate_reads_only_the_two_script_artifacts(tmp_path):
+    script = tmp_path / "script"
+    script.mkdir()
+
+    assert script_substate(script) == "pending"
+
+    (script / "narration.txt").write_text("Narration", encoding="utf-8")
+    assert script_substate(script) == "partial"
+
+    (script / "scenes.json").write_text("[]", encoding="utf-8")
+    assert script_substate(script) == "done"
 
 def test_script_phase_writes_narration_and_a_verbatim_scene_partition(tmp_path, monkeypatch):
     fake = _QueueGenerator([NARRATION, SCENE_BLOCKS])

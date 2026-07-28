@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 from avg.api.app import create_app
 from avg.config.channels import get_channel
 from avg.core.events import PhaseFinished, PhaseStarted
+from avg.core.takes import migrate_to_takes, take_folder
 
 TOKEN = "t0k"
 AUTH = {"X-AVG-Token": TOKEN}
@@ -150,6 +151,33 @@ def test_create_appears_in_a_subsequent_list(client):
     created = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"}).json()
     listed = client.get("/api/projects", headers=AUTH).json()["projects"]
     assert any(p["id"] == created["id"] for p in listed)
+
+
+def test_list_projects_derives_script_substate_from_current_artifacts(client):
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"}).json()
+    project = client.app.state.projects[created["id"]]
+    project_root = Path(created["folder"])
+    script = project_root / "script"
+
+    def substate() -> str:
+        listed = client.get("/api/projects", headers=AUTH).json()["projects"]
+        return next(project for project in listed if project["id"] == created["id"])["script_substate"]
+
+    assert substate() == "pending"
+    (script / "narration.txt").write_text("Narration", encoding="utf-8")
+    assert substate() == "partial"
+
+    # Once the project has a current take, the top-level legacy artifacts
+    # must no longer influence the display state.
+    migrate_to_takes(project)
+    (script / "scenes.json").write_text("[]", encoding="utf-8")
+    assert substate() == "partial"
+
+    assert project.current_take_id is not None
+    current_script = take_folder(project, project.current_take_id) / "script"
+    (current_script / "scenes.json").write_text("[]", encoding="utf-8")
+    assert substate() == "done"
 
 
 def test_create_override_never_persists_to_the_channel_document(client, paths):

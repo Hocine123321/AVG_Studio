@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { apiGet, deleteTake, getTakes, imageUrl, renameTake, videoUrl } from "./api";
-import type { PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, Take } from "./api";
+import type { PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
 import type { PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
 import NewTakePanel from "./NewTakePanel";
-import { PHASE_ORDER } from "./phases";
+import { groupStatus, PHASE_DEFS, PHASE_ORDER, type DisplayPhaseStatus } from "./phases";
 import Player from "./Player";
 import TakeStrip from "./TakeStrip";
 
@@ -20,17 +20,18 @@ function formatBytes(n?: number | null): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`;
 }
 
-function statusLabel(status: PhaseStatus): string {
+function statusLabel(status: DisplayPhaseStatus): string {
   if (status === "done") return "Done";
   if (status === "failed") return "Failed";
   if (status === "running") return "Running";
+  if (status === "partial") return "1 of 2 done";
   return "Not started";
 }
 
-function statusChipClass(status: PhaseStatus): string {
+function statusChipClass(status: DisplayPhaseStatus): string {
   if (status === "done") return "chip chip--ok";
   if (status === "failed") return "chip chip--bad";
-  if (status === "running") return "chip chip--amber";
+  if (status === "running" || status === "partial") return "chip chip--amber";
   return "chip";
 }
 
@@ -52,6 +53,35 @@ function defaultPhase(phases: Record<string, PhaseRecord>): string {
 
 function totalDurationMs(phases: Record<string, PhaseRecord>): number {
   return Object.values(phases).reduce((sum, p) => sum + (p.duration_ms ?? 0), 0);
+}
+
+/** Add the display-only Script leaves to the backend's eight phase records.
+ * The list endpoint supplies current-take artifact truth while idle. During
+ * a fresh client-side run it has not yet been refreshed, so a completed
+ * script PhaseRecord is the short-lived fallback. */
+function displayStatuses(
+  phases: Record<string, PhaseRecord>,
+  scriptSubstate: ScriptSubstate | undefined,
+  activePhase: string | null,
+): Record<string, PhaseStatus> {
+  const statuses: Record<string, PhaseStatus> = {};
+  for (const { key } of PHASE_ORDER) statuses[key] = phases[key]?.status ?? "pending";
+
+  if (activePhase === "script") {
+    // The runner buffers Script's 0/50/100 progress until it has returned,
+    // so phase_started is the only live signal. Do not pretend to know that
+    // segmentation has begun before the backend can tell us.
+    statuses.draft = "running";
+    statuses.segmentation = "pending";
+  } else if (statuses.script === "failed") {
+    statuses.draft = "failed";
+    statuses.segmentation = "failed";
+  } else {
+    const resolved = scriptSubstate ?? (statuses.script === "done" ? "done" : "pending");
+    statuses.draft = resolved === "pending" ? "pending" : "done";
+    statuses.segmentation = resolved === "done" ? "done" : "pending";
+  }
+  return statuses;
 }
 
 function ArtifactDetail({
@@ -252,6 +282,9 @@ function ArtifactDetail({
 export interface StudioProps {
   project: ProjectDoc;
   progress: ProgressEvent | null;
+  /** The current pipeline phase, from its existing phase_started event.
+   * `null` for direct `/render` jobs, which have no pipeline phase event. */
+  activePhase?: string | null;
   failure?: PhaseFailedEvent | null;
   cancelled?: RenderCancelledEvent | null;
   finished?: RenderFinishedEvent | null;
@@ -283,6 +316,7 @@ export interface StudioProps {
 export default function Studio({
   project,
   progress,
+  activePhase = null,
   failure = null,
   cancelled = null,
   finished = null,
@@ -329,12 +363,9 @@ export default function Studio({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 
-  // While a take is running, poll for its phase-by-phase progress: the
-  // pipeline's own PhaseStarted/PhaseFinished events aren't wired into
-  // `useEvents` (only the render phase's own ProgressEvent/RenderFinished/
-  // PhaseFailed are - see `avg.pipeline.phases.render`), so this is what
-  // keeps the rail's pending/running/done nodes current for the phases
-  // before render. Stops the moment nothing is running.
+  // While a take is running, poll its persisted records as a recovery path
+  // for a dropped socket. Existing phase-start/finish events update the
+  // current UI immediately; this keeps it correct across a reconnect.
   useEffect(() => {
     if (runningTakeId === null) return;
     const id = setInterval(() => {
@@ -346,26 +377,28 @@ export default function Studio({
 
   // Any event for this project means take data is worth refreshing (a
   // render just failed/finished/was cancelled, or is progressing). A live
-  // render also snaps both the selected TAKE (to whichever one is actually
-  // running) and the selected PHASE to "render" - the running take must
-  // stay findable, matching the same jump this component already made for
-  // the single-take world.
+  // active pipeline phase also snaps both the selected TAKE (to whichever
+  // one is actually running) and the selected PHASE there.
   useEffect(() => {
     const forThisProject =
       progress?.project_id === project.id ||
       failure?.project_id === project.id ||
       cancelled?.project_id === project.id ||
-      finished?.project_id === project.id;
+      finished?.project_id === project.id ||
+      activePhase !== null;
     if (!forThisProject) return;
 
     refreshTakes().catch(() => {});
     if (failure || cancelled || finished) setRunningTakeId(null);
-    if (progress?.project_id === project.id) {
+    if (activePhase !== null) {
+      setSelected(activePhase);
+      if (runningTakeId !== null) setSelectedTakeId(runningTakeId);
+    } else if (progress?.project_id === project.id) {
       setSelected("render");
       if (runningTakeId !== null) setSelectedTakeId(runningTakeId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progress, failure, cancelled, finished]);
+  }, [progress, activePhase, failure, cancelled, finished]);
 
   const selectedTake = takes?.find((t) => t.id === selectedTakeId);
   const isCurrentTake = selectedTakeId !== null && selectedTakeId === currentTakeId;
@@ -399,14 +432,20 @@ export default function Studio({
   }
 
   const phasesForSelected: Record<string, PhaseRecord> = selectedTake?.phases ?? project.phases;
+  // `/api/projects` derives this only for the current take. A historical
+  // take must not inherit that current take's artifact state, so its own
+  // persisted Script record remains the fallback in `displayStatuses`.
+  const selectedScriptSubstate = isCurrentTake ? project.script_substate : undefined;
+  const statuses = displayStatuses(phasesForSelected, selectedScriptSubstate, activePhase);
 
   const renderStatus: PhaseStatus = project.phases.render?.status ?? "pending";
   const isRunning = renderStatus === "running";
   const actionLabel = isRunning ? "Cancel" : renderStatus === "pending" ? "Start render" : "Run again";
 
   const record = phasesForSelected[selected];
-  const selectedStatus: PhaseStatus = record?.status ?? "pending";
-  const label = PHASE_ORDER.find((p) => p.key === selected)?.label ?? selected;
+  const selectedDef = PHASE_DEFS.find((def) => def.key === selected);
+  const selectedStatus = selectedDef ? groupStatus(selectedDef, statuses) : "pending";
+  const label = selectedDef?.label ?? selected;
 
   return (
     <div className="studio">
@@ -472,10 +511,11 @@ export default function Studio({
           </p>
           <div className="phase-rail__inner">
             <span className="phase-rail__thread" aria-hidden="true" />
-            {PHASE_ORDER.map(({ key, label: rowLabel }) => {
+            {PHASE_DEFS.map((def) => {
+              const { key, label: rowLabel } = def;
               const rowRecord = phasesForSelected[key];
-              const status: PhaseStatus = rowRecord?.status ?? "pending";
-              const live = key === "render" && isCurrentTake && progress;
+              const status = groupStatus(def, statuses);
+              const live = key === "render" && activePhase === null && isCurrentTake && progress;
               return (
                 <button
                   key={key}
@@ -485,9 +525,12 @@ export default function Studio({
                   title={statusLabel(status)}
                 >
                   <span className={`phase-row__node${status === "running" ? " halo" : ""}`} aria-hidden="true" />
-                  <span className="phase-row__name">{rowLabel}</span>
+                  <span className="phase-row__name">
+                    {rowLabel}
+                    {def.sub && <span className="phase-row__sub">{def.sub.length}</span>}
+                  </span>
                   <span className="phase-row__dur">
-                    {live ? `${progress.percent}%` : formatDuration(rowRecord?.duration_ms)}
+                    {live ? `${progress.percent}%` : status === "partial" ? "1/2" : formatDuration(rowRecord?.duration_ms)}
                   </span>
                 </button>
               );
@@ -500,18 +543,34 @@ export default function Studio({
             <h2 className="artifact-panel__title">{label}</h2>
             <span className={statusChipClass(selectedStatus)}>{statusLabel(selectedStatus)}</span>
           </div>
-          <ArtifactDetail
-            phaseKey={selected}
-            record={record}
-            progress={selected === "render" && isCurrentTake ? progress : null}
-            failure={selected === "render" ? failure : null}
-            finished={selected === "render" && isCurrentTake ? finished : null}
-            project={project}
-            take={selectedTake}
-            isCurrentTake={isCurrentTake}
-            onStartRender={onStartRender}
-            onCancel={onCancel}
-          />
+          {selectedDef?.sub && (
+            <div className="subphase" aria-label="Script sub-phases">
+              {selectedDef.sub.map(({ key, label: subLabel }) => {
+                const status = statuses[key];
+                return (
+                  <div key={key} className="subphase__row">
+                    <span className={`dot dot--${status}`} aria-hidden="true" />
+                    <b>{subLabel}</b>
+                    <span className="mut">{statusLabel(status)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {(!selectedDef?.sub || selectedStatus === "failed") && (
+            <ArtifactDetail
+              phaseKey={selected}
+              record={record}
+              progress={selected === "render" && isCurrentTake ? progress : null}
+              failure={selected === "render" ? failure : null}
+              finished={selected === "render" && isCurrentTake ? finished : null}
+              project={project}
+              take={selectedTake}
+              isCurrentTake={isCurrentTake}
+              onStartRender={onStartRender}
+              onCancel={onCancel}
+            />
+          )}
         </div>
       </div>
 

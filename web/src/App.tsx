@@ -44,10 +44,25 @@ function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>
 function applyLiveState(project: ProjectDoc, events: ReturnType<typeof useEvents>): ProjectDoc {
   const id = project.id;
   if (events.progress?.project_id === id) {
-    return withPhase(project, "render", { status: "running" });
+    return withPhase(project, events.phaseStarted?.project_id === id ? events.phaseStarted.phase : "render", {
+      status: "running",
+    });
+  }
+  if (events.phaseStarted?.project_id === id) {
+    return withPhase(project, events.phaseStarted.phase, { status: "running" });
+  }
+  if (events.phaseFinished?.project_id === id) {
+    return withPhase(project, events.phaseFinished.phase, {
+      status: "done",
+      duration_ms: events.phaseFinished.duration_ms,
+      error: null,
+    });
   }
   if (events.failure?.project_id === id) {
-    return withPhase(project, "render", { status: "failed", error: events.failure.message });
+    return withPhase(project, events.failure.phase, { status: "failed", error: events.failure.message });
+  }
+  if (events.pipelineCancelled?.project_id === id) {
+    return withPhase(project, events.pipelineCancelled.phase, { status: "pending", error: null });
   }
   if (events.finished?.project_id === id) {
     return { ...withPhase(project, "render", { status: "done", error: null }), master_output: events.finished.output };
@@ -188,6 +203,7 @@ export default function App() {
         <Studio
           project={project}
           progress={events.progress?.project_id === project.id ? events.progress : null}
+          activePhase={events.phaseStarted?.project_id === project.id ? events.phaseStarted.phase : null}
           failure={events.failure?.project_id === project.id ? events.failure : null}
           cancelled={events.cancelled?.project_id === project.id ? events.cancelled : null}
           finished={events.finished?.project_id === project.id ? events.finished : null}

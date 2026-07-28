@@ -24,6 +24,25 @@ export interface PhaseFailedEvent {
   detail: string;
 }
 
+export interface PhaseStartedEvent {
+  type: "phase_started";
+  project_id: string;
+  phase: string;
+}
+
+export interface PhaseFinishedEvent {
+  type: "phase_finished";
+  project_id: string;
+  phase: string;
+  duration_ms: number;
+}
+
+export interface PipelineCancelledEvent {
+  type: "pipeline_cancelled";
+  project_id: string;
+  phase: string;
+}
+
 export interface RenderCancelledEvent {
   type: "render_cancelled";
   project_id: string;
@@ -36,7 +55,14 @@ export interface RenderFinishedEvent {
   size_bytes: number;
 }
 
-export type EngineEvent = ProgressEvent | PhaseFailedEvent | RenderCancelledEvent | RenderFinishedEvent;
+export type EngineEvent =
+  | ProgressEvent
+  | PhaseFailedEvent
+  | PhaseStartedEvent
+  | PhaseFinishedEvent
+  | PipelineCancelledEvent
+  | RenderCancelledEvent
+  | RenderFinishedEvent;
 
 export interface EventsState {
   /** The most recently seen event of each kind - not a history, and not
@@ -47,6 +73,9 @@ export interface EventsState {
    * filter these by `project_id` themselves (see `App.tsx`). */
   progress: ProgressEvent | null;
   failure: PhaseFailedEvent | null;
+  phaseStarted: PhaseStartedEvent | null;
+  phaseFinished: PhaseFinishedEvent | null;
+  pipelineCancelled: PipelineCancelledEvent | null;
   cancelled: RenderCancelledEvent | null;
   finished: RenderFinishedEvent | null;
   /** False while the socket is down and a reconnect is pending - surfaced
@@ -58,20 +87,42 @@ export interface EventsState {
 const INITIAL_STATE: EventsState = {
   progress: null,
   failure: null,
+  phaseStarted: null,
+  phaseFinished: null,
+  pipelineCancelled: null,
   cancelled: null,
   finished: null,
   connected: false,
 };
 
-/** Every event resets the other three fields: state always reflects the
- * single most recent thing that happened, terminal or not, rather than
- * accumulating stale flags from a previous render. */
-function reduce(payload: { type: string } & Record<string, unknown>): EventsState {
+/** Every event replaces the prior terminal/progress state so the UI reflects
+ * the most recent event, rather than accumulating stale outcomes. A progress
+ * event deliberately retains its preceding phase_started association because
+ * the backend's progress payload itself has no phase key. */
+function reduce(previous: EventsState, payload: { type: string } & Record<string, unknown>): EventsState {
   switch (payload.type) {
+    case "phase_started":
+      return { ...INITIAL_STATE, connected: true, phaseStarted: payload as unknown as PhaseStartedEvent };
     case "progress":
-      return { ...INITIAL_STATE, connected: true, progress: payload as unknown as ProgressEvent };
+      // Pipeline progress has no phase field. The immediately preceding
+      // phase_started event supplies that association; direct media renders
+      // have none and continue to be treated as render progress by App.
+      return {
+        ...INITIAL_STATE,
+        connected: true,
+        progress: payload as unknown as ProgressEvent,
+        phaseStarted: previous.phaseStarted,
+      };
+    case "phase_finished":
+      return { ...INITIAL_STATE, connected: true, phaseFinished: payload as unknown as PhaseFinishedEvent };
     case "phase_failed":
       return { ...INITIAL_STATE, connected: true, failure: payload as unknown as PhaseFailedEvent };
+    case "pipeline_cancelled":
+      return {
+        ...INITIAL_STATE,
+        connected: true,
+        pipelineCancelled: payload as unknown as PipelineCancelledEvent,
+      };
     case "render_cancelled":
       return { ...INITIAL_STATE, connected: true, cancelled: payload as unknown as RenderCancelledEvent };
     case "render_finished":
@@ -122,7 +173,7 @@ export function useEvents(): EventsState {
           return;
         }
         if (typeof payload !== "object" || payload === null || !("type" in payload)) return;
-        setState(reduce(payload as { type: string } & Record<string, unknown>));
+        setState((previous) => reduce(previous, payload as { type: string } & Record<string, unknown>));
       };
 
       socket.onclose = () => {

@@ -1,8 +1,6 @@
 # Slice 6 — handoff brief
 
-**Written 2026-07-28**, replacing `project handoff.md` (2026-07-26), which
-predates the file consolidation and carried claims that no longer hold.
-Assumes no prior context.
+**Written 2026-07-28**, 
 
 Every fact below was checked against the code. That is worth stating
 precisely, because the first draft of this document *also* claimed to be
