@@ -39,7 +39,7 @@ see `avg/providers/text/groq.py`'s module docstring.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Literal, Mapping
 
 from avg.core.errors import AvgError
 from avg.providers.errors import POLICY
@@ -60,11 +60,31 @@ class ProviderModel:
 @dataclass(frozen=True, slots=True)
 class PhaseRoute:
     """A pipeline phase's configured routing: a required primary, an
-    optional backup. A phase absent from `RouterConfig.phases` entirely
-    behaves the same as one with no backup - see `generate()`."""
+    optional backup, and what to do when both are exhausted. A phase absent
+    from `RouterConfig.phases` entirely behaves the same as one with no
+    backup and `on_failure="stop"` - see `generate()`.
+
+    `on_failure` is the mockup's "If both fail" column
+    (`F:\\Downloads\\organic_night_v2.html`, `MODEL_ROWS`). It offers three
+    labels - `stop`, `switch provider`, `fall back` - but only two distinct
+    behaviours exist here, so only two are modelled:
+
+      - `"stop"`: the failure propagates. This is the pre-existing
+        behaviour and stays the default, so a `PhaseRoute` built without
+        thinking about this field behaves exactly as it did before.
+      - `"fall_back"`: `RouterConfig.default` is tried as a last resort,
+        once, if it is neither the primary nor the backup.
+
+    The mockup's third label, "switch provider", would mean "try the
+    default only when it names a different provider" - which is what
+    `fall_back` already does in every case where it could differ, since a
+    default that matches the primary is skipped. A separate value would be
+    a distinction the router cannot act on differently.
+    """
 
     primary: ProviderModel
     backup: ProviderModel | None = None
+    on_failure: Literal["stop", "fall_back"] = "stop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,19 +151,103 @@ def generate(prompt: str, phase: str, *, config: RouterConfig) -> TextResult:
     route = config.phases.get(phase)
     primary = route.primary if route is not None else config.default
 
-    backend = _build_backend(primary.provider, config.transport)
-    try:
-        text = backend.generate(
-            prompt, primary.model, max_tokens=config.max_tokens, temperature=config.temperature
-        )
-        return TextResult(text=text, provider=primary.provider, model=primary.model)
-    except AvgError as exc:
-        backup = route.backup if route is not None else None
-        if backup is None or POLICY[exc.kind].on_exhausted not in _SWITCH_OUTCOMES:
-            raise
+    # The ordered attempt list. Everything after the first entry is only
+    # ever reached when POLICY says switching could help - see the loop.
+    attempts = [primary]
+    if route is not None:
+        if route.backup is not None:
+            attempts.append(route.backup)
+        if route.on_failure == "fall_back" and config.default not in attempts:
+            attempts.append(config.default)
 
-        backup_backend = _build_backend(backup.provider, config.transport)
-        text = backup_backend.generate(
-            prompt, backup.model, max_tokens=config.max_tokens, temperature=config.temperature
+    last = len(attempts) - 1
+    for index, target in enumerate(attempts):
+        backend = _build_backend(target.provider, config.transport)
+        try:
+            text = backend.generate(
+                prompt, target.model, max_tokens=config.max_tokens, temperature=config.temperature
+            )
+        except AvgError as exc:
+            # Stop on the final attempt, and stop early on any kind a
+            # different provider/model would fail identically for.
+            if index == last or POLICY[exc.kind].on_exhausted not in _SWITCH_OUTCOMES:
+                raise
+            continue
+        return TextResult(
+            text=text, provider=target.provider, model=target.model, used_backup=index > 0
         )
-        return TextResult(text=text, provider=backup.provider, model=backup.model, used_backup=True)
+    raise AssertionError("unreachable: the final attempt either returns or raises")
+
+
+# ── Building a config from settings ────────────────
+
+# One `provider/model` slot per phase, plus the shared default. Deliberately
+# a plain mapping rather than an import of `avg.core.settings_schema`: this
+# module sits under `avg/providers/` and must not learn about the settings
+# catalogue, so the caller passes the channel's own settings dict in.
+_TEXT_PHASES = ("brief", "script_draft", "script_segmentation", "director1", "director2")
+
+
+def parse_target(raw: str) -> ProviderModel | None:
+    """Parse a `"provider/model"` settings string. Empty/blank means unset.
+
+    Raises `ValueError` on a non-empty value that is not exactly one
+    provider, one `/`, and a non-empty model id - a silently ignored typo
+    here would route a phase somewhere the user did not choose.
+    """
+    text = raw.strip()
+    if not text:
+        return None
+    provider, sep, model = text.partition("/")
+    provider, model = provider.strip(), model.strip()
+    if not sep or not provider or not model:
+        raise ValueError(f"{raw!r} is not a 'provider/model' pair")
+    if provider not in _BACKENDS:
+        raise ValueError(f"unknown text provider {provider!r} (known: {sorted(_BACKENDS)})")
+    return ProviderModel(provider=provider, model=model)
+
+
+def config_from_settings(
+    settings: Mapping[str, Any],
+    *,
+    fallback_default: str,
+    transport: Transport | None = None,
+) -> RouterConfig:
+    """Build a `RouterConfig` from a channel's settings dict.
+
+    Reads `text_model_default` plus, per text phase, `<phase>_model`,
+    `<phase>_backup` and `<phase>_on_failure` (see
+    `avg.core.settings_schema`'s `models` group). A phase whose `_model` is
+    blank simply gets no entry, which `generate()` already treats as "use
+    the default" - so an unconfigured channel routes everything to one
+    model rather than failing.
+
+    `fallback_default` is used when the channel document has no
+    `text_model_default` key at all, which is every channel written before
+    that setting existed. The caller passes the catalogue's own default
+    (`get_spec("text_model_default").default`) rather than this module
+    importing `avg.core.settings_schema`: nothing under `avg/providers/`
+    knows about the settings catalogue, and a hardcoded copy here would be
+    a second source of truth for that default.
+
+    `script_draft` and `script_segmentation` are router phase keys, not
+    pipeline phase keys: `ScriptPhase` makes two model calls and names them
+    separately here so a cheap model can segment what a strong one wrote.
+    `avg.pipeline.registry` still has exactly one `script` phase.
+    """
+    default = parse_target(str(settings.get("text_model_default") or fallback_default))
+    if default is None:
+        raise ValueError("text_model_default is not set — no default text model to route to")
+
+    phases: dict[str, PhaseRoute] = {}
+    for phase in _TEXT_PHASES:
+        primary = parse_target(str(settings.get(f"{phase}_model") or ""))
+        if primary is None:
+            continue
+        on_failure = str(settings.get(f"{phase}_on_failure") or "stop")
+        phases[phase] = PhaseRoute(
+            primary=primary,
+            backup=parse_target(str(settings.get(f"{phase}_backup") or "")),
+            on_failure="fall_back" if on_failure == "fall_back" else "stop",
+        )
+    return RouterConfig(default=default, phases=phases, transport=transport)

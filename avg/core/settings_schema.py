@@ -171,6 +171,71 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="director2",
     ),
+    # --- per-phase text models (the mockup's Models table) ---
+    #
+    # One `provider/model` string per slot rather than a provider choice
+    # plus a model text field: model ids are provider-specific and the
+    # model catalogue is cache-only, so a `choice` type cannot enumerate
+    # them, and two fields per slot would triple this block for no gain.
+    # `avg.providers.text.router.parse_target` is the only parser, and it
+    # rejects a malformed pair rather than silently routing elsewhere.
+    #
+    # `script_draft` and `script_segmentation` are ROUTER phase keys - the
+    # Script phase's two model calls. `avg.pipeline.registry` still has one
+    # `script` phase, so both invalidate `"script"`.
+    SettingSpec(
+        id="text_model_default",
+        group="models",
+        label="Default text model",
+        help="Fallback 'provider/model' for any phase with no model of its own. E.g. groq/llama-3.3-70b-versatile.",
+        type="text",
+        default="groq/llama-3.3-70b-versatile",
+        scope="channel",
+        invalidates="brief",
+    ),
+    *[
+        spec
+        for phase_key, phase_label, invalidated in (
+            ("brief", "Brief", "brief"),
+            ("script_draft", "Script · Draft", "script"),
+            ("script_segmentation", "Script · Segmentation", "script"),
+            ("director1", "Director I", "director1"),
+            ("director2", "Director II", "director2"),
+        )
+        for spec in (
+            SettingSpec(
+                id=f"{phase_key}_model",
+                group="models",
+                label=f"{phase_label} — model",
+                help=f"'provider/model' used for {phase_label}. Empty uses the default text model.",
+                type="text",
+                default="",
+                scope="channel",
+                invalidates=invalidated,
+            ),
+            SettingSpec(
+                id=f"{phase_key}_backup",
+                group="models",
+                label=f"{phase_label} — backup",
+                help=f"'provider/model' tried once if {phase_label}'s model fails a switchable error. Empty means no backup.",
+                type="text",
+                default="",
+                scope="channel",
+                invalidates=invalidated,
+            ),
+            SettingSpec(
+                id=f"{phase_key}_on_failure",
+                group="models",
+                label=f"{phase_label} — if both fail",
+                help="Stop the run, or fall back to the default text model as a last resort.",
+                type="choice",
+                default="stop",
+                scope="channel",
+                choices=["stop", "fall_back"],
+                invalidates=invalidated,
+            ),
+        )
+    ],
     # --- captions ---
     SettingSpec(
         id="captions_enabled",

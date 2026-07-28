@@ -54,6 +54,7 @@ from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
+from avg.providers.text.router import config_from_settings
 
 from .deps import require_token
 from .routes_settings import router as settings_router
@@ -363,6 +364,22 @@ def create_app(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         effective_channel = channel.model_copy(update={"settings": effective_settings})
 
+        # Built here, not inside the worker: a malformed 'provider/model'
+        # setting is a bad request, and must be a 400 the user sees rather
+        # than a phase that fails minutes later. Until this existed the
+        # runner was handed `router=None` and every text phase died on
+        # `None.phases` - the whole per-phase routing layer was unreachable.
+        try:
+            router_config = config_from_settings(
+                effective_channel.settings,
+                # Channels written before the models group existed have no
+                # `text_model_default` key; the catalogue's own default is
+                # what they get, not an error.
+                fallback_default=str(get_spec("text_model_default").default),  # type: ignore[union-attr]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
         # The same one-job-at-a-time guard `start_render` enforces below -
         # a full pipeline run and a `/render` MediaEngine run share the one
         # `render_thread` slot, never a second job mechanism.
@@ -393,6 +410,7 @@ def create_app(
                 for event in run_pipeline(
                     project,
                     channel=effective_channel,
+                    router=router_config,
                     start_from=0,
                     cancel_token=cancel_token,
                     on_phase_change=lambda: save_project(project),

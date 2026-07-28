@@ -179,3 +179,104 @@ def test_generate_unknown_provider_raises_value_error():
     )
     with pytest.raises(ValueError):
         generate("hello", "brief", config=config)
+
+
+# ---------------------------------------------------------------------------
+# Settings -> RouterConfig (Slice 6B)
+
+
+def test_parse_target_rejects_anything_that_is_not_a_provider_model_pair():
+    from avg.providers.text.router import ProviderModel, parse_target
+
+    assert parse_target("  ") is None
+    assert parse_target("groq/llama-3.3-70b-versatile") == ProviderModel("groq", "llama-3.3-70b-versatile")
+    # A typo must never be silently ignored - that would route a phase at
+    # whatever the default happens to be, which is not what was asked for.
+    for bad in ("groq", "groq/", "/llama", "nope/some-model"):
+        with pytest.raises(ValueError):
+            parse_target(bad)
+
+
+def test_config_from_settings_reads_the_catalogue_defaults():
+    from avg.core.settings_schema import channel_defaults, get_spec
+    from avg.providers.text.router import config_from_settings
+
+    spec = get_spec("text_model_default")
+    assert spec is not None
+    config = config_from_settings(channel_defaults(), fallback_default=str(spec.default))
+    assert config.default.provider == "groq"
+    # Every per-phase slot ships blank, so nothing is pinned and every
+    # phase routes to the default.
+    assert config.phases == {}
+
+
+def test_config_from_settings_survives_a_channel_written_before_the_models_group():
+    from avg.providers.text.router import config_from_settings
+
+    # Not an error: every channel document on disk predates these settings.
+    config = config_from_settings({}, fallback_default="groq/llama-3.3-70b-versatile")
+    assert config.default.model == "llama-3.3-70b-versatile"
+
+
+def test_config_from_settings_builds_a_per_phase_route():
+    from avg.providers.text.router import config_from_settings
+
+    config = config_from_settings(
+        {
+            "text_model_default": "groq/llama-3.3-70b-versatile",
+            "script_segmentation_model": "groq/llama-3.1-8b-instant",
+            "script_segmentation_backup": "gemini/gemini-2.0-flash",
+            "script_segmentation_on_failure": "fall_back",
+        },
+        fallback_default="groq/llama-3.3-70b-versatile",
+    )
+    route = config.phases["script_segmentation"]
+    assert route.primary.model == "llama-3.1-8b-instant"
+    assert route.backup is not None and route.backup.provider == "gemini"
+    assert route.on_failure == "fall_back"
+    # A phase with no `_model` gets no entry at all rather than an entry
+    # duplicating the default.
+    assert "brief" not in config.phases
+
+
+def test_fall_back_tries_the_default_after_primary_and_backup_are_exhausted():
+    from avg.providers.text.router import PhaseRoute, ProviderModel, RouterConfig, generate
+
+    # Primary and backup are both the hand-written 429 fixture's target; the
+    # default is the real recorded happy path. With on_failure="stop" this
+    # would raise (see the next test) - "fall_back" is the only reason it
+    # returns.
+    config = RouterConfig(
+        default=ProviderModel("groq", "llama-3.1-8b-instant"),
+        phases={
+            "script": PhaseRoute(
+                primary=ProviderModel("groq", "llama-3.3-70b-versatile"),
+                backup=ProviderModel("groq", "llama-3.3-70b-versatile"),
+                on_failure="fall_back",
+            ),
+        },
+        max_tokens=8,
+        temperature=0.7,
+        transport=_replay_transport(),
+    )
+    result = generate("router fallback test: primary should fail", "script", config=config)
+    assert result.used_backup is True
+    assert result.model == "llama-3.1-8b-instant"
+
+
+def test_stop_is_the_default_and_never_reaches_the_router_default():
+    from avg.providers.text.router import PhaseRoute, ProviderModel, RouterConfig, generate
+
+    config = RouterConfig(
+        default=ProviderModel("groq", "llama-3.1-8b-instant"),
+        phases={
+            "script": PhaseRoute(primary=ProviderModel("groq", "llama-3.3-70b-versatile")),
+        },
+        max_tokens=8,
+        temperature=0.7,
+        transport=_replay_transport(),
+    )
+    assert config.phases["script"].on_failure == "stop"
+    with pytest.raises(AvgError) as excinfo:
+        generate("router fallback test: primary should fail", "script", config=config)
+    assert excinfo.value.kind == ErrorKind.rate_limit

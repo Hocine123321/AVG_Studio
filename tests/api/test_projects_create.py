@@ -274,3 +274,63 @@ def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
         assert client.app.state.pipeline_cancel_token.cancelled is True
     finally:
         release.set()
+
+
+# ---------------------------------------------------------------------------
+# Per-phase text routing (Slice 6B)
+
+
+def test_create_hands_the_runner_a_real_router_config(client, monkeypatch):
+    """The runner must receive a built `RouterConfig`, never `None`.
+
+    This is a regression test for a real defect, not a shape assertion:
+    until Slice 6B, neither this route nor the take re-run passed `router=`
+    at all, so `PhaseContext.router` was `None` and every text phase died
+    on `None.phases` the moment it called `generate_text`. The whole
+    per-phase routing layer was unreachable from the app. Asserting the
+    concrete type is what makes a future refactor that drops the argument
+    fail here instead of at runtime, minutes into a user's video.
+    """
+    from avg.providers.text.router import RouterConfig
+
+    seen: dict[str, object] = {}
+
+    def capturing_run(project, *, channel, router=None, start_from=0, cancel_token=None, **kwargs):
+        seen["router"] = router
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", capturing_run)
+    _activate_channel(client)
+
+    assert client.post("/api/projects", headers=AUTH, json={"topic": "x"}).status_code == 201
+    for _ in range(50):
+        if "router" in seen:
+            break
+        threading.Event().wait(0.02)
+
+    router = seen.get("router")
+    assert isinstance(router, RouterConfig)
+    assert router.default.provider == "groq"
+
+
+def test_create_with_a_malformed_model_setting_is_a_400_and_starts_nothing(client, monkeypatch):
+    started = threading.Event()
+
+    def poison_run(*args, **kwargs):
+        started.set()
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", poison_run)
+    _activate_channel(client)
+
+    response = client.post(
+        "/api/projects",
+        headers=AUTH,
+        json={"topic": "x", "overrides": {"brief_model": "not-a-pair"}},
+    )
+    assert response.status_code == 400
+    assert "provider/model" in response.json()["detail"]
+    # A bad setting must be rejected before any work begins.
+    assert not started.is_set()

@@ -33,9 +33,17 @@ def test_dynamic_pauses_invalidates_the_script_not_voice():
     assert spec.invalidates == "script"
 
 
-def test_all_39_settings_are_present():
-    """Sanity check on the catalogue size the brief's table assumes."""
-    assert len(SETTINGS) == 39
+def test_the_whole_catalogue_is_present_and_uniquely_identified():
+    """Sanity check on the catalogue's size and shape.
+
+    Was `len(SETTINGS) == 39` before Slice 6B added the 16-entry `models`
+    group (the default text model plus model/backup/on-failure for five
+    router phases). The count is kept as a deliberate tripwire on
+    accidental additions or losses; the uniqueness check is what actually
+    matters, since `BY_ID` would silently swallow a duplicated id.
+    """
+    assert len(SETTINGS) == 55
+    assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 
 def test_change_set_spanning_two_phases_picks_the_earlier_one():

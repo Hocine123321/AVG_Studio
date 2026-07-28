@@ -109,9 +109,14 @@ def _fake_text_generator():
     director1; director2 (Task 5) - ids 3-4 (visuals/voice) call
     image/voice providers instead (see `test_default_registry_runs_all_
     eight_stub_phases_successfully`'s own fakes for those), and id 7 is
-    still a `_StubPhase` and never calls this. Tracks its own call count
-    for the "script" phase since Pass 1 and Pass 2 share that phase key
-    but need different-shaped replies (see `avg.pipeline.phases.writing`)."""
+    still a `_StubPhase` and never calls this.
+
+    The `script` PHASE makes two calls under two distinct ROUTER keys,
+    `script_draft` and `script_segmentation` (see `avg.pipeline.phases.
+    writing`) - so each gets its own differently-shaped reply here rather
+    than this fake counting calls to tell the passes apart. An unexpected
+    key raises, which is what makes this fake fail loudly if the phase
+    ever starts routing under a name nothing configures."""
     narration = "This tiny invention quietly changed how ancient sailors found their way. [pause] Nobody expected a bronze box of gears to predict the sky decades in advance."
     scene_blocks = (
         "@@SCENE@@\n"
@@ -123,14 +128,13 @@ def _fake_text_generator():
         "@@IMAGE@@\nAncient gears turning in golden light\n"
         "@@LABEL@@\nReveal\n"
     )
-    calls = {"script": 0}
-
     def _fake(prompt: str, phase: str, *, config: Any) -> TextResult:
         if phase == "brief":
             text = json.dumps({"emotional_arc": "hook to payoff", "tone": "curious", "angle": "a fresh angle"})
-        elif phase == "script":
-            calls["script"] += 1
-            text = narration if calls["script"] == 1 else scene_blocks
+        elif phase == "script_draft":
+            text = narration
+        elif phase == "script_segmentation":
+            text = scene_blocks
         elif phase == "director1":
             text = json.dumps({"image_count": 2, "notes": "one image per scene"})
         elif phase == "director2":

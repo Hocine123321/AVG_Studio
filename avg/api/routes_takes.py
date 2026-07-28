@@ -85,6 +85,7 @@ from avg.pipeline.create import save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.registry import BY_KEY, REGISTRY
 from avg.pipeline.runner import run as run_pipeline
+from avg.providers.text.router import config_from_settings
 
 from .deps import require_token
 
@@ -391,6 +392,17 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     effective_channel = channel.model_copy(update={"settings": effective_settings})
 
+    # Built BEFORE the take is cloned and saved: a malformed 'provider/model'
+    # must be a 400 with nothing written, not a 400 that leaves an orphan
+    # take on disk. Same reasoning as the create route in `avg.api.app`.
+    try:
+        router_config = config_from_settings(
+            effective_channel.settings,
+            fallback_default=str(get_spec("text_model_default").default),  # type: ignore[union-attr]
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     # A legacy/never-touched project has no takes yet - this is the one
     # spot in this module allowed to create take 1 (unlike `preview`, this
     # route is already in the business of creating a take).
@@ -444,6 +456,7 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             for event in run_pipeline(
                 shadow_project,
                 channel=effective_channel,
+                router=router_config,
                 start_from=plan.start_id,
                 cancel_token=cancel_token,
                 # Closes over the REAL project, not `shadow_project` -

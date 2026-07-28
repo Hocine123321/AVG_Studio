@@ -202,7 +202,14 @@ class ScriptPhase:
         # ── Pass 1: flowing narration prose ─────────────────────────────
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Writing narration..."))
         narration_prompt = build_narration_prompt(inputs, extra_context=extra_context)
-        narration_result = generate_text(narration_prompt, "script", config=ctx.router)
+        # `script_draft` / `script_segmentation` are ROUTER phase keys, not
+        # pipeline phase keys - this is still the single `script` phase in
+        # `avg.pipeline.registry`. Naming the two passes separately is what
+        # lets a cheap model segment what a strong one wrote (see
+        # `avg.providers.text.router.config_from_settings`). A router with
+        # no entry for either key falls back to its default, so this is
+        # safe for any config that never heard of them.
+        narration_result = generate_text(narration_prompt, "script_draft", config=ctx.router)
         narration = strip_code_fence(narration_result.text).strip()
         if not narration:
             raise AvgError(ErrorKind.bug, "script phase: pass 1 produced no narration text")
@@ -212,7 +219,7 @@ class ScriptPhase:
         segmentation_prompt = build_scene_segmentation_prompt(
             inputs, narration, min_scenes=_MIN_SCENES, max_scenes=_MAX_SCENES
         )
-        segmentation_result = generate_text(segmentation_prompt, "script", config=ctx.router)
+        segmentation_result = generate_text(segmentation_prompt, "script_segmentation", config=ctx.router)
         scenes = parse_scene_blocks(segmentation_result.text)
         if not scenes:
             raise AvgError(ErrorKind.bug, "script phase: pass 2 produced no parseable scenes")

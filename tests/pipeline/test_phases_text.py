@@ -205,7 +205,9 @@ def test_script_phase_writes_narration_and_a_verbatim_scene_partition(tmp_path, 
     reconstructed = " ".join(" ".join(s["text"].split()) for s in scenes)
     assert " ".join(reconstructed.split()) == " ".join(NARRATION.split())
 
-    assert fake.calls[0][0] == "script" and fake.calls[1][0] == "script"
+    # Two calls under two distinct ROUTER keys - the pipeline phase is still
+    # the single `script` entry in `avg.pipeline.registry`.
+    assert fake.calls[0][0] == "script_draft" and fake.calls[1][0] == "script_segmentation"
     assert any(isinstance(e, ProgressEvent) for e in events)
 
 
