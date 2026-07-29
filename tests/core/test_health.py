@@ -150,3 +150,26 @@ def test_essential_components_are_listed_first():
     components = health.check_all(refresh=True)
     required_flags = [c.required for c in components]
     assert required_flags == sorted(required_flags, reverse=True)
+
+
+def test_a_missing_optional_component_does_not_fail_the_stage():
+    """An optional dependency is worth listing, not worth failing over.
+
+    Observed live: a machine without pydub - which only refines silence
+    handling - showed "Dependency check: Failed" in red next to a row
+    labelled Optional. A screen that cries wolf about a degradable
+    dependency stops being read at all.
+    """
+    stage = health.Stage(
+        key="dependencies",
+        name="Dependency check",
+        detail="",
+        checks=[
+            health.Component(name="FFmpeg", ok=True, required=True),
+            health.Component(name="pydub", ok=False, detail="cannot import", required=False),
+        ],
+    )
+    assert stage.ok is True
+
+    stage.checks[0] = health.Component(name="FFmpeg", ok=False, required=True)
+    assert stage.ok is False

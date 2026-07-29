@@ -208,7 +208,15 @@ class Stage:
 
     @property
     def ok(self) -> bool:
-        return all(check.ok for check in self.checks)
+        """Only REQUIRED checks decide the verdict.
+
+        An optional component is worth listing and not worth failing over:
+        with `required` ignored here, a machine without pydub - which only
+        refines silence handling - reported "Dependency check: Failed" in
+        red, next to a row that says Optional. A screen that cries wolf
+        about a degradable dependency stops being read at all.
+        """
+        return all(check.ok for check in self.checks if check.required)
 
 
 def _warmup_checks(settings_path: Path | None, channels_dir: Path | None) -> list[Component]:

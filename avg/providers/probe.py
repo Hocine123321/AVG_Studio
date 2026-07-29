@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import httpx
+
 from avg.config.secrets import get_key
 from avg.providers.text.base import TextBackend
 from avg.providers.text.router import _BACKENDS, _build_backend
@@ -36,6 +38,34 @@ from avg.providers.transport import Transport
 #: single token: this measures whether the model responds at all, and a
 #: longer prompt would cost more on the paid providers for no more signal.
 PROBE_PROMPT = "Reply with the word ok."
+
+
+#: Per-request ceiling for a probe. Generous enough for a cold model to
+#: answer one token, short enough that twenty dead ones cannot hold the
+#: sweep open for ten minutes. Observed: a Hugging Face sweep with the
+#: client's default timeout never finished at all - several listed models
+#: sit there loading, and a probe that waits for them is measuring the
+#: wrong thing anyway. "Did not answer promptly" is the same verdict as
+#: "did not answer" for a control whose whole job is to offer a model the
+#: user can pick right now.
+PROBE_TIMEOUT_S = 20.0
+
+
+def _probe_transport() -> Transport:
+    """A live transport built for a sweep: bounded, and never sleeping.
+
+    `POLICY`'s backoff exists so one important call survives a blip. A
+    sweep is the opposite case - dozens of calls, most of them expected to
+    fail - and every failure classified `rate_limit` or `quota` slept
+    through its exponential backoff before giving up, turning a sweep of
+    ~60 models into minutes of mostly sleeping. The retries still happen;
+    they just happen immediately.
+    """
+    return Transport(
+        mode="live",
+        client=httpx.Client(follow_redirects=False, timeout=PROBE_TIMEOUT_S),
+        sleep=lambda _s: None,
+    )
 
 
 def known_providers() -> list[str]:
@@ -74,15 +104,23 @@ def probe_provider(provider: str, *, transport: Transport | None = None) -> dict
         # wrong reason and marks every model broken.
         return {}
 
+    # Only close what this function opened - an injected transport belongs
+    # to the caller and may be reused across providers.
+    owned = transport is None
+    transport = transport if transport is not None else _probe_transport()
     try:
-        models = list_models(provider, transport)
-    except Exception:
-        return {}
+        try:
+            models = list_models(provider, transport)
+        except Exception:
+            return {}
 
-    results: dict[str, bool] = {}
-    for model in models:
-        results[model] = _model_answers(provider, model, transport)
-    return results
+        results: dict[str, bool] = {}
+        for model in models:
+            results[model] = _model_answers(provider, model, transport)
+        return results
+    finally:
+        if owned:
+            transport.close()
 
 
 def _model_answers(provider: str, model: str, transport: Transport | None) -> bool:
