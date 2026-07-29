@@ -47,6 +47,7 @@ from avg.config.settings import SettingsDoc, default_settings_path, load_setting
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
 from avg.core.model_cache import ModelCache
+from avg.core.model_prefs import ModelPrefs
 from avg.core.events import JobStarted, JobStep, PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
@@ -285,6 +286,7 @@ def create_app(
     secrets_path: Path | None = None,
     errors_path: Path | None = None,
     model_cache_path: Path | None = None,
+    model_prefs_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -331,6 +333,19 @@ def create_app(
         if model_cache_path is not None
         else default_settings_path().with_name("working_models.json")
     )
+    # The Live List's user-owned data: ticks, favourites, notes. A separate
+    # document from the cache above, which is replaced wholesale on every
+    # sweep - see `avg.core.model_prefs`.
+    app.state.model_prefs = ModelPrefs(
+        Path(model_prefs_path)
+        if model_prefs_path is not None
+        else default_settings_path().with_name("model_prefs.json")
+    )
+    # Language and gender per voice id, for the Live List's filters.
+    # Derived from the catalogue on refresh and deliberately not persisted:
+    # a restart simply refreshes it, and a second on-disk copy of something
+    # this cheap to fetch is a thing to keep in sync for no reason.
+    app.state.voice_meta = {}
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None

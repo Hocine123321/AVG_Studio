@@ -239,6 +239,19 @@ SETTINGS: list[SettingSpec] = [
             ),
         )
     ],
+    SettingSpec(
+        id="live_list_source",
+        group="models",
+        label="Live List source",
+        help="Use the app-wide Live List, or keep a shortlist that belongs to this channel alone.",
+        type="choice",
+        default="global",
+        scope="channel",
+        choices=["global", "channel"],
+        # Nothing is invalidated: this changes which models are OFFERED,
+        # never which one produced an existing artifact.
+        invalidates=None,
+    ),
     # --- captions ---
     SettingSpec(
         id="captions_enabled",

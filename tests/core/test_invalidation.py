@@ -39,13 +39,13 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     Was `len(SETTINGS) == 39` before Slice 6B added the 16-entry `models`
     group (the default text model plus model/backup/on-failure for five
     router phases), 55 before `render_threads`, and 56 before three dead
-    switches (python_exe, performance_mode, run_as_admin) were removed. The
-    count is kept as a
+    switches (python_exe, performance_mode, run_as_admin) were removed, and
+    53 before Slice 8 added `live_list_source`. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 53
+    assert len(SETTINGS) == 54
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

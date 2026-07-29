@@ -37,6 +37,7 @@ in through the generic values route either.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -53,6 +54,8 @@ from avg.core.settings_schema import (
     get_spec,
     validate_value,
 )
+from avg.core.model_prefs import KINDS, ModelPrefs
+from avg.providers import catalogues
 from avg.providers.probe import probe_all
 
 from .deps import require_token
@@ -258,6 +261,222 @@ async def build_model_cache(request: Request) -> dict:
     app_state.probe_thread = thread
     thread.start()
     return {"started": True}
+
+
+# ── Live List ──────────────────────────────────────────────
+
+class LiveEntryUpdate(BaseModel):
+    """`PATCH /api/live-list/{kind}/{entry_id}` - one field at a time.
+
+    Every field is optional and only the given ones change: the screen
+    sends a tick, a star, or a note losing focus, and a whole-entry
+    replace would make ticking a box erase the note beside it.
+    """
+
+    selected: bool | None = None
+    favourite: bool | None = None
+    note: str | None = None
+
+
+class LiveEntryCreate(BaseModel):
+    """`POST /api/live-list/{kind}` - an entry the user typed themselves.
+
+    For providers that publish no catalogue (OpenAI and Gemini images).
+    Marked `manual` wherever it is shown, so it can never be mistaken for
+    something the app verified.
+    """
+
+    entry_id: str
+
+
+def _prefs_for_scope(app_state: Any) -> tuple[ModelPrefs, str]:
+    """The Live List document this request should read, and which scope it is.
+
+    A channel set to `live_list_source="channel"` keeps its own shortlist,
+    in its own document, and does NOT fall back to the global one - the
+    same no-merge-layer rule every channel-scoped setting follows. Three
+    legacy config bugs came from the copy-and-merge mechanism that rule
+    replaces.
+    """
+    values = _channel_values(app_state)
+    if values.get("live_list_source") != "channel":
+        return app_state.model_prefs, "global"
+
+    channel_id = channels_config.active_channel_id(app_state.settings_path)
+    if channel_id is None:
+        return app_state.model_prefs, "global"
+    # Beside the global document, named for the channel - so it is obvious
+    # on disk which shortlist belongs to which channel.
+    base = Path(app_state.model_prefs.path).parent
+    return ModelPrefs(base / "live-lists" / f"{channel_id}.json"), "channel"
+
+
+def _entry_rows(prefs: ModelPrefs, kind: str, known: dict[str, str]) -> list[dict]:
+    """Merge what the app knows about with what the user has said about it.
+
+    `known` maps entry id -> source (`probed` / `catalogue`). Anything in
+    the prefs document but not in `known` is reported as `manual` rather
+    than silently dropped: a model can vanish from a catalogue between
+    refreshes, and losing the note attached to it would be worse than
+    showing an entry that no longer resolves.
+    """
+    saved = prefs.all(kind)
+    rows: list[dict] = []
+    for entry_id in sorted(set(known) | set(saved)):
+        entry = saved.get(entry_id)
+        rows.append(
+            {
+                "id": entry_id,
+                "source": known.get(entry_id, "manual"),
+                "selected": bool(entry.selected) if entry else False,
+                "favourite": bool(entry.favourite) if entry else False,
+                "note": entry.note if entry else "",
+            }
+        )
+    rows.sort(key=lambda r: (not r["favourite"], r["id"].lower()))
+    return rows
+
+
+def _known_text(app_state: Any) -> dict[str, str]:
+    """Text models a probe proved working, as `provider/model`."""
+    cache = app_state.model_cache
+    return {
+        f"{provider}/{model}": "probed"
+        for provider in cache.providers()
+        if not provider.startswith("__")
+        for model in cache.working(provider)
+    }
+
+
+def _known_from_catalogue(app_state: Any, kind: str) -> dict[str, str]:
+    """Image models / voices as last listed.
+
+    Stored in the same cache document the text probe writes, under a
+    namespaced provider key, so there is one cache file rather than three.
+    `refresh` is what fills it - a plain GET never touches the network.
+    """
+    cache = app_state.model_cache
+    prefix = f"__{kind}__"
+    return {
+        f"{provider.removeprefix(prefix)}/{model}": "catalogue"
+        for provider in cache.providers()
+        if provider.startswith(prefix)
+        for model in cache.working(provider)
+    }
+
+
+@router.get("/api/live-list")
+async def get_live_list(request: Request) -> dict:
+    """Everything the pickers could offer, plus what the user said about it.
+
+    Never touches the network: text entries come from the probe cache and
+    image/voice entries from the last catalogue refresh. A GET that went
+    listing would make opening a screen cost provider calls.
+    """
+    app_state = request.app.state
+    prefs, scope = _prefs_for_scope(app_state)
+    return {
+        "scope": scope,
+        "text": _entry_rows(prefs, "text", _known_text(app_state)),
+        "image": _entry_rows(prefs, "image", _known_from_catalogue(app_state, "image")),
+        "voice": _entry_rows(prefs, "voice", _known_from_catalogue(app_state, "voice")),
+        "voice_meta": app_state.voice_meta,
+    }
+
+
+@router.post("/api/live-list/refresh")
+async def refresh_live_list(request: Request) -> dict:
+    """Re-list image models and voices. Listing only - nothing is generated.
+
+    Probing an image model means paying for an image and probing an
+    ElevenLabs voice costs characters, so the Live List curates what a
+    provider advertises rather than proving it. Text models keep their own
+    probe, on its own button, because there the verdict is cheap and real.
+    """
+    app_state = request.app.state
+    cache = app_state.model_cache
+    # The text probe's own results are preserved: `save` replaces the whole
+    # document, and dropping them here would silently un-verify every text
+    # model every time someone refreshed the voice list.
+    results: dict[str, dict[str, bool]] = {
+        provider: {model: True for model in cache.working(provider)}
+        for provider in cache.providers()
+        if not provider.startswith("__")
+    }
+
+    for provider in catalogues.image_providers():
+        models = catalogues.list_image_models(provider)
+        results[f"__image__{provider}"] = {model: True for model in models}
+
+    voice_meta: dict[str, dict[str, str]] = dict(app_state.voice_meta)
+    for provider in catalogues.voice_providers():
+        voices = catalogues.list_voices(provider)
+        results[f"__voice__{provider}"] = {voice["voice_id"]: True for voice in voices}
+        for voice in voices:
+            voice_meta[f"{provider}/{voice['voice_id']}"] = {
+                "name": voice["name"],
+                "locale": voice["locale"],
+                "gender": voice["gender"],
+            }
+
+    cache.save(results)
+    # Language and gender for the voice tab's filters. Kept in memory
+    # rather than on disk: it is derived from the catalogue and a restart
+    # simply refreshes it, so persisting it would be a second copy of
+    # something already cheap to get.
+    app_state.voice_meta = voice_meta
+    return {"refreshed": True}
+
+
+@router.patch("/api/live-list/{kind}/{entry_id:path}")
+async def patch_live_entry(kind: str, entry_id: str, body: LiveEntryUpdate, request: Request) -> dict:
+    if kind not in KINDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"unknown kind {kind!r}")
+    prefs, _scope = _prefs_for_scope(request.app.state)
+    entry = prefs.set(kind, entry_id, selected=body.selected, favourite=body.favourite, note=body.note)
+    return {
+        "id": entry_id,
+        "selected": entry.selected,
+        "favourite": entry.favourite,
+        "note": entry.note,
+    }
+
+
+@router.post("/api/live-list/{kind}", status_code=status.HTTP_201_CREATED)
+async def add_live_entry(kind: str, body: LiveEntryCreate, request: Request) -> dict:
+    if kind not in KINDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"unknown kind {kind!r}")
+    entry_id = body.entry_id.strip()
+    if "/" not in entry_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="an entry id is 'provider/model' - e.g. openai/gpt-image-1",
+        )
+    prefs, _scope = _prefs_for_scope(request.app.state)
+    prefs.set(kind, entry_id, selected=True)
+    return {"added": entry_id}
+
+
+@router.delete("/api/live-list/{kind}/{entry_id:path}")
+async def delete_live_entry(kind: str, entry_id: str, request: Request) -> dict:
+    """Remove a MANUAL entry.
+
+    A probed or catalogued entry is not the user's to delete - it is what
+    the provider says exists, and it would reappear on the next refresh
+    anyway. Untick it instead; that is what the tick is for.
+    """
+    if kind not in KINDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"unknown kind {kind!r}")
+    app_state = request.app.state
+    known = _known_text(app_state) if kind == "text" else _known_from_catalogue(app_state, kind)
+    if entry_id in known:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="this entry comes from the provider's own list - untick it instead of removing it",
+        )
+    prefs, _scope = _prefs_for_scope(app_state)
+    prefs.remove(kind, entry_id)
+    return {"removed": entry_id}
 
 
 @router.get("/api/health/report")
