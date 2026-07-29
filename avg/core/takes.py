@@ -96,7 +96,12 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # Render must carry it or the clone cannot be rendered at all.
     "visuals": ("images", "render/index.json", "render/scene_safezones.json"),
     "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3", "audio/scene_audio_map.json"),
-    "director2": ("render/direction_plan.json", "render/card_plan.json"),
+    "director2": (
+        "render/direction_plan.json",
+        "render/card_plan.json",
+        "render/scene_timings.json",
+        "render/edit_plan.json",
+    ),
     # `card_plan.json` appears here as well as under director2 because
     # Captions REWRITES it in place, adding each card's start/end times
     # (`avg/pipeline/phases/captions.py`). Those timings are captions'

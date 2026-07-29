@@ -91,6 +91,7 @@ one card per scene (first question wins - a scene rarely needs two boards).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from avg.core.errors import AvgError, ErrorKind
@@ -420,6 +421,102 @@ def _build_card_plan(scenes: list[dict]) -> dict:
     return {"cards": cards}
 
 
+#: How long a Focused card holds the screen when its own window is unknown.
+_CARD_SECONDS = 2.5
+
+
+def build_edit_plan(card_plan: dict[str, Any], direction_plan: dict[str, Any]) -> dict[str, Any]:
+    """`render/edit_plan.json` - the same cards, in the shape the overlay
+    compositor reads.
+
+    `cmd_overlay_render` reads `plan["overlays"]` and, per entry, `element`,
+    `scene`, `duration`, `transition_in`/`transition_out` and `ride_motion`
+    (`avg/media/vendor/avg.py:3178-3190`). This is a TRANSLATION of
+    `card_plan.json`, never a second source: that file stays the one place a
+    card's text and accent are decided, so the panel the user reads and the
+    overlay the engine draws cannot disagree.
+
+    A card that already carries `start`/`end` (Screen Text resolves those)
+    gets its real length; otherwise the default stands. `ride_motion` is on
+    because a card pinned to a still frame while the image behind it moves
+    looks like a bug - the engine only honours it when that scene actually
+    zooms (`avg.py:3143`).
+    """
+    transitions = {
+        int(scene["scene"]): str(scene.get("transition_in") or "fade")
+        for scene in (direction_plan.get("scenes") or [])
+        if isinstance(scene, dict) and _coerce_int(scene.get("scene")) is not None
+    }
+
+    overlays: list[dict[str, Any]] = []
+    for card in card_plan.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        scene = _coerce_int(card.get("scene"))
+        if scene is None:
+            continue
+        start, end = card.get("start"), card.get("end")
+        duration = (
+            float(end) - float(start)
+            if isinstance(start, (int, float)) and isinstance(end, (int, float))
+            else _CARD_SECONDS
+        )
+        overlays.append(
+            {
+                "element": str(card.get("element") or "focused"),
+                "scene": scene,
+                "text": str(card.get("text") or ""),
+                "accent": str(card.get("accent") or ""),
+                "duration": round(duration, 3),
+                "transition_in": transitions.get(scene, "fade"),
+                "transition_out": "fade",
+                "ride_motion": True,
+            }
+        )
+    return {"overlays": overlays}
+
+
+def _write_scene_timings(ctx: PhaseContext, rdir: Path) -> None:
+    """Write `render/scene_timings.json` from the timeline and audio map.
+
+    The vendored timing pass is REUSED rather than reimplemented: it is the
+    same function Render would otherwise run blind at encode time
+    (`avg/media/vendor/avg.py:1964`), and a second implementation here would
+    put images on one clock and captions on another. Writing it now is what
+    lets Screen Text and the overlay pass plan without a frame existing.
+
+    Non-fatal in every direction. Missing inputs, or a pass that raises,
+    means Render derives the timings itself - exactly what happened before
+    this file existed - and this phase's real output is already on disk.
+    """
+    from avg.media.vendor.avg import _load_audio_map, compute_scene_timings
+
+    timeline = read_json(script_dir(ctx) / "timeline.json")
+    audio_map_path = Path(ctx.project.folder) / "audio" / "scene_audio_map.json"
+    if not isinstance(timeline, list) or not timeline or not audio_map_path.is_file():
+        return
+
+    try:
+        audio_map = _load_audio_map(str(audio_map_path))  # type: ignore[no-untyped-call]
+        if not audio_map:
+            return
+        total = float(sum(float(entry.get("duration") or 0.0) for entry in audio_map.values()))
+        timings, _takeovers, _skipped = compute_scene_timings(  # type: ignore[no-untyped-call]
+            timeline, audio_map, total, {},
+            {}, {}, {}, {}, {},
+            100, "flat",
+        )
+        write_json(rdir / "scene_timings.json", timings)
+    except Exception as exc:  # noqa: BLE001 - non-fatal, see docstring
+        ctx.emit(
+            ProgressEvent(
+                project_id=ctx.project.id,
+                percent=100,
+                message=f"Scene timings could not be precomputed ({exc}); the render will derive them.",
+            )
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Director2Phase:
     id: int = 5
@@ -477,7 +574,13 @@ class Director2Phase:
 
         rdir = render_dir(ctx)
         write_json(rdir / "direction_plan.json", direction_plan)
-        write_json(rdir / "card_plan.json", _build_card_plan(scenes))
+        card_plan = _build_card_plan(scenes)
+        write_json(rdir / "card_plan.json", card_plan)
+
+        # ── Part 1 tail: exact per-scene windows, and the overlay
+        # compositor's own view of the cards just planned.
+        _write_scene_timings(ctx, rdir)
+        write_json(rdir / "edit_plan.json", build_edit_plan(card_plan, direction_plan))
 
         ctx.emit(
             ProgressEvent(

@@ -116,6 +116,106 @@ class _QueueGenerator:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def test_edit_plan_derives_from_the_card_plan():
+    """One owner for a card's text. card_plan.json decides what a card says;
+    edit_plan.json is the same information in the shape cmd_overlay_render
+    reads (`plan["overlays"]`, each entry carrying element/scene/duration/
+    transition_in). A second table would let the two disagree about a card
+    the user is looking at."""
+    from avg.pipeline.phases.director import build_edit_plan
+
+    plan = build_edit_plan(
+        {"cards": [{"element": "focused", "scene": 2, "text": "Why stripes?", "accent": "#e08a4e"}]},
+        {"scenes": [{"scene": 2, "transition_in": "fade"}]},
+    )
+
+    assert plan["overlays"] == [
+        {
+            "element": "focused",
+            "scene": 2,
+            "text": "Why stripes?",
+            "accent": "#e08a4e",
+            "duration": 2.5,
+            "transition_in": "fade",
+            "transition_out": "fade",
+            "ride_motion": True,
+        }
+    ]
+
+
+def test_edit_plan_prefers_a_cards_own_resolved_window():
+    """Once Screen Text has added start/end, the card's real length is
+    known and must win over the default - otherwise a card timed to two
+    words sits on screen for the full default."""
+    from avg.pipeline.phases.director import build_edit_plan
+
+    plan = build_edit_plan(
+        {"cards": [{"element": "focused", "scene": 1, "text": "Why?", "start": 4.0, "end": 5.5}]},
+        {},
+    )
+
+    assert plan["overlays"][0]["duration"] == 1.5
+
+
+def test_director2_writes_scene_timings_and_edit_plan(tmp_path, monkeypatch):
+    """The vendored timing pass is REUSED rather than reimplemented: it is
+    what Render itself would otherwise run, and two timing implementations
+    would put images and captions on different clocks."""
+    reply = json.dumps({
+        "version": 1,
+        "grade": {"look": "warm"},
+        "scenes": [
+            {"scene": 1, "motion": {"type": "zoom_in", "intensity": 0.3, "ease": "ease_out_cubic"},
+             "transition_in": "fade"},
+            {"scene": 2, "motion": {"type": "pan_up", "intensity": 0.4, "ease": "ease_out_cubic"},
+             "transition_in": "cut"},
+        ],
+    })
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["Scene one ((why?)) text.", "Scene two text."])
+    write_json(script_dir(ctx) / "timeline.json", [
+        {"type": "scene", "scene": 1},
+        {"type": "scene", "scene": 2},
+    ])
+    write_json(project.folder / "audio" / "scene_audio_map.json", {
+        "total_duration": 10.0,
+        "scenes": [
+            {"scene": 1, "start": 0.0, "end": 6.0, "duration": 6.0},
+            {"scene": 2, "start": 6.0, "end": 10.0, "duration": 4.0},
+        ],
+    })
+
+    Director2Phase().run(ctx)
+
+    timings = read_json(render_dir(ctx) / "scene_timings.json")
+    assert [t["scene"] for t in timings if t["type"] == "scene"] == [1, 2]
+    assert timings[0]["duration"] == 6.0
+    assert read_json(render_dir(ctx) / "edit_plan.json")["overlays"][0]["scene"] == 1
+
+
+def test_director2_survives_a_missing_audio_map(tmp_path, monkeypatch):
+    """No audio map means no exact windows, and the render recomputes them
+    blind - which is what happened before the file existed at all. Worth a
+    degradation, not a failed phase whose real output is already on disk."""
+    reply = json.dumps({"version": 1, "grade": {"look": "warm"}, "scenes": [
+        {"scene": 1, "motion": {"type": "zoom_in", "intensity": 0.3, "ease": "ease_out_cubic"},
+         "transition_in": "fade"},
+    ]})
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["Scene one text."])
+
+    Director2Phase().run(ctx)  # must NOT raise
+
+    assert not (render_dir(ctx) / "scene_timings.json").exists()
+    assert (render_dir(ctx) / "edit_plan.json").is_file()
+
+
 def test_director2_inputs_ready_false_without_scenes_json(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
