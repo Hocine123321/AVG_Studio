@@ -18,7 +18,7 @@ import ModelCacheCard from "./ModelCacheCard";
  *
  * One filled terracotta action here: Re-run everything.
  */
-export default function AppHealth() {
+export default function AppHealth({ onOpenLiveList }: { onOpenLiveList?: () => void }) {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +102,24 @@ export default function AppHealth() {
       </div>
 
       <ModelCacheCard />
+
+      {onOpenLiveList && (
+        <section className="errorlog" aria-label="Live List">
+          <header className="errorlog__head">
+            <div>
+              <h2 className="health-stage__title">Live List</h2>
+              <p className="health-stage__detail">
+                Choose which models and voices the Settings pickers offer, mark favourites, and note
+                what each one is good for.
+              </p>
+            </div>
+            <span className="home__spacer" />
+            <button type="button" className="btn" onClick={onOpenLiveList}>
+              Open Live List
+            </button>
+          </header>
+        </section>
+      )}
 
       <ErrorLog />
     </div>

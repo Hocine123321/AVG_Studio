@@ -344,6 +344,62 @@ export function artifactFileUrl(projectId: string, takeId: number, key: string, 
   );
 }
 
+// ---- Live List ----
+
+export type LiveKind = "text" | "image" | "voice";
+export type LiveSource = "probed" | "catalogue" | "manual";
+
+/** One row of the Live List: what the app knows about an entry, plus what
+ * the user has said about it. `source` is how it got here - `probed` (a
+ * real call succeeded), `catalogue` (the provider advertises it), or
+ * `manual` (the user typed it), which never reads as verified. */
+export interface LiveEntry {
+  id: string;
+  source: LiveSource;
+  selected: boolean;
+  favourite: boolean;
+  note: string;
+}
+
+export interface LiveListResponse {
+  /** `global`, or `channel` when the active channel keeps its own
+   * shortlist. There is no merge between the two. */
+  scope: "global" | "channel";
+  text: LiveEntry[];
+  image: LiveEntry[];
+  voice: LiveEntry[];
+  /** Language and gender per voice id, for the voice tab's filters. */
+  voice_meta: Record<string, { name: string; locale: string; gender: string }>;
+}
+
+export function getLiveList(): Promise<LiveListResponse> {
+  return apiGet<LiveListResponse>("/api/live-list");
+}
+
+/** Re-list image models and voices. Listing only - nothing is generated,
+ * so this costs nothing on any provider. */
+export function refreshLiveList(): Promise<{ refreshed: boolean }> {
+  return apiPost<{ refreshed: boolean }>("/api/live-list/refresh", {});
+}
+
+/** Update one field of one entry. Omitted fields are left alone, so
+ * ticking a box cannot erase the note beside it. */
+export function patchLiveEntry(
+  kind: LiveKind,
+  entryId: string,
+  body: { selected?: boolean; favourite?: boolean; note?: string },
+): Promise<LiveEntry> {
+  return apiPatch<LiveEntry>(`/api/live-list/${kind}/${encodeURIComponent(entryId)}`, body);
+}
+
+export function addLiveEntry(kind: LiveKind, entryId: string): Promise<{ added: string }> {
+  return apiPost<{ added: string }>(`/api/live-list/${kind}`, { entry_id: entryId });
+}
+
+export function removeLiveEntry(kind: LiveKind, entryId: string): Promise<{ removed: string }> {
+  return apiDelete<{ removed: string }>(`/api/live-list/${kind}/${encodeURIComponent(entryId)}`);
+}
+
 // ---- working-models cache ----
 
 /** `GET /api/models/cache`. `providers` holds ONLY models a probe proved

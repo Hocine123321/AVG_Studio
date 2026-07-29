@@ -3377,3 +3377,177 @@ a:hover {
   max-width: 520px;
   margin-top: 8px;
 }
+
+/* ---- Live List ----
+   Which models and voices the Settings pickers may offer. Three tabs, one
+   row per entry: tick, star, id, where it came from, and a note. */
+
+.livelist__tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.livelist__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.livelist__tab:hover {
+  color: var(--text);
+}
+
+/* The selected tab is stated by fill and text weight, not by the accent -
+   the one filled terracotta action on this screen is Refresh catalogues. */
+.livelist__tab--on {
+  background: var(--canvas);
+  border-color: var(--line-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.livelist__tab-count {
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.livelist__controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 14px 0 12px;
+}
+
+.livelist__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.livelist__filter select {
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.livelist__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.livelist__add input {
+  width: 260px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.livelist__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.livelist__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* A ticked row is what the pickers offer, so it reads as settled - sage,
+   the same "finished" meaning it carries everywhere else. */
+.livelist__row--on {
+  border-color: color-mix(in srgb, var(--sage) 45%, var(--line));
+}
+
+.livelist__tick {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--canvas);
+  color: var(--canvas);
+  cursor: pointer;
+  padding: 0;
+}
+
+.livelist__tick--on {
+  background: var(--sage);
+  border-color: var(--sage);
+}
+
+.livelist__star {
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--line-2);
+  cursor: pointer;
+}
+
+.livelist__star--on {
+  color: var(--accent);
+}
+
+.livelist__id {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 240px;
+}
+
+.livelist__id .mono {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.livelist__meta {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.livelist__note {
+  flex: 2 1 260px;
+  min-width: 0;
+}
+
+.livelist__note input {
+  width: 100%;
+}

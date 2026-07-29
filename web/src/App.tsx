@@ -14,6 +14,7 @@ import AppHealth from "./AppHealth";
 import Channels from "./Channels";
 import Create from "./Create";
 import Home from "./Home";
+import LiveList from "./LiveList";
 import Rail from "./Rail";
 import Settings from "./Settings";
 import Studio from "./Studio";
@@ -29,7 +30,8 @@ type Screen =
   | { name: "create" }
   | { name: "channels" }
   | { name: "settings" }
-  | { name: "health" };
+  | { name: "health" }
+  | { name: "livelist" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -271,8 +273,10 @@ export default function App() {
       );
     } else if (screen.name === "settings") {
       content = <Settings />;
-    } else if (screen.name === "health") {
-      content = <AppHealth />;
+    } else if (screen.name === "livelist") {
+    content = <LiveList onBack={() => setScreen({ name: "health" })} />;
+  } else if (screen.name === "health") {
+      content = <AppHealth onOpenLiveList={() => setScreen({ name: "livelist" })} />;
     } else if (screen.name === "channels") {
       content = <Channels />;
     } else {

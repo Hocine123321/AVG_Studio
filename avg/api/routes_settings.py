@@ -36,6 +36,7 @@ in through the generic values route either.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from pathlib import Path
 from typing import Any, Literal
@@ -395,30 +396,44 @@ async def refresh_live_list(request: Request) -> dict:
     """
     app_state = request.app.state
     cache = app_state.model_cache
-    # The text probe's own results are preserved: `save` replaces the whole
-    # document, and dropping them here would silently un-verify every text
-    # model every time someone refreshed the voice list.
-    results: dict[str, dict[str, bool]] = {
-        provider: {model: True for model in cache.working(provider)}
-        for provider in cache.providers()
-        if not provider.startswith("__")
-    }
 
-    for provider in catalogues.image_providers():
-        models = catalogues.list_image_models(provider)
-        results[f"__image__{provider}"] = {model: True for model in models}
+    def _list_everything() -> tuple[dict[str, dict[str, bool]], dict[str, dict[str, str]]]:
+        """All the network work, off the event loop.
 
-    voice_meta: dict[str, dict[str, str]] = dict(app_state.voice_meta)
-    for provider in catalogues.voice_providers():
-        voices = catalogues.list_voices(provider)
-        results[f"__voice__{provider}"] = {voice["voice_id"]: True for voice in voices}
-        for voice in voices:
-            voice_meta[f"{provider}/{voice['voice_id']}"] = {
-                "name": voice["name"],
-                "locale": voice["locale"],
-                "gender": voice["gender"],
-            }
+        Two reasons this is a thread rather than inline. It is seconds of
+        HTTP against several providers, and blocking the loop would stall
+        every other request including the one carrying render progress.
+        And Edge's voice list is an async API that `EdgeVoiceProvider`
+        drives with `asyncio.run`, which RAISES inside a running loop - so
+        called inline it returned nothing at all, and the voice tab came
+        back with only ElevenLabs in it.
+        """
+        # The text probe's own results are preserved: `save` replaces the
+        # whole document, and dropping them here would silently un-verify
+        # every text model every time someone refreshed the voice list.
+        results: dict[str, dict[str, bool]] = {
+            provider: {model: True for model in cache.working(provider)}
+            for provider in cache.providers()
+            if not provider.startswith("__")
+        }
 
+        for provider in catalogues.image_providers():
+            models = catalogues.list_image_models(provider)
+            results[f"__image__{provider}"] = {model: True for model in models}
+
+        meta: dict[str, dict[str, str]] = dict(app_state.voice_meta)
+        for provider in catalogues.voice_providers():
+            voices = catalogues.list_voices(provider)
+            results[f"__voice__{provider}"] = {voice["voice_id"]: True for voice in voices}
+            for voice in voices:
+                meta[f"{provider}/{voice['voice_id']}"] = {
+                    "name": voice["name"],
+                    "locale": voice["locale"],
+                    "gender": voice["gender"],
+                }
+        return results, meta
+
+    results, voice_meta = await asyncio.to_thread(_list_everything)
     cache.save(results)
     # Language and gender for the voice tab's filters. Kept in memory
     # rather than on disk: it is derived from the catalogue and a restart
