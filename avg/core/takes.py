@@ -85,7 +85,10 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "brief": ("script/brief.json",),
     "script": ("script/narration.txt", "script/scenes.json"),
     "director1": ("script/video_map.json",),
-    "visuals": ("images",),
+    # `render/index.json` is Visuals' output, not Render's: it is the list
+    # the render engine reads, and a cloned take that kept Visuals but not
+    # Render must carry it or the clone cannot be rendered at all.
+    "visuals": ("images", "render/index.json", "render/scene_safezones.json"),
     "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3"),
     "director2": ("render/direction_plan.json", "render/card_plan.json"),
     # `card_plan.json` appears here as well as under director2 because

@@ -105,6 +105,117 @@ class _FakeImageProvider:
         return f"fake-image-bytes:{prompt}".encode()
 
 
+class _FakePngProvider:
+    """Returns REAL png bytes, so the safezone analysis can open them.
+
+    `_FakeImageProvider` above returns a marker string, which is all the
+    generation tests need. Safezone analysis actually decodes each image
+    with Pillow, so it needs a file that is genuinely an image.
+    """
+
+    name = "fake-png"
+
+    def generate(self, prompt: str, *, aspect_ratio: str, model: str) -> bytes:
+        import io
+
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 32), (30, 30, 30)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def test_index_entries_keep_position_meaning_scene():
+    """Position n in index.json IS scene n+1.
+
+    The vendored engine builds `{i + 1: img for i, img in enumerate(images)}`
+    (`avg/media/vendor/avg.py:2236`). Omitting a failed scene's entry
+    therefore shifts EVERY later image one scene earlier against narration
+    that still plays for the missing one - the whole video drifts out of
+    sync from the first failure onwards.
+    """
+    from avg.pipeline.phases.visuals import _SceneResult, index_entries
+
+    results = {
+        1: _SceneResult(scene=1, ok=True, file="001.png"),
+        2: _SceneResult(scene=2, ok=False, error="rate limited"),
+        3: _SceneResult(scene=3, ok=True, file="003.png"),
+    }
+
+    assert index_entries(results, 3) == ["images/001.png", "images/001.png", "images/003.png"]
+
+
+def test_a_failed_first_scene_borrows_the_next_image():
+    """There is no previous image to repeat, so the fill looks forward.
+    Anything else writes a path that does not exist and turns a partial
+    render into a failed one."""
+    from avg.pipeline.phases.visuals import _SceneResult, index_entries
+
+    results = {
+        1: _SceneResult(scene=1, ok=False, error="safety filter"),
+        2: _SceneResult(scene=2, ok=True, file="002.png"),
+    }
+
+    assert index_entries(results, 2) == ["images/002.png", "images/002.png"]
+
+
+def test_a_scene_with_no_result_at_all_is_filled_like_a_failed_one():
+    """A scene the pool never reported on is indistinguishable from one
+    that failed, as far as the render is concerned: there is no image."""
+    from avg.pipeline.phases.visuals import _SceneResult, index_entries
+
+    results = {1: _SceneResult(scene=1, ok=True, file="001.png")}
+
+    assert index_entries(results, 3) == ["images/001.png", "images/001.png", "images/001.png"]
+
+
+def test_visuals_writes_render_index_json(tmp_path, monkeypatch):
+    """The file the render engine actually reads. Without it
+    `render_project` exits 1 (`avg/media/vendor/avg.py:2228`) and no render
+    this app starts can succeed."""
+    fake = _FakeImageProvider(fail_prompts=frozenset({"prompt two"}))
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["prompt one", "prompt two", "prompt three"])
+
+    VisualsPhase().run(ctx)
+
+    index = read_json(project.folder / "render" / "index.json")
+    assert index == ["images/001.png", "images/001.png", "images/003.png"]
+
+
+def test_visuals_writes_safezones_from_the_real_images(tmp_path, monkeypatch):
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: _FakePngProvider())
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    VisualsPhase().run(ctx)
+
+    safezones = read_json(project.folder / "render" / "scene_safezones.json")
+    assert [entry["scene"] for entry in safezones] == [1, 2]
+    assert "safe_zone" in safezones[0]
+
+
+def test_a_safezone_failure_does_not_fail_the_phase(tmp_path, monkeypatch):
+    """It costs overlay placement quality, never the video. The fake
+    provider's bytes are not a decodable image, which is exactly the
+    situation a corrupt download produces."""
+    fake = _FakeImageProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["prompt one"])
+
+    VisualsPhase().run(ctx)  # must NOT raise
+
+    assert (project.folder / "render" / "index.json").is_file()
+
+
 def test_visuals_inputs_ready_false_without_scenes_json(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)

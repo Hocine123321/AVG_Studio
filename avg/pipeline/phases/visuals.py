@@ -54,7 +54,7 @@ from pathlib import Path
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._common import read_json, script_dir, write_json
+from avg.pipeline.phases._common import read_json, render_dir, script_dir, write_json
 from avg.providers.images.base import ImageProvider
 from avg.providers.images.community import (
     HuggingFaceImageProvider,
@@ -165,6 +165,41 @@ def _generate_one(
         return _SceneResult(scene=scene, ok=False, error=str(exc))
 
 
+def index_entries(results: dict[int, _SceneResult], total: int) -> list[str]:
+    """`render/index.json`'s contents: one path per scene, in scene order.
+
+    The vendored engine maps LIST POSITION to scene number
+    (`avg/media/vendor/avg.py:2236`), so this list must carry exactly one
+    entry per scene whether or not that scene's image was generated. A
+    failed scene takes the nearest previous successful image (the nearest
+    FOLLOWING one when it is the first scene, since there is nothing
+    behind it): its narration still plays, so the choice is between a
+    repeated image - visible, honest, in sync - and every later scene
+    sliding one position earlier against the voice track.
+
+    Scenes with no result at all are treated exactly like failed ones;
+    from the render's point of view there is no image either way. The
+    all-failed case never reaches here - the phase raises first.
+    """
+    ordered = [results.get(scene) for scene in range(1, total + 1)]
+    files = [
+        f"images/{result.file}" if result is not None and result.ok and result.file else None
+        for result in ordered
+    ]
+
+    entries: list[str] = []
+    for position, current in enumerate(files):
+        if current is not None:
+            entries.append(current)
+            continue
+        previous = next((f for f in reversed(files[:position]) if f is not None), None)
+        following = next((f for f in files[position + 1 :] if f is not None), None)
+        fill = previous or following
+        if fill is not None:
+            entries.append(fill)
+    return entries
+
+
 @dataclass(frozen=True, slots=True)
 class VisualsPhase:
     id: int = 3
@@ -246,6 +281,18 @@ class VisualsPhase:
             ],
         }
         write_json(images_dir / "manifest.json", manifest)
+
+        # `render/index.json` is what the render engine actually reads
+        # (`avg/media/vendor/avg.py:2228` exits 1 without it). `manifest.json`
+        # above stays: it records the provider, the model and each scene's
+        # error, which index.json has no room for - the vendored engine
+        # expects a flat list of paths and nothing else.
+        rdir = render_dir(ctx)
+        rdir.mkdir(parents=True, exist_ok=True)
+        write_json(rdir / "index.json", index_entries(results, total))
+
+        _write_safezones(ctx, rdir)
+
         ctx.emit(
             ProgressEvent(
                 project_id=ctx.project.id,
@@ -253,3 +300,40 @@ class VisualsPhase:
                 message=f"Visuals complete: {ok_count}/{total} image(s) generated.",
             )
         )
+
+
+def _write_safezones(ctx: PhaseContext, rdir: Path) -> None:
+    """Analyse where text may sit over each image, into
+    `render/scene_safezones.json`.
+
+    Runs on the SOURCE images rather than rendered frames, which is why it
+    can run here at all rather than waiting for a render
+    (`avg/media/vendor/avg.py:221`). Bad images therefore fail fast, before
+    voice and render time is spent on them.
+
+    Non-fatal in every direction: a missing safezone file costs overlay
+    PLACEMENT quality, never the video. `cmd_safezones` reports by raising
+    SystemExit, including on success, so that is caught rather than
+    allowed to end the phase.
+    """
+    from avg.media.vendor.avg import cmd_safezones
+
+    argv = [str(ctx.project.folder), str(rdir / "index.json"), str(rdir / "scene_safezones.json")]
+    try:
+        cmd_safezones(argv)
+    except SystemExit as exc:
+        if exc.code in (0, None):
+            return
+        _warn_safezones(ctx, f"exit code {exc.code}")
+    except Exception as exc:  # noqa: BLE001 - never fatal, see above
+        _warn_safezones(ctx, str(exc))
+
+
+def _warn_safezones(ctx: PhaseContext, reason: str) -> None:
+    ctx.emit(
+        ProgressEvent(
+            project_id=ctx.project.id,
+            percent=100,
+            message=f"Safezone analysis was skipped ({reason}); overlay placement will use defaults.",
+        )
+    )
