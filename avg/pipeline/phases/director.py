@@ -105,6 +105,7 @@ from avg.pipeline.phases._common import (
     extract_question_markers,
     read_json,
     render_dir,
+    resolve_font_family,
     script_dir,
     write_json,
 )
@@ -517,6 +518,41 @@ def _write_scene_timings(ctx: PhaseContext, rdir: Path) -> None:
         )
 
 
+def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any]) -> int:
+    """Part 2: draw the cards and overlays as real PNGs.
+
+    This is the step whose absence meant every finished video carried no
+    card text - `card_plan.json` existed and nothing rendered it. Their
+    existence (`render/_final_layers.json`) is also what lets the render's
+    second part bake overlays and captions in ONE encode.
+
+    Non-fatal: a card that cannot be drawn costs that card. The direction
+    plan is already on disk by here, and it is the phase's real output.
+    """
+    from avg.media.overlays import write_layers
+    from avg.media.vendor.avg import _target_size
+
+    try:
+        width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)  # type: ignore[no-untyped-call]
+        return write_layers(
+            Path(ctx.project.folder),
+            edit_plan,
+            read_json(rdir / "scene_timings.json") or [],
+            int(width),
+            int(height),
+            resolve_font_family(ctx),
+        )
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        ctx.emit(
+            ProgressEvent(
+                project_id=ctx.project.id,
+                percent=100,
+                message=f"Overlay assets could not be drawn ({exc}); the render will composite without cards.",
+            )
+        )
+        return 0
+
+
 @dataclass(frozen=True, slots=True)
 class Director2Phase:
     id: int = 5
@@ -580,12 +616,18 @@ class Director2Phase:
         # ── Part 1 tail: exact per-scene windows, and the overlay
         # compositor's own view of the cards just planned.
         _write_scene_timings(ctx, rdir)
-        write_json(rdir / "edit_plan.json", build_edit_plan(card_plan, direction_plan))
+        edit_plan = build_edit_plan(card_plan, direction_plan)
+        write_json(rdir / "edit_plan.json", edit_plan)
+
+        drawn = _draw_overlay_assets(ctx, rdir, edit_plan)
 
         ctx.emit(
             ProgressEvent(
                 project_id=ctx.project.id,
                 percent=100,
-                message=f"Direction plan complete ({len(scenes_out)} scene(s), grade={look}).",
+                message=(
+                    f"Direction plan complete ({len(scenes_out)} scene(s), grade={look}); "
+                    f"{drawn} overlay asset(s) drawn."
+                ),
             )
         )

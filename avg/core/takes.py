@@ -101,6 +101,11 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
         "render/card_plan.json",
         "render/scene_timings.json",
         "render/edit_plan.json",
+        # The drawn assets, and the manifest naming them. A clone that keeps
+        # Director II but not these would render with no cards at all - the
+        # manifest's existence is what tells the caption pass to bake them.
+        "render/_final_layers.json",
+        "overlays",
     ),
     # `card_plan.json` appears here as well as under director2 because
     # Captions REWRITES it in place, adding each card's start/end times
