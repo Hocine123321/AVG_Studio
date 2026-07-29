@@ -344,6 +344,82 @@ def _write_scenes(ctx: PhaseContext, texts: list[str]) -> None:
     )
 
 
+def test_timeline_nodes_match_what_compute_scene_timings_reads():
+    """The vendored timing pass reads `type`, `scene`, and a takeover's
+    `headline`/`sub`/`duration_sec` (`avg/media/vendor/avg.py:1978-1999`).
+    A node missing `type` is dropped silently, which is why this asserts the
+    shape rather than only the count."""
+    from avg.pipeline.phases.director import build_timeline
+
+    scenes = [{"index": 1, "text": "One"}, {"index": 2, "text": "Two"}]
+    video_map = {"parts": [{"title": "Part one", "sub": "the setup", "after_scene": 1}]}
+
+    timeline = build_timeline(scenes, video_map)
+
+    assert [node["type"] for node in timeline] == ["scene", "takeover", "scene"]
+    assert timeline[0]["scene"] == 1
+    assert timeline[1]["headline"] == "Part one"
+    assert timeline[1]["sub"] == "the setup"
+    assert timeline[1]["duration_sec"] > 0
+    assert timeline[2]["scene"] == 2
+
+
+def test_a_video_map_with_no_parts_is_all_scenes():
+    """A takeover node the user never asked for is nearly two seconds of
+    card inserted into their video."""
+    from avg.pipeline.phases.director import build_timeline
+
+    timeline = build_timeline([{"index": 1, "text": "One"}], {})
+
+    assert [node["type"] for node in timeline] == ["scene"]
+
+
+def test_markers_are_extracted_per_scene():
+    """`((question))` sources a Focused card, `[[focus]]` an emphasis
+    window, `[pause]` the dynamic-pause list. Before this they were written
+    inline by the script and then dropped on the floor by everything
+    downstream."""
+    from avg.pipeline.phases.director import build_markers
+
+    markers = build_markers([
+        {"index": 1, "text": "So ((why stripes?)) nobody asks."},
+        {"index": 2, "text": "It was [[deliberate]]. [pause] Entirely."},
+    ])
+
+    assert markers["text_markers"] == [
+        {"scene": 1, "kind": "question", "text": "why stripes?"},
+        {"scene": 2, "kind": "focus", "text": "deliberate"},
+    ]
+    assert markers["dynamic_pauses"] == [{"scene": 2, "index": 1}]
+    assert markers["beat_map"] == {"1": "HIT", "2": "PAUSE"}
+
+
+def test_director1_writes_the_timeline_and_marker_files(tmp_path, monkeypatch):
+    """Four files the old app wrote and this one did not."""
+    reply = json.dumps({
+        "image_count": 2,
+        "scenes": [
+            {"scene": 1, "role": "hook", "beat": "HIT", "visual_intent": "POP"},
+            {"scene": 2, "role": "reveal", "beat": "none", "visual_intent": "BACKGROUND"},
+        ],
+        "zoom_words": [],
+        "notes": "",
+    })
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["So ((why stripes?)) nobody asks.", "It was [[deliberate]]. [pause] Entirely."])
+
+    Director1Phase().run(ctx)
+
+    sdir = project.folder / "script"
+    assert [node["type"] for node in read_json(sdir / "timeline.json")] == ["scene", "scene"]
+    assert read_json(sdir / "text_markers.json")[0]["text"] == "why stripes?"
+    assert read_json(sdir / "dynamic_pauses.json") == [{"scene": 2, "index": 1}]
+    assert read_json(sdir / "beat_map.json") == {"1": "HIT", "2": "PAUSE"}
+
+
 def test_director1_inputs_ready_false_without_scenes_json(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)

@@ -57,8 +57,15 @@ ARTIFACTS: dict[str, tuple[ArtifactSpec, ...]] = {
         ArtifactSpec("narration", "script/narration.txt", "Narration", "text/plain", "text"),
         ArtifactSpec("scenes", "script/scenes.json", "Scenes", "application/json", "json"),
     ),
+    # The other two files this phase writes - `dynamic_pauses.json` and
+    # `beat_map.json` - are machine plumbing for the silence remover and the
+    # render's blind fallback. They are copied by a clone (they are in
+    # `PHASE_ARTIFACTS`) but not shown, because neither means anything to a
+    # person reading the panel.
     "director1": (
         ArtifactSpec("video_map", "script/video_map.json", "Image plan", "application/json", "json"),
+        ArtifactSpec("timeline", "script/timeline.json", "Timeline", "application/json", "json"),
+        ArtifactSpec("text_markers", "script/text_markers.json", "Markers", "application/json", "json"),
     ),
     "visuals": (
         ArtifactSpec("images", "images", "Images", "image/png", "image_dir"),

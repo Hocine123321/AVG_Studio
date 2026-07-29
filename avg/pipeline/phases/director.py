@@ -91,11 +91,14 @@ one card per scene (first question wins - a scene rarely needs two boards).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._common import (
+    _FOCUS_MARKER_RE,
+    _PAUSE_MARKER_RE,
     creative_inputs,
     extract_json_object,
     extract_question_markers,
@@ -171,6 +174,86 @@ def _normalize_zoom_word(entry: object) -> dict | None:
     return {"scene": scene_num, "word": word}
 
 
+#: A takeover card holds the screen this long when the plan does not say.
+#: Matches the vendored engine's own default (`avg/media/vendor/avg.py:1992`),
+#: so a node without a duration times identically here and there.
+_TAKEOVER_SECONDS = 1.8
+
+
+def build_timeline(scenes: list[Any], video_map: dict[str, Any]) -> list[dict[str, Any]]:
+    """`script/timeline.json` - the scene and takeover structure.
+
+    Consumed by `avg.media.vendor.avg.compute_scene_timings`, which reads
+    `type`, a scene's `scene`, and a takeover's `headline`/`sub`/
+    `duration_sec`. Takeovers come from the video map's `parts` (chapter
+    boundaries); a map with no parts yields scenes only, because a takeover
+    node nobody asked for is nearly two seconds of card inserted into the
+    middle of the video.
+    """
+    parts_after: dict[int, list[dict[str, Any]]] = {}
+    for part in video_map.get("parts") or []:
+        if not isinstance(part, dict):
+            continue
+        after = _coerce_int(part.get("after_scene"))
+        if after is not None and after > 0:
+            parts_after.setdefault(after, []).append(part)
+
+    timeline: list[dict[str, Any]] = []
+    for position, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        number = _coerce_int(scene.get("index")) or position
+        timeline.append({"type": "scene", "scene": number})
+        for part in parts_after.get(number, ()):
+            timeline.append(
+                {
+                    "type": "takeover",
+                    "id": f"part-{number}",
+                    "headline": str(part.get("title") or ""),
+                    "sub": str(part.get("sub") or ""),
+                    "duration_sec": float(part.get("duration_sec") or _TAKEOVER_SECONDS),
+                }
+            )
+    return timeline
+
+
+def build_markers(scenes: list[Any]) -> dict[str, Any]:
+    """The three marker files, from the markers the writer left inline.
+
+    The script drops `((question))`, `[[focus]]` and `[pause]` into its
+    prose; `strip_delivery_markers` removes them again before anything is
+    spoken or captioned, and until now that was the end of them. Extracting
+    them here is what gives a Focused card a source, an emphasis window a
+    position, and `remove_silences_core` a beat map saying which gaps are
+    deliberate.
+
+    `beat_map` uses the vendored engine's own vocabulary: a scene holding a
+    deliberate pause is `PAUSE`, everything else `HIT`. Its keys are strings
+    because the file is written as JSON and read back as JSON.
+    """
+    text_markers: list[dict[str, Any]] = []
+    dynamic_pauses: list[dict[str, Any]] = []
+    beat_map: dict[str, str] = {}
+
+    for position, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        number = _coerce_int(scene.get("index")) or position
+        text = str(scene.get("text") or "")
+
+        for question in extract_question_markers(text):
+            text_markers.append({"scene": number, "kind": "question", "text": question})
+        for match in _FOCUS_MARKER_RE.finditer(text):
+            text_markers.append({"scene": number, "kind": "focus", "text": match.group(1).strip()})
+
+        pauses = len(_PAUSE_MARKER_RE.findall(text))
+        for index in range(1, pauses + 1):
+            dynamic_pauses.append({"scene": number, "index": index})
+        beat_map[str(number)] = "PAUSE" if pauses else "HIT"
+
+    return {"text_markers": text_markers, "dynamic_pauses": dynamic_pauses, "beat_map": beat_map}
+
+
 @dataclass(frozen=True, slots=True)
 class Director1Phase:
     id: int = 2
@@ -237,7 +320,20 @@ class Director1Phase:
             "zoom_words": zoom_words,
             "notes": str(parsed.get("notes") or "").strip(),
         }
-        write_json(script_dir(ctx) / "video_map.json", video_map)
+        sdir = script_dir(ctx)
+        write_json(sdir / "video_map.json", video_map)
+
+        # Structure and markers, both derived from the finished script plus
+        # the map just written. Non-fatal in the old app and non-fatal here:
+        # a missing marker file costs a card or an emphasis, a missing
+        # timeline costs takeovers, and this phase's real output -
+        # video_map.json - is already on disk by now.
+        write_json(sdir / "timeline.json", build_timeline(scenes, video_map))
+        markers = build_markers(scenes)
+        write_json(sdir / "text_markers.json", markers["text_markers"])
+        write_json(sdir / "dynamic_pauses.json", markers["dynamic_pauses"])
+        write_json(sdir / "beat_map.json", markers["beat_map"])
+
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Video map complete."))
 
 

@@ -84,7 +84,13 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "brief": ("script/brief.json",),
     "script": ("script/narration.txt", "script/scenes.json"),
-    "director1": ("script/video_map.json",),
+    "director1": (
+        "script/video_map.json",
+        "script/timeline.json",
+        "script/text_markers.json",
+        "script/dynamic_pauses.json",
+        "script/beat_map.json",
+    ),
     # `render/index.json` is Visuals' output, not Render's: it is the list
     # the render engine reads, and a cloned take that kept Visuals but not
     # Render must carry it or the clone cannot be rendered at all.
