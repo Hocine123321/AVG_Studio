@@ -30,20 +30,22 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import threading
+import traceback
 from contextlib import suppress
 from pathlib import Path
 from collections.abc import Iterable
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
 from avg.config.legacy_import import import_all
-from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
+from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
+from avg.core.error_store import ErrorStore, classify
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
@@ -275,6 +277,7 @@ def create_app(
     settings_path: Path | None = None,
     channels_dir: Path | None = None,
     secrets_path: Path | None = None,
+    errors_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -304,6 +307,40 @@ def create_app(
     app.state.settings_path = Path(settings_path) if settings_path is not None else None
     app.state.channels_dir = Path(channels_dir) if channels_dir is not None else None
     app.state.secrets_path = Path(secrets_path) if secrets_path is not None else None
+    # Errors live beside the settings document, so a user who moves their
+    # profile takes the log with them. Overridable like every other path so
+    # tests never write into the real %APPDATA%.
+    app.state.error_store = ErrorStore(
+        Path(errors_path)
+        if errors_path is not None
+        else default_settings_path().with_name("errors.json")
+    )
+
+    @app.middleware("http")
+    async def _record_unhandled(request: Request, call_next):
+        """Every unhandled exception becomes a stored, severity-tagged error.
+
+        Without this a 500 from a packaged build is a dead end: the user
+        sees "500 internal server error", the traceback goes to a console
+        that a windowed build does not have, and nothing in the app
+        remembers what happened.
+
+        Re-raises after recording. This observes; it does not swallow - a
+        request that failed must still fail.
+        """
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            with suppress(Exception):
+                app.state.error_store.record(
+                    severity=classify(kind=None, status=500, source="api"),
+                    source="api",
+                    summary=f"{type(exc).__name__}: {exc}",
+                    detail="".join(traceback.format_exception(exc)),
+                    context={"path": request.url.path, "method": request.method},
+                )
+            raise
+
     # A single background thread at a time - MediaEngine itself only ever
     # tracks one child process (see its docstring), so a second render
     # starting while one is alive would silently overwrite that handle and

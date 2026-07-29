@@ -7,6 +7,9 @@ against the schema, delegate to `avg.config.settings` / `avg.config.channels`
 stack - those modules already refuse to have one (see their docstrings)
 and this router does not reintroduce one at the HTTP layer.
 
+    GET    /api/errors                   -> recent failures, newest first
+    POST   /api/errors                   -> record one (the frontend's own failures)
+    DELETE /api/errors                   -> clear the log
     GET    /api/costs                    -> the maintained cost table
     GET    /api/health                   -> component states (?refresh=true to recheck)
     GET    /api/settings/schema           -> the catalogue
@@ -33,10 +36,10 @@ in through the generic values route either.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
 from avg.config import secrets as secrets_config
@@ -140,6 +143,59 @@ async def get_health(refresh: bool = False) -> dict:
         ],
         "ok": all(c.ok for c in components),
     }
+
+
+class ErrorReport(BaseModel):
+    """`POST /api/errors` - how the frontend reports what only it can see.
+
+    A thumbnail that would not load, a WebSocket that dropped: failures the
+    backend never hears about, and exactly the ones a user cannot describe
+    accurately afterwards.
+    """
+
+    severity: Literal["critical", "needs_review", "low"]
+    source: str
+    summary: str
+    detail: str = ""
+    context: dict[str, str] = Field(default_factory=dict)
+
+
+@router.get("/api/errors")
+async def list_errors(request: Request) -> dict:
+    """Recent failures, newest first. Never raises for a broken store - an
+    error log that can itself error is worse than none."""
+    return {
+        "errors": [
+            {
+                "id": r.id,
+                "when": r.when.isoformat(),
+                "severity": r.severity,
+                "source": r.source,
+                "summary": r.summary,
+                "detail": r.detail,
+                "context": r.context,
+            }
+            for r in request.app.state.error_store.all()
+        ]
+    }
+
+
+@router.post("/api/errors", status_code=status.HTTP_201_CREATED)
+async def report_error(body: ErrorReport, request: Request) -> dict:
+    record = request.app.state.error_store.record(
+        severity=body.severity,
+        source=body.source,
+        summary=body.summary,
+        detail=body.detail,
+        context=body.context,
+    )
+    return {"recorded": record.id}
+
+
+@router.delete("/api/errors")
+async def clear_errors(request: Request) -> dict:
+    request.app.state.error_store.clear()
+    return {"cleared": True}
 
 
 @router.get("/api/health/report")
