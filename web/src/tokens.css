@@ -2573,12 +2573,32 @@ a:hover {
   background: var(--sage-deep);
 }
 
+/* The input is the control's state and its keyboard target, never its
+   appearance: a native checkbox renders as Windows' own grey square with
+   square corners, which was showing through the dot on every card. The
+   dot itself is the visual, and the tick below is drawn in CSS. */
 .select-dot input {
-  width: 14px;
-  height: 14px;
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
   margin: 0;
-  accent-color: var(--sage);
   cursor: pointer;
+}
+
+.select-dot::after {
+  content: "";
+  width: 11px;
+  height: 6px;
+  border-left: 2px solid var(--canvas);
+  border-bottom: 2px solid var(--canvas);
+  transform: rotate(-45deg) translate(1px, -1px);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.select-dot--on::after {
+  opacity: 1;
 }
 
 .select-bar {
@@ -3437,14 +3457,31 @@ a:hover {
   color: var(--muted);
 }
 
-.livelist__filter select {
-  padding: 5px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
+/* The filters' own Selects sit inline with their label, so they are
+   sized down from the settings screen's full-width fields. */
+.livelist__filter .sel {
+  min-width: 120px;
+}
+
+.livelist__filter .sel__button {
+  padding: 6px 12px;
   font-size: 12.5px;
+}
+
+/* The switch is the app's boolean control everywhere else (BoolField), so
+   it is scaled to sit on a filter row rather than restyled. */
+.livelist__filter .switch {
+  width: 38px;
+  height: 21px;
+}
+
+.livelist__filter .switch__thumb {
+  width: 15px;
+  height: 15px;
+}
+
+.livelist__filter .switch--on .switch__thumb {
+  transform: translateX(17px);
 }
 
 .livelist__add {

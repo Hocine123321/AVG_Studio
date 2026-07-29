@@ -80,19 +80,48 @@ class ModelCache:
         except ValueError:
             return None
 
-    def save(self, results: dict[str, dict[str, bool]]) -> None:
+    def meta(self) -> dict[str, dict[str, str]]:
+        """Descriptive detail for entries that have some, by entry id.
+
+        Voices carry language and gender; a model id carries nothing, so
+        most entries are simply absent here. It lives in this document
+        rather than a fourth file because it is the same kind of thing as
+        the rest of it: machine-owned, derived from a provider's own list,
+        and replaced wholesale on the next sweep.
+        """
+        raw = self._load().get("meta")
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(key): {str(k): str(v) for k, v in value.items()}
+            for key, value in raw.items()
+            if isinstance(value, dict)
+        }
+
+    def save(
+        self,
+        results: dict[str, dict[str, bool]],
+        meta: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         """Replace the document with one sweep's results.
 
         A whole-document replace, not a merge: a model that stopped
         working has to be able to disappear, and a merge would keep a
         stale `true` alive forever.
+
+        `meta` is the exception, and only in one direction: passing `None`
+        keeps whatever was stored, so a text probe - which knows nothing
+        about voices - does not wipe the language and gender a catalogue
+        refresh put there.
         """
+        kept = self.meta() if meta is None else meta
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(
                 {
                     "updated": datetime.now(timezone.utc).isoformat(),
                     "models": {p: dict(sorted(m.items())) for p, m in results.items()},
+                    "meta": dict(sorted(kept.items())),
                 },
                 indent=2,
             ),

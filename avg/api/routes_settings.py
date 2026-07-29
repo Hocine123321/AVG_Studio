@@ -381,7 +381,7 @@ async def get_live_list(request: Request) -> dict:
         "text": _entry_rows(prefs, "text", _known_text(app_state)),
         "image": _entry_rows(prefs, "image", _known_from_catalogue(app_state, "image")),
         "voice": _entry_rows(prefs, "voice", _known_from_catalogue(app_state, "voice")),
-        "voice_meta": app_state.voice_meta,
+        "voice_meta": app_state.model_cache.meta(),
     }
 
 
@@ -421,7 +421,7 @@ async def refresh_live_list(request: Request) -> dict:
             models = catalogues.list_image_models(provider)
             results[f"__image__{provider}"] = {model: True for model in models}
 
-        meta: dict[str, dict[str, str]] = dict(app_state.voice_meta)
+        meta: dict[str, dict[str, str]] = dict(cache.meta())
         for provider in catalogues.voice_providers():
             voices = catalogues.list_voices(provider)
             results[f"__voice__{provider}"] = {voice["voice_id"]: True for voice in voices}
@@ -434,12 +434,7 @@ async def refresh_live_list(request: Request) -> dict:
         return results, meta
 
     results, voice_meta = await asyncio.to_thread(_list_everything)
-    cache.save(results)
-    # Language and gender for the voice tab's filters. Kept in memory
-    # rather than on disk: it is derived from the catalogue and a restart
-    # simply refreshes it, so persisting it would be a second copy of
-    # something already cheap to get.
-    app_state.voice_meta = voice_meta
+    cache.save(results, voice_meta)
     return {"refreshed": True}
 
 

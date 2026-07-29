@@ -341,11 +341,6 @@ def create_app(
         if model_prefs_path is not None
         else default_settings_path().with_name("model_prefs.json")
     )
-    # Language and gender per voice id, for the Live List's filters.
-    # Derived from the catalogue on refresh and deliberately not persisted:
-    # a restart simply refreshes it, and a second on-disk copy of something
-    # this cheap to fetch is a thing to keep in sync for no reason.
-    app.state.voice_meta = {}
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None

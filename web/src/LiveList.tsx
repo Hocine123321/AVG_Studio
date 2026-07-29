@@ -9,6 +9,7 @@ import {
   type LiveKind,
   type LiveListResponse,
 } from "./api";
+import Select from "./Select";
 import { DeferredInput } from "./fields/DeferredInput";
 import { IconCheck, IconPlus } from "./Icons";
 
@@ -193,35 +194,49 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
       <p className="health-stage__detail">{TABS.find((t) => t.kind === kind)?.hint}</p>
 
       <div className="livelist__controls">
-        <label className="livelist__filter">
-          <input
-            type="checkbox"
-            checked={onlySelected}
-            onChange={(e) => setOnlySelected(e.target.checked)}
-          />
+        {/* The app's own switch and Select, never the native controls:
+            Windows draws `<select>` and `<input type=checkbox>` itself, in
+            OS grey with square corners, and they were the only two things
+            on this screen ignoring the theme. `Select.tsx` exists for
+            exactly this reason. */}
+        <div className="livelist__filter">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onlySelected}
+            aria-label="Show ticked entries only"
+            className={`switch${onlySelected ? " switch--on" : ""}`}
+            onClick={() => setOnlySelected((on) => !on)}
+          >
+            <span className="switch__thumb" aria-hidden="true" />
+          </button>
           Ticked only ({selectedCount})
-        </label>
+        </div>
 
         {kind === "voice" && (
           <>
-            <label className="livelist__filter">
+            <div className="livelist__filter">
               Language
-              <select value={locale} onChange={(e) => setLocale(e.target.value)}>
-                {locales.map((l) => (
-                  <option key={l} value={l}>
-                    {l === "all" ? "Any" : l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="livelist__filter">
+              <Select
+                value={locale}
+                ariaLabel="Filter by language"
+                options={locales.map((l) => ({ value: l, label: l === "all" ? "Any" : l }))}
+                onChange={setLocale}
+              />
+            </div>
+            <div className="livelist__filter">
               Gender
-              <select value={gender} onChange={(e) => setGender(e.target.value)}>
-                <option value="all">Any</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-              </select>
-            </label>
+              <Select
+                value={gender}
+                ariaLabel="Filter by gender"
+                options={[
+                  { value: "all", label: "Any" },
+                  { value: "female", label: "Female" },
+                  { value: "male", label: "Male" },
+                ]}
+                onChange={setGender}
+              />
+            </div>
           </>
         )}
 
