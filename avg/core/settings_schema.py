@@ -58,6 +58,13 @@ class SettingSpec(BaseModel):
     scope: Scope
     invalidates: str | None
     choices: list[str] | None = None
+    #: Where a field's options come from at RUNTIME, when the catalogue
+    #: cannot enumerate them. `"model_cache"` means the working-models cache
+    #: (`avg.core.model_cache`) fills the list, which is why the cache has to
+    #: be built before a model can be picked from a list. The field keeps its
+    #: declared `type`, so an unbuilt cache still allows a typed value rather
+    #: than locking the user out of a setting they could always edit before.
+    source: str | None = None
 
 
 class SettingValidationError(ValueError):
@@ -185,6 +192,7 @@ SETTINGS: list[SettingSpec] = [
         default="groq/llama-3.3-70b-versatile",
         scope="channel",
         invalidates="brief",
+        source="model_cache",
     ),
     *[
         spec
@@ -205,6 +213,7 @@ SETTINGS: list[SettingSpec] = [
                 default="",
                 scope="channel",
                 invalidates=invalidated,
+                source="model_cache",
             ),
             SettingSpec(
                 id=f"{phase_key}_backup",
@@ -215,6 +224,7 @@ SETTINGS: list[SettingSpec] = [
                 default="",
                 scope="channel",
                 invalidates=invalidated,
+                source="model_cache",
             ),
             SettingSpec(
                 id=f"{phase_key}_on_failure",

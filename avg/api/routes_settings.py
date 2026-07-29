@@ -36,6 +36,7 @@ in through the generic values route either.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -52,6 +53,7 @@ from avg.core.settings_schema import (
     get_spec,
     validate_value,
 )
+from avg.providers.probe import probe_all
 
 from .deps import require_token
 
@@ -197,6 +199,65 @@ async def report_error(body: ErrorReport, request: Request) -> dict:
 async def clear_errors(request: Request) -> dict:
     request.app.state.error_store.clear()
     return {"cleared": True}
+
+
+@router.get("/api/models/cache")
+async def get_model_cache(request: Request) -> dict:
+    """Which models each provider proved working, and when that was checked.
+
+    `providers` holds only proven models; a provider that was probed and
+    had nothing work appears with an empty list, which is a different
+    statement from being absent. `updated: null` means no sweep has ever
+    run - the UI says "build the cache", never invents a model list.
+    """
+    cache = request.app.state.model_cache
+    updated = cache.updated_at()
+    return {
+        "updated": updated.isoformat() if updated is not None else None,
+        "providers": {p: cache.working(p) for p in cache.providers()},
+        "building": _probe_running(request.app.state),
+    }
+
+
+def _probe_running(app_state: Any) -> bool:
+    thread = getattr(app_state, "probe_thread", None)
+    return thread is not None and thread.is_alive()
+
+
+@router.post("/api/models/cache/build", status_code=status.HTTP_202_ACCEPTED)
+async def build_model_cache(request: Request) -> dict:
+    """Probe every keyed provider's models and store the verdicts.
+
+    Runs on a background thread with a single slot and a 409 on a second
+    start, matching how renders are guarded: a sweep is one call per model
+    per keyed provider, so two at once would double the spend and the
+    second would overwrite the first's results anyway.
+
+    Deliberately NOT sharing the render slot - probing does not touch a
+    project or the media engine, and blocking a render behind a model
+    sweep (or the reverse) would be a limitation with no cause.
+    """
+    app_state = request.app.state
+    if _probe_running(app_state):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="a model cache build is already running",
+        )
+
+    cache = app_state.model_cache
+
+    def _sweep() -> None:
+        # Never raises out of the thread: a failed sweep leaves the
+        # previous cache in place, which is more useful than an empty one.
+        try:
+            cache.save(probe_all())
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_sweep, name="model-cache-build", daemon=True)
+    app_state.probe_thread = thread
+    thread.start()
+    return {"started": True}
 
 
 @router.get("/api/health/report")

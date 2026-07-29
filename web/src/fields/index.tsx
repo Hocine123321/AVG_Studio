@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import type { SettingType } from "../api";
 import { BoolField, ChoiceField, FloatField, IntField, PathField, TextField } from "./Fields";
 import SecretField from "./SecretField";
+import ModelPicker from "../ModelPicker";
 import type { FieldProps } from "./types";
 
 export type { FieldProps, SettingsCtx } from "./types";
@@ -24,6 +25,13 @@ const REGISTRY: Record<SettingType, ComponentType<FieldProps>> = {
 };
 
 export function Field({ spec, ctx, disabled }: FieldProps) {
+  // `source` outranks `type`: a field whose options only exist at runtime
+  // cannot be described by the catalogue, so the schema declares where they
+  // come from instead. Only `model_cache` exists today; an unknown source
+  // falls through to the ordinary renderer rather than rendering nothing.
+  if (spec.source === "model_cache") {
+    return <ModelPicker spec={spec} ctx={ctx} disabled={disabled} />;
+  }
   const Component = REGISTRY[spec.type];
   if (!Component) {
     // Unreachable for anything the current schema can produce - kept as an

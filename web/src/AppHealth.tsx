@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealthReport, type HealthReport } from "./api";
 import ErrorLog from "./ErrorLog";
+import ModelCacheCard from "./ModelCacheCard";
 
 /**
  * The App Health screen: the legacy app's startup diagnostic, rebuilt.
@@ -99,6 +100,8 @@ export default function AppHealth() {
           </section>
         ))}
       </div>
+
+      <ModelCacheCard />
 
       <ErrorLog />
     </div>

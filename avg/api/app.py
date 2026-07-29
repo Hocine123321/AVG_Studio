@@ -46,6 +46,7 @@ from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
+from avg.core.model_cache import ModelCache
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
@@ -283,6 +284,7 @@ def create_app(
     channels_dir: Path | None = None,
     secrets_path: Path | None = None,
     errors_path: Path | None = None,
+    model_cache_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -320,6 +322,18 @@ def create_app(
         if errors_path is not None
         else default_settings_path().with_name("errors.json")
     )
+    # Which models a probe proved working. Beside the settings document for
+    # the same reason the error log is, and NOT the same file as
+    # `avg/providers/models.py`'s `model_cache.json`, which caches what a
+    # provider *advertises* - see `avg.core.model_cache`'s docstring.
+    app.state.model_cache = ModelCache(
+        Path(model_cache_path)
+        if model_cache_path is not None
+        else default_settings_path().with_name("working_models.json")
+    )
+    # One probe sweep at a time: it costs a call per model on every keyed
+    # provider, and two at once would double that for nothing.
+    app.state.probe_thread = None
 
     @app.middleware("http")
     async def _record_unhandled(request: Request, call_next):

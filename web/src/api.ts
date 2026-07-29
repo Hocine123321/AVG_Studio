@@ -294,6 +294,30 @@ export function getHealthReport(refresh = false): Promise<HealthReport> {
   return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
 }
 
+// ---- working-models cache ----
+
+/** `GET /api/models/cache`. `providers` holds ONLY models a probe proved
+ * working; a provider that was probed and had nothing work appears with an
+ * empty list, which is a different statement from being absent. `updated:
+ * null` means no sweep has ever run - the UI says "build the cache" and
+ * never invents a model list. See `avg/core/model_cache.py`. */
+export interface ModelCacheResponse {
+  updated: string | null;
+  providers: Record<string, string[]>;
+  building: boolean;
+}
+
+export function getModelCache(): Promise<ModelCacheResponse> {
+  return apiGet<ModelCacheResponse>("/api/models/cache");
+}
+
+/** Start a probe sweep. 202 when it starts, 409 when one is already
+ * running - probing is one call per model per keyed provider, so two at
+ * once would double the spend for nothing. */
+export function buildModelCache(): Promise<{ started: boolean }> {
+  return apiPost<{ started: boolean }>("/api/models/cache/build", {});
+}
+
 // ---- cost table ----
 
 /** `GET /api/costs`. Served rather than hardcoded here on purpose: these
@@ -340,6 +364,11 @@ export interface SettingSpec {
   default: unknown;
   scope: SettingScope;
   choices: string[] | null;
+  /** Where the options come from at runtime when the catalogue cannot
+   * enumerate them. `"model_cache"` means the working-models cache fills
+   * the list; the field keeps its `type`, so an unbuilt cache still allows
+   * a typed value rather than locking the setting. */
+  source?: string | null;
 }
 
 export interface SettingsSchemaResponse {
