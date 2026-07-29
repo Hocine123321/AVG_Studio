@@ -67,8 +67,10 @@ export default function ModelCacheCard() {
           </p>
         </div>
         <span className="home__spacer" />
+        {/* "Build" next to a timestamp reading "Last checked 14:02" is
+            asking whether the first build ever happened. */}
         <button type="button" className="btn" onClick={() => void build()} disabled={building}>
-          {building ? "Probing…" : "Build model cache"}
+          {building ? "Probing…" : cache?.updated ? "Re-build model cache" : "Build model cache"}
         </button>
       </header>
 
