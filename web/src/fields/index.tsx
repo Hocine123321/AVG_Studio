@@ -29,7 +29,10 @@ export function Field({ spec, ctx, disabled }: FieldProps) {
   // cannot be described by the catalogue, so the schema declares where they
   // come from instead. Only `model_cache` exists today; an unknown source
   // falls through to the ordinary renderer rather than rendering nothing.
-  if (spec.source === "model_cache") {
+  // Three sources today, one component: `model_cache` (text models, kept
+  // for any channel document written before Slice 8) and the two
+  // `live_list:` kinds. The kind is the part after the colon.
+  if (spec.source === "model_cache" || spec.source?.startsWith("live_list:")) {
     return <ModelPicker spec={spec} ctx={ctx} disabled={disabled} />;
   }
   const Component = REGISTRY[spec.type];

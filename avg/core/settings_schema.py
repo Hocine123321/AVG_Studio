@@ -335,17 +335,22 @@ SETTINGS: list[SettingSpec] = [
         id="voice_id",
         group="voice",
         label="Voice ID",
-        help="Provider-specific voice identifier.",
+        help="Which voice reads the narration. The Live List decides what is offered here.",
         type="text",
         default="",
         scope="channel",
         invalidates="voice",
+        source="live_list:voice",
     ),
     SettingSpec(
+        # Deliberately NOT a Live List field: this is the TTS ENGINE
+        # (e.g. eleven_multilingual_v2), not a voice, and the Live List's
+        # voice tab lists voices. Offering voice ids here would be a
+        # picker whose every option is wrong.
         id="voice_model_id",
         group="voice",
         label="Voice model",
-        help="Provider-specific TTS model id.",
+        help="Provider-specific TTS engine id, e.g. eleven_multilingual_v2.",
         type="text",
         default="",
         scope="channel",
@@ -397,11 +402,12 @@ SETTINGS: list[SettingSpec] = [
         id="image_model",
         group="images",
         label="Image model",
-        help="Provider-specific image model id.",
+        help="Which image model to generate with. The Live List decides what is offered here.",
         type="text",
         default="flux",
         scope="channel",
         invalidates="visuals",
+        source="live_list:image",
     ),
     SettingSpec(
         id="image_quality",

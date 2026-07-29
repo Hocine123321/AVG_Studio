@@ -193,6 +193,7 @@ export default function Settings() {
 
   const ctx: SettingsCtx = {
     getValue,
+    valueById,
     isDirty,
     onCommit,
     activeChannelId,

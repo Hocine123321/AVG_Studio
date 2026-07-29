@@ -177,6 +177,14 @@ export default function NewTakePanel({
 
   const ctx: SettingsCtx = {
     getValue,
+    // The take panel edits channel-scoped settings only, and the picker
+    // uses this to read whichever provider is selected beside it - which
+    // in this panel is either an override the user has just made or the
+    // channel's own saved value, exactly what `getValue` resolves.
+    valueById: (id) => {
+      const found = (schema ?? []).find((candidate) => candidate.id === id);
+      return found ? String(getValue(found) ?? "") : "";
+    },
     isDirty,
     onCommit,
     activeChannelId,

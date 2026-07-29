@@ -17,6 +17,11 @@ import type { SettingSpec } from "../api";
  */
 export interface SettingsCtx {
   getValue: (spec: SettingSpec) => unknown;
+  /** Another setting's current value, by id, as a string. A field
+   * occasionally needs one: the image and voice pickers filter their
+   * options by whichever provider is selected beside them, and asking for
+   * it here is cheaper than every field carrying the whole values map. */
+  valueById: (id: string) => string;
   isDirty: (id: string) => boolean;
   onCommit: (spec: SettingSpec, value: unknown) => void;
 
