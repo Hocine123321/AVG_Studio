@@ -61,7 +61,7 @@ import httpx
 from avg.core.errors import AvgError, ErrorKind
 from avg.providers.errors import POLICY, classify
 
-Mode = Literal["record", "replay"]
+Mode = Literal["live", "record", "replay"]
 
 # Placeholder written in place of any credential value. Exported (not
 # underscore-prefixed) so tests can assert against it by name rather than
@@ -258,9 +258,29 @@ class Transport:
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self.mode: Mode = mode if mode is not None else ("record" if _env_truthy("AVG_HTTP_RECORD") else "replay")
-        if self.mode not in ("record", "replay"):
-            raise ValueError(f"unknown transport mode {self.mode!r} (expected 'record' or 'replay')")
+        # Default is LIVE. This used to default to `replay`, which meant the
+        # shipped app could not make a single real API call: every provider
+        # constructs a bare `Transport()` when none is injected, so every
+        # generation looked for a test fixture and died with "No recorded
+        # fixture for POST https://api.groq.com/...". A default that only
+        # made sense inside the test suite had become the product's default.
+        #
+        # Replay is now opt-in through `AVG_REPLAY_FIXTURES`, and
+        # `tests/conftest.py` is what opts in - so the no-live-calls rule is
+        # enforced by the test harness, where it belongs, instead of by a
+        # default that leaks into the shipped app.
+        if mode is not None:
+            self.mode: Mode = mode
+        elif _env_truthy("AVG_HTTP_RECORD"):
+            self.mode = "record"
+        elif _env_truthy("AVG_REPLAY_FIXTURES"):
+            self.mode = "replay"
+        else:
+            self.mode = "live"
+        if self.mode not in ("live", "record", "replay"):
+            raise ValueError(
+                f"unknown transport mode {self.mode!r} (expected 'live', 'record' or 'replay')"
+            )
         self.fixtures_dir = Path(fixtures_dir) if fixtures_dir is not None else DEFAULT_FIXTURES_DIR
         self._owns_client = client is None
         # follow_redirects=False (also httpx's own default here) so a 3xx
@@ -305,7 +325,13 @@ class Transport:
             return self._replay(fixture_path, method_u, url)
 
         response = self._send_with_retry(method_u, url, headers, json, timeout, provider)
-        self._write_fixture(fixture_path, method_u, canonical_url, _redacted_body, body_hash, headers, response)
+        # Live performs the call and stops there. Only `record` writes:
+        # a live run writing fixtures would quietly rewrite the corpus the
+        # test suite replays, from a real account, during normal use.
+        if self.mode == "record":
+            self._write_fixture(
+                fixture_path, method_u, canonical_url, _redacted_body, body_hash, headers, response
+            )
         return response
 
     # -- replay: filesystem + JSON only, never the client. ------------------

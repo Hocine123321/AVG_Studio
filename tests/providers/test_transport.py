@@ -372,3 +372,65 @@ def test_module_level_request_is_replay_safe_by_default(monkeypatch):
     monkeypatch.delenv("AVG_HTTP_RECORD", raising=False)
     with pytest.raises(UnmatchedRequestError):
         transport_request("GET", "https://this-was-never-recorded.example.invalid/nope")
+
+
+# ---------------------------------------------------------------------------
+# Live mode (Slice 7, Task 1)
+
+
+def test_default_mode_is_live_not_replay(monkeypatch):
+    """The shipped app must make real calls.
+
+    Regression test for a defect that made the packaged app unusable: the
+    default was `replay`, so every provider call in production looked for
+    a test fixture and failed with "No recorded fixture for POST
+    https://api.groq.com/...". A test-only default had become the
+    production default.
+    """
+    monkeypatch.delenv("AVG_HTTP_RECORD", raising=False)
+    monkeypatch.delenv("AVG_REPLAY_FIXTURES", raising=False)
+    assert Transport().mode == "live"
+
+
+def test_replay_is_opt_in_by_env(monkeypatch):
+    monkeypatch.delenv("AVG_HTTP_RECORD", raising=False)
+    monkeypatch.setenv("AVG_REPLAY_FIXTURES", "1")
+    assert Transport().mode == "replay"
+
+
+def test_record_still_wins_over_replay(monkeypatch):
+    monkeypatch.setenv("AVG_HTTP_RECORD", "1")
+    monkeypatch.setenv("AVG_REPLAY_FIXTURES", "1")
+    assert Transport().mode == "record"
+
+
+def test_live_mode_performs_a_real_request_and_writes_no_fixture(tmp_path):
+    """Live must reach the client, and must NOT record.
+
+    Uses a MockTransport so no network call happens - what is proven is
+    that the request goes to the client rather than to the replay lookup,
+    and that the fixtures directory is left untouched (recording is what
+    `record` mode is for; live writing fixtures would corrupt the corpus
+    the test suite replays).
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"ok": True})
+
+    transport = Transport(
+        mode="live",
+        fixtures_dir=tmp_path,
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        sleep=lambda _s: None,
+    )
+    response = transport.request("POST", "https://example.test/v1/chat", json={"a": 1})
+    assert response.status_code == 200
+    assert seen == ["https://example.test/v1/chat"]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_unknown_mode_still_raises():
+    with pytest.raises(ValueError):
+        Transport(mode="teleport")  # type: ignore[arg-type]
