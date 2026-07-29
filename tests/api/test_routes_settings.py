@@ -425,7 +425,7 @@ def test_health_report_runs_all_three_stages_in_order(client):
     for stage in body["stages"]:
         assert stage["checks"], f"{stage['key']} ran no checks"
         # REQUIRED checks alone decide the verdict. A machine without an
-        # optional dependency (pydub here) used to read as a failed
+        # optional dependency (edge-tts, say) used to read as a failed
         # dependency stage next to a row labelled Optional.
         assert stage["ok"] is all(c["ok"] for c in stage["checks"] if c["required"])
 

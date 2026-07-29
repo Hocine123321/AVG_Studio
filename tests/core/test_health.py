@@ -139,9 +139,21 @@ def test_essential_and_optional_are_distinguished():
     assert by_name["FFmpeg"].required is True
     assert by_name["FastAPI"].required is True
     assert by_name["pywebview"].required is True
-    # Voice has a second provider; pydub only refines silence handling.
+    # Voice has a second provider, so Edge TTS is degradable.
     assert by_name["edge-tts"].required is False
-    assert by_name["pydub"].required is False
+
+
+def test_pydub_is_required_because_voice_cannot_run_without_it():
+    """It was declared optional and it is not.
+
+    `avg/pipeline/phases/voice.py` imports pydub for assembly and calls
+    `remove_silences_core`, which imports it too. Neither has a path that
+    skips it, so a machine without pydub fails the Voice phase outright -
+    while the health screen said the dependency was optional and only
+    "refined silence handling".
+    """
+    by_name = {c.name: c for c in health.check_all(refresh=True)}
+    assert by_name["pydub"].required is True
 
 
 def test_essential_components_are_listed_first():
@@ -155,10 +167,14 @@ def test_essential_components_are_listed_first():
 def test_a_missing_optional_component_does_not_fail_the_stage():
     """An optional dependency is worth listing, not worth failing over.
 
-    Observed live: a machine without pydub - which only refines silence
-    handling - showed "Dependency check: Failed" in red next to a row
-    labelled Optional. A screen that cries wolf about a degradable
-    dependency stops being read at all.
+    Observed live: a machine missing a degradable dependency showed
+    "Dependency check: Failed" in red next to a row labelled Optional. A
+    screen that cries wolf about a degradable dependency stops being read
+    at all.
+
+    The example is edge-tts rather than pydub: pydub became a declared
+    requirement on 2026-07-29 (the Voice phase has no path that skips it),
+    so it is no longer an optional anything.
     """
     stage = health.Stage(
         key="dependencies",
@@ -166,7 +182,7 @@ def test_a_missing_optional_component_does_not_fail_the_stage():
         detail="",
         checks=[
             health.Component(name="FFmpeg", ok=True, required=True),
-            health.Component(name="pydub", ok=False, detail="cannot import", required=False),
+            health.Component(name="edge-tts", ok=False, detail="cannot import", required=False),
         ],
     )
     assert stage.ok is True

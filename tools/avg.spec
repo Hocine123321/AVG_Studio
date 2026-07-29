@@ -80,7 +80,12 @@ a = Analysis(
     pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    # pydub is imported INSIDE functions (`avg/pipeline/phases/voice.py`, and
+    # four places in the vendored engine), which is exactly the shape
+    # PyInstaller's static analysis is least reliable about. Naming it here
+    # costs nothing and is cheaper than shipping a build whose Voice phase
+    # dies with ModuleNotFoundError on a user's machine.
+    hiddenimports=["pydub", "pydub.silence"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

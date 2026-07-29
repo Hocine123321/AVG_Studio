@@ -97,11 +97,17 @@ _PACKAGES: tuple[tuple[str, str, str, bool], ...] = (
     ("moviepy", "moviepy", "moviepy", True),
     ("NumPy", "numpy", "numpy", True),
     ("imageio-ffmpeg", "imageio_ffmpeg", "imageio-ffmpeg", True),
-    # Degradable. Edge TTS is the free voice provider but ElevenLabs
-    # exists, and pydub only refines silence handling - a missing one is
-    # worth knowing about, not worth calling the app broken over.
+    # `pydub` is NOT optional, whatever this table said before 2026-07-29:
+    # `avg/pipeline/phases/voice.py` imports it directly for assembly and
+    # calls `remove_silences_core`, which imports it as well. There is no
+    # code path that skips it, so a machine without it fails Voice - which
+    # is what happened here while this row claimed the package merely
+    # "refines silence handling" and its card sat red as an Optional.
+    ("pydub", "pydub", "pydub", True),
+    # Degradable. Edge TTS is the free voice provider, but ElevenLabs
+    # exists - a missing one is worth knowing about, not worth calling the
+    # app broken over.
     ("edge-tts", "edge_tts", "edge-tts", False),
-    ("pydub", "pydub", "pydub", False),
 )
 
 
