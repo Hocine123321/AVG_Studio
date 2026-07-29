@@ -66,13 +66,17 @@ def _project(tmp_path: Path) -> ProjectDoc:
     )
 
 
-def _seed_full_take(project: ProjectDoc, take_id: int = 2, scene_count: int = 3) -> Take:
+def _seed_full_take(project: ProjectDoc, take_id: int = 2, scene_count: int = 3, storage: str = "own") -> Take:
     """A take with every artifact `export_take` reads: real images, a real
     narration file, a real `.ass` (converted from real cue text), a real
     `scene_timings.json` (contiguous scene windows, matching the pipeline's
     own "spans the whole audio duration exactly" invariant), a real
-    `scenes.json`, and a `master_output.mp4` - "has a finished render"."""
-    folder = take_folder(project, take_id)
+    `scenes.json`, and a `master_output.mp4` - "has a finished render".
+
+    `storage="root"` writes at the project's own top level instead of
+    `takes/<id>/`, matching every real take 1 (`avg.pipeline.create.
+    save_project` always sets it)."""
+    folder = Path(project.folder) if storage == "root" else take_folder(project, take_id)
 
     scene_texts = [f"This is scene number {i} of the story." for i in range(1, scene_count + 1)]
     for i in range(1, scene_count + 1):
@@ -117,6 +121,7 @@ def _seed_full_take(project: ProjectDoc, take_id: int = 2, scene_count: int = 3)
         created=project.created,
         phases={},
         master_output=output,
+        storage=storage,
     )
     project.takes.append(take)
     return take
@@ -146,6 +151,24 @@ def test_export_creates_every_named_file(tmp_path):
     assert (dest / "master_output.mp4").read_text(encoding="utf-8") == "fake-mp4-bytes"
     assert "images/" in (dest / "how-to-import.txt").read_text(encoding="utf-8")
     assert "narration.mp3" in (dest / "how-to-import.txt").read_text(encoding="utf-8")
+
+
+def test_export_take_1_root_storage_reads_project_root_not_takes_folder(tmp_path):
+    """Take 1 is always `storage="root"` (`avg.pipeline.create.
+    save_project`), so its files live at the project's own top level, never
+    under `takes/1/`. `export_take` must read through `take_root`, not
+    `take_folder` - the latter only ever names the `takes/<id>/` path, which
+    stays empty for a root-storage take and would wrongly report "no images
+    to export" even though the render succeeded."""
+    project = _project(tmp_path)
+    _seed_full_take(project, take_id=1, storage="root")
+
+    dest = export_take(project, 1)
+
+    assert dest == project.folder / "exports" / "take-1"
+    assert sorted(p.name for p in (dest / "images").glob("*.png")) == ["001.png", "002.png", "003.png"]
+    assert (dest / "narration.mp3").is_file()
+    assert not (Path(project.folder) / "takes" / "1").exists()
 
 
 def test_exports_the_selected_take_not_the_current_one(tmp_path):

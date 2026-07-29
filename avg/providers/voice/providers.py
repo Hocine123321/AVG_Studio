@@ -17,6 +17,7 @@ implementation of it.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from avg.config.secrets import get_key
@@ -247,6 +248,17 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+# `edge_tts` has no `httpx`/transport seam of its own to carry a per-call
+# timeout, unlike every other provider in this package - so a stalled
+# connection here has no way to be interrupted and would hang whichever
+# thread called `synthesize`/`list_voices` (the render pipeline's own
+# thread, since nothing wraps this provider in an executor) indefinitely,
+# holding `app.state.render_thread`'s single slot forever. These bound both
+# calls the same way ElevenLabs' own `httpx` calls are bounded above.
+_EDGE_SYNTHESIZE_TIMEOUT_SECONDS = 60.0
+_EDGE_LIST_VOICES_TIMEOUT_SECONDS = 20.0
+
+
 class EdgeVoiceProvider:
     name = "edge"
 
@@ -258,26 +270,42 @@ class EdgeVoiceProvider:
         signature.
         """
         del model
-        try:
+
+        def _collect() -> bytes:
             communicate = _edge().Communicate(text, voice_id)
             audio = bytearray()
             for chunk in communicate.stream_sync():
                 if chunk.get("type") == "audio" and chunk.get("data"):
                     audio.extend(chunk["data"])
+            return bytes(audio)
+
+        # `stream_sync()` is a blocking generator, not a coroutine, so it
+        # can't be bounded with `asyncio.wait_for` - run it on a worker
+        # thread instead and bound `Future.result` itself. A timed-out
+        # thread is not killed (Python has no API for that) but is no
+        # longer waited on, so this call returns promptly either way.
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            audio = pool.submit(_collect).result(timeout=_EDGE_SYNTHESIZE_TIMEOUT_SECONDS)
         except Exception as exc:  # noqa: BLE001 - re-classified immediately below
             kind = classify(None, "", exc, self.name)
             raise AvgError(kind, f"Edge TTS request failed: {exc}", detail=str(exc)) from exc
+        finally:
+            pool.shutdown(wait=False)
 
         if not audio:
             raise AvgError(ErrorKind.bug, "Edge TTS returned no audio data")
-        return bytes(audio)
+        return audio
 
     def list_voices(self) -> list[dict[str, str]]:
         """Microsoft's live voice catalogue - always fetched, never a
         hardcoded list (matching every other provider's `list_voices`/
         `list_models` in this codebase)."""
+        async def _list_with_timeout() -> Any:
+            return await asyncio.wait_for(_edge().list_voices(), timeout=_EDGE_LIST_VOICES_TIMEOUT_SECONDS)
+
         try:
-            voices = asyncio.run(_edge().list_voices())
+            voices = asyncio.run(_list_with_timeout())
         except Exception as exc:  # noqa: BLE001 - re-classified immediately below
             kind = classify(None, "", exc, self.name)
             raise AvgError(kind, f"Edge TTS voice list failed: {exc}", detail=str(exc)) from exc

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
+import hmac
 import threading
 import traceback
 from contextlib import suppress
@@ -929,7 +930,7 @@ def create_app(
         # X-AVG-Token header the HTTP routes use. Rejecting before accept()
         # denies the handshake outright (the client sees a close, never a
         # connection) rather than accepting and then dropping it.
-        if token != websocket.app.state.token:
+        if token is None or not hmac.compare_digest(token, websocket.app.state.token):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 

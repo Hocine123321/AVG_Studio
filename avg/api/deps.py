@@ -18,6 +18,8 @@ always sends the header.
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import Header, HTTPException, Request, status
 
 
@@ -33,7 +35,7 @@ async def require_token(
     fresh, isolated app per test.
     """
     provided = x_avg_token or request.query_params.get("token")
-    if provided != request.app.state.token:
+    if provided is None or not hmac.compare_digest(provided, request.app.state.token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="missing or invalid X-AVG-Token",
