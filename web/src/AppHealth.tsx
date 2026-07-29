@@ -86,6 +86,9 @@ export default function AppHealth() {
                 <li key={check.name} className="health-check">
                   <span className={`health-check__dot${check.ok ? " health-check__dot--ok" : " health-check__dot--bad"}`} aria-hidden="true" />
                   <span className="health-check__name">{check.name}</span>
+                  {check.required === false && (
+                    <span className="health-check__optional">Optional</span>
+                  )}
                   {check.version && <span className="health-check__version mono">{check.version}</span>}
                   <span className="health-check__detail" title={check.detail}>
                     {check.detail}

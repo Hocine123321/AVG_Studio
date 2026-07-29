@@ -256,6 +256,9 @@ export interface HealthComponent {
   ok: boolean;
   version: string;
   detail: string;
+  /** Whether the app can work without it. An optional component that is
+   * missing is worth knowing about, not worth reading as a broken app. */
+  required?: boolean;
 }
 
 export interface HealthResponse {

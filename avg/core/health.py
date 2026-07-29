@@ -59,6 +59,10 @@ class Component:
     version: str = ""
     #: Why it failed, or what it is, in one short sentence for the user.
     detail: str = ""
+    #: Whether the app can do its job without this. NOT "whether pip
+    #: installed it" - the split exists because a dozen equal-weight rows
+    #: cannot answer "which missing one is why nothing works".
+    required: bool = True
 
 
 @dataclass
@@ -72,26 +76,56 @@ _CACHE = _Cache()
 # `import name` -> the distribution name its version is published under.
 # Kept explicit because the two differ for Pillow (`PIL`) and moviepy is
 # imported lazily by the render child rather than by this process.
-_PACKAGES: tuple[tuple[str, str, str], ...] = (
-    ("Pillow", "PIL", "Pillow"),
-    ("moviepy", "moviepy", "moviepy"),
-    ("NumPy", "numpy", "numpy"),
+# (label, import name, distribution name, required)
+#
+# This covered four packages - FFmpeg, Pillow, moviepy, NumPy - which is
+# the render path and nothing else. A dependency check that only knows the
+# render path cannot answer "why won't it start", which is the question a
+# user opens this screen with.
+#
+# Import names differ from distribution names often enough to be worth
+# spelling out: PIL/Pillow, webview/pywebview, edge_tts/edge-tts.
+_PACKAGES: tuple[tuple[str, str, str, bool], ...] = (
+    # The app itself. Without any of these there is no window and no API.
+    ("FastAPI", "fastapi", "fastapi", True),
+    ("uvicorn", "uvicorn", "uvicorn", True),
+    ("pywebview", "webview", "pywebview", True),
+    ("pydantic", "pydantic", "pydantic", True),
+    ("httpx", "httpx", "httpx", True),
+    # Rendering.
+    ("Pillow", "PIL", "Pillow", True),
+    ("moviepy", "moviepy", "moviepy", True),
+    ("NumPy", "numpy", "numpy", True),
+    ("imageio-ffmpeg", "imageio_ffmpeg", "imageio-ffmpeg", True),
+    # Degradable. Edge TTS is the free voice provider but ElevenLabs
+    # exists, and pydub only refines silence handling - a missing one is
+    # worth knowing about, not worth calling the app broken over.
+    ("edge-tts", "edge_tts", "edge-tts", False),
+    ("pydub", "pydub", "pydub", False),
 )
 
 
-def _check_package(label: str, module: str, distribution: str) -> Component:
+def _check_package(label: str, module: str, distribution: str, required: bool) -> Component:
+    # Importing to check costs whatever that import costs - which for
+    # edge-tts is the ~2s that Slice 7 took OFF startup. That is fine and
+    # must stay fine: a health check runs on demand, never at import, so
+    # this does not put the cost back. Do not "optimise" this into a
+    # metadata-only check; a package that installs but cannot import is
+    # exactly the failure worth catching.
     try:
         __import__(module)
     except Exception as exc:  # noqa: BLE001 - any import failure is the answer
-        return Component(name=label, ok=False, detail=f"cannot import: {exc}")
+        return Component(name=label, ok=False, detail=f"cannot import: {exc}", required=required)
     try:
         version = metadata.version(distribution)
     except Exception:  # noqa: BLE001
         # Imports fine but has no installed metadata - true in some frozen
         # builds. Present and usable is the thing being reported, so this
         # is healthy with an unknown version, not a failure.
-        return Component(name=label, ok=True, detail="installed (version unavailable)")
-    return Component(name=label, ok=True, version=version)
+        return Component(
+            name=label, ok=True, detail="installed (version unavailable)", required=required
+        )
+    return Component(name=label, ok=True, version=version, required=required)
 
 
 def _check_ffmpeg() -> Component:
@@ -136,7 +170,13 @@ def check_all(*, refresh: bool = False, now: float | None = None) -> list[Compon
         return list(_CACHE.components)
 
     components = [_check_ffmpeg()]
-    components.extend(_check_package(label, module, dist) for label, module, dist in _PACKAGES)
+    components.extend(
+        _check_package(label, module, dist, required)
+        for label, module, dist, required in _PACKAGES
+    )
+    # Essential first: this screen is read top-down, and the row that
+    # explains why nothing works must not sit below three optional ones.
+    components.sort(key=lambda c: (not c.required, c.name.lower()))
 
     _CACHE.at = stamp
     _CACHE.components = components

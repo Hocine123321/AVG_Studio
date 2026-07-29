@@ -27,7 +27,7 @@ def _clean_cache():
 def test_check_all_reports_a_row_per_component_and_never_raises():
     components = health.check_all(refresh=True)
     names = [c.name for c in components]
-    assert names[0] == "FFmpeg"
+    assert "FFmpeg" in names
     assert {"Pillow", "moviepy", "NumPy"} <= set(names)
     # Whatever this machine has, every row is well-formed.
     for component in components:
@@ -40,7 +40,7 @@ def test_a_missing_ffmpeg_is_a_failed_row_not_an_exception(monkeypatch):
         raise FileNotFoundError("no ffmpeg here")
 
     monkeypatch.setattr(subprocess, "run", missing)
-    ffmpeg = health.check_all(refresh=True)[0]
+    ffmpeg = next(c for c in health.check_all(refresh=True) if c.name == "FFmpeg")
     assert ffmpeg.name == "FFmpeg"
     assert ffmpeg.ok is False
     assert "not found" in ffmpeg.detail
@@ -51,7 +51,7 @@ def test_a_hanging_ffmpeg_is_a_failed_row(monkeypatch):
         raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1)
 
     monkeypatch.setattr(subprocess, "run", hangs)
-    ffmpeg = health.check_all(refresh=True)[0]
+    ffmpeg = next(c for c in health.check_all(refresh=True) if c.name == "FFmpeg")
     assert ffmpeg.ok is False
     assert "respond" in ffmpeg.detail
 
@@ -62,7 +62,7 @@ def test_a_nonzero_exit_is_a_failed_row(monkeypatch):
         "run",
         lambda *_a, **_k: subprocess.CompletedProcess(args=["ffmpeg"], returncode=127, stdout="", stderr=""),
     )
-    ffmpeg = health.check_all(refresh=True)[0]
+    ffmpeg = next(c for c in health.check_all(refresh=True) if c.name == "FFmpeg")
     assert ffmpeg.ok is False
     assert "127" in ffmpeg.detail
 
@@ -78,7 +78,7 @@ def test_the_version_comes_from_ffmpegs_own_first_line(monkeypatch):
             stderr="",
         ),
     )
-    ffmpeg = health.check_all(refresh=True)[0]
+    ffmpeg = next(c for c in health.check_all(refresh=True) if c.name == "FFmpeg")
     assert ffmpeg.ok is True
     assert ffmpeg.version == "7.1-full_build"
 
@@ -104,3 +104,49 @@ def test_the_cache_prevents_a_second_subprocess_within_the_ttl(monkeypatch):
     # if it were cached it would look like it did nothing.
     health.check_all(refresh=True, now=1000.0 + health.TTL_SECONDS + 1)
     assert calls["n"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Full dependency coverage (Slice 7)
+
+
+def test_every_runtime_dependency_is_checked():
+    """The check covered four packages; the app needs a dozen.
+
+    A dependency check that only looks at the render path cannot answer
+    "why won't it start", which is the question it exists for.
+    """
+    names = {c.name for c in health.check_all(refresh=True)}
+    assert {
+        "FFmpeg",
+        "Pillow",
+        "moviepy",
+        "NumPy",
+        "FastAPI",
+        "uvicorn",
+        "pywebview",
+        "httpx",
+        "pydantic",
+        "edge-tts",
+        "pydub",
+        "imageio-ffmpeg",
+    } <= names
+
+
+def test_essential_and_optional_are_distinguished():
+    by_name = {c.name: c for c in health.check_all(refresh=True)}
+    # Without these there is no app and no render.
+    assert by_name["FFmpeg"].required is True
+    assert by_name["FastAPI"].required is True
+    assert by_name["pywebview"].required is True
+    # Voice has a second provider; pydub only refines silence handling.
+    assert by_name["edge-tts"].required is False
+    assert by_name["pydub"].required is False
+
+
+def test_essential_components_are_listed_first():
+    """The screen is read top-down, and the row that explains why nothing
+    works should not be below three optional ones."""
+    components = health.check_all(refresh=True)
+    required_flags = [c.required for c in components]
+    assert required_flags == sorted(required_flags, reverse=True)

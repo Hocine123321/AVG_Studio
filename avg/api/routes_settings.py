@@ -139,7 +139,8 @@ async def get_health(refresh: bool = False) -> dict:
     components = health.check_all(refresh=refresh)
     return {
         "components": [
-            {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail} for c in components
+            {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail, "required": c.required}
+            for c in components
         ],
         "ok": all(c.ok for c in components),
     }
@@ -226,7 +227,13 @@ async def get_health_report(request: Request, refresh: bool = False) -> dict:
                 "detail": stage.detail,
                 "ok": stage.ok,
                 "checks": [
-                    {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail}
+                    {
+                        "name": c.name,
+                        "ok": c.ok,
+                        "version": c.version,
+                        "detail": c.detail,
+                        "required": c.required,
+                    }
                     for c in stage.checks
                 ],
             }

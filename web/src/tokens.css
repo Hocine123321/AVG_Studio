@@ -3155,3 +3155,12 @@ a:hover {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* A missing optional dependency is information, not an alarm - it must not
+   read with the same weight as a missing essential one. */
+.health-check__optional {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
