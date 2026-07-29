@@ -296,6 +296,54 @@ export function getHealthReport(refresh = false): Promise<HealthReport> {
   return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
 }
 
+// ---- take artifacts ----
+
+/** `GET /api/projects/{id}/takes/{take}/artifacts` - artifact key to size
+ * in bytes, or to a FILE COUNT for a directory artifact like `images`.
+ * Only what actually exists: a phase that failed halfway leaves some of
+ * its artifacts and not others. */
+export interface TakeArtifacts {
+  files: Record<string, number>;
+  /** Phase key -> the artifact keys that phase owns AND that exist. The
+   * mapping is the backend's (`avg/core/artifacts.py`); a copy of it here
+   * would be another hand-kept duplicate like `phases.ts`. */
+  by_phase: Record<string, string[]>;
+}
+
+export function getTakeArtifacts(projectId: string, takeId: number): Promise<TakeArtifacts> {
+  return apiGet<TakeArtifacts>(
+    `/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/artifacts`,
+  );
+}
+
+/** The filenames inside a directory artifact, sorted. */
+export function getTakeArtifactList(
+  projectId: string,
+  takeId: number,
+  key: string,
+): Promise<{ files: string[] }> {
+  return apiGet<{ files: string[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/artifact-list/${encodeURIComponent(key)}`,
+  );
+}
+
+/** A URL, not a fetch: `<img>` and `<audio>` cannot set a header, so these
+ * go through the same `mediaUrl` helper `videoUrl`/`imageUrl` already use -
+ * one token scheme for every media route, not a second. */
+export function artifactUrl(projectId: string, takeId: number, key: string): string {
+  return mediaUrl(
+    `/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/artifact/${encodeURIComponent(key)}`,
+  );
+}
+
+/** One file out of a directory artifact. `name` is a PATH SEGMENT, matching
+ * the route's `/{key}/{name}` shape - not a query parameter. */
+export function artifactFileUrl(projectId: string, takeId: number, key: string, name: string): string {
+  return mediaUrl(
+    `/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/artifact/${encodeURIComponent(key)}/${encodeURIComponent(name)}`,
+  );
+}
+
 // ---- working-models cache ----
 
 /** `GET /api/models/cache`. `providers` holds ONLY models a probe proved

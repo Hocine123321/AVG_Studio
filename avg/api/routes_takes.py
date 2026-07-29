@@ -76,7 +76,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
-from avg.core.artifacts import available, resolve, spec_for
+from avg.core.artifacts import ARTIFACTS, available, resolve, spec_for
 from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
@@ -331,7 +331,18 @@ async def list_take_artifacts(project_id: str, take_id: int, request: Request) -
     stating rather than an empty view.
     """
     project = _get_project(request.app.state, project_id)
-    return {"files": available(project, take_id)}
+    files = available(project, take_id)
+    # Which keys belong to which phase, so the panel can report "2
+    # artifacts" for the phase being looked at rather than the take's
+    # total. Sent from here rather than restated in TypeScript: the
+    # phase->artifact mapping is `avg/core/artifacts.py`'s, and a second
+    # copy of it is exactly the kind of hand-kept duplicate `phases.ts`
+    # already is.
+    by_phase = {
+        phase: [spec.key for spec in specs if spec.key in files]
+        for phase, specs in ARTIFACTS.items()
+    }
+    return {"files": files, "by_phase": by_phase}
 
 
 @router.get("/api/projects/{project_id}/takes/{take_id}/artifact/{key}")

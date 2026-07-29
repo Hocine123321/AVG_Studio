@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { apiGet, createTake, deleteTake, getCosts, getTakes, imageUrl, renameTake, videoUrl } from "./api";
-import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
+import { createTake, deleteTake, getCosts, getTakes, renameTake, videoUrl } from "./api";
+import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ScriptSubstate, Take } from "./api";
 import { formatUsd, projectSpend } from "./costs";
 import type { LivePhase, PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
 import NewTakePanel from "./NewTakePanel";
 import { groupStatus, PHASE_DEFS, PHASE_ORDER, type DisplayPhaseStatus } from "./phases";
+import PhaseArtifact from "./artifacts/PhaseArtifact";
 import Player from "./Player";
 import TakeStrip from "./TakeStrip";
 
@@ -126,6 +127,9 @@ function ArtifactDetail({
   isCurrentTake,
   onStartRender,
   onCancel,
+  takeId,
+  duration,
+  cost,
 }: {
   phaseKey: string;
   record: PhaseRecord | undefined;
@@ -145,27 +149,13 @@ function ArtifactDetail({
   isCurrentTake: boolean;
   onStartRender: () => void;
   onCancel: () => void;
+  /** Which take's files the panel should read. `null` only in the window
+   * before the first `GET .../takes` lands. */
+  takeId: number | null;
+  duration: string;
+  cost: string | null;
 }) {
   const status: PhaseStatus = record?.status ?? "pending";
-
-  const [images, setImages] = useState<string[]>([]);
-  useEffect(() => {
-    if (phaseKey !== "visuals" || !isCurrentTake) {
-      setImages([]);
-      return;
-    }
-    let cancelled = false;
-    apiGet<ProjectImagesResponse>(`/api/projects/${encodeURIComponent(project.id)}/images`)
-      .then((res) => {
-        if (!cancelled) setImages(res.images);
-      })
-      .catch(() => {
-        if (!cancelled) setImages([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [phaseKey, project.id, isCurrentTake]);
 
   // A running phase streams into the same view it is later inspected in.
   if (phaseKey === "render" && progress) {
@@ -284,30 +274,29 @@ function ArtifactDetail({
     );
   }
 
-  if (phaseKey === "visuals" && images.length > 0) {
-    return (
-      <div>
-        <p className="lbl" style={{ marginBottom: 12 }}>
-          {status === "running" && <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />}
-          {images.length} image{images.length === 1 ? "" : "s"}
-        </p>
-        <div className="shots">
-          {images.map((name) => (
-            <div key={name}>
-              <div className="shot">
-                <img className="washed" src={imageUrl(project.id, name)} alt="" loading="lazy" />
-              </div>
-              <div className="shot__caption">{name}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // Every non-render phase shows its own real output. A phase that has
+  // not run yet still says so - there is nothing on disk to show - but
+  // "Done." on its own, which is what six of the eight used to render, is
+  // gone.
+  if (status === "pending") return <p className="artifact-empty">Not started yet.</p>;
 
-  if (status === "done") return <p className="artifact-empty">Done.</p>;
-  if (status === "running") return <p className="artifact-empty">Running…</p>;
-  return <p className="artifact-empty">Not started yet.</p>;
+  return (
+    <>
+      {status === "running" && (
+        <p className="lbl" style={{ marginBottom: 12 }}>
+          <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
+          Running — showing what has landed so far
+        </p>
+      )}
+      <PhaseArtifact
+        projectId={project.id}
+        takeId={takeId}
+        phaseKey={phaseKey}
+        duration={duration}
+        cost={cost}
+      />
+    </>
+  );
 }
 
 export interface StudioProps {
@@ -712,6 +701,13 @@ export default function Studio({
               isCurrentTake={isCurrentTake}
               onStartRender={onStartRender}
               onCancel={onCancel}
+              takeId={selectedTakeId}
+              duration={formatDuration(record?.duration_ms)}
+              cost={
+                costTable
+                  ? formatUsd(projectSpend({ [selected]: { status: "done" } }, costTable, undefined))
+                  : null
+              }
             />
           )}
         </div>
