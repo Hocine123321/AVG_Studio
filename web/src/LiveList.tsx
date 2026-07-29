@@ -309,7 +309,10 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
               <div className="livelist__note">
                 <DeferredInput
                   value={entry.note}
-                  placeholder="Note — shown under the field when you pick this"
+                  // Short, because it repeats on every visible row: the
+                  // sentence explaining what a note is for belongs in the
+                  // one line under the header, not 345 times down the page.
+                  placeholder="Add a note"
                   onCommit={(raw) => void patch(entry, { note: raw })}
                 />
               </div>

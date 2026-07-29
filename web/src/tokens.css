@@ -3532,7 +3532,9 @@ a:hover {
   height: 22px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  /* Matches `.select-dot`, the app's other multi-select control - the
+     same gesture should not have two different corner radii. */
+  border-radius: 9px;
   border: 1px solid var(--line-2);
   background: var(--canvas);
   color: var(--canvas);

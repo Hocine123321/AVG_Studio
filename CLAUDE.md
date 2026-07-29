@@ -84,6 +84,8 @@ catches it.
 | What to do about a failure | `avg/providers/errors.py` `POLICY` — a data table keyed by `ErrorKind`, never re-derived |
 | Writing `project.json` | `avg/pipeline/create.py` `save_project`, atomically |
 | The session token / `X-AVG-Token` | `web/src/api.ts` on the frontend; `avg/api/deps.py` on the backend |
+| Which files a phase writes | `avg/core/takes.py` `PHASE_ARTIFACTS` — what a clone copies. `avg/core/artifacts.py` adds display metadata over it and must never restate a path; a test asserts they cannot drift, because an artifact the UI shows but a clone does not copy is a file that vanishes in the next take |
+| Which models/voices a picker may offer | `avg/core/model_prefs.py` (`model_prefs.json`) — the user's ticks, favourites and notes. Kept apart from `working_models.json`, which is machine-owned and replaced wholesale on every sweep |
 
 ### Config scopes (no merge layer)
 
@@ -94,7 +96,11 @@ catches it.
 
 ### Takes
 
-A project owns zero or more `Take`s (`<project.folder>/takes/<id>/`). Changing a setting and re-running clones the current take, keeping only the phases the change does not invalidate. `SettingSpec.invalidates` (a phase key) drives `avg/core/invalidation.py`; `avg/core/takes.py` acts on the result. `current_take_id` is canonical (Home thumbnail, `master_output`, export default) and only advances when a take *finishes* — merely viewing a take never moves it. A cloned take never inherits `master_output`.
+A project owns one or more `Take`s. **Take 1 exists from `new_project`** (Slice 8) and its `phases` dict is the SAME OBJECT as `ProjectDoc.phases` — the runner mutates one set of records, not a live copy and a displayed copy. That aliasing has to be re-applied after any load, because a JSON round trip breaks it (`avg.core.takes.alias_root_take_phases`); pydantic copies a dict passed to a constructor, so passing one dict to both models is not enough.
+
+`Take.storage` says where a take's files are: `"root"` (take 1 — every phase writes in place at the project folder) or `"own"` (`<project.folder>/takes/<id>/`, what a clone and a migrated legacy project get). **Read a take's files through `take_root`, never `take_folder`** — the latter only ever names the `takes/<id>/` path. Never infer storage from whether that folder exists; a take whose folder is merely absent is not a root take, and inferring it once made such a take adopt the project's records and lose its own.
+
+Changing a setting and re-running clones the current take, keeping only the phases the change does not invalidate. `SettingSpec.invalidates` (a phase key) drives `avg/core/invalidation.py`; `avg/core/takes.py` acts on the result. `current_take_id` is canonical (Home thumbnail, `master_output`, export default) and only advances when a take *finishes* — merely viewing a take never moves it. A cloned take never inherits `master_output`.
 
 ## Rules that are not negotiable
 
@@ -103,6 +109,9 @@ Each of these has caused a real defect at least once.
 - **No live API calls in tests, ever.** `avg/providers/transport.py` replays recorded fixtures from `tests/fixtures/http/` and raises `UnmatchedRequestError` on anything unmatched — there is structurally no path from replay mode to the network. Recording requires `AVG_HTTP_RECORD=1`. ElevenLabs / image providers cost real money; one paid recording was already lost.
 - **`avg/media/vendor/` is protected.** Byte-for-byte copies of the old render engine, pinned `-text` in `.gitattributes` because `core.autocrlf` silently corrupted the stored blob once while the working file looked fine. Never edit. The only change ever permitted was a 9-line progress hook.
 - **One terracotta (`#e08a4e`) *primary action* per screen** — `.btn--primary`, the filled one. Terracotta itself is the brand accent and appears freely as identity (links, `:focus-visible` rings, `::selection`, chips); what is scarce is the filled call-to-action. Sage `#aebf92` means settled/finished, and the pulsing halo — never colour alone — marks the live phase. `web/src/tokens.css`'s header is the authority here and says so explicitly ("Amber-means-one-thing is relaxed here on purpose… the accent carries identity as well as 'happening right now'"); the older, stricter "terracotta means happening right now and nothing else" wording in `docs/superpowers/specs/project handoff.md` predates the Organic Night theme and is superseded. Four tasks have had to fix over-use of the filled action.
+- **Never use a native form control.** No `<select>`, no `<input type="checkbox">`, no `<input type="radio">`, no native `<button>` styling left at browser defaults. Windows draws all of them itself — OS grey, square corners, OS font — and they are the only things capable of ignoring the theme entirely. Use what already exists: `web/src/Select.tsx` for any choice (it is portalled, so no ancestor can clip it, and it keeps keyboard, type-ahead and ARIA), `.switch` for any boolean (see `BoolField`), `.select-dot` for multi-select on a card. A checkbox that must exist for state or keyboard focus is `position: absolute; opacity: 0` behind a styled element, never visible — `.select-dot input` is the pattern. This has been fixed on three separate controls across two screens; grep for `<select` and `type="checkbox"` in `web/src/` before shipping any screen.
+- **Reuse the design language's own values.** Radii, spacing, colour: take them from `web/src/tokens.css` or from the nearest existing control doing the same job, never from a fresh guess. Two controls performing the same gesture with different corner radii is the same defect as an unthemed control, just quieter.
+- **Look at the screen before calling a UI task done.** `preview_start` with the dev-server URL opens the Browser pane, and `computer{action:"screenshot"}` only works once that pane is displayed — a screenshot attempt without it fails with "the page is not compositing frames". Computed styles and geometry are not a substitute: they confirmed a native `<select>` was "themed" because the wrapper was, and they cannot see a placeholder repeating 345 times down a page.
 - **Never add a Google Fonts `@import`.** Caprasimo and Figtree are self-hosted in `web/public/fonts` so the app works offline and does not ping Google on launch.
 - **Every `SettingSpec` must declare `invalidates`** — a required field with no default, so omitting it fails at import. A test enforces completeness.
 - Tests must not write to the real `%APPDATA%/AVG Studio` — pass the `create_app` path overrides.
@@ -115,8 +124,12 @@ Every slice: brainstorm → spec → plan → subagent-driven execution, using t
 - `.superpowers/sdd/progress.md` — the running ledger of every decision and defect found. Sessions have died mid-slice six times; **that file plus `git log` is what makes resuming possible. Trust it over recollection.**
 - `docs/decisions/` — packaging and other standing decisions.
 
-Slices 1–5 are done (installer, config, providers, 8-phase pipeline, takes + CapCut export), 537 tests passing. Slice 6 is the six features from the user-supplied mockup; two of them (cost tracking, the `partial` phase state) still need design decisions, and the restyle is blocked on one unanswered question (shadows or no shadows — the current app deliberately has none).
+Slices 1–8 are done, **671 tests passing**: installer, config, providers, the 8-phase pipeline, takes + CapCut export, the mockup's six features, repair/diagnostics/model cache, and pipeline truth + the per-phase artifact panel + the Live List. Still open and cosmetic: toasts and the device-frame player (Slice 6C leftovers). Deferred with its own plan pending: the codebase-simplification refactor, whose input is `docs/APP_CODING_GUIDE.md`.
 
 ## Account state (affects what you can actually exercise)
 
-Only **Groq** currently generates text — Gemini is at zero free-tier quota, Pollinations at zero pollen budget, HuggingFace returns `model_not_supported`. For images, **Pollinations and Stable Horde work and are free**; OpenAI and Gemini do not. Voice: Edge TTS is free and always works.
+Only **Groq** currently generates text — a Slice 7 probe found 5 of its 10 models working. Gemini has exactly one working text model (32 listed); HuggingFace returns `model_not_supported` on all 20; Pollinations has no pollen budget.
+
+**Images are currently broken on this account**: a real run on 2026-07-29 failed at Visuals with "every scene failed to generate an image" against `pollinations/flux`, key present. Stable Horde lists 156 models and has no key set — it is the untested alternative. OpenAI and Gemini images do not work and publish no catalogue at all.
+
+Voice: **Edge TTS is free, always works, and advertises 322 voices**; ElevenLabs is keyed with 23. Listing voices costs nothing on either; synthesising costs characters on ElevenLabs, which is why the Live List lists image models and voices rather than probing them.
