@@ -2697,15 +2697,15 @@ a:hover {
 }
 
 .sel__list {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 5px);
-  /* Right-aligned and sized to its content, not stretched to the button.
-     The trigger is often narrow (a settings row's right column), and a list
-     clamped to it truncated every option to "bala…". Capped so a long value
-     cannot run off the panel. */
-  right: 0;
-  min-width: 100%;
+  /* fixed, not absolute: the list is portalled to <body> and positioned in
+     viewport coordinates, so no ancestor's overflow can clip it. See
+     Select.tsx - a settings card's `overflow: hidden` used to cut it off. */
+  position: fixed;
+  z-index: 60;
+  /* Sized to its content, not stretched to the trigger. The trigger is
+     often narrow (a settings row's right column), and a list clamped to it
+     truncated every option to "bala…". Top/right/min-width come from the
+     measured trigger rect in Select.tsx. */
   width: max-content;
   max-width: 280px;
   margin: 0;
@@ -3163,4 +3163,46 @@ a:hover {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+/* ---- scrollbars ----
+   WebView2 renders the classic Windows scrollbar by default: a grey channel
+   with square ends and arrow buttons, which was the one piece of OS chrome
+   left in an otherwise fully themed app.
+
+   Both engines are addressed. `scrollbar-width`/`scrollbar-color` is the
+   standard property; the `::-webkit-` rules are what Chromium - and
+   therefore WebView2 - actually honours today, and they allow the inset
+   pill the standard one cannot express. */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: 999px;
+  /* Inset via a transparent border so the thumb reads as a thin pill rather
+     than filling the whole gutter. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }

@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * The app's own select. Replaces the native `<select>`, whose dropdown list
@@ -22,10 +23,22 @@ import { useEffect, useId, useRef, useState } from "react";
  *   - Typing a letter jumps to the next option starting with it.
  *   - Closes on outside click and on scroll of any ancestor.
  *
- * The open list is absolutely positioned inside the control, NOT portalled:
- * every use in this app is inside a normally-flowing panel, and a portal
- * would add layer management for no gain here.
+ * The open list IS portalled to `document.body`, positioned in viewport
+ * coordinates from the trigger's rect. It used to be absolutely positioned
+ * inside the control, which looked fine until it was put inside a settings
+ * card: `.settings-group__list` sets `overflow: hidden` to clip its rows to
+ * the card's rounded corners, and that clipped the dropdown too - the list
+ * was cut off at the card edge.
+ *
+ * Portalling is the general fix rather than removing that one `overflow`.
+ * The card genuinely needs the clip, and any future scrolling or clipping
+ * ancestor would reintroduce the bug; a portalled list has no ancestor to
+ * be clipped by.
  */
+/** Kept in step with `.sel__list`'s max-height in tokens.css - the flip
+ * decision needs to know how tall the list can get before it renders. */
+const LIST_MAX_HEIGHT = 260;
+
 export interface SelectOption {
   value: string;
   label?: string;
@@ -51,7 +64,11 @@ export default function Select({ value, options, onChange, disabled, ariaLabel, 
   const [activeIndex, setActiveIndex] = useState(() => Math.max(0, items.findIndex((o) => o.value === value)));
   const rootRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const listId = useId();
+  // Viewport coordinates for the portalled list. `null` until measured,
+  // which is the one frame between opening and layout.
+  const [rect, setRect] = useState<DOMRect | null>(null);
 
   const selected = items.find((o) => o.value === value);
 
@@ -61,7 +78,12 @@ export default function Select({ value, options, onChange, disabled, ariaLabel, 
   useEffect(() => {
     if (!open) return;
     function onPointerDown(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // The list is no longer inside `rootRef` - it is portalled to body -
+      // so an outside-click test that only knew about the root would close
+      // the list the instant an option was pressed.
+      if (rootRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onScroll(event: Event) {
       if (rootRef.current && event.target instanceof Node && event.target.contains(rootRef.current)) {
@@ -81,6 +103,17 @@ export default function Select({ value, options, onChange, disabled, ariaLabel, 
     // Only when the list opens - re-syncing on every render would fight the
     // arrow keys, which move the active option without committing it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Measured before paint so the list never renders at the wrong place for
+  // a frame. Re-measured on resize; ancestor scroll closes it outright
+  // (see the effect above), which is simpler than chasing a moving anchor.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => setRect(buttonRef.current?.getBoundingClientRect() ?? null);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, [open]);
 
   function commit(index: number) {
@@ -167,29 +200,53 @@ export default function Select({ value, options, onChange, disabled, ariaLabel, 
         <span className="sel__caret" aria-hidden="true" />
       </button>
 
-      {open && (
-        <ul className="sel__list" id={listId} role="listbox" tabIndex={-1} aria-label={ariaLabel}>
-          {items.map((option, index) => (
-            <li
-              key={option.value}
-              role="option"
-              aria-selected={option.value === value}
-              className={`sel__option${index === activeIndex ? " sel__option--active" : ""}${
-                option.value === value ? " sel__option--on" : ""
-              }`}
-              // mousedown, not click: the document-level mousedown listener
-              // above would otherwise close the list before click fired.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                commit(index);
-              }}
-              onMouseEnter={() => setActiveIndex(index)}
-            >
-              {option.label ?? option.value}
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        rect &&
+        createPortal(
+          <ul
+            className="sel__list"
+            id={listId}
+            ref={listRef}
+            role="listbox"
+            tabIndex={-1}
+            aria-label={ariaLabel}
+            style={{
+              // Right-aligned to the trigger, and flipped above it when
+              // there is not room below - a list that opens off the bottom
+              // of the window is worse than one that opens upward.
+              top: rect.bottom + 5 + LIST_MAX_HEIGHT > window.innerHeight
+                ? undefined
+                : rect.bottom + 5,
+              bottom: rect.bottom + 5 + LIST_MAX_HEIGHT > window.innerHeight
+                ? window.innerHeight - rect.top + 5
+                : undefined,
+              right: window.innerWidth - rect.right,
+              minWidth: rect.width,
+            }}
+          >
+            {items.map((option, index) => (
+              <li
+                key={option.value}
+                role="option"
+                aria-selected={option.value === value}
+                className={`sel__option${index === activeIndex ? " sel__option--active" : ""}${
+                  option.value === value ? " sel__option--on" : ""
+                }`}
+                // mousedown, not click: the document-level mousedown
+                // listener above would otherwise close the list before
+                // click fired.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  commit(index);
+                }}
+                onMouseEnter={() => setActiveIndex(index)}
+              >
+                {option.label ?? option.value}
+              </li>
+            ))}
+          </ul>,
+          document.body,
+        )}
     </div>
   );
 }
