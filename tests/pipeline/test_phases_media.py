@@ -105,6 +105,66 @@ class _FakeImageProvider:
         return f"fake-image-bytes:{prompt}".encode()
 
 
+def test_scene_audio_map_spans_the_whole_track():
+    """`compute_scene_timings` DROPS every scene that has no entry in this
+    file and raises when that is all of them
+    (`avg/media/vendor/avg.py:2009`), and `render_project` falls back to
+    dividing the track equally. One entry per scene, contiguous, last end
+    equal to the audio duration."""
+    from avg.pipeline.phases.voice import scene_audio_map
+
+    doc = scene_audio_map(["a much longer scene line", "short"], 12.0)
+
+    assert doc["total_duration"] == 12.0
+    assert [s["scene"] for s in doc["scenes"]] == [1, 2]
+    assert doc["scenes"][0]["start"] == 0.0
+    assert doc["scenes"][-1]["end"] == 12.0
+    assert doc["scenes"][0]["end"] == doc["scenes"][1]["start"]
+    # Longer text, longer window - the split is proportional.
+    assert doc["scenes"][0]["duration"] > doc["scenes"][1]["duration"]
+
+
+def test_voice_writes_the_scene_audio_map(tmp_path, monkeypatch):
+    """Measured from the FINISHED audio, after dead-air removal has
+    shortened it - a map built from the pre-trim segments would run late by
+    however much air was cut."""
+    fake = _FakeVoiceProvider()
+    _patch_voice_collaborators(monkeypatch, fake)
+    monkeypatch.setattr("avg.pipeline.phases.voice.audio_duration_seconds", lambda path: 10.0)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_narration(ctx, "Scene one text. Scene two text.")
+    write_json(
+        script_dir(ctx) / "scenes.json",
+        [{"index": 1, "text": "Scene one text."}, {"index": 2, "text": "Scene two text."}],
+    )
+
+    VoicePhase().run(ctx)
+
+    doc = read_json(project.folder / "audio" / "scene_audio_map.json")
+    assert doc["total_duration"] == 10.0
+    assert [s["scene"] for s in doc["scenes"]] == [1, 2]
+    assert doc["scenes"][-1]["end"] == 10.0
+
+
+def test_voice_writes_no_map_without_scenes_json(tmp_path, monkeypatch):
+    """Voice reads narration.txt, so it can run with no scenes.json at all
+    (a legacy project, a hand-edited folder). An empty or invented map
+    would be worse than none: compute_scene_timings would then drop the
+    scenes it does not mention."""
+    fake = _FakeVoiceProvider()
+    _patch_voice_collaborators(monkeypatch, fake)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_narration(ctx, "Just narration, no scene list.")
+
+    VoicePhase().run(ctx)
+
+    assert not (project.folder / "audio" / "scene_audio_map.json").exists()
+
+
 class _FakePngProvider:
     """Returns REAL png bytes, so the safezone analysis can open them.
 

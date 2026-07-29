@@ -64,7 +64,16 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import _target_size
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, strip_delivery_markers, write_json
+from avg.pipeline.phases._common import (
+    allocate_proportional,
+    audio_duration_seconds,
+    read_json,
+    render_dir,
+    resolve_font_family,
+    script_dir,
+    strip_delivery_markers,
+    write_json,
+)
 
 _ASSEMBLYAI_BASE = "https://api.assemblyai.com/v2"
 _ASSEMBLYAI_UPLOAD_TIMEOUT = 120.0
@@ -113,16 +122,6 @@ def _optimized_voice_path(ctx: PhaseContext) -> Path:
     return _audio_dir(ctx) / "optimized_voice.mp3"
 
 
-def _audio_duration_seconds(path: Path) -> float:
-    """Total duration of an mp3, in seconds. Deferred `pydub` import -
-    matches `avg.pipeline.phases.voice`'s own lazy-import pattern - so
-    merely importing this module never requires the `media` extra to be
-    installed; only actually calling this function does."""
-    from pydub import AudioSegment
-
-    return len(AudioSegment.from_file(str(path), format="mp3")) / 1000.0
-
-
 def _coerce_int(value: object) -> int | None:
     try:
         return int(value)  # type: ignore[arg-type]
@@ -133,25 +132,6 @@ def _coerce_int(value: object) -> int | None:
 # ── proportional timing estimate (the no-key/degraded path) ──────────────
 
 
-def _allocate_proportional(units: list[str], total_seconds: float, offset: float = 0.0) -> list[tuple[float, float]]:
-    """Split `total_seconds` across `units` (in order), each getting a
-    slice proportional to its own character count (a floor of 1 keeps an
-    empty unit from swallowing zero time and confusing a downstream
-    zip()). The same helper drives both scene-level windows (`_scene_
-    windows`) and word-level timing within one scene
-    (`_synthetic_word_timings`) - one estimator, used twice, rather than
-    two subtly different ones."""
-    weights = [max(len(u.strip()), 1) for u in units]
-    total_weight = sum(weights)
-    cursor = offset
-    spans: list[tuple[float, float]] = []
-    for w in weights:
-        dur = (total_seconds * (w / total_weight)) if total_weight else 0.0
-        spans.append((cursor, cursor + dur))
-        cursor += dur
-    return spans
-
-
 def _scene_windows(scene_texts_clean: list[str], total_duration: float) -> dict[int, tuple[float, float]]:
     """1-indexed `{scene_number: (start, end)}` spanning the whole audio
     track - used both to derive synthetic word timing AND (regardless of
@@ -159,7 +139,7 @@ def _scene_windows(scene_texts_clean: list[str], total_duration: float) -> dict[
     since a card names a `scene`, not a transcript offset, and no
     `scene_timings.json` exists yet at this point in the pipeline (Render,
     Phase 7, builds that later from Director II's `direction_plan.json`)."""
-    spans = _allocate_proportional(scene_texts_clean, total_duration)
+    spans = allocate_proportional(scene_texts_clean, total_duration)
     return {i + 1: span for i, span in enumerate(spans)}
 
 
@@ -175,7 +155,7 @@ def _synthetic_word_timings(
         if not scene_words:
             continue
         start, end = scene_windows.get(i, (0.0, 0.0))
-        for word, (ws, we) in zip(scene_words, _allocate_proportional(scene_words, max(end - start, 0.0), start)):
+        for word, (ws, we) in zip(scene_words, allocate_proportional(scene_words, max(end - start, 0.0), start)):
             words.append({"text": word, "start": ws, "end": we})
     return words
 
@@ -435,7 +415,7 @@ class ScreenTextPhase:
             raise AvgError(ErrorKind.bug, "captions phase: scenes.json had no usable narration text")
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Transcribing narration..."))
-        total_duration = _audio_duration_seconds(audio_path)
+        total_duration = audio_duration_seconds(audio_path)
         scene_windows = _scene_windows(scene_texts_clean, total_duration)
 
         words, used_assemblyai = _get_words(ctx, audio_path, scene_texts_clean, scene_windows)

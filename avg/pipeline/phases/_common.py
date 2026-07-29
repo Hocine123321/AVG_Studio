@@ -162,13 +162,53 @@ def script_dir(ctx: PhaseContext) -> Path:
 
 
 def render_dir(ctx: PhaseContext) -> Path:
-    """`<project.folder>/render` - where Director II/Captions/Render write
-    their plan/asset files (`direction_plan.json`, `card_plan.json`,
-    `captions.ass`, and - later, Render's own job - `index.json`/
-    `scene_timings.json`). Already created empty by `avg.pipeline.create.
-    new_project` (see that module's `_PROJECT_DIRS`), matching this app's
-    "grouped, not flat" project-folder convention."""
+    """`<project.folder>/render` - where Visuals/Director II/Screen Text/
+    Render write their plan and asset files (`index.json`,
+    `scene_safezones.json`, `direction_plan.json`, `card_plan.json`,
+    `scene_timings.json`, `edit_plan.json`, `captions.ass`). Already created
+    empty by `avg.pipeline.create.new_project` (see that module's
+    `_PROJECT_DIRS`), matching this app's "grouped, not flat"
+    project-folder convention."""
     return Path(ctx.project.folder) / "render"
+
+
+def allocate_proportional(
+    units: list[str], total_seconds: float, offset: float = 0.0
+) -> list[tuple[float, float]]:
+    """Split `total_seconds` across `units` (in order), each getting a slice
+    proportional to its own character count (a floor of 1 keeps an empty
+    unit from swallowing zero time and confusing a downstream `zip()`).
+
+    Lives here rather than in one phase because THREE callers need the same
+    answer and must not disagree: Voice writes `audio/scene_audio_map.json`
+    from it, and Screen Text derives both scene-level caption windows and
+    word-level timing within a scene from it. Two allocators would put a
+    card on screen at a moment the audio map says a different scene is
+    playing.
+    """
+    weights = [max(len(u.strip()), 1) for u in units]
+    total_weight = sum(weights)
+    cursor = offset
+    spans: list[tuple[float, float]] = []
+    for weight in weights:
+        duration = (total_seconds * (weight / total_weight)) if total_weight else 0.0
+        spans.append((cursor, cursor + duration))
+        cursor += duration
+    return spans
+
+
+def audio_duration_seconds(path: Path) -> float:
+    """Total duration of an mp3, in seconds.
+
+    Deferred `pydub` import so merely importing this module never needs the
+    audio stack - only calling this does. Shared for the same reason
+    `allocate_proportional` is: Voice measures the finished narration to
+    build the scene map, Screen Text measures the same file to place
+    captions, and the two must agree to the millisecond.
+    """
+    from pydub import AudioSegment
+
+    return len(AudioSegment.from_file(str(path), format="mp3")) / 1000.0
 
 
 def resolve_font_family(ctx: PhaseContext) -> str:

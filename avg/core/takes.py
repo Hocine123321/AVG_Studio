@@ -89,7 +89,7 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # the render engine reads, and a cloned take that kept Visuals but not
     # Render must carry it or the clone cannot be rendered at all.
     "visuals": ("images", "render/index.json", "render/scene_safezones.json"),
-    "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3"),
+    "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3", "audio/scene_audio_map.json"),
     "director2": ("render/direction_plan.json", "render/card_plan.json"),
     # `card_plan.json` appears here as well as under director2 because
     # Captions REWRITES it in place, adding each card's start/end times

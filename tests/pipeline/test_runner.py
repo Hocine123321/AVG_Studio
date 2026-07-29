@@ -192,7 +192,7 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     a real, paid transcription call the moment this smoke test runs, which
     is exactly the live-call risk this whole suite exists to rule out - so
     the synthetic-timing path is taken deterministically, and its one
-    `pydub`-touching call (`_audio_duration_seconds`) is faked the same way
+    `pydub`-touching call (`audio_duration_seconds`) is faked the same way
     voice's are. Id 7 is still a `_StubPhase` and untouched by any of this.
     """
     fake = _fake_text_generator()
@@ -220,7 +220,7 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
         out_path.write_bytes(b"assembled-audio")
 
     monkeypatch.setattr("avg.pipeline.phases.voice._assemble_with_gaps", fake_assemble)
-    monkeypatch.setattr("avg.pipeline.phases.captions._audio_duration_seconds", lambda path: 5.0)
+    monkeypatch.setattr("avg.pipeline.phases.captions.audio_duration_seconds", lambda path: 5.0)
     # Never rely on this machine merely happening to have no AssemblyAI key
     # configured - see docstring above.
     monkeypatch.setattr("avg.pipeline.phases.captions.has_key", lambda provider: False)

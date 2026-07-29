@@ -16,7 +16,7 @@ No live API calls anywhere in this file:
     `_transcribe_with_assemblyai` wholesale (the same "patch the phase
     module's own seam" convention `avg.pipeline.phases.visuals`/`.voice`
     established for their own providers).
-  - `avg.pipeline.phases.captions._audio_duration_seconds` is always
+  - `avg.pipeline.phases._common.audio_duration_seconds` is always
     monkeypatched to a fixed value - `pydub` is not installed in this
     project's lean test venv (`.venv-build`; see
     `tests/pipeline/test_phases_media.py`'s identical note), and no test
@@ -266,7 +266,7 @@ _FIXED_DURATION_SECONDS = 12.0
 
 
 def _patch_audio_duration(monkeypatch, seconds: float = _FIXED_DURATION_SECONDS) -> None:
-    monkeypatch.setattr(captions_module, "_audio_duration_seconds", lambda path: seconds)
+    monkeypatch.setattr(captions_module, "audio_duration_seconds", lambda path: seconds)
 
 
 def _write_audio(ctx: PhaseContext) -> None:

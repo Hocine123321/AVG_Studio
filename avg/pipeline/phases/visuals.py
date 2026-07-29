@@ -320,7 +320,7 @@ def _write_safezones(ctx: PhaseContext, rdir: Path) -> None:
 
     argv = [str(ctx.project.folder), str(rdir / "index.json"), str(rdir / "scene_safezones.json")]
     try:
-        cmd_safezones(argv)
+        cmd_safezones(argv)  # type: ignore[no-untyped-call]  # the vendored engine is untyped by design
     except SystemExit as exc:
         if exc.code in (0, None):
             return

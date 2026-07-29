@@ -67,7 +67,14 @@ from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import VOICE_MP3_BITRATE, remove_silences_core
 from avg.pipeline.phase import PhaseContext
-from avg.pipeline.phases._common import script_dir
+from avg.pipeline.phases._common import (
+    allocate_proportional,
+    audio_duration_seconds,
+    read_json,
+    script_dir,
+    strip_delivery_markers,
+    write_json,
+)
 from avg.providers.transport import Transport
 from avg.providers.voice.base import VoiceProvider
 from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider
@@ -162,6 +169,33 @@ def _assemble_with_gaps(segment_paths: list[Path], gap_ms: int, out_path: Path) 
     combined.export(str(out_path), format="mp3", bitrate=VOICE_MP3_BITRATE)
 
 
+def scene_audio_map(scene_texts: list[str], total_duration: float) -> dict[str, object]:
+    """`audio/scene_audio_map.json` - per-scene windows over the finished
+    narration.
+
+    Legacy produced this by silence-detecting the TTS output
+    (`splice`/`splice_flat`). This phase synthesises per PAUSE-separated
+    SEGMENT, not per scene, so segment boundaries are not scene boundaries
+    and there is nothing to detect. The windows are therefore allocated
+    proportionally over the real measured duration - the same deterministic
+    split Screen Text uses for caption windows, from the one shared
+    allocator in `_common`, so the two files cannot disagree.
+
+    Without this file `compute_scene_timings` drops every scene and raises
+    (`avg/media/vendor/avg.py:2009`), and `render_project` falls back to
+    dividing the track equally, which desyncs any video whose scenes differ
+    in length.
+    """
+    windows = allocate_proportional(list(scene_texts), float(total_duration))
+    return {
+        "total_duration": round(float(total_duration), 3),
+        "scenes": [
+            {"scene": i, "start": round(start, 3), "end": round(end, 3), "duration": round(end - start, 3)}
+            for i, (start, end) in enumerate(windows, start=1)
+        ],
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class VoicePhase:
     id: int = 4
@@ -240,4 +274,50 @@ class VoicePhase:
 
             _assemble_with_gaps(cleaned_paths, gap_ms, audio_dir / "optimized_voice.mp3")
 
+        # Best-effort: the narration itself is already on disk and usable.
+        # A duration probe that fails (a truncated mp3, an ffmpeg that
+        # cannot decode it) costs the render its exact per-scene windows -
+        # it falls back to dividing the track equally - and must not throw
+        # away audio the user has already paid a provider for.
+        try:
+            _write_scene_audio_map(ctx, audio_dir)
+        except Exception as exc:  # noqa: BLE001 - see above
+            ctx.emit(
+                ProgressEvent(
+                    project_id=ctx.project.id,
+                    percent=100,
+                    message=f"Per-scene audio map could not be measured ({exc}); the render will divide the track evenly.",
+                )
+            )
+
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Voice & Audio complete."))
+
+
+def _write_scene_audio_map(ctx: PhaseContext, audio_dir: Path) -> None:
+    """Write `audio/scene_audio_map.json`, if there are scenes to map.
+
+    Measured from `optimized_voice.mp3` - the file the render actually
+    reads - rather than from the sum of the pre-trim segments:
+    `remove_silences_core` shortens the audio, so a map built before it
+    would run late by however much dead air was cut.
+
+    No `scenes.json` means no map is written at all. This phase reads
+    `narration.txt`, so it can legitimately run without one (a legacy
+    project, a hand-edited folder), and an invented map would be worse
+    than none: `compute_scene_timings` drops the scenes a map does not
+    mention.
+    """
+    scenes = read_json(script_dir(ctx) / "scenes.json")
+    if not isinstance(scenes, list):
+        return
+    scene_texts = [
+        cleaned
+        for scene in scenes
+        if isinstance(scene, dict) and (cleaned := strip_delivery_markers(str(scene.get("text") or "")))
+    ]
+    if not scene_texts:
+        return
+    write_json(
+        audio_dir / "scene_audio_map.json",
+        scene_audio_map(scene_texts, audio_duration_seconds(audio_dir / "optimized_voice.mp3")),
+    )
