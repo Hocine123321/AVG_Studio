@@ -226,6 +226,7 @@ export default function App() {
           failure={events.failure?.project_id === project.id ? events.failure : null}
           cancelled={events.cancelled?.project_id === project.id ? events.cancelled : null}
           finished={events.finished?.project_id === project.id ? events.finished : null}
+          livePhases={events.phases[project.id]}
           startError={startError}
           onStartRender={() => startRender(project.id)}
           onCancel={() => cancelRender(project.id)}

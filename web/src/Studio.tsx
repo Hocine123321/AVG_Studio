@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet, createTake, deleteTake, getCosts, getTakes, imageUrl, renameTake, videoUrl } from "./api";
 import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ProjectImagesResponse, ScriptSubstate, Take } from "./api";
 import { formatUsd, projectSpend } from "./costs";
-import type { PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
+import type { LivePhase, PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
 import NewTakePanel from "./NewTakePanel";
 import { groupStatus, PHASE_DEFS, PHASE_ORDER, type DisplayPhaseStatus } from "./phases";
@@ -325,6 +325,10 @@ export interface StudioProps {
   /** New: the back arrow in the header. The icon rail can't navigate out of
    * Studio (it's only reached from a card), so this is the way home. */
   onBack?: () => void;
+  /** Live phase state for THIS project, folded from the event socket
+   * (`useEvents`). Overlays the persisted records so the rail is right
+   * between refetches and across a reconnect. */
+  livePhases?: Record<string, LivePhase>;
 }
 
 /**
@@ -355,6 +359,7 @@ export default function Studio({
   onStartRender,
   onCancel,
   onBack,
+  livePhases,
 }: StudioProps) {
   const [selected, setSelected] = useState<string>(() => defaultPhase(project.phases));
 
@@ -479,7 +484,15 @@ export default function Studio({
     refreshTakes().catch(() => {});
   }
 
-  const phasesForSelected: Record<string, PhaseRecord> = selectedTake?.phases ?? project.phases;
+  // Live state overlays the persisted records, and ONLY for the current
+  // take: a historical take must never inherit the running take's
+  // progress. The persisted records are still the base, so a phase that
+  // finished before this session started is not lost.
+  const persistedPhases: Record<string, PhaseRecord> = selectedTake?.phases ?? project.phases;
+  const phasesForSelected: Record<string, PhaseRecord> =
+    isCurrentTake && livePhases
+      ? { ...persistedPhases, ...(livePhases as Record<string, PhaseRecord>) }
+      : persistedPhases;
   // `/api/projects` derives this only for the current take. A historical
   // take must not inherit that current take's artifact state, so its own
   // persisted Script record remains the fallback in `displayStatuses`.

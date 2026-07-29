@@ -90,6 +90,19 @@ export interface EventsState {
    * so a dropped connection is something the user can see (Transport),
    * never something that fails silently. */
   connected: boolean;
+  /**
+   * Every phase transition seen for each project this session, folded
+   * forward. Keyed project id, then phase key.
+   *
+   * The single-event fields above are deliberately last-write-wins: they
+   * answer "what just happened". They cannot answer "where has this run
+   * got to", because every branch of `reduce` returns `{...INITIAL_STATE,
+   * <one field>}` - a `phase_finished` is erased by the next
+   * `phase_started`, so finished phases never accumulated anywhere on the
+   * client and the rail was only ever right about the most recent
+   * transition.
+   */
+  phases: Record<string, Record<string, LivePhase>>;
 }
 
 const INITIAL_STATE: EventsState = {
@@ -101,7 +114,62 @@ const INITIAL_STATE: EventsState = {
   cancelled: null,
   finished: null,
   connected: false,
+  phases: {},
 };
+
+/**
+ * Fold one event into the accumulated phase map.
+ *
+ * Returns the previous map unchanged for anything that says nothing about
+ * a phase (the socket's own "hello", a future event type), so a render's
+ * progress ticks do not allocate a new object thirty times a second.
+ */
+function foldPhases(
+  previous: EventsState["phases"],
+  payload: { type: string } & Record<string, unknown>,
+): EventsState["phases"] {
+  const id = typeof payload.project_id === "string" ? payload.project_id : null;
+  const phase = typeof payload.phase === "string" ? payload.phase : null;
+  if (id === null) return previous;
+
+  const forProject = { ...(previous[id] ?? {}) };
+  switch (payload.type) {
+    case "phase_started":
+      if (!phase) return previous;
+      forProject[phase] = { status: "running" };
+      break;
+    case "phase_finished":
+      if (!phase) return previous;
+      forProject[phase] = {
+        status: "done",
+        duration_ms: typeof payload.duration_ms === "number" ? payload.duration_ms : undefined,
+      };
+      break;
+    case "phase_failed":
+      if (!phase) return previous;
+      forProject[phase] = {
+        status: "failed",
+        error: typeof payload.message === "string" ? payload.message : null,
+      };
+      break;
+    case "pipeline_cancelled":
+      // Back to pending, never a "cancelled" status - the backend does not
+      // invent one either (`_apply_terminal_event`), and a status the
+      // server cannot produce would be a second vocabulary.
+      if (!phase) return previous;
+      forProject[phase] = { status: "pending" };
+      break;
+    case "render_finished":
+      forProject.render = { status: "done" };
+      break;
+    case "render_cancelled":
+      forProject.render = { status: "pending" };
+      break;
+    default:
+      return previous;
+  }
+  return { ...previous, [id]: forProject };
+}
 
 /** Every event replaces the prior terminal/progress state so the UI reflects
  * the most recent event, rather than accumulating stale outcomes. A progress
@@ -122,38 +190,45 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
     if (typeof id === "string") clearRenderClock(id);
   }
 
+  // Folded once, then carried through every branch: the map is the one
+  // piece of state that must survive the next event rather than be
+  // replaced by it.
+  const phases = foldPhases(previous.phases, payload);
+
   switch (payload.type) {
     case "phase_started":
-      return { ...INITIAL_STATE, connected: true, phaseStarted: payload as unknown as PhaseStartedEvent };
+      return { ...INITIAL_STATE, phases, connected: true, phaseStarted: payload as unknown as PhaseStartedEvent };
     case "progress":
       // Pipeline progress has no phase field. The immediately preceding
       // phase_started event supplies that association; direct media renders
       // have none and continue to be treated as render progress by App.
       return {
         ...INITIAL_STATE,
+        phases,
         connected: true,
         progress: payload as unknown as ProgressEvent,
         phaseStarted: previous.phaseStarted,
       };
     case "phase_finished":
-      return { ...INITIAL_STATE, connected: true, phaseFinished: payload as unknown as PhaseFinishedEvent };
+      return { ...INITIAL_STATE, phases, connected: true, phaseFinished: payload as unknown as PhaseFinishedEvent };
     case "phase_failed":
-      return { ...INITIAL_STATE, connected: true, failure: payload as unknown as PhaseFailedEvent };
+      return { ...INITIAL_STATE, phases, connected: true, failure: payload as unknown as PhaseFailedEvent };
     case "pipeline_cancelled":
       return {
         ...INITIAL_STATE,
+        phases,
         connected: true,
         pipelineCancelled: payload as unknown as PipelineCancelledEvent,
       };
     case "render_cancelled":
-      return { ...INITIAL_STATE, connected: true, cancelled: payload as unknown as RenderCancelledEvent };
+      return { ...INITIAL_STATE, phases, connected: true, cancelled: payload as unknown as RenderCancelledEvent };
     case "render_finished":
-      return { ...INITIAL_STATE, connected: true, finished: payload as unknown as RenderFinishedEvent };
+      return { ...INITIAL_STATE, phases, connected: true, finished: payload as unknown as RenderFinishedEvent };
     default:
       // "hello" (the socket's own greeting on connect) and anything future
       // and unrecognised both land here - connectedness changes, nothing
       // else does.
-      return { ...INITIAL_STATE, connected: true };
+      return { ...INITIAL_STATE, phases, connected: true };
   }
 }
 
