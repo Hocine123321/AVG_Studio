@@ -3,6 +3,7 @@ import type { ProjectDoc } from "./api";
 import { archiveProjects, thumbnailUrl } from "./api";
 import type { ProgressEvent } from "./useEvents";
 import { IconFrame, IconStop } from "./Icons";
+import Overview from "./Overview";
 import ProjectCard from "./ProjectCard";
 import { useRenderClock } from "./renderClock";
 
@@ -19,6 +20,12 @@ export interface HomeProps {
    * copy of its own - `App` owns the list, so the only honest way to show
    * the result is to ask for it again. */
   onArchived: () => Promise<void>;
+  /** Total library bytes from `GET /api/projects`; `null` until the startup
+   * scan has summed it. Feeds the Overview row's Storage card. */
+  storageBytes: number | null;
+  onGoSettings: () => void;
+  onGoHealth: () => void;
+  onGoChannels: () => void;
 }
 
 function formatClock(ms: number): string {
@@ -120,7 +127,18 @@ function Hero({ project, progress, onOpen, onCancel }: HeroProps) {
  * than none. Add `channel` to `avg/core/models.py` and the importer, and
  * the chips drop straight in — see PORTING.md.
  */
-export default function Home({ projects, progress, onOpen, onRender, onCancel, onArchived }: HomeProps) {
+export default function Home({
+  projects,
+  progress,
+  onOpen,
+  onRender,
+  onCancel,
+  onArchived,
+  storageBytes,
+  onGoSettings,
+  onGoHealth,
+  onGoChannels,
+}: HomeProps) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -200,6 +218,14 @@ export default function Home({ projects, progress, onOpen, onRender, onCancel, o
           aria-label="Search projects by title"
         />
       </header>
+
+      <Overview
+        projects={projects}
+        storageBytes={storageBytes}
+        onGoSettings={onGoSettings}
+        onGoHealth={onGoHealth}
+        onGoChannels={onGoChannels}
+      />
 
       {renderingProject && progress && (
         <Hero project={renderingProject} progress={progress} onOpen={onOpen} onCancel={onCancel} />

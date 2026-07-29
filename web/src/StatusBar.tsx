@@ -2,20 +2,26 @@ import { useEffect, useState } from "react";
 import { elapsedClock, useActivities } from "./activity";
 
 /**
- * The always-present line saying what the backend is doing.
+ * The floating status pill: what the backend is doing, top-right of the
+ * content area.
  *
  * Every HTTP call registers itself in `activity.ts` (from the one wrapper in
- * `api.ts`, so nothing can be missing), and this renders whatever is in
- * flight with a running clock: "Loading library 00:03". A call that is slow
- * therefore LOOKS slow, which is the entire point - the previous behaviour
- * was a UI that sat perfectly still and was indistinguishable from a hang.
+ * `api.ts`, so nothing can be missing), and this names whatever is in flight
+ * with a live mm:ss clock. A slow call therefore LOOKS slow, which is the
+ * entire point - a UI that sits perfectly still is indistinguishable from a
+ * hung one.
  *
- * Idle is not blank: it says "Ready", so the bar is a thing the user learns
- * to trust rather than something that only appears when it feels like it.
+ * Shape and placement come from the 3rd redesign (`docs/reference/
+ * 3rd-redesign`): a pill that floats over the content rather than a bar
+ * pinned to the bottom, its border and tint taking the state's colour.
+ * The redesign's pill carries no timer; the clock is kept here deliberately,
+ * because "this call is 40 seconds deep" is the thing that made a stall
+ * legible in the first place.
  *
- * `connected` comes from the events socket. A dropped socket outranks any
- * request, because while it is down the app is not being told about the very
- * work this bar exists to report.
+ * Idle is not blank - it says "Ready!", so the pill is something the user
+ * learns to trust rather than a thing that only appears when it feels like
+ * it. A dropped events socket outranks any request: while it is down, the
+ * app is not being told about the very work this pill exists to report.
  */
 export default function StatusBar({ connected }: { connected: boolean }) {
   const activities = useActivities();
@@ -34,25 +40,18 @@ export default function StatusBar({ connected }: { connected: boolean }) {
     null,
   );
 
-  const busy = oldest !== null;
-  const label = !connected ? "Reconnecting" : busy ? oldest.label : "Ready";
-  const clock = busy ? elapsedClock(oldest.startedAt, now) : null;
+  const kind = !connected ? "error" : oldest !== null ? "busy" : "ready";
+  const label = kind === "error" ? "Reconnecting" : oldest !== null ? oldest.label : "Ready!";
 
   return (
-    <div
-      className={`statusbar${busy || !connected ? " statusbar--busy" : ""}`}
-      role="status"
-      aria-live="polite"
-    >
-      <span className={`statusbar__dot${busy || !connected ? " pulse" : ""}`} aria-hidden="true" />
-      <span className="statusbar__label">
+    <div className={`statuspill statuspill--${kind}`} role="status" aria-live="polite">
+      <span className="statuspill__dot" aria-hidden="true" />
+      <span className="statuspill__label">
         {label}
-        {busy && "…"}
+        {oldest !== null && "…"}
       </span>
-      {clock && <span className="statusbar__clock mono">{clock}</span>}
-      {activities.length > 1 && (
-        <span className="statusbar__more">+{activities.length - 1} more</span>
-      )}
+      {oldest !== null && <span className="statuspill__clock mono">{elapsedClock(oldest.startedAt, now)}</span>}
+      {activities.length > 1 && <span className="statuspill__more">+{activities.length - 1}</span>}
     </div>
   );
 }

@@ -113,7 +113,9 @@ export default function Rail({
         aria-label={night ? "Switch to day" : "Switch to night"}
         aria-pressed={!night}
       >
-        {night ? <IconMoon /> : <IconSun />}
+        {/* A filled accent disc, per the 3rd redesign: it reads as a
+            switch rather than as another place to navigate to. */}
+        <span className="rail__toggle-disc">{night ? <IconMoon size={11} /> : <IconSun size={11} />}</span>
       </button>
 
       <button

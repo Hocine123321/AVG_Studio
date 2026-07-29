@@ -400,3 +400,32 @@ def test_archive_applies_to_all_ids_or_none(client):
 
     listed = {p["id"]: p for p in client.get("/api/projects", headers=AUTH).json()["projects"]}
     assert listed[created["id"]]["archived"] is False
+
+
+def test_storage_bytes_sums_the_whole_library(client, paths):
+    """Home's Storage card needs a library-wide figure, and it must be the
+    same measurement the Studio header reports per project - a full walk of
+    each project folder, not just the current take."""
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "Sized"}).json()
+
+    empty = client.get("/api/projects", headers=AUTH).json()
+    assert empty["storage_bytes"] == 0
+
+    (Path(created["folder"]) / "images").mkdir(parents=True, exist_ok=True)
+    (Path(created["folder"]) / "images" / "a.png").write_bytes(b"x" * 2048)
+
+    # Summed by the startup scan, so a fresh app is what re-counts it.
+    from avg.api.app import create_app
+
+    reloaded = TestClient(
+        create_app(
+            token=TOKEN,
+            output_root=paths["output_root"],
+            thumb_cache_dir=paths["thumb_cache_dir"],
+            settings_path=paths["settings_path"],
+            channels_dir=paths["channels_dir"],
+            secrets_path=paths["secrets_path"],
+        )
+    )
+    assert reloaded.get("/api/projects", headers=AUTH).json()["storage_bytes"] >= 2048

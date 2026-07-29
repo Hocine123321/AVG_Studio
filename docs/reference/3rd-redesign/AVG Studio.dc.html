@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    @font-face { font-family: "Caprasimo"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/caprasimo-400.woff2") format("woff2"); }
+    @font-face { font-family: "Figtree"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("fonts/figtree-var.woff2") format("woff2-variations"); }
+    @keyframes avgPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.86); } }
+    @keyframes avgHalo { 0%, 100% { box-shadow: 0 0 0 0 rgba(224,138,78,0.34); } 50% { box-shadow: 0 0 0 8px rgba(224,138,78,0); } }
+    @keyframes avgDrift { 0%, 100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(14px,-10px,0); } }
+    html, body { height: 100%; }
+    body { margin: 0; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    a { text-decoration: none; }
+  </style>
+</helmet>
+
+<div style="{{ rootStyle }}">
+
+  <nav style="width:74px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:16px 0;gap:6px;">
+    <div style="width:38px;height:38px;border-radius:14px;background:var(--accent);color:var(--canvas);display:grid;place-items:center;font-family:var(--font-heading);font-size:18px;margin-bottom:14px;">A</div>
+
+    <button type="button" onClick="{{ goDashboard }}" title="Your videos" style="{{ railBtnStyleDashboard }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></svg>
+    </button>
+
+    <button type="button" onClick="{{ goCreate }}" title="New video" style="{{ railBtnStyleCreate }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+    </button>
+
+    <span title="Studio" style="{{ railBtnStyleStudio }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="4"></rect><path d="M8 4v16M16 4v16M3 12h18"></path></svg>
+    </span>
+
+    <span style="flex:1;"></span>
+
+    <button type="button" onClick="{{ goChannels }}" title="Channels" style="{{ railBtnStyleChannels }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1.6" fill="currentColor" stroke="none"></circle></svg>
+    </button>
+
+    <button type="button" onClick="{{ goHealth }}" title="App health" style="{{ railBtnStyleHealth }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"></path></svg>
+    </button>
+
+    <button type="button" onClick="{{ toggleTheme }}" aria-label="Toggle day and night" title="Switch theme" style="width:44px;height:24px;border-radius:999px;border:1px solid var(--line-2);background:{{ switchTrackBg }};position:relative;cursor:pointer;padding:0;margin:10px 0 4px;flex-shrink:0;">
+      <span style="{{ switchThumbStyle }}">
+        <sc-if value="{{ isNight }}" hint-placeholder-val="{{ true }}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--canvas)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"></path></svg>
+        </sc-if>
+        <sc-if value="{{ isDay }}" hint-placeholder-val="{{ false }}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--canvas)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.5 1.5M17.3 17.3l1.5 1.5M18.8 5.2l-1.5 1.5M6.7 17.3l-1.5 1.5"></path></svg>
+        </sc-if>
+      </span>
+    </button>
+
+    <button type="button" onClick="{{ goSettings }}" title="Settings" style="{{ railBtnStyleSettings }}">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 17h16"></path><circle cx="9" cy="7" r="2.4" fill="currentColor" stroke="none"></circle><circle cx="16" cy="17" r="2.4" fill="currentColor" stroke="none"></circle></svg>
+    </button>
+  </nav>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;height:100%;position:relative;">
+
+    <div style="{{ bubbleWrapStyle }}">
+      <span style="{{ bubbleDotStyle }}"></span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;">{{ statusLabel }}</span>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow-y:auto;">
+
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+        <div style="min-height:100%;padding:26px 26px 30px;position:relative;overflow:hidden;">
+          <span style="position:absolute;right:-120px;top:-140px;width:420px;height:420px;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 40% 40%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 68%);animation:avgDrift 22s ease-in-out infinite;"></span>
+
+          <header style="display:flex;align-items:flex-end;gap:16px;position:relative;margin-bottom:22px;">
+            <div style="min-width:0;">
+              <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">Library</div>
+              <h1 style="font-family:var(--font-heading);font-size:38px;line-height:1;margin:0;">Your videos</h1>
+            </div>
+            <span style="margin-left:auto;"></span>
+            <sc-if value="{{ hasArchived }}" hint-placeholder-val="{{ false }}">
+              <button type="button" onClick="{{ toggleArchived }}" style="{{ archiveBtnStyle }}">{{ archiveBtnLabel }}</button>
+            </sc-if>
+            <input placeholder="Search topics" value="{{ query }}" onChange="{{ onQueryChange }}" aria-label="Search projects" style="width:190px;min-height:40px;padding:0 16px;font:inherit;font-size:13.5px;color:var(--text);background:var(--surface);border:1px solid var(--line-2);border-radius:999px;"/>
+          </header>
+
+          <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 12px;">Overview</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:18px;margin-bottom:calc(18px + 12px);position:relative;">
+
+            <div style="border-radius:20px;background:var(--surface);border:1px solid var(--line);padding:18px 20px;box-shadow:var(--shadow-sm);">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Library spend</p>
+              <b style="display:block;font-family:var(--font-heading);font-size:26px;color:var(--accent);font-variant-numeric:tabular-nums;">{{ librarySpendFmt }}</b>
+              <p style="margin:8px 0 0;font-size:12px;color:var(--muted);">Across {{ projectCount }} videos · next video est. {{ nextEstFmt }}</p>
+              <a href="#" onClick="{{ goSettings }}" style="display:inline-block;margin-top:10px;font-size:12px;color:var(--accent);">Models &amp; cost →</a>
+            </div>
+
+            <div style="border-radius:20px;background:var(--surface);border:1px solid var(--line);padding:18px 20px;box-shadow:var(--shadow-sm);">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Components</p>
+              <span style="{{ healthChipStyle }}">{{ healthChipLabel }}</span>
+              <p style="margin:10px 0 0;font-size:12px;color:var(--muted);">FFmpeg, Pillow, moviepy — checked on this machine.</p>
+              <a href="#" onClick="{{ goHealth }}" style="display:inline-block;margin-top:10px;font-size:12px;color:var(--accent);">Diagnostics →</a>
+            </div>
+
+            <div style="border-radius:20px;background:var(--surface);border:1px solid var(--line);padding:18px 20px;box-shadow:var(--shadow-sm);">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Active channel</p>
+              <b style="display:block;font-family:var(--font-heading);font-size:19px;">{{ activeChannelLabel }}</b>
+              <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;">
+                <span style="{{ chipStyle }}">{{ activeChannelFormat }}</span>
+                <span style="{{ chipStyle }}">{{ activeChannelLength }}</span>
+                <span style="{{ chipStyle }}">{{ activeChannelTone }}</span>
+              </div>
+              <a href="#" onClick="{{ goChannels }}" style="display:inline-block;margin-top:10px;font-size:12px;color:var(--accent);">Manage channels →</a>
+            </div>
+
+            <div style="border-radius:20px;background:var(--surface);border:1px solid var(--line);padding:18px 20px;box-shadow:var(--shadow-sm);">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Storage used</p>
+              <b style="display:block;font-family:var(--font-heading);font-size:26px;">{{ diskFmt }}</b>
+              <p style="margin:8px 0 0;font-size:12px;color:var(--muted);">Across every take · never auto-pruned</p>
+            </div>
+
+          </div>
+
+          <sc-if value="{{ hasRender }}" hint-placeholder-val="{{ false }}">
+            <div style="position:relative;margin-bottom:calc(18px + 10px);">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--accent);margin:0 0 11px;display:flex;align-items:center;gap:9px;">
+                <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;animation:avgPulse 1.9s ease-in-out infinite;"></span>
+                Rendering now
+              </p>
+              <div style="display:grid;grid-template-columns:200px 1fr;gap:24px;background:var(--surface);border:1px solid var(--line-2);border-radius:30px;padding:20px;box-shadow:var(--shadow-md);position:relative;overflow:hidden;">
+                <div style="border-radius:20px;overflow:hidden;aspect-ratio:9/16;max-height:250px;background:linear-gradient(158deg, var(--surface-2), var(--canvas));display:grid;place-items:center;color:var(--dim);">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="4"></rect><path d="m5 16 4.2-4.2a2 2 0 0 1 2.8 0L16 15.8"></path><circle cx="15.2" cy="9.4" r="1.4" fill="currentColor" stroke="none"></circle></svg>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:12px;min-width:0;padding-top:2px;">
+                  <h3 style="font-family:var(--font-heading);font-size:29px;line-height:1.12;margin:0;">{{ renderTitle }}</h3>
+                  <div style="display:flex;align-items:baseline;gap:14px;">
+                    <span style="font-family:var(--font-heading);font-size:52px;line-height:0.9;color:var(--accent);font-variant-numeric:tabular-nums;letter-spacing:-0.03em;">{{ renderPercentFmt }}</span>
+                    <span style="font-size:14px;color:var(--muted);">{{ renderMessage }}</span>
+                  </div>
+                  <div style="height:8px;border-radius:999px;background:var(--surface-2);overflow:hidden;">
+                    <span style="display:block;height:100%;border-radius:999px;background:linear-gradient(90deg, var(--accent), var(--accent-soft));transition:width 0.3s linear;width:{{ renderPercentPx }};"></span>
+                  </div>
+                  <div style="display:flex;gap:9px;margin-top:auto;">
+                    <button type="button" onClick="{{ openRenderingProject }}" style="{{ btnPrimaryStyle }}">Open studio</button>
+                    <button type="button" onClick="{{ cancelRender }}" style="{{ btnGhostStyle }}">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);">Library</span>
+            <span style="flex:1;height:1px;background:var(--line);"></span>
+            <span style="font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;">{{ gridCountLabel }}</span>
+          </div>
+
+          <sc-if value="{{ gridEmpty }}" hint-placeholder-val="{{ false }}">
+            <p style="color:var(--muted);padding:40px 0;text-align:center;">{{ gridEmptyMessage }}</p>
+          </sc-if>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(188px, 1fr));gap:18px;position:relative;">
+            <sc-for list="{{ gridProjects }}" as="p" hint-placeholder-count="4">
+              <div style="position:relative;">
+                <article onClick="{{ p.openHandler }}" style="border-radius:28px;overflow:hidden;background:var(--surface);border:1px solid var(--line);position:relative;cursor:pointer;box-shadow:var(--shadow-sm);">
+                  <div style="position:relative;aspect-ratio:9/16;max-height:246px;background:linear-gradient(158deg, var(--surface-2), var(--canvas));display:grid;place-items:center;color:var(--dim);">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="4"></rect><path d="m5 16 4.2-4.2a2 2 0 0 1 2.8 0L16 15.8"></path><circle cx="15.2" cy="9.4" r="1.4" fill="currentColor" stroke="none"></circle></svg>
+                  </div>
+                  <div style="position:absolute;inset:0;background:linear-gradient(to top, rgba(14,12,10,0.9) 0%, rgba(14,12,10,0.28) 40%, transparent 66%);pointer-events:none;"></div>
+                  <div style="position:absolute;top:11px;left:11px;right:11px;display:flex;align-items:flex-start;gap:6px;z-index:2;">
+                    <span style="{{ p.pillStyle }}">{{ p.statusLabel }}</span>
+                    <span style="border-radius:999px;padding:3px 10px;font-size:10.5px;background:rgba(14,12,10,0.62);color:#e6dcc9;margin-left:auto;">{{ p.aspect_ratio }}</span>
+                  </div>
+                  <div style="position:absolute;left:15px;right:15px;bottom:14px;z-index:2;">
+                    <h3 style="font-family:var(--font-heading);font-size:16px;line-height:1.2;margin:0 0 5px;color:#f7f0e2;">{{ p.title }}</h3>
+                    <p style="display:flex;gap:9px;margin:0;font-size:11px;color:rgba(247,240,226,0.62);">
+                      <span>{{ p.createdFmt }}</span><span>{{ p.takeLabel }}</span>
+                    </p>
+                  </div>
+                </article>
+                <label title="Select" style="{{ p.selectDotStyle }}">
+                  <input type="checkbox" checked="{{ p.isSelected }}" onChange="{{ p.toggleSelectHandler }}" style="opacity:0;width:1px;height:1px;position:absolute;"/>
+                </label>
+              </div>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ false }}">
+            <div style="position:fixed;left:calc(50% + 37px);bottom:26px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:12px 18px;border-radius:999px;background:var(--panel);border:1px solid var(--line-2);box-shadow:var(--shadow-lg);z-index:30;">
+              <span style="font-size:13px;">{{ selectionCountLabel }}</span>
+              <button type="button" onClick="{{ clearSelection }}" style="{{ btnStyle }}">Clear</button>
+              <button type="button" onClick="{{ applyArchive }}" style="{{ btnStyle }}">{{ archiveActionLabel }}</button>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStudio }}" hint-placeholder-val="{{ false }}">
+        <div style="min-height:100%;display:flex;flex-direction:column;">
+          <header style="flex:none;display:flex;align-items:center;gap:14px;padding:18px 26px 16px;border-bottom:1px solid var(--line);">
+            <button type="button" onClick="{{ goDashboard }}" aria-label="Back" style="width:36px;height:36px;border-radius:50%;border:1px solid var(--line-2);background:transparent;color:var(--muted);cursor:pointer;display:grid;place-items:center;flex:none;">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+            </button>
+            <div style="min-width:0;">
+              <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:3px;">Project</div>
+              <h1 style="font-family:var(--font-heading);font-size:26px;line-height:1.1;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ activeProject.title }}</h1>
+            </div>
+            <span style="margin-left:auto;"></span>
+            <span style="{{ chipStyle }}">{{ activeProject.aspect_ratio }}</span>
+            <span style="{{ chipMonoStyle }}" title="Total size on disk">{{ activeProject.diskFmt }}</span>
+            <span style="{{ chipMonoStyle }}" title="Estimated spend">~{{ activeProject.spendFmt }}</span>
+            <button type="button" onClick="{{ primaryAction }}" style="{{ btnPrimaryStyle }}">{{ primaryActionLabel }}</button>
+          </header>
+
+          <div style="flex:none;padding:14px 26px;border-bottom:1px solid var(--line);background:var(--panel);">
+            <div style="display:flex;align-items:stretch;gap:10px;overflow-x:auto;">
+              <sc-for list="{{ takes }}" as="t" hint-placeholder-count="2">
+                <button type="button" onClick="{{ t.selectHandler }}" style="{{ t.chipStyle }}">
+                  <span style="display:flex;align-items:center;gap:7px;font-size:13.5px;">{{ t.label }}<sc-if value="{{ t.isCurrent }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line-2);border-radius:999px;padding:1px 7px;">current</span></sc-if></span>
+                  <span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);margin-top:5px;"><span style="{{ t.dotStyle }}"></span>{{ t.durationFmt }}</span>
+                </button>
+              </sc-for>
+              <button type="button" style="{{ btnSmStyle }}">+ New take</button>
+            </div>
+          </div>
+
+          <div style="flex:1;display:flex;align-items:stretch;min-height:0;">
+            <div style="width:250px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);padding:20px 0 20px 26px;overflow-y:auto;">
+              <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 14px;">Pipeline</p>
+              <div style="position:relative;">
+                <span style="position:absolute;left:9px;top:14px;bottom:14px;width:2px;border-radius:2px;background:var(--line-2);"></span>
+                <sc-for list="{{ phaseRows }}" as="ph" hint-placeholder-count="8">
+                  <button type="button" onClick="{{ ph.selectHandler }}" style="{{ ph.rowStyle }}">
+                    <span style="{{ ph.nodeStyle }}"></span>
+                    <span style="flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ph.label }}</span>
+                    <span style="font-size:11.5px;color:var(--dim);flex-shrink:0;">{{ ph.durationFmt }}</span>
+                  </button>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="flex:1;min-width:0;padding:22px 26px 28px;overflow-y:auto;">
+              <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px;">
+                <h2 style="font-family:var(--font-heading);font-size:23px;margin:0;">{{ selectedPhase.label }}</h2>
+                <span style="{{ selectedPhase.chipStyle }}">{{ selectedPhase.statusLabel }}</span>
+                <span style="margin-left:auto;"></span>
+                <button type="button" style="{{ btnStyle }}">Run again</button>
+              </div>
+
+              <sc-if value="{{ selectedPhase.isRunning }}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <div style="display:flex;align-items:baseline;gap:16px;">
+                    <span style="font-family:var(--font-heading);font-size:62px;line-height:0.88;color:var(--accent);letter-spacing:-0.03em;">{{ renderPercentFmt }}</span>
+                    <span style="font-size:15px;color:var(--muted);">{{ renderMessage }}</span>
+                  </div>
+                  <div style="height:10px;border-radius:999px;background:var(--surface-2);overflow:hidden;margin:14px 0 18px;">
+                    <div style="height:100%;border-radius:999px;background:linear-gradient(90deg, var(--accent), var(--accent-soft));width:{{ renderPercentPx }};"></div>
+                  </div>
+                  <button type="button" onClick="{{ cancelRender }}" style="{{ btnStyle }}">Cancel render</button>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ selectedPhase.isFailed }}" hint-placeholder-val="{{ false }}">
+                <div style="max-width:640px;border-radius:28px;background:var(--bad-deep);border:1px solid color-mix(in srgb, var(--bad) 34%, transparent);padding:22px 24px;">
+                  <div style="display:flex;align-items:center;gap:11px;margin-bottom:12px;font-family:var(--font-heading);font-size:19px;color:var(--bad);">
+                    <span style="width:24px;height:24px;border-radius:50%;background:color-mix(in srgb, var(--bad) 22%, transparent);display:grid;place-items:center;flex:none;">!</span>
+                    Failed — {{ selectedPhase.label }}
+                  </div>
+                  <p style="margin:0 0 10px;font-size:14px;color:var(--text);">{{ selectedPhase.errorMessage }}</p>
+                  <button type="button" onClick="{{ primaryAction }}" style="{{ btnPrimaryStyle }}">Run again</button>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ selectedPhase.isVisuals }}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 12px;">{{ selectedPhase.imageCountLabel }}</p>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));gap:12px;max-width:820px;">
+                    <sc-for list="{{ selectedPhase.images }}" as="im" hint-placeholder-count="6">
+                      <div>
+                        <div style="aspect-ratio:9/16;border-radius:20px;overflow:hidden;background:linear-gradient(158deg, var(--surface-2), var(--canvas));border:1px solid var(--line);"></div>
+                        <div style="margin-top:8px;font-size:11.5px;color:var(--dim);">{{ im.name }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ selectedPhase.isRenderDone }}" hint-placeholder-val="{{ false }}">
+                <div style="display:grid;grid-template-columns:300px 1fr;gap:26px;align-items:start;">
+                  <div style="background:#0d0b09;border-radius:28px;overflow:hidden;border:1px solid var(--line-2);box-shadow:var(--shadow-md);aspect-ratio:9/16;display:grid;place-items:center;color:var(--dim);">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5 20 12 7 19.5Z"></path></svg>
+                  </div>
+                  <div style="border-radius:28px;background:var(--surface);border:1px solid var(--line);padding:20px 22px;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;font-family:var(--font-heading);font-size:18px;">
+                      <span style="width:22px;height:22px;border-radius:50%;background:var(--sage-deep);color:var(--sage);display:grid;place-items:center;">✓</span>
+                      Render finished
+                    </div>
+                    <dl style="display:grid;grid-template-columns:auto 1fr;gap:9px 22px;font-size:13.5px;">
+                      <dt style="color:var(--dim);">Output</dt><dd style="margin:0;">{{ activeProject.outputName }}</dd>
+                      <dt style="color:var(--dim);">Size</dt><dd style="margin:0;">{{ activeProject.sizeFmt }}</dd>
+                      <dt style="color:var(--dim);">Aspect</dt><dd style="margin:0;">{{ activeProject.aspect_ratio }}</dd>
+                    </dl>
+                    <button type="button" onClick="{{ primaryAction }}" style="{{ btnPrimaryStyle }}; margin-top:18px;">Run again</button>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ selectedPhase.isPlain }}" hint-placeholder-val="{{ true }}">
+                <p style="color:var(--muted);">{{ selectedPhase.plainText }}</p>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isCreate }}" hint-placeholder-val="{{ false }}">
+        <div style="min-height:100%;padding:26px 26px 40px;display:flex;flex-direction:column;max-width:720px;">
+          <header style="margin-bottom:22px;">
+            <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">New video</div>
+            <h1 style="font-family:var(--font-heading);font-size:38px;line-height:1;margin:0;">What's it about?</h1>
+          </header>
+          <textarea placeholder="A topic, a headline, a few sentences — whatever you've got." value="{{ createTopic }}" onChange="{{ onTopicChange }}" style="width:100%;min-height:130px;padding:20px 22px;font:inherit;font-size:17px;line-height:1.5;color:var(--text);background:var(--surface);border:1px solid var(--line-2);border-radius:28px;resize:vertical;"></textarea>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:18px 0 0;">
+            <span style="{{ chipStyle }}">Channel: {{ activeChannelLabel }}</span>
+            <sc-for list="{{ createChips }}" as="c" hint-placeholder-count="3">
+              <label style="display:flex;align-items:center;gap:6px;border:1px solid var(--line-2);border-radius:999px;padding:5px 8px 5px 15px;">
+                <span style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);">{{ c.label }}</span>
+                <select value="{{ c.value }}" onChange="{{ c.onChange }}" style="border:0;background:transparent;color:var(--text);font:inherit;font-size:13px;padding:4px 8px;border-radius:999px;">
+                  <sc-for list="{{ c.options }}" as="o" hint-placeholder-count="3">
+                    <option value="{{ o }}">{{ o }}</option>
+                  </sc-for>
+                </select>
+              </label>
+            </sc-for>
+          </div>
+          <p style="margin:10px 0 0;font-size:12.5px;color:var(--dim);">Changes here apply to this video only — the channel itself is unchanged.</p>
+          <div style="margin-top:26px;">
+            <button type="button" onClick="{{ startProject }}" disabled="{{ createDisabled }}" style="{{ btnPrimaryLgStyle }}">Start</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isChannels }}" hint-placeholder-val="{{ false }}">
+        <div style="min-height:100%;padding:26px 26px 30px;">
+          <header style="display:flex;align-items:flex-end;gap:16px;margin-bottom:22px;">
+            <div><div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">Manage</div><h1 style="font-family:var(--font-heading);font-size:38px;line-height:1;margin:0;">Channels</h1></div>
+            <span style="margin-left:auto;"></span>
+            <button type="button" onClick="{{ openCreateChannel }}" style="{{ btnPrimaryStyle }}">+ New channel</button>
+          </header>
+          <p style="max-width:72ch;margin:0 0 20px;font-size:13.5px;color:var(--muted);line-height:1.55;">Channel-scoped creative settings on the Settings screen always apply to whichever channel is active here.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:18px;align-items:start;">
+            <sc-if value="{{ channelCreating }}" hint-placeholder-val="{{ false }}">
+              <div style="border-radius:28px;background:transparent;border:1px dashed var(--line-2);padding:20px 22px;">
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                  <input placeholder="Channel name" value="{{ channelDraftLabel }}" onChange="{{ onChannelDraftLabel }}" style="min-height:38px;padding:0 14px;font:inherit;font-size:13.5px;color:var(--text);background:var(--surface-2);border:1px solid var(--line-2);border-radius:12px;"/>
+                  <div style="display:flex;gap:8px;">
+                    <button type="button" onClick="{{ cancelCreateChannel }}" style="{{ btnGhostSmStyle }}">Cancel</button>
+                    <button type="button" onClick="{{ confirmCreateChannel }}" style="{{ btnPrimarySmStyle }}">Create</button>
+                  </div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-for list="{{ channels }}" as="ch" hint-placeholder-count="2">
+              <div style="{{ ch.cardStyle }}">
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px;">
+                  <h3 style="font-family:var(--font-heading);font-size:19px;line-height:1.2;margin:0;">{{ ch.label }}</h3>
+                  <sc-if value="{{ ch.isActive }}" hint-placeholder-val="{{ false }}"><span style="{{ chipOkStyle }}">Active</span></sc-if>
+                </div>
+                <p style="margin:0 0 12px;font-size:13px;color:var(--muted);">{{ ch.note }}</p>
+                <p style="margin:0 0 16px;font-size:11.5px;color:var(--dim);">{{ ch.pinnedLabel }}</p>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                  <sc-if value="{{ ch.showActivate }}" hint-placeholder-val="{{ true }}"><button type="button" onClick="{{ ch.activateHandler }}" style="{{ btnSmStyle }}">Set active</button></sc-if>
+                  <button type="button" onClick="{{ ch.deleteHandler }}" style="{{ btnGhostSmStyle }}">Delete</button>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="min-height:100%;padding:26px 26px 0;display:flex;flex-direction:column;">
+          <header style="display:flex;align-items:flex-end;gap:16px;margin-bottom:22px;">
+            <div><div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">Configure</div><h1 style="font-family:var(--font-heading);font-size:38px;line-height:1;margin:0;">Settings</h1></div>
+            <span style="margin-left:auto;"></span>
+            <span style="{{ chipOkStyle }}">Channel: {{ activeChannelLabel }}</span>
+          </header>
+
+          <div style="display:flex;align-items:flex-start;gap:30px;flex:1;min-height:0;">
+            <nav style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:14px;">
+              <input placeholder="Search settings…" value="{{ settingsSearch }}" onChange="{{ onSettingsSearch }}" style="width:100%;min-height:42px;padding:0 16px;font:inherit;font-size:13.5px;color:var(--text);background:var(--surface);border:1px solid var(--line-2);border-radius:999px;"/>
+              <div style="display:flex;flex-direction:column;gap:3px;">
+                <sc-for list="{{ settingsCategories }}" as="cat" hint-placeholder-count="6">
+                  <button type="button" onClick="{{ cat.selectHandler }}" style="{{ cat.navStyle }}">{{ cat.label }}</button>
+                </sc-for>
+              </div>
+            </nav>
+
+            <div style="flex:1;min-width:0;padding-bottom:22px;">
+              <sc-for list="{{ settingsGroups }}" as="g" hint-placeholder-count="2">
+                <div>
+                  <sc-if value="{{ g.isModels }}" hint-placeholder-val="{{ false }}">
+                    <section style="margin-bottom:18px;">
+                      <div style="display:flex;align-items:center;gap:26px;flex-wrap:wrap;border-radius:28px;background:var(--surface);border:1px solid var(--line);padding:18px 22px;margin-bottom:16px;">
+                        <div><p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Library spend</p><b style="display:block;font-family:var(--font-heading);font-size:24px;color:var(--accent);">{{ librarySpendFmt }}</b></div>
+                        <div><p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Across</p><b style="display:block;font-family:var(--font-heading);font-size:24px;">{{ projectCount }}</b></div>
+                        <div><p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Next video</p><b style="display:block;font-family:var(--font-heading);font-size:24px;">{{ nextEstFmt }}</b></div>
+                        <span style="margin-left:auto;max-width:34ch;font-size:12px;color:var(--dim);">Estimated from a maintained price table, not metered usage.</span>
+                      </div>
+                      <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                          <thead><tr>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Phase</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Model</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Backup</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">If both fail</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Est. / video</th>
+                          </tr></thead>
+                          <tbody>
+                            <sc-for list="{{ modelsRows }}" as="mr" hint-placeholder-count="5">
+                              <tr>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);">{{ mr.label }}</td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;">{{ mr.model }}</td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;">{{ mr.backup }}</td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);"><span style="{{ mr.actionChipStyle }}">{{ mr.actionLabel }}</span></td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;">{{ mr.costFmt }}</td>
+                              </tr>
+                            </sc-for>
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </sc-if>
+
+                  <sc-if value="{{ g.isPaths }}" hint-placeholder-val="{{ false }}">
+                    <section style="margin-bottom:18px;">
+                      <div style="display:flex;align-items:center;gap:26px;flex-wrap:wrap;border-radius:28px;background:var(--surface);border:1px solid var(--line);padding:18px 22px;margin-bottom:16px;">
+                        <div><p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;">Components</p><b style="{{ healthTextStyle }}">{{ healthChipLabel }}</b></div>
+                        <span style="margin-left:auto;max-width:34ch;font-size:12px;color:var(--dim);">FFmpeg is run, not just looked for.</span>
+                        <button type="button" onClick="{{ recheckHealth }}" style="{{ btnStyle }}">{{ recheckLabel }}</button>
+                      </div>
+                      <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                          <thead><tr>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Component</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">State</th>
+                            <th style="text-align:left;font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);padding:0 14px 9px 0;">Version</th>
+                          </tr></thead>
+                          <tbody>
+                            <sc-for list="{{ componentRows }}" as="cp" hint-placeholder-count="3">
+                              <tr>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);">{{ cp.name }}</td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);"><span style="{{ cp.chipStyle }}">{{ cp.stateLabel }}</span></td>
+                                <td style="padding:10px 14px 10px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;">{{ cp.version }}</td>
+                              </tr>
+                            </sc-for>
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  </sc-if>
+
+                  <h2 style="font-family:var(--font-heading);font-size:20px;margin:0 0 10px;">{{ g.label }}</h2>
+                  <div style="border-radius:28px;background:var(--surface);border:1px solid var(--line);overflow:hidden;margin-bottom:30px;">
+                    <sc-for list="{{ g.specs }}" as="s" hint-placeholder-count="3">
+                      <div style="{{ s.rowStyle }}">
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-size:14px;color:var(--text);">{{ s.label }}</div>
+                          <p style="margin:3px 0 0;font-size:12.5px;color:var(--dim);line-height:1.45;">{{ s.help }}</p>
+                        </div>
+                        <div style="flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;min-width:160px;">
+                          <sc-if value="{{ s.isSwitch }}" hint-placeholder-val="{{ false }}">
+                            <button type="button" onClick="{{ s.toggleHandler }}" style="{{ s.switchTrackStyle }}"><span style="{{ s.switchThumbStyle }}"></span></button>
+                          </sc-if>
+                          <sc-if value="{{ s.isSelect }}" hint-placeholder-val="{{ false }}">
+                            <select value="{{ s.value }}" onChange="{{ s.selectHandler }}" style="min-height:38px;padding:0 14px;font:inherit;font-size:13.5px;color:var(--text);background:var(--surface-2);border:1px solid var(--line-2);border-radius:12px;width:200px;">
+                              <sc-for list="{{ s.options }}" as="o" hint-placeholder-count="3"><option value="{{ o }}">{{ o }}</option></sc-for>
+                            </select>
+                          </sc-if>
+                          <sc-if value="{{ s.isSecret }}" hint-placeholder-val="{{ false }}">
+                            <span style="{{ s.secretChipStyle }}">{{ s.secretLabel }}</span>
+                          </sc-if>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="position:sticky;bottom:0;display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:14px 26px;margin:0 -26px;background:var(--panel);border-top:1px solid var(--line);">
+            <span style="font-size:12.5px;color:var(--dim);margin-right:auto;">{{ dirtyNote }}</span>
+            <button type="button" onClick="{{ discardSettings }}" disabled="{{ noDirty }}" style="{{ btnStyle }}">Discard</button>
+            <button type="button" onClick="{{ saveSettings }}" disabled="{{ noDirty }}" style="{{ btnPrimaryStyle }}">Save changes</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isHealth }}" hint-placeholder-val="{{ false }}">
+        <div style="min-height:100%;padding:26px 26px 0;">
+          <header style="display:flex;align-items:flex-end;gap:16px;margin-bottom:22px;">
+            <div><div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">Diagnostics</div><h1 style="font-family:var(--font-heading);font-size:38px;line-height:1;margin:0;">App health</h1></div>
+            <span style="margin-left:auto;"></span>
+            <span style="{{ healthChipStyle }}">{{ healthChipLabel }}</span>
+            <button type="button" onClick="{{ recheckHealth }}" style="{{ btnPrimaryStyle }}">{{ recheckLabel }}</button>
+          </header>
+          <div style="display:flex;flex-direction:column;gap:16px;padding-bottom:30px;">
+            <sc-for list="{{ healthStages }}" as="st" hint-placeholder-count="3">
+              <section style="border-radius:28px;background:var(--surface);border:1px solid var(--line);padding:18px 22px;">
+                <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                  <span style="width:26px;height:26px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-size:12px;color:var(--muted);flex:none;">{{ st.num }}</span>
+                  <div style="min-width:0;"><h2 style="font-family:var(--font-heading);font-size:17px;margin:0;">{{ st.name }}</h2><p style="margin:2px 0 0;font-size:12.5px;color:var(--dim);">{{ st.detail }}</p></div>
+                  <span style="margin-left:auto;"></span>
+                  <span style="{{ st.chipStyle }}">{{ st.stateLabel }}</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <sc-for list="{{ st.checks }}" as="c" hint-placeholder-count="3">
+                    <div style="display:flex;align-items:center;gap:10px;font-size:13px;padding:6px 0;border-top:1px solid var(--line);">
+                      <span style="{{ c.dotStyle }}"></span>
+                      <span style="min-width:140px;">{{ c.name }}</span>
+                      <span style="font-variant-numeric:tabular-nums;color:var(--dim);">{{ c.version }}</span>
+                      <span style="color:var(--muted);margin-left:auto;">{{ c.detail }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </section>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+
+    <sc-if value="{{ hasRender }}" hint-placeholder-val="{{ false }}">
+      <div style="flex-shrink:0;display:flex;align-items:center;gap:16px;height:60px;padding:0 26px;border-top:1px solid var(--line);background:var(--panel);">
+        <span style="width:34px;height:34px;border-radius:12px;background:var(--surface-2);flex-shrink:0;"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;animation:avgPulse 1.9s ease-in-out infinite;flex-shrink:0;"></span>
+        <button type="button" onClick="{{ openRenderingProject }}" style="display:flex;flex-direction:column;gap:2px;border:0;background:transparent;color:inherit;padding:0;cursor:pointer;text-align:left;min-width:0;">
+          <span style="font-size:14px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Rendering "{{ renderTitle }}"</span>
+          <span style="font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ renderMessage }}</span>
+        </button>
+        <span style="flex:1;"></span>
+        <div style="width:190px;flex-shrink:0;height:6px;background:var(--surface-2);border-radius:999px;overflow:hidden;">
+          <div style="height:100%;border-radius:999px;background:linear-gradient(90deg, var(--accent), var(--accent-soft));width:{{ renderPercentPx }};"></div>
+        </div>
+        <span style="flex-shrink:0;font-size:14px;color:var(--accent);font-variant-numeric:tabular-nums;">{{ renderPercentFmt }}</span>
+        <button type="button" onClick="{{ cancelRender }}" style="{{ btnSmStyle }}">Cancel</button>
+      </div>
+    </sc-if>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const NIGHT = {
+  canvas:"#1c1a16", panel:"#211f19", surface:"#26231d", surface2:"#302c24",
+  line:"rgba(242,235,221,0.09)", line2:"rgba(242,235,221,0.17)",
+  text:"#f2ebdd", muted:"#a2988a", dim:"#6f675c",
+  accent:"#e08a4e", accentSoft:"#f6a06b", accentDeep:"#4a2d18",
+  sage:"#aebf92", sageDeep:"#313a25", bad:"#e0776a", badDeep:"#4a221d",
+  shadowSm:"0 2px 6px rgba(0,0,0,0.3)", shadowMd:"0 6px 18px rgba(0,0,0,0.34)", shadowLg:"0 18px 44px rgba(0,0,0,0.46)",
+};
+const DAY = {
+  canvas:"#f5ead8", panel:"#f0e5d1", surface:"#ebddc5", surface2:"#e3d4ba",
+  line:"rgba(32,30,29,0.1)", line2:"rgba(32,30,29,0.2)",
+  text:"#201e1d", muted:"#645c50", dim:"#a19786",
+  accent:"#b2622d", accentSoft:"#8c491a", accentDeep:"#ffe1d0",
+  sage:"#728157", sageDeep:"#e1eecc", bad:"#a33f31", badDeep:"#ffdfd8",
+  shadowSm:"0 1px 2px rgba(46,43,37,0.14)", shadowMd:"0 3px 10px rgba(46,43,37,0.16)", shadowLg:"0 12px 32px rgba(46,43,37,0.22)",
+};
+
+const PHASE_DEFS = [
+  { key:"brief", label:"Brief" },
+  { key:"script", label:"Script" },
+  { key:"director1", label:"Director I" },
+  { key:"visuals", label:"Visuals" },
+  { key:"voice", label:"Voice & audio" },
+  { key:"director2", label:"Director II" },
+  { key:"captions", label:"Captions" },
+  { key:"render", label:"Render" },
+];
+
+const RENDER_MESSAGES = [
+  { at:0, label:"Writing brief" }, { at:10, label:"Drafting script" },
+  { at:20, label:"Directing scene one" }, { at:35, label:"Generating images" },
+  { at:55, label:"Synthesising narration" }, { at:70, label:"Planning motion" },
+  { at:82, label:"Writing captions" }, { at:92, label:"Encoding video" },
+];
+
+function doneFrom(idx, total) {
+  const out = {};
+  PHASE_DEFS.forEach((p, i) => { out[p.key] = { status: i < idx ? "done" : i === idx ? "running" : "pending", duration_ms: i < idx ? 30000 + i * 4000 : null }; });
+  return out;
+}
+function allDone() {
+  const out = {};
+  PHASE_DEFS.forEach((p, i) => { out[p.key] = { status:"done", duration_ms: 20000 + i * 5000 }; });
+  return out;
+}
+function failedAt(idx) {
+  const out = doneFrom(idx, PHASE_DEFS.length);
+  out[PHASE_DEFS[idx].key] = { status:"failed", duration_ms:null, error:"Pollinations returned 402 — pollen budget exhausted." };
+  return out;
+}
+function pendingFrom(idx) {
+  const out = {};
+  PHASE_DEFS.forEach((p, i) => { out[p.key] = { status: i < idx ? "done" : "pending", duration_ms: i < idx ? 15000 : null }; });
+  return out;
+}
+
+function buildProjects() {
+  return [
+    { id:"p1", title:"The Fall of the Roman Grain Trade", aspect_ratio:"16:9", created:"2026-07-24T10:20:00", takes:1, phases: allDone(), archived:false, outputName:"roman_grain_trade_v1.mp4", sizeMb:184 },
+    { id:"p2", title:"Why Octopuses Have Three Hearts", aspect_ratio:"9:16", created:"2026-07-28T08:05:00", takes:1, phases: doneFrom(3, PHASE_DEFS.length), archived:false, outputName:null, sizeMb:0 },
+    { id:"p3", title:"A Short History of the Zipper", aspect_ratio:"9:16", created:"2026-07-22T15:40:00", takes:2, phases: failedAt(3), archived:false, outputName:null, sizeMb:12 },
+    { id:"p4", title:"The Physics of Soap Bubbles", aspect_ratio:"9:16", created:"2026-07-19T09:10:00", takes:1, phases: allDone(), archived:false, outputName:"soap_bubbles_v1.mp4", sizeMb:96 },
+    { id:"p5", title:"How Vending Machines Learned to Talk Back", aspect_ratio:"16:9", created:"2026-07-27T13:00:00", takes:1, phases: pendingFrom(1), archived:false, outputName:null, sizeMb:2 },
+    { id:"p6", title:"The Secret Life of Ballast Water", aspect_ratio:"9:16", created:"2026-07-10T11:30:00", takes:1, phases: allDone(), archived:true, outputName:"ballast_water_v1.mp4", sizeMb:120 },
+    { id:"p7", title:"Why Bees Dance in Figures of Eight", aspect_ratio:"9:16", created:"2026-07-21T17:50:00", takes:3, phases: failedAt(4), archived:false, outputName:null, sizeMb:34 },
+  ];
+}
+
+const COST_LEAF = { brief:0.011, script_draft:0.021, script_segmentation:0.008, director1:0.014, visuals:0.182, voice:0.061, director2:0.014, captions:0.005, render:0 };
+const PHASE_LEAVES = { brief:["brief"], visuals:["visuals"], voice:["voice"], director1:["director1"], director2:["director2"], captions:["captions"], render:["render"] };
+
+function projectSpend(phases) {
+  let total = 0;
+  Object.entries(phases).forEach(([key, rec]) => {
+    if (rec.status !== "done" && rec.status !== "running") return;
+    if (key === "script") { total += COST_LEAF.script_draft + COST_LEAF.script_segmentation; return; }
+    (PHASE_LEAVES[key] || []).forEach((leaf) => { total += COST_LEAF[leaf] || 0; });
+  });
+  return total;
+}
+function fmtUsd(n) { return "$" + n.toFixed(3); }
+function fmtDur(ms) { if (!ms) return "—"; const t = Math.round(ms/1000); return Math.floor(t/60) + ":" + String(t%60).padStart(2,"0"); }
+function fmtCreated(iso) { const d = new Date(iso); const mon = d.toLocaleString("en-US",{month:"short"}); return d.getDate()+" "+mon; }
+
+const MODELS_ROWS = [
+  { phase:"brief", label:"Brief", model:"groq/llama-3.3-70b", backup:"none", action:"stop" },
+  { phase:"script_draft", label:"Script — draft", model:"groq/llama-3.3-70b", backup:"huggingface/mixtral", action:"fall_back" },
+  { phase:"script_segmentation", label:"Script — segmentation", model:"groq/llama-3.1-8b-instant", backup:"none", action:"stop" },
+  { phase:"director1", label:"Director I", model:"groq/llama-3.3-70b", backup:"none", action:"stop" },
+  { phase:"director2", label:"Director II", model:"groq/llama-3.3-70b", backup:"none", action:"stop" },
+];
+
+const COMPONENTS = [
+  { name:"FFmpeg", ok:true, version:"7.1" },
+  { name:"Pillow", ok:true, version:"11.0" },
+  { name:"moviepy", ok:false, version:"—" },
+];
+
+const HEALTH_STAGES = [
+  { key:"deps", name:"Dependency check", detail:"Python, ffmpeg, image and audio libraries.", checks:[
+    { name:"Python", ok:true, version:"3.12.4", detail:".venv-build" },
+    { name:"FFmpeg", ok:true, version:"7.1", detail:"vendor/ffmpeg/ffmpeg.exe" },
+    { name:"moviepy", ok:false, version:"—", detail:"import failed — reinstall required" },
+  ]},
+  { key:"warmup", name:"App warmup", detail:"Settings, channels and the render queue.", checks:[
+    { name:"Settings file", ok:true, version:"", detail:"%APPDATA%/AVG Studio/settings.json" },
+    { name:"Active channel", ok:true, version:"", detail:"Main Channel" },
+  ]},
+  { key:"safe", name:"Safeguards", detail:"Provider keys and disk space.", checks:[
+    { name:"Groq key", ok:true, version:"", detail:"present" },
+    { name:"Disk space", ok:true, version:"", detail:"212 GB free" },
+  ]},
+];
+
+const CHANNELS = [
+  { id:"c1", label:"Main Channel", note:"Long-form history & science explainers.", pinned:4, format:"Long-form", length:"3 min", tone:"Warm" },
+  { id:"c2", label:"Side Project", note:"Quick 9:16 curiosities.", pinned:2, format:"Short-form", length:"45s", tone:"Playful" },
+];
+
+const SETTINGS_GROUPS = [
+  { group:"paths", label:"Paths & components", specs:[
+    { id:"python_path", label:"Python executable", help:"Used for legacy engine calls.", kind:"select", value:".venv-build\\\\Scripts\\\\python.exe", options:[".venv-build\\\\Scripts\\\\python.exe", ".venv\\\\Scripts\\\\python.exe"] },
+  ]},
+  { group:"video", label:"Video format", specs:[
+    { id:"aspect_default", label:"Default aspect ratio", help:"Used when a channel doesn't specify one.", kind:"select", value:"9:16", options:["9:16","16:9"] },
+    { id:"short_edge", label:"Short edge (px)", help:"Vertical resolution for 9:16 output.", kind:"select", value:"1080", options:["720","1080","1440"] },
+  ]},
+  { group:"voice", label:"Voice", specs:[
+    { id:"voice_provider", label:"Voice provider", help:"Edge TTS is free and always works.", kind:"select", value:"Edge TTS", options:["Edge TTS","ElevenLabs"] },
+    { id:"voice_auto_captions", label:"Auto-generate captions", help:"Runs the captions phase automatically after voice.", kind:"switch", value:true },
+  ]},
+  { group:"images", label:"Images", specs:[
+    { id:"image_provider", label:"Image provider", help:"Pollinations and Stable Horde are free.", kind:"select", value:"Pollinations", options:["Pollinations","Stable Horde","OpenAI","Gemini"] },
+    { id:"images_regen_failed_only", label:"Re-run failed images only", help:"Currently regenerates every image on re-run — real money per image.", kind:"switch", value:false },
+  ]},
+  { group:"keys", label:"Provider keys", specs:[
+    { id:"key_groq", label:"Groq", help:"Only provider currently generating text.", kind:"secret", value:true },
+    { id:"key_gemini", label:"Gemini", help:"At zero free-tier quota.", kind:"secret", value:false },
+  ]},
+  { group:"models", label:"Models & cost", specs:[] },
+];
+
+class Component extends DCLogic {
+  state = {
+    theme: "night",
+    screen: "dashboard",
+    query: "",
+    showArchived: false,
+    selected: [],
+    activeProjectId: null,
+    render: null,
+    statusKind: "ready",
+    statusMessage: "Ready!",
+    projects: buildProjects(),
+    studioTakeId: 1,
+    studioPhase: "render",
+    settingsSearch: "",
+    settingsCategory: "all",
+    settingsValues: {},
+    settingsDraft: {},
+    channels: CHANNELS.map((c) => ({ ...c })),
+    activeChannelId: "c1",
+    channelCreating: false,
+    channelDraftLabel: "",
+    createTopic: "",
+    createOverrides: { video_form:"Long-form", length_preset:"3 min", visual_tone:"Warm" },
+    healthBusy: false,
+  };
+
+  componentWillUnmount() { if (this._timer) clearInterval(this._timer); }
+
+  goDashboard = () => this.setState({ screen:"dashboard" });
+  goCreate = () => this.setState({ screen:"create" });
+  goChannels = () => this.setState({ screen:"channels" });
+  goSettings = () => this.setState({ screen:"settings" });
+  goHealth = () => this.setState({ screen:"health" });
+  openProject = (id) => this.setState({ screen:"studio", activeProjectId:id, studioPhase:"render" });
+
+  toggleTheme = () => this.setState((s) => ({ theme: s.theme === "night" ? "day" : "night" }));
+
+  onQueryChange = (e) => this.setState({ query:e.target.value });
+  toggleArchived = () => this.setState((s) => ({ showArchived: !s.showArchived, selected:[] }));
+  toggleSelect = (id) => this.setState((s) => ({ selected: s.selected.includes(id) ? s.selected.filter((x) => x !== id) : [...s.selected, id] }));
+  clearSelection = () => this.setState({ selected:[] });
+  applyArchive = () => {
+    const toArchive = !this.state.showArchived;
+    this.setState((s) => ({
+      projects: s.projects.map((p) => (s.selected.includes(p.id) ? { ...p, archived: toArchive } : p)),
+      selected: [],
+    }));
+  };
+
+  flashStatus = (kind, message, ms) => {
+    if (this._flashTimer) clearTimeout(this._flashTimer);
+    this.setState({ statusKind:kind, statusMessage:message });
+    if (ms) this._flashTimer = setTimeout(() => this.setState({ statusKind:"ready", statusMessage:"Ready!" }), ms);
+  };
+
+  startRenderFor = (id) => {
+    if (this.state.render) return;
+    const project = this.state.projects.find((p) => p.id === id);
+    const failedIdx = project ? PHASE_DEFS.findIndex((p) => project.phases[p.key]?.status === "failed") : -1;
+    const willFailAgain = failedIdx >= 0;
+    this.setState({
+      render: { projectId:id, percent:0, message:RENDER_MESSAGES[0].label },
+      statusKind:"busy", statusMessage:RENDER_MESSAGES[0].label,
+      projects: this.state.projects.map((p) => (p.id === id ? { ...p, phases:doneFrom(0, PHASE_DEFS.length) } : p)),
+    });
+    this._timer = setInterval(() => {
+      this.setState((s) => {
+        if (!s.render) return {};
+        const cap = willFailAgain ? 62 : 100;
+        const next = Math.min(cap, s.render.percent + 3 + Math.round(Math.random() * 5));
+        const msg = RENDER_MESSAGES.slice().reverse().find((m) => next >= m.at)?.label ?? RENDER_MESSAGES[0].label;
+        if (next >= cap) {
+          clearInterval(this._timer);
+          const proj = s.projects.find((p) => p.id === s.render.projectId);
+          if (willFailAgain) {
+            const phaseLabel = PHASE_DEFS[failedIdx].label;
+            this.flashStatus("error", `Render failed — ${phaseLabel}`, 5000);
+            return { render:null, statusKind:"error", statusMessage:`Render failed — ${phaseLabel}`, studioPhase: PHASE_DEFS[failedIdx].key, projects: s.projects.map((p) => (p.id === s.render.projectId ? { ...p, phases:failedAt(failedIdx) } : p)) };
+          }
+          this.flashStatus("ready", "Ready!", 0);
+          return {
+            render: null,
+            statusKind:"ready", statusMessage:"Ready!",
+            projects: s.projects.map((p) => (p.id === s.render.projectId ? { ...p, phases:allDone(), outputName: (p.title.toLowerCase().replace(/[^a-z0-9]+/g,"_")) + ".mp4", sizeMb: 90 + Math.round(Math.random()*80) } : p)),
+          };
+        }
+        return { render: { ...s.render, percent:next, message:msg }, statusKind:"busy", statusMessage:msg };
+      });
+    }, 450);
+  };
+  startRender = () => this.startRenderFor(this.state.activeProjectId || "p2");
+  openRenderingProject = () => this.state.render && this.openProject(this.state.render.projectId);
+  cancelRender = () => {
+    if (this._timer) clearInterval(this._timer);
+    this.setState({ render:null });
+    this.flashStatus("ready", "Ready!", 0);
+  };
+  forceFail = () => { if (this._timer) clearInterval(this._timer); this.setState({ render:null }); this.flashStatus("error", "Render failed — provider quota exhausted", 4500); };
+
+  selectPhase = (key) => this.setState({ studioPhase:key });
+  primaryAction = () => {
+    const project = this.state.projects.find((p) => p.id === this.state.activeProjectId);
+    if (!project) return;
+    const failedIdx = PHASE_DEFS.findIndex((p) => project.phases[p.key]?.status === "failed");
+    this.startRenderFor(project.id);
+  };
+
+  onTopicChange = (e) => this.setState({ createTopic:e.target.value });
+  setOverride = (id, val) => this.setState((s) => ({ createOverrides: { ...s.createOverrides, [id]: val } }));
+  startProject = () => {
+    if (!this.state.createTopic.trim()) return;
+    const id = "p" + (this.state.projects.length + 1);
+    const project = { id, title:this.state.createTopic.trim(), aspect_ratio:"9:16", created:new Date().toISOString(), takes:1, phases:doneFrom(0, PHASE_DEFS.length), archived:false, outputName:null, sizeMb:0 };
+    this.setState((s) => ({ projects:[project, ...s.projects], createTopic:"", screen:"studio", activeProjectId:id, studioPhase:"render" }));
+    this.startRenderFor(id);
+  };
+
+  onSettingsSearch = (e) => this.setState({ settingsSearch:e.target.value });
+  selectCategory = (g) => this.setState({ settingsCategory:g });
+  toggleSetting = (id) => this.setState((s) => ({ settingsDraft: { ...s.settingsDraft, [id]: !(id in s.settingsDraft ? s.settingsDraft[id] : SETTINGS_GROUPS.flatMap((g) => g.specs).find((sp) => sp.id === id)?.value) } }));
+  selectSetting = (id, val) => this.setState((s) => ({ settingsDraft: { ...s.settingsDraft, [id]: val } }));
+  discardSettings = () => this.setState({ settingsDraft:{} });
+  saveSettings = () => { this.setState({ settingsDraft:{} }); this.flashStatus("ready", "Settings saved", 1800); };
+
+  recheckHealth = () => { this.setState({ healthBusy:true }); setTimeout(() => this.setState({ healthBusy:false }), 900); };
+
+  openCreateChannel = () => this.setState({ channelCreating:true, channelDraftLabel:"" });
+  cancelCreateChannel = () => this.setState({ channelCreating:false });
+  onChannelDraftLabel = (e) => this.setState({ channelDraftLabel:e.target.value });
+  confirmCreateChannel = () => {
+    const label = this.state.channelDraftLabel.trim();
+    if (!label) return;
+    const id = "c" + (this.state.channels.length + 1);
+    this.setState((s) => ({ channels:[...s.channels, { id, label, note:"", pinned:0, format:"Long-form", length:"60s", tone:"Neutral" }], channelCreating:false }));
+  };
+  activateChannel = (id) => this.setState({ activeChannelId:id });
+  deleteChannel = (id) => this.setState((s) => ({ channels:s.channels.filter((c) => c.id !== id), activeChannelId: s.activeChannelId === id ? (s.channels.find((c)=>c.id!==id)?.id ?? null) : s.activeChannelId }));
+
+  renderVals() {
+    const s = this.state;
+    const tokens = s.theme === "night" ? NIGHT : DAY;
+    const isNight = s.theme === "night";
+
+    const rootStyle = {
+      "--canvas":tokens.canvas, "--panel":tokens.panel, "--surface":tokens.surface, "--surface-2":tokens.surface2,
+      "--line":tokens.line, "--line-2":tokens.line2, "--text":tokens.text, "--muted":tokens.muted, "--dim":tokens.dim,
+      "--accent":tokens.accent, "--accent-soft":tokens.accentSoft, "--accent-deep":tokens.accentDeep,
+      "--sage":tokens.sage, "--sage-deep":tokens.sageDeep, "--bad":tokens.bad, "--bad-deep":tokens.badDeep,
+      "--shadow-sm":tokens.shadowSm, "--shadow-md":tokens.shadowMd, "--shadow-lg":tokens.shadowLg,
+      "--font-heading":'"Caprasimo", Georgia, serif', "--font-body":'"Figtree","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif',
+      height:"100%", display:"flex", background:tokens.canvas, color:tokens.text, fontFamily:"var(--font-body)", fontSize:"14px", lineHeight:1.55, position:"relative", overflow:"hidden",
+    };
+
+    const railBtn = (active, disabled) => ({
+      width:"48px", height:"48px", borderRadius:"16px", display:"grid", placeItems:"center",
+      color: active ? "var(--text)" : "var(--dim)", background: active ? "var(--surface-2)" : "transparent",
+      border:0, cursor: disabled ? "default" : "pointer", position:"relative", opacity: disabled ? 0.45 : 1,
+    });
+
+    const screen = s.screen;
+    const activeProject = s.projects.find((p) => p.id === s.activeProjectId) || s.projects[0];
+
+    // status bubble
+    const statusColor = s.statusKind === "busy" ? "var(--accent)" : s.statusKind === "error" ? "var(--bad)" : "var(--sage)";
+    const statusLabel = s.statusKind === "busy" ? s.statusMessage : s.statusKind === "error" ? s.statusMessage : "Ready!";
+    const bubbleWrapStyle = {
+      position:"absolute", top:"14px", right:"22px", zIndex:20,
+      display:"flex", alignItems:"center", gap:"9px", padding:"7px 16px 7px 12px", borderRadius:"999px",
+      border:`1.5px solid ${statusColor}`, background:`color-mix(in srgb, ${statusColor} 12%, var(--panel))`,
+      color:statusColor, fontSize:"12.5px", fontWeight:600, boxShadow:"var(--shadow-sm)",
+    };
+    const bubbleDotStyle = { width:"7px", height:"7px", borderRadius:"50%", background:statusColor, flexShrink:0, display:"inline-block", animation: s.statusKind === "busy" ? "avgPulse 1.4s ease-in-out infinite" : "none" };
+
+    const chipStyle = { display:"inline-flex", alignItems:"center", gap:"5px", fontSize:"11.5px", padding:"3px 11px", borderRadius:"999px", border:"1px solid var(--line-2)", color:"var(--muted)" };
+    const chipMonoStyle = { ...chipStyle, fontVariantNumeric:"tabular-nums" };
+    const chipOkStyle = { ...chipStyle, borderColor:"transparent", background:"var(--sage-deep)", color:"var(--sage)" };
+    const btnBase = { display:"inline-flex", alignItems:"center", justifyContent:"center", gap:"8px", fontFamily:"var(--font-heading)", fontSize:"13.5px", minHeight:"38px", padding:"0 18px", borderRadius:"999px", border:"1px solid var(--line-2)", color:"var(--text)", background:"transparent", cursor:"pointer", whiteSpace:"nowrap" };
+    const btnStyle = { ...btnBase };
+    const btnSmStyle = { ...btnBase, minHeight:"32px", fontSize:"12.5px", padding:"0 14px" };
+    const btnGhostStyle = { ...btnBase, borderColor:"transparent", color:"var(--muted)" };
+    const btnGhostSmStyle = { ...btnGhostStyle, minHeight:"32px", fontSize:"12.5px", padding:"0 14px" };
+    const btnPrimaryStyle = { ...btnBase, background:"var(--accent)", borderColor:"transparent", color:"var(--canvas)" };
+    const btnPrimarySmStyle = { ...btnPrimaryStyle, minHeight:"32px", fontSize:"12.5px", padding:"0 14px" };
+    const btnPrimaryLgStyle = { ...btnPrimaryStyle, minHeight:"46px", padding:"0 26px", fontSize:"15px" };
+
+    // dashboard derive
+    const activeProjects = s.projects.filter((p) => !p.archived);
+    const librarySpend = activeProjects.reduce((sum, p) => sum + projectSpend(p.phases), 0);
+    const nextEst = 0.42 * 1.4;
+    const diskTotalMb = s.projects.reduce((sum, p) => sum + p.sizeMb, 0);
+    const health = { ok: COMPONENTS.every((c) => c.ok) };
+    const activeChannel = s.channels.find((c) => c.id === s.activeChannelId) || s.channels[0];
+
+    const query = s.query.trim().toLowerCase();
+    const renderingProject = s.render ? s.projects.find((p) => p.id === s.render.projectId) : null;
+    const filtered = s.projects
+      .filter((p) => !(renderingProject && p.id === renderingProject.id))
+      .filter((p) => Boolean(p.archived) === s.showArchived)
+      .filter((p) => (query ? p.title.toLowerCase().includes(query) : true));
+
+    const statusInfoFor = (project) => {
+      const entries = Object.entries(project.phases);
+      const failed = entries.find(([, r]) => r.status === "failed");
+      if (failed) return { label:"Failed · " + failed[0], style:{ borderRadius:"999px", padding:"3px 10px", fontSize:"10.5px", background:"color-mix(in srgb, var(--bad) 90%, transparent)", color:"#241110" } };
+      const running = entries.find(([, r]) => r.status === "running");
+      if (running) return { label:"Rendering", style:{ borderRadius:"999px", padding:"3px 10px", fontSize:"10.5px", background:"color-mix(in srgb, var(--accent) 90%, transparent)", color:"#1c1a16" } };
+      const allD = entries.every(([, r]) => r.status === "done");
+      if (allD && project.outputName) return { label:"Done", style:{ borderRadius:"999px", padding:"3px 10px", fontSize:"10.5px", background:"color-mix(in srgb, var(--sage) 88%, transparent)", color:"#22271a" } };
+      return { label:"Incomplete", style:{ borderRadius:"999px", padding:"3px 10px", fontSize:"10.5px", background:"rgba(14,12,10,0.62)", color:"#e6dcc9" } };
+    };
+
+    const gridProjects = filtered.map((p) => {
+      const info = statusInfoFor(p);
+      const isSelected = s.selected.includes(p.id);
+      return {
+        id:p.id, title:p.title, aspect_ratio:p.aspect_ratio, createdFmt:fmtCreated(p.created),
+        takeLabel: p.takes + (p.takes === 1 ? " take" : " takes"), statusLabel:info.label, pillStyle:info.style,
+        openHandler: () => this.openProject(p.id), isSelected,
+        toggleSelectHandler: () => this.toggleSelect(p.id),
+        selectDotStyle: { position:"absolute", top:"11px", right:"11px", zIndex:4, width:"20px", height:"20px", borderRadius:"50%", border: isSelected ? "0" : "1.5px solid rgba(255,255,255,0.55)", background: isSelected ? "var(--accent)" : "rgba(14,12,10,0.35)", cursor:"pointer", display:"grid", placeItems:"center" },
+      };
+    });
+
+    // studio derive
+    const projectPhases = activeProject ? activeProject.phases : {};
+    const failedKey = PHASE_DEFS.find((p) => projectPhases[p.key]?.status === "failed")?.key;
+    const runningKey = PHASE_DEFS.find((p) => projectPhases[p.key]?.status === "running")?.key;
+    const defaultPhaseKey = failedKey || runningKey || [...PHASE_DEFS].reverse().find((p) => projectPhases[p.key]?.status === "done")?.key || "brief";
+    const activePhaseKey = s.studioPhase || defaultPhaseKey;
+
+    const phaseRows = PHASE_DEFS.map((def) => {
+      const rec = projectPhases[def.key] || { status:"pending" };
+      const selected = def.key === activePhaseKey;
+      const nodeColors = rec.status === "done" ? { border:"var(--sage)", bg:"var(--sage-deep)", inner:"var(--sage)" }
+        : rec.status === "running" ? { border:"var(--accent)", bg:"var(--accent-deep)", inner:"var(--accent)" }
+        : rec.status === "failed" ? { border:"var(--bad)", bg:"var(--bad-deep)", inner:"var(--bad)" }
+        : { border:"var(--line-2)", bg:"transparent", inner:"transparent" };
+      return {
+        key:def.key, label:def.label, durationFmt: rec.status === "running" ? "…" : fmtDur(rec.duration_ms),
+        selectHandler: () => this.selectPhase(def.key),
+        rowStyle: { display:"flex", alignItems:"center", gap:"14px", width:"100%", height:"48px", padding:"0 14px 0 0", border:0, background: selected ? "var(--surface-2)" : "transparent", color: rec.status === "failed" ? "var(--bad)" : "var(--dim)", cursor:"pointer", textAlign:"left", borderRadius:"999px 0 0 999px" },
+        nodeStyle: { width:"20px", height:"20px", borderRadius:"50%", flex:"none", border:`2px solid ${nodeColors.border}`, background:nodeColors.bg, boxShadow:"0 0 0 5px var(--panel)", position:"relative" },
+      };
+    });
+
+    const selPhaseRec = projectPhases[activePhaseKey] || { status:"pending" };
+    const selDef = PHASE_DEFS.find((d) => d.key === activePhaseKey);
+    const chipClassFor = (status) => status === "done" ? chipOkStyle : status === "failed" ? { ...chipStyle, borderColor:"transparent", background:"var(--bad-deep)", color:"var(--bad)" } : status === "running" ? { ...chipStyle, borderColor:"transparent", background:"var(--accent-deep)", color:"var(--accent-soft)" } : chipStyle;
+    const statusWord = { done:"Done", failed:"Failed", running:"Running", pending:"Not started" }[selPhaseRec.status] || "Not started";
+
+    const isLiveRenderHere = activePhaseKey === "render" && s.render && s.render.projectId === activeProject?.id;
+    const selectedPhase = {
+      label: selDef?.label || activePhaseKey, statusLabel: statusWord, chipStyle: chipClassFor(selPhaseRec.status),
+      isRunning: Boolean(isLiveRenderHere), isFailed: selPhaseRec.status === "failed" && !isLiveRenderHere,
+      isVisuals: activePhaseKey === "visuals" && selPhaseRec.status !== "failed" && !isLiveRenderHere,
+      isRenderDone: activePhaseKey === "render" && selPhaseRec.status === "done" && !isLiveRenderHere,
+      isPlain: !isLiveRenderHere && selPhaseRec.status !== "failed" && !(activePhaseKey === "visuals") && !(activePhaseKey === "render" && selPhaseRec.status === "done"),
+      plainText: selPhaseRec.status === "done" ? "Done." : selPhaseRec.status === "running" ? "Running…" : "Not started yet.",
+      errorMessage: selPhaseRec.error || "This phase failed.",
+      imageCountLabel: "6 images",
+      images: Array.from({ length:6 }, (_, i) => ({ name:`scene_${i + 1}.png` })),
+    };
+
+    const takes = Array.from({ length: activeProject ? activeProject.takes : 1 }, (_, i) => {
+      const id = i + 1; const isCurrent = id === (activeProject ? activeProject.takes : 1); const selected = id === s.studioTakeId;
+      return {
+        id, label: id === 1 ? "Take 1" : `Take ${id}`, isCurrent, durationFmt: fmtDur(60000 + id * 40000),
+        selectHandler: () => this.setState({ studioTakeId:id }),
+        dotStyle: { width:"8px", height:"8px", borderRadius:"50%", background: isCurrent ? "var(--sage)" : "var(--dim)", display:"inline-block" },
+        chipStyle: { flex:"none", display:"flex", flexDirection:"column", alignItems:"flex-start", minWidth:"132px", borderRadius:"20px", padding:"10px 14px", background: selected ? "var(--surface-2)" : "var(--surface)", border: selected ? "1px solid var(--line-2)" : "1px solid var(--line)", cursor:"pointer", boxShadow: selected ? "var(--shadow-sm)" : "none" },
+      };
+    });
+
+    const isRunningProject = Boolean(s.render && s.render.projectId === activeProject?.id);
+    const primaryActionLabel = isRunningProject ? "Cancel" : failedKey ? "Run again" : (activeProject && Object.values(activeProject.phases).every((p) => p.status === "done")) ? "Run again" : "Continue";
+
+    // create chips
+    const createChips = [
+      { label:"Format", value:s.createOverrides.video_form, options:["Long-form","Short-form"], onChange:(e) => this.setOverride("video_form", e.target.value) },
+      { label:"Length", value:s.createOverrides.length_preset, options:["45s","60s","3 min"], onChange:(e) => this.setOverride("length_preset", e.target.value) },
+      { label:"Tone", value:s.createOverrides.visual_tone, options:["Warm","Playful","Neutral"], onChange:(e) => this.setOverride("visual_tone", e.target.value) },
+    ];
+
+    // settings derive
+    const settingsCategories = [{ group:"all", label:"All settings" }, ...SETTINGS_GROUPS.map((g) => ({ group:g.group, label:g.label }))].map((c) => ({
+      label:c.label, selectHandler: () => this.selectCategory(c.group),
+      navStyle: { textAlign:"left", border:0, background: s.settingsCategory === c.group ? "var(--surface-2)" : "transparent", color: s.settingsCategory === c.group ? "var(--text)" : "var(--muted)", padding:"9px 14px", borderRadius:"12px", fontSize:"13.5px", cursor:"pointer" },
+    }));
+    const visibleGroupDefs = s.settingsCategory === "all" ? SETTINGS_GROUPS : SETTINGS_GROUPS.filter((g) => g.group === s.settingsCategory);
+    const settingsGroups = visibleGroupDefs.map((g) => ({
+      label:g.label, isModels: g.group === "models", isPaths: g.group === "paths",
+      specs: g.specs.map((spec) => {
+        const value = spec.id in s.settingsDraft ? s.settingsDraft[spec.id] : spec.value;
+        const dirty = spec.id in s.settingsDraft;
+        return {
+          label:spec.label, help:spec.help, isSwitch:spec.kind === "switch", isSelect:spec.kind === "select", isSecret:spec.kind === "secret",
+          value, options:spec.options,
+          rowStyle: { display:"flex", alignItems:"center", gap:"20px", padding:"16px 22px", borderBottom:"1px solid var(--line)", background: dirty ? "color-mix(in srgb, var(--text) 4%, transparent)" : "transparent" },
+          toggleHandler: () => this.toggleSetting(spec.id),
+          switchTrackStyle: { width:"46px", height:"26px", borderRadius:"999px", border:"1px solid var(--line-2)", background: value ? "var(--sage-deep)" : "var(--surface-2)", position:"relative", cursor:"pointer", padding:0 },
+          switchThumbStyle: { position:"absolute", top:"2px", left: value ? "22px" : "2px", width:"20px", height:"20px", borderRadius:"50%", background: value ? "var(--sage)" : "var(--dim)", transition:"left 0.16s" },
+          selectHandler: (e) => this.selectSetting(spec.id, e.target.value),
+          secretChipStyle: { fontSize:"11px", padding:"3px 11px", borderRadius:"999px", border: value ? "1px solid transparent" : "1px solid var(--line-2)", background: value ? "var(--sage-deep)" : "transparent", color: value ? "var(--sage)" : "var(--muted)" },
+          secretLabel: value ? "Key set" : "No key",
+        };
+      }),
+    }));
+    const dirtyCount = Object.keys(s.settingsDraft).length;
+
+    const modelsRows = MODELS_ROWS.map((r) => ({
+      label:r.label, model:r.model, backup:r.backup,
+      actionLabel: r.action === "fall_back" ? "fall back" : "stop",
+      actionChipStyle: r.action === "fall_back" ? chipOkStyle : { ...chipStyle, borderColor:"transparent", background:"var(--bad-deep)", color:"var(--bad)" },
+      costFmt: fmtUsd(COST_LEAF[r.phase === "brief" ? "brief" : r.phase] || 0),
+    }));
+    const componentRows = COMPONENTS.map((c) => ({ name:c.name, version:c.version, stateLabel: c.ok ? "Present" : "Missing", chipStyle: c.ok ? chipOkStyle : { ...chipStyle, borderColor:"transparent", background:"var(--bad-deep)", color:"var(--bad)" } }));
+    const healthStages = HEALTH_STAGES.map((st, i) => ({
+      num:i + 1, name:st.name, detail:st.detail, stateLabel: st.checks.every((c) => c.ok) ? "Passed" : "Failed",
+      chipStyle: st.checks.every((c) => c.ok) ? chipOkStyle : { ...chipStyle, borderColor:"transparent", background:"var(--bad-deep)", color:"var(--bad)" },
+      checks: st.checks.map((c) => ({ name:c.name, version:c.version, detail:c.detail, dotStyle:{ width:"7px", height:"7px", borderRadius:"50%", background: c.ok ? "var(--sage)" : "var(--bad)", flexShrink:0 } })),
+    }));
+
+    // channels derive
+    const channels = s.channels.map((c) => ({
+      label:c.label, note:c.note || "No note.", isActive: c.id === s.activeChannelId,
+      pinnedLabel: c.pinned + (c.pinned === 1 ? " setting pinned" : " settings pinned"),
+      showActivate: c.id !== s.activeChannelId,
+      activateHandler: () => this.activateChannel(c.id), deleteHandler: () => this.deleteChannel(c.id),
+      cardStyle: { borderRadius:"28px", background:"var(--surface)", border: c.id === s.activeChannelId ? "1px solid color-mix(in srgb, var(--sage) 46%, var(--line))" : "1px solid var(--line)", padding:"20px 22px", boxShadow:"var(--shadow-sm)" },
+    }));
+
+    const switchOn = !isNight;
+    return {
+      isNight, isDay: !isNight, rootStyle,
+      railBtnStyleDashboard: railBtn(screen === "dashboard", false), railBtnStyleCreate: railBtn(screen === "create", false),
+      railBtnStyleStudio: railBtn(screen === "studio", true), railBtnStyleChannels: railBtn(screen === "channels", false),
+      railBtnStyleHealth: railBtn(screen === "health", false), railBtnStyleSettings: railBtn(screen === "settings", false),
+      switchTrackBg: switchOn ? "var(--accent-deep)" : "var(--surface-2)",
+      switchThumbStyle: { position:"absolute", top:"1px", left: switchOn ? "21px" : "1px", width:"20px", height:"20px", borderRadius:"50%", background: switchOn ? "var(--accent)" : "var(--dim)", display:"grid", placeItems:"center", transition:"left 0.18s, background 0.18s" },
+      toggleTheme:this.toggleTheme,
+      goDashboard:this.goDashboard, goCreate:this.goCreate, goChannels:this.goChannels, goSettings:this.goSettings, goHealth:this.goHealth,
+
+      bubbleWrapStyle, bubbleDotStyle, statusLabel,
+
+      isDashboard: screen === "dashboard", isStudio: screen === "studio", isCreate: screen === "create",
+      isChannels: screen === "channels", isSettings: screen === "settings", isHealth: screen === "health",
+
+      hasArchived: activeProjects.length !== s.projects.length || s.showArchived,
+      archiveBtnLabel: s.showArchived ? "Back to library" : `Archived (${s.projects.length - activeProjects.length})`,
+      archiveBtnStyle: btnStyle, toggleArchived:this.toggleArchived,
+      query:s.query, onQueryChange:this.onQueryChange,
+
+      librarySpendFmt: fmtUsd(librarySpend), projectCount:activeProjects.length, nextEstFmt: fmtUsd(nextEst),
+      healthChipStyle: health.ok ? chipOkStyle : { ...chipStyle, borderColor:"transparent", background:"var(--bad-deep)", color:"var(--bad)" },
+      healthChipLabel: health.ok ? "All present" : "Needs attention",
+      healthTextStyle: { display:"block", fontFamily:"var(--font-heading)", fontSize:"20px", color: health.ok ? "var(--sage)" : "var(--bad)" },
+      activeChannelLabel: activeChannel?.label || "None", activeChannelFormat: activeChannel?.format || "—",
+      activeChannelLength: activeChannel?.length || "—", activeChannelTone: activeChannel?.tone || "—",
+      diskFmt: diskTotalMb >= 1024 ? (diskTotalMb / 1024).toFixed(2) + " GB" : diskTotalMb + " MB",
+      chipStyle, chipOkStyle, chipMonoStyle, btnStyle, btnSmStyle, btnGhostStyle, btnGhostSmStyle, btnPrimaryStyle, btnPrimarySmStyle, btnPrimaryLgStyle,
+
+      hasRender: Boolean(s.render), renderTitle: renderingProject?.title || "", renderMessage: s.render?.message || "",
+      renderPercentFmt: (s.render?.percent ?? 0) + "%", renderPercentPx: (s.render?.percent ?? 0) + "%",
+      openRenderingProject:this.openRenderingProject, cancelRender:this.cancelRender,
+
+      gridCountLabel: gridProjects.length + (gridProjects.length === 1 ? " video" : " videos"),
+      gridEmpty: gridProjects.length === 0, gridEmptyMessage: query ? `Nothing matches "${s.query}".` : s.showArchived ? "Nothing archived." : "No projects yet.",
+      gridProjects,
+      hasSelection: s.selected.length > 0, selectionCountLabel: s.selected.length + " selected",
+      clearSelection:this.clearSelection, applyArchive:this.applyArchive, archiveActionLabel: s.showArchived ? "Restore" : "Archive",
+
+      activeProject: activeProject ? {
+        title:activeProject.title, aspect_ratio:activeProject.aspect_ratio,
+        diskFmt: activeProject.sizeMb >= 1024 ? (activeProject.sizeMb/1024).toFixed(2)+" GB" : activeProject.sizeMb+" MB",
+        spendFmt: fmtUsd(projectSpend(activeProject.phases)).slice(1),
+        outputName: activeProject.outputName || "—", sizeFmt: activeProject.sizeMb ? activeProject.sizeMb+" MB" : "—",
+      } : { title:"", aspect_ratio:"", diskFmt:"—", spendFmt:"0.000", outputName:"—", sizeFmt:"—" },
+      takes, phaseRows, selectedPhase, primaryAction:this.primaryAction, primaryActionLabel,
+
+      createTopic:s.createTopic, onTopicChange:this.onTopicChange, createChips, createDisabled: !s.createTopic.trim(), startProject:this.startProject,
+
+      channelCreating:s.channelCreating, channelDraftLabel:s.channelDraftLabel, onChannelDraftLabel:this.onChannelDraftLabel,
+      openCreateChannel:this.openCreateChannel, cancelCreateChannel:this.cancelCreateChannel, confirmCreateChannel:this.confirmCreateChannel,
+      channels,
+
+      settingsSearch:s.settingsSearch, onSettingsSearch:this.onSettingsSearch, settingsCategories, settingsGroups,
+      modelsRows, componentRows, healthStages,
+      dirtyNote: dirtyCount > 0 ? `${dirtyCount} unsaved change${dirtyCount === 1 ? "" : "s"}` : "No unsaved changes",
+      noDirty: dirtyCount === 0, discardSettings:this.discardSettings, saveSettings:this.saveSettings,
+      recheckLabel: s.healthBusy ? "Checking…" : "Recheck", recheckHealth:this.recheckHealth,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

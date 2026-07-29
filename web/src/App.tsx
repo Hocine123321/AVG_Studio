@@ -105,6 +105,11 @@ export default function App() {
   const { theme, toggle: toggleTheme } = useTheme();
   const [settings, setSettings] = useState<SettingsDoc | null>(null);
   const [projects, setProjects] = useState<ProjectDoc[] | null>(null);
+  // Library-wide bytes, summed by the backend's startup scan. `null` until
+  // the first list response lands - Overview shows a dash rather than a
+  // confident zero, which on that card would be indistinguishable from a
+  // real answer.
+  const [storageBytes, setStorageBytes] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [startError, setStartError] = useState<string | null>(null);
@@ -127,6 +132,7 @@ export default function App() {
     try {
       const res = await apiGet<ProjectsResponse>("/api/projects");
       setProjects(res.projects);
+      if (typeof res.storage_bytes === "number") setStorageBytes(res.storage_bytes);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -251,6 +257,10 @@ export default function App() {
           onRender={openAndRender}
           onCancel={cancelRender}
           onArchived={reloadProjects}
+          storageBytes={storageBytes}
+          onGoSettings={() => setScreen({ name: "settings" })}
+          onGoHealth={() => setScreen({ name: "health" })}
+          onGoChannels={() => setScreen({ name: "channels" })}
         />
       );
     }

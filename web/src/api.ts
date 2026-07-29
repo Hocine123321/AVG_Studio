@@ -162,6 +162,13 @@ export interface ProjectDoc {
 
 export interface ProjectsResponse {
   projects: ProjectDoc[];
+  /** False once the startup library scan has finished. The route waits for
+   * that scan, so a response always carries `false` - the flag exists for
+   * any caller that polls before the route can answer. */
+  loading?: boolean;
+  /** Total bytes across every project folder, summed by that same scan
+   * rather than per request: it is a full recursive stat of the library. */
+  storage_bytes?: number;
 }
 
 // ---- settings / first-run welcome ----

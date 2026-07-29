@@ -32,6 +32,7 @@ import ctypes
 import threading
 from contextlib import suppress
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -146,6 +147,28 @@ def _total_ram_gb() -> float:
         return stat.ullTotalPhys / (1024**3)
     except Exception:
         return 8.0
+
+
+def _library_bytes(projects: Iterable[ProjectDoc]) -> int:
+    """Total bytes across every project folder.
+
+    Counts each project's WHOLE folder - every take's subfolder plus any
+    legacy top-level artifacts - matching what the Studio header already
+    reports per project, so the library total and the per-project figures
+    are the same measurement at two scales rather than two different ones.
+
+    A project whose files were removed out-of-band contributes nothing
+    rather than raising: this feeds a number on a card, and one missing
+    folder must not cost the whole figure.
+    """
+    total = 0
+    for project in projects:
+        folder = Path(project.folder)
+        if not folder.is_dir():
+            continue
+        with suppress(OSError):
+            total += sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+    return total
 
 
 def _build_render_request(
@@ -315,6 +338,12 @@ def create_app(
     # instead of "No projects yet".
     app.state.projects: dict[str, ProjectDoc] = {}
     app.state.projects_loading = True
+    # Total bytes across every project folder, for Home's "Storage used"
+    # card. Summed once by the background scan that is already walking this
+    # tree, rather than per request: it is a full recursive stat of the whole
+    # library, which is far too expensive to do on every list call and does
+    # not change unless a render or an import does.
+    app.state.storage_bytes = 0
     # Set once the first scan has finished, successfully or not. Requests
     # wait on this; the WINDOW never does, which is the whole point.
     app.state.library_loaded = threading.Event()
@@ -329,6 +358,7 @@ def create_app(
         try:
             report = import_all(output_root)
             app.state.projects = {p.id: p for p in report.imported}
+            app.state.storage_bytes = _library_bytes(app.state.projects.values())
         except Exception:
             # A library that fails to scan leaves the app usable and empty
             # rather than dead. Nothing below the API layer may print, and
@@ -400,7 +430,13 @@ def create_app(
                     "script_substate": script_substate(root / "script"),
                 }
             )
-        return {"projects": projects, "loading": bool(app.state.projects_loading)}
+        return {
+            "projects": projects,
+            "loading": bool(app.state.projects_loading),
+            # Zero until the scan finishes, which `loading` is what
+            # distinguishes from a genuinely empty library.
+            "storage_bytes": int(app.state.storage_bytes),
+        }
 
     @app.post("/api/projects/archive", dependencies=[Depends(require_token)])
     async def archive_projects(body: ArchiveRequest) -> dict:
@@ -574,6 +610,7 @@ def create_app(
         app.state.output_root = root
         report = import_all(root)
         app.state.projects = {p.id: p for p in report.imported}
+        app.state.storage_bytes = _library_bytes(app.state.projects.values())
         app.state.projects_loading = False
         threading.Thread(target=_warm_thumbnails, daemon=True, name="avg-thumb-warm-onboard").start()
 

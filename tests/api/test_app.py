@@ -20,7 +20,7 @@ def test_requests_with_the_token_succeed(client):
     # route waits for that scan, so by the time it answers it is always
     # False - the flag exists for the UI, which polls before this route can
     # be sure, not to describe this response.
-    assert r.status_code == 200 and r.json() == {"projects": [], "loading": False}
+    assert r.status_code == 200 and r.json() == {"projects": [], "loading": False, "storage_bytes": 0}
 
 def test_render_of_an_unknown_project_is_404(client):
     r = client.post("/api/projects/nope/render", headers={"X-AVG-Token": "t0k"})

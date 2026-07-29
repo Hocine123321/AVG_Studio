@@ -2735,45 +2735,6 @@ a:hover {
   color: var(--sage);
 }
 
-/* ---- global status bar (StatusBar.tsx) ---- */
-
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 var(--pad);
-  height: 26px;
-  flex-shrink: 0;
-  font-size: 11.5px;
-  color: var(--dim);
-  background: var(--panel);
-  border-top: 1px solid var(--line);
-}
-
-.statusbar__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--dim);
-  transition: background 0.2s;
-}
-
-.statusbar--busy .statusbar__dot {
-  background: var(--accent);
-}
-
-.statusbar--busy .statusbar__label {
-  color: var(--muted);
-}
-
-.statusbar__clock {
-  color: var(--muted);
-}
-
-.statusbar__more {
-  margin-left: auto;
-}
-
 /* ---- transitions ----
    Deliberately small and fast. A desktop tool should feel immediate; these
    exist to stop panels appearing from nowhere, not to be noticed. Anyone who
@@ -2927,4 +2888,179 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- status pill (StatusBar.tsx) ----
+   From the 3rd redesign: floats over the content top-right rather than
+   sitting in a bar at the bottom. Border and tint carry the state, so the
+   pill reads at a glance without being read. */
+
+.statuspill {
+  position: absolute;
+  top: 14px;
+  right: 22px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 16px 7px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--pill);
+  background: color-mix(in srgb, var(--pill) 12%, var(--panel));
+  color: var(--pill);
+  font-size: 12.5px;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  /* Never intercept a click meant for the content behind it - it reports,
+     it is not a control. */
+  pointer-events: none;
+  max-width: 320px;
+}
+
+.statuspill--ready {
+  --pill: var(--sage);
+}
+
+.statuspill--busy {
+  --pill: var(--accent);
+}
+
+.statuspill--error {
+  --pill: var(--bad);
+}
+
+.statuspill__dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--pill);
+}
+
+.statuspill--busy .statuspill__dot,
+.statuspill--error .statuspill__dot {
+  animation: avg-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes avg-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.86);
+  }
+}
+
+.statuspill__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statuspill__clock,
+.statuspill__more {
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statuspill__dot {
+    animation: none;
+  }
+}
+
+/* ---- Home overview row ----
+   Four (or three) stat cards above the library, each a door into the screen
+   that owns the number. From the 3rd redesign. */
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gap);
+  margin-bottom: calc(var(--gap) + 12px);
+  position: relative;
+}
+
+.ovcard {
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.ovcard__label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0 0 8px;
+}
+
+.ovcard__value {
+  display: block;
+  font-family: var(--font-heading);
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ovcard__value--accent {
+  color: var(--accent);
+}
+
+.ovcard__value--name {
+  font-size: 19px;
+}
+
+.ovcard__note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ovcard__chips {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+  flex-wrap: wrap;
+}
+
+/* A text link, not a button: these are navigation, and the screen's one
+   filled action must stay scarce. */
+.ovcard__link {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.ovcard__link:hover {
+  color: var(--accent-soft);
+  text-decoration: underline;
+}
+
+/* ---- rail theme toggle, redesign form ----
+   A small filled accent disc rather than a ghost item - it reads as a
+   switch, which is what it is. */
+
+.rail__item--mini {
+  height: 28px;
+  border-radius: 999px;
+}
+
+.rail__toggle-disc {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: grid;
+  place-items: center;
+  color: var(--canvas);
 }

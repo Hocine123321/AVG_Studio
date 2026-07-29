@@ -114,10 +114,9 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
     );
   }
 
-  return (
-    <div className="transport transport--idle">
-      <span className="dot" style={{ background: "var(--dim)" }} aria-hidden="true" />
-      <span className="transport__label">Nothing rendering.</span>
-    </div>
-  );
+  // Nothing running: render nothing. The bar used to sit here permanently
+  // saying "Nothing rendering.", which the 3rd redesign drops - and the
+  // status pill now answers "is anything happening" everywhere, all the
+  // time, so the idle bar was a second voice saying less.
+  return null;
 }
