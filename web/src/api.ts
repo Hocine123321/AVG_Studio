@@ -23,7 +23,9 @@ async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: str
   // Registered here, in the ONE wrapper every call goes through, so the
   // global status bar can never be missing a request that is genuinely in
   // flight - and so no screen has to remember to report its own.
-  const endActivity = beginActivity(labelForRequest(method, path));
+  // A write outranks a read in the status bar: "Saving" must not be
+  // replaced by a background "Loading" that happens to still be in flight.
+  const endActivity = beginActivity(labelForRequest(method, path), method === "GET" ? "low" : "medium");
   let res: Response;
   try {
     res = await fetch(path, {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   apiGet,
@@ -9,6 +9,7 @@ import {
   type ProjectsResponse,
   type SettingsDoc,
 } from "./api";
+import { beginActivity } from "./activity";
 import AppHealth from "./AppHealth";
 import Channels from "./Channels";
 import Create from "./Create";
@@ -114,6 +115,31 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [startError, setStartError] = useState<string | null>(null);
   const events = useEvents();
+
+  // The running job's own status-bar activity. Registered from the socket
+  // rather than in `api.ts`, because a job is not a request: `POST
+  // /render` is over in milliseconds while the job it started runs for
+  // minutes, which is why the pill used to say "Ready!" through an entire
+  // render. High priority, so nothing else can take the label off it.
+  const jobActivity = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (events.jobStarted && jobActivity.current === null) {
+      jobActivity.current = beginActivity("Working", "high");
+    }
+    if (!events.jobStarted && jobActivity.current !== null) {
+      jobActivity.current();
+      jobActivity.current = null;
+    }
+  }, [events.jobStarted]);
+
+  // A dropped socket must not leave the pill claiming work forever: the
+  // job may well have finished while we were not listening.
+  useEffect(() => {
+    if (!events.connected && jobActivity.current !== null) {
+      jobActivity.current();
+      jobActivity.current = null;
+    }
+  }, [events.connected]);
 
   // First-run gate: onboarding state decides whether the welcome screen or
   // the real app shell renders at all, so it has to resolve before either

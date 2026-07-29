@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { elapsedClock, useActivities } from "./activity";
+import { elapsedClock, leadActivity, useActivities } from "./activity";
 
 /**
  * The floating status pill: what the backend is doing, top-right of the
@@ -33,24 +33,23 @@ export default function StatusBar({ connected }: { connected: boolean }) {
     return () => clearInterval(id);
   }, [activities.length]);
 
-  // The oldest wins: with several calls in flight, the one that has been
-  // waiting longest is the one worth naming.
-  const oldest = activities.reduce<(typeof activities)[number] | null>(
-    (slowest, a) => (slowest === null || a.startedAt < slowest.startedAt ? a : slowest),
-    null,
-  );
+  // Highest priority first, oldest within it. A running job outranks every
+  // request, so the pill can no longer read "Ready!" through a render -
+  // and a background read can no longer replace the label of something
+  // more important that is still in flight, which is what made it flicker.
+  const lead = leadActivity(activities);
 
-  const kind = !connected ? "error" : oldest !== null ? "busy" : "ready";
-  const label = kind === "error" ? "Reconnecting" : oldest !== null ? oldest.label : "Ready!";
+  const kind = !connected ? "error" : lead !== null ? "busy" : "ready";
+  const label = kind === "error" ? "Reconnecting" : lead !== null ? lead.label : "Ready!";
 
   return (
     <div className={`statuspill statuspill--${kind}`} role="status" aria-live="polite">
       <span className="statuspill__dot" aria-hidden="true" />
       <span className="statuspill__label">
         {label}
-        {oldest !== null && "…"}
+        {lead !== null && "…"}
       </span>
-      {oldest !== null && <span className="statuspill__clock mono">{elapsedClock(oldest.startedAt, now)}</span>}
+      {lead !== null && <span className="statuspill__clock mono">{elapsedClock(lead.startedAt, now)}</span>}
       {activities.length > 1 && <span className="statuspill__more">+{activities.length - 1}</span>}
     </div>
   );

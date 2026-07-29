@@ -38,7 +38,7 @@ function TransportThumb({ projectId }: { projectId: string }) {
  * Purely presentational; every action is a callback prop.
  */
 export default function Transport({ events, projects, onCancel, onOpen }: TransportProps) {
-  const { progress, failure, cancelled, finished, connected } = events;
+  const { progress, failure, cancelled, finished, connected, jobStarted, jobStep } = events;
 
   if (!connected) {
     return (
@@ -65,6 +65,30 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
         </div>
         <span className="transport__percent">{progress.percent}%</span>
         <button type="button" className="btn btn--sm" onClick={() => onCancel(progress.project_id)}>
+          <IconStop size={12} />
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // Started, but nothing measurable to report yet. Before this the bar was
+  // empty for as long as the workspace took to prepare - minutes on a real
+  // project - which is indistinguishable from the app having done nothing.
+  if (jobStarted) {
+    const title = titleFor(projects, jobStarted.project_id);
+    return (
+      <div className="transport transport--running">
+        <TransportThumb projectId={jobStarted.project_id} />
+        <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
+        <button type="button" className="transport__open" onClick={() => onOpen(jobStarted.project_id)}>
+          <span className="transport__label">
+            {jobStarted.kind === "render" ? "Starting render" : "Working"} “{title}”
+          </span>
+          <span className="transport__detail">{jobStep?.detail || "Getting ready…"}</span>
+        </button>
+        <span className="transport__spacer" />
+        <button type="button" className="btn btn--sm" onClick={() => onCancel(jobStarted.project_id)}>
           <IconStop size={12} />
           Cancel
         </button>

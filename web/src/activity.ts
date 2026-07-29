@@ -17,12 +17,29 @@ import { useEffect, useState } from "react";
  * "connecting 00:07".
  */
 
+/**
+ * How much the bar should care about one activity.
+ *
+ * `high` is a running job - a render or a pipeline. It is registered from
+ * the event socket, never from an HTTP call, because the call that STARTS
+ * a job returns 202 in milliseconds and its activity ends before anyone
+ * can read it. That is why the pill said "Ready!" through an entire
+ * render.
+ *
+ * The bar names the highest priority present, oldest first within it, and
+ * a lower priority can never replace a higher one. That is what removes
+ * the flicker: two concurrent reads used to swap the label as each
+ * resolved.
+ */
+export type Priority = "high" | "medium" | "low";
+
 export interface Activity {
   id: number;
   /** What the user should understand is happening: "Loading", "Checking",
    * "Saving", "Connecting". Sentence case, no ellipsis - the bar adds it. */
   label: string;
   startedAt: number;
+  priority: Priority;
 }
 
 type Listener = (activities: Activity[]) => void;
@@ -38,9 +55,9 @@ function emit(): void {
 
 /** Register work in progress. Returns the function that ends it - always
  * call it, in a `finally`, or the bar will claim the work never finished. */
-export function beginActivity(label: string): () => void {
+export function beginActivity(label: string, priority: Priority = "low"): () => void {
   const id = nextId++;
-  active.set(id, { id, label, startedAt: Date.now() });
+  active.set(id, { id, label, startedAt: Date.now(), priority });
   emit();
   let done = false;
   return () => {
@@ -63,6 +80,19 @@ export function labelForRequest(method: string, path: string): string {
   if (method !== "GET") return "Saving";
   if (path.startsWith("/api/projects") && !path.includes("/")) return "Loading library";
   return "Loading";
+}
+
+const RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+
+/** The activity the bar should name: highest priority, oldest within it. */
+export function leadActivity(activities: Activity[]): Activity | null {
+  return activities.reduce<Activity | null>((lead, a) => {
+    if (lead === null) return a;
+    if (RANK[a.priority] !== RANK[lead.priority]) {
+      return RANK[a.priority] < RANK[lead.priority] ? a : lead;
+    }
+    return a.startedAt < lead.startedAt ? a : lead;
+  }, null);
 }
 
 export function useActivities(): Activity[] {

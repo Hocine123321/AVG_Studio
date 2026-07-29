@@ -56,6 +56,19 @@ export interface RenderFinishedEvent {
   size_bytes: number;
 }
 
+export interface JobStartedEvent {
+  type: "job_started";
+  project_id: string;
+  kind: "render" | "pipeline";
+}
+
+export interface JobStepEvent {
+  type: "job_step";
+  project_id: string;
+  step: string;
+  detail: string;
+}
+
 export type EngineEvent =
   | ProgressEvent
   | PhaseFailedEvent
@@ -63,7 +76,9 @@ export type EngineEvent =
   | PhaseFinishedEvent
   | PipelineCancelledEvent
   | RenderCancelledEvent
-  | RenderFinishedEvent;
+  | RenderFinishedEvent
+  | JobStartedEvent
+  | JobStepEvent;
 
 /** One phase's live state, in the same shape `ProjectDoc.phases` uses. */
 export interface LivePhase {
@@ -86,6 +101,13 @@ export interface EventsState {
   pipelineCancelled: PipelineCancelledEvent | null;
   cancelled: RenderCancelledEvent | null;
   finished: RenderFinishedEvent | null;
+  /** The job that is running, from its own announcement rather than from
+   * the HTTP call that started it - that call is over in milliseconds.
+   * Cleared by any terminal event. */
+  jobStarted: JobStartedEvent | null;
+  /** Named work with no measurable percentage, e.g. preparing the render
+   * workspace. Shown as the Transport bar's detail line. */
+  jobStep: JobStepEvent | null;
   /** False while the socket is down and a reconnect is pending - surfaced
    * so a dropped connection is something the user can see (Transport),
    * never something that fails silently. */
@@ -113,6 +135,8 @@ const INITIAL_STATE: EventsState = {
   pipelineCancelled: null,
   cancelled: null,
   finished: null,
+  jobStarted: null,
+  jobStep: null,
   connected: false,
   phases: {},
 };
@@ -195,40 +219,56 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
   // replaced by it.
   const phases = foldPhases(previous.phases, payload);
 
+  // Carried forward until a terminal event, like the phase map: the job is
+  // still running while phases start and finish under it, and the status
+  // pill's "a job is running" state is exactly this field being set.
+  const terminal =
+    payload.type === "render_finished" ||
+    payload.type === "render_cancelled" ||
+    payload.type === "pipeline_cancelled" ||
+    payload.type === "phase_failed";
+  const jobStarted =
+    payload.type === "job_started"
+      ? (payload as unknown as JobStartedEvent)
+      : terminal
+        ? null
+        : previous.jobStarted;
+  const jobStep =
+    payload.type === "job_step" ? (payload as unknown as JobStepEvent) : terminal ? null : previous.jobStep;
+  const carried = { phases, jobStarted, jobStep, connected: true };
+
   switch (payload.type) {
     case "phase_started":
-      return { ...INITIAL_STATE, phases, connected: true, phaseStarted: payload as unknown as PhaseStartedEvent };
+      return { ...INITIAL_STATE, ...carried, phaseStarted: payload as unknown as PhaseStartedEvent };
     case "progress":
       // Pipeline progress has no phase field. The immediately preceding
       // phase_started event supplies that association; direct media renders
       // have none and continue to be treated as render progress by App.
       return {
         ...INITIAL_STATE,
-        phases,
-        connected: true,
+        ...carried,
         progress: payload as unknown as ProgressEvent,
         phaseStarted: previous.phaseStarted,
       };
     case "phase_finished":
-      return { ...INITIAL_STATE, phases, connected: true, phaseFinished: payload as unknown as PhaseFinishedEvent };
+      return { ...INITIAL_STATE, ...carried, phaseFinished: payload as unknown as PhaseFinishedEvent };
     case "phase_failed":
-      return { ...INITIAL_STATE, phases, connected: true, failure: payload as unknown as PhaseFailedEvent };
+      return { ...INITIAL_STATE, ...carried, failure: payload as unknown as PhaseFailedEvent };
     case "pipeline_cancelled":
       return {
         ...INITIAL_STATE,
-        phases,
-        connected: true,
+        ...carried,
         pipelineCancelled: payload as unknown as PipelineCancelledEvent,
       };
     case "render_cancelled":
-      return { ...INITIAL_STATE, phases, connected: true, cancelled: payload as unknown as RenderCancelledEvent };
+      return { ...INITIAL_STATE, ...carried, cancelled: payload as unknown as RenderCancelledEvent };
     case "render_finished":
-      return { ...INITIAL_STATE, phases, connected: true, finished: payload as unknown as RenderFinishedEvent };
+      return { ...INITIAL_STATE, ...carried, finished: payload as unknown as RenderFinishedEvent };
     default:
       // "hello" (the socket's own greeting on connect) and anything future
       // and unrecognised both land here - connectedness changes, nothing
       // else does.
-      return { ...INITIAL_STATE, phases, connected: true };
+      return { ...INITIAL_STATE, ...carried };
   }
 }
 
