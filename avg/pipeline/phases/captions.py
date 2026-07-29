@@ -52,10 +52,11 @@ card window - a takeover card owns the whole screen while it is up.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import httpx
 
@@ -120,6 +121,51 @@ def _audio_dir(ctx: PhaseContext) -> Path:
 
 def _optimized_voice_path(ctx: PhaseContext) -> Path:
     return _audio_dir(ctx) / "optimized_voice.mp3"
+
+
+def seed_transcript_cache(
+    project_folder: Path, audio_path: Path, provider: str, words: list[dict[str, Any]]
+) -> Path | None:
+    """Hand this phase's word list to the render's burn pass, for free.
+
+    The burn pass transcribes unless it finds its own cache file
+    (`avg/media/vendor/avg.py:3548-3568`). This phase has ALREADY produced a
+    word list - from AssemblyAI, or from the proportional estimate when
+    there is no key - so writing that list into the vendored cache means the
+    burn never re-uploads the audio and never re-pays for it. It also means
+    the words that get burnt are the same ones this phase timed the cards
+    against.
+
+    Units are converted here, deliberately and in ONE place: this phase
+    works in seconds, the vendored pass in milliseconds.
+
+    `provider` is whatever produced the words - `"assemblyai"` or
+    `"estimated"`. It is part of the cache key, so the render has to pass
+    the same string back; the phase records it in
+    `render/_transcript_source.json` rather than leaving Render to guess. A
+    mismatch is a silent cache miss, not an error, which is exactly why it
+    is written down.
+    """
+    from avg.media.vendor.avg import _seg_cache_key
+
+    try:
+        key = _seg_cache_key("transcript", 0, provider, str(audio_path))  # type: ignore[no-untyped-call]
+    except Exception:  # noqa: BLE001 - a cache we cannot key is a cache we skip
+        return None
+
+    cache_dir = Path(project_folder) / "render" / "_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"transcript_{key}.json"
+    payload = [
+        {
+            "text": str(word.get("text") or ""),
+            "start": int(round(float(word.get("start") or 0.0) * 1000)),
+            "end": int(round(float(word.get("end") or 0.0) * 1000)),
+        }
+        for word in words
+    ]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def _coerce_int(value: object) -> int | None:
@@ -446,6 +492,15 @@ class ScreenTextPhase:
             lines.append(_dialogue_line(cue["start"], cue["end"], cue["text"]))
 
         (rdir / "captions.ass").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        # Hand the same words to the render's burn pass through the vendored
+        # cache, so it neither re-uploads the audio nor re-pays for it, and
+        # burns exactly the words these cards were timed against. The
+        # provider name is part of the cache key, so it is recorded for
+        # Render to pass back rather than guessed there.
+        provider = "assemblyai" if used_assemblyai else "estimated"
+        seed_transcript_cache(Path(ctx.project.folder), audio_path, provider, words)
+        write_json(rdir / "_transcript_source.json", {"provider": provider})
 
         source = "AssemblyAI" if used_assemblyai else "estimated timing"
         ctx.emit(

@@ -662,3 +662,58 @@ def test_assemblyai_poll_times_out_when_never_completed(monkeypatch):
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(captions_module._AssemblyAIError):
         captions_module._assemblyai_poll(b"bytes", "key", client=client, sleep=lambda s: None)
+
+
+def test_the_transcript_cache_is_written_in_milliseconds(tmp_path):
+    """This phase works in SECONDS; the vendored burn pass works in
+    MILLISECONDS (`cue[0]['start']/1000` at `avg/media/vendor/avg.py:3663`).
+    Handing it seconds would stack the whole track's captions inside the
+    first few frames."""
+    from avg.pipeline.phases.captions import seed_transcript_cache
+
+    audio = tmp_path / "audio" / "optimized_voice.mp3"
+    audio.parent.mkdir(parents=True)
+    audio.write_bytes(b"stable bytes standing in for an mp3")
+
+    path = seed_transcript_cache(tmp_path, audio, "estimated", [{"text": "Hi", "start": 1.5, "end": 2.0}])
+
+    assert path is not None
+    assert json.loads(path.read_text(encoding="utf-8")) == [{"text": "Hi", "start": 1500, "end": 2000}]
+
+
+def test_the_transcript_cache_key_is_the_vendors_own(tmp_path):
+    """A key we invented would never be read. The burn pass looks for
+    exactly `transcript_<_seg_cache_key("transcript", 0, provider,
+    audio)>.json` under render/_cache (`avg.py:3557`)."""
+    from avg.media.vendor.avg import _seg_cache_key
+    from avg.pipeline.phases.captions import seed_transcript_cache
+
+    audio = tmp_path / "audio" / "optimized_voice.mp3"
+    audio.parent.mkdir(parents=True)
+    audio.write_bytes(b"stable bytes")
+
+    path = seed_transcript_cache(tmp_path, audio, "assemblyai", [{"text": "Hi", "start": 0.0, "end": 0.5}])
+
+    assert path is not None
+    assert path.name == f"transcript_{_seg_cache_key('transcript', 0, 'assemblyai', str(audio))}.json"
+    assert path.parent == tmp_path / "render" / "_cache"
+
+
+def test_screen_text_seeds_the_cache_and_records_the_provider(tmp_path, monkeypatch):
+    """The render must pass the SAME provider string back, because it is part
+    of the cache key - so the phase records which one produced the words
+    rather than leaving Render to guess."""
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_audio(ctx)
+    _write_scenes(ctx, ["Scene one text.", "Scene two text."])
+
+    ScreenTextPhase().run(ctx)
+
+    assert read_json(render_dir(ctx) / "_transcript_source.json") == {"provider": "estimated"}
+    cached = list((Path(project.folder) / "render" / "_cache").glob("transcript_*.json"))
+    assert len(cached) == 1
+    words = json.loads(cached[0].read_text(encoding="utf-8"))
+    assert words and all(isinstance(w["start"], int) and isinstance(w["end"], int) for w in words)

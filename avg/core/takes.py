@@ -113,7 +113,15 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # own output, so a take that keeps captions has to carry them - it
     # only worked before because kept phases are in practice a prefix,
     # and keeping captions therefore kept director2 too.
-    "screen_text": ("render/captions.ass", "render/card_plan.json"),
+    # `_transcript_source.json` names the provider that produced the words,
+    # which is part of the vendored transcription cache's KEY - a clone that
+    # kept Screen Text but not this would make its render pass the wrong
+    # provider, miss the cache, and re-pay for a transcription.
+    "screen_text": (
+        "render/captions.ass",
+        "render/card_plan.json",
+        "render/_transcript_source.json",
+    ),
 }
 
 # What a legacy (pre-takes) project's artifacts look like at the TOP of its
