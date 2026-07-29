@@ -47,7 +47,7 @@ from avg.config.settings import SettingsDoc, default_settings_path, load_setting
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
 from avg.core.model_cache import ModelCache
-from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
+from avg.core.events import JobStarted, JobStep, PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.takes import take_folder, take_root
@@ -613,8 +613,19 @@ def create_app(
         async def _dispatch(event: Any) -> None:
             await app.state.manager.broadcast(event.model_dump(mode="json"))
 
+        def _emit(event: Any) -> None:
+            # Submitted, not awaited - see the render worker's `_emit` for
+            # why waiting here deadlocks.
+            with suppress(Exception):
+                asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
+
         def _worker() -> None:
             try:
+                # A pipeline has no preparation step - it starts working
+                # immediately - but it still has to say it began, or the
+                # status pill has nothing to show until the first phase
+                # emits progress.
+                _emit(JobStarted(project_id=project.id, kind="pipeline"))
                 # `project` is the SAME object cached in `app.state.projects`
                 # - `run_pipeline` mutates its `.phases[key]` records in
                 # place (see `avg.pipeline.runner.run`'s own docstring), so
@@ -739,15 +750,44 @@ def create_app(
             await app.state.manager.broadcast(event.model_dump(mode="json"))
             _apply_terminal_event(app.state.projects.get(project_id), event)
 
+        def _emit(event: Any) -> None:
+            """Broadcast one event from the worker thread.
+
+            Deliberately NOT through `_dispatch`, which also calls
+            `_apply_terminal_event` - that function creates a `render`
+            PhaseRecord for anything that is not a ProgressEvent, so
+            routing a JobStarted through it would invent a render record
+            on a project that has not rendered anything.
+            """
+            # Submitted, never waited on. `run_coroutine_threadsafe`
+            # preserves submission order, so the sequence a client sees is
+            # still exact - but blocking on the result would make this
+            # worker depend on the loop being serviced right now, which
+            # deadlocks the moment a job starts between two requests.
+            with suppress(Exception):
+                asyncio.run_coroutine_threadsafe(
+                    app.state.manager.broadcast(event.model_dump(mode="json")), loop
+                )
+
         def _worker() -> None:
             try:
+                # Announced before a single file is touched: preparing the
+                # workspace is the part that used to look like a hang.
+                _emit(JobStarted(project_id=project_id, kind="render"))
+                _emit(
+                    JobStep(
+                        project_id=project_id,
+                        step="preparing",
+                        detail="Preparing the render workspace",
+                    )
+                )
                 # Renders run against a disposable COPY of the project, never
                 # the folder itself. render_project writes master_output.mp4
                 # into the folder it is given, so rendering in place would
                 # overwrite the finished video the user already has - their
                 # actual work, with no undo - and destroy the original that
                 # Slice 1 exists to compare the new output against.
-                with render_workspace(req.project_folder, keep=True) as workspace:
+                with render_workspace(req.project_folder) as workspace:
                     _run_render(req.model_copy(update={"project_folder": workspace}))
             finally:
                 app.state.render_thread = None

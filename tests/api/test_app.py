@@ -178,3 +178,34 @@ def test_a_pipeline_run_advances_the_current_takes_records(tmp_path, monkeypatch
     takes = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     current = next(t for t in takes["takes"] if t["id"] == takes["current_take_id"])
     assert current["phases"]["brief"]["status"] == "done"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+def test_job_started_is_the_first_event_a_render_emits(tmp_path):
+    """A render was silent until the encoder's first progress line.
+
+    The workspace preparation happens before the child process starts and
+    takes as long as the project is big, so the app looked hung for
+    minutes. The job now announces itself before a single file is touched.
+    """
+    output_root = tmp_path / "output"
+    _make_legacy_project_with_video(output_root, "proj-jobstart")
+
+    client = TestClient(
+        create_app(token="t0k", output_root=output_root, thumb_cache_dir=tmp_path / "thumbs")
+    )
+
+    with client.websocket_connect("/ws/events?token=t0k") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        started = client.post("/api/projects/proj-jobstart/render", headers={"X-AVG-Token": "t0k"})
+        assert started.status_code == 202
+
+        first = ws.receive_json()
+        second = ws.receive_json()
+
+    assert first["type"] == "job_started"
+    assert first["kind"] == "render"
+    # The workspace preparation is named rather than given a fake
+    # percentage - it has no measurable denominator.
+    assert second["type"] == "job_step"
+    assert second["step"] == "preparing"

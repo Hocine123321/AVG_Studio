@@ -228,6 +228,13 @@ def test_create_starts_the_pipeline_and_streams_its_events_over_the_socket(clien
         r = client.post("/api/projects", headers=AUTH, json={"topic": "How Rome Fell"})
         assert r.status_code == 201
 
+        # The job announces itself first (Slice 8) - before this, nothing
+        # reached a client until a phase emitted, which for a render meant
+        # minutes of silence while the workspace was prepared.
+        started = ws.receive_json()
+        assert started["type"] == "job_started"
+        assert started["kind"] == "pipeline"
+
         first = ws.receive_json()
         assert first["type"] == "phase_started"
         assert first["phase"] == "brief"

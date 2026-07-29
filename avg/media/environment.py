@@ -190,8 +190,32 @@ _INPUT_DIRS = ("images", "audio", "render", "script")
 _INPUT_FILES = ("project.json", "pipeline_state.json")
 
 
+def _link_file(source: Path, dest: Path) -> None:
+    """Hardlink `source` to `dest`, copying if the link is refused.
+
+    A link fails across volumes, on FAT32, and on some network shares -
+    all ordinary situations, none of them worth surfacing as an error.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, dest)
+    except OSError:
+        shutil.copy2(source, dest)
+
+
+def _link_tree(source: Path, dest: Path) -> None:
+    """`_link_file` over a whole directory, preserving its shape."""
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in sorted(source.rglob("*")):
+        target = dest / item.relative_to(source)
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            _link_file(item, target)
+
+
 @contextmanager
-def render_workspace(project_folder: Path, keep: bool = False) -> Iterator[Path]:
+def render_workspace(project_folder: Path, keep: bool | None = None) -> Iterator[Path]:
     """Yield a disposable copy of `project_folder` for a render to write into.
 
     The copy carries only what the render reads. `master_output.mp4` is
@@ -199,19 +223,37 @@ def render_workspace(project_folder: Path, keep: bool = False) -> Iterator[Path]
     appearing there is unambiguously this render's output rather than a
     leftover that would make a failed render look successful.
 
-    Set `keep=True` to leave the workspace on disk (for inspecting or
-    comparing output); it is removed on exit otherwise, including on error.
+    Inputs are HARDLINKED where the filesystem allows it and copied only
+    where it does not. A real project is images and audio measured in
+    hundreds of megabytes, and copying them was why a render sat silent
+    for minutes before the child process even started. A hardlink is the
+    same bytes under a second name, so the no-master_output property above
+    is untouched: nothing in the render writes over an input in place, it
+    only adds the output file.
+
+    `keep=None` reads `AVG_KEEP_RENDER_WORKSPACE`. This used to be passed
+    `True` unconditionally by the render route, so every render ever run
+    left a full copy of the project in `%TEMP%` permanently - the escape
+    hatch for inspecting a render's workspace is worth keeping, but it
+    cannot be the default.
     """
+    if keep is None:
+        keep = os.environ.get("AVG_KEEP_RENDER_WORKSPACE", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
     workspace = Path(tempfile.mkdtemp(prefix="avg-render-"))
     try:
         for name in _INPUT_DIRS:
             source = project_folder / name
             if source.is_dir():
-                shutil.copytree(source, workspace / name)
+                _link_tree(source, workspace / name)
         for name in _INPUT_FILES:
             source = project_folder / name
             if source.is_file():
-                shutil.copy2(source, workspace / name)
+                _link_file(source, workspace / name)
         yield workspace
     finally:
         if not keep:
