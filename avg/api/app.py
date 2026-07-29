@@ -198,22 +198,27 @@ def _build_render_request(
             **_render_kwargs(channel_settings or {}),
         )
 
-    return RenderRequest(
-        project_folder=project.folder,
-        fps=settings.fps,
-        codec=settings.codec,
-        aspect_ratio=settings.aspect_ratio,
-        ken_burns=settings.ken_burns,
-        short_edge=settings.short_edge,
-        kb_intensity=settings.kb_intensity,
-        kb_mode=settings.kb_mode,
-        render_engine=settings.render_engine,
-        render_opts=settings.render_opts,
-        # Last, so the user's own channel settings win over whatever the
-        # legacy config.json carried - that file predates every one of them
-        # and the user cannot edit it from this app.
-        **_render_kwargs(channel_settings or {}),
-    )
+    # Merged into ONE dict rather than spread after the explicit keywords.
+    # Spreading collided: `_render_kwargs` returns `fps`, `codec`,
+    # `ken_burns` and `render_engine` too, so any channel that had one of
+    # them set raised `RenderRequest() got multiple values for keyword
+    # argument 'render_engine'` and every render returned 500. `.update()`
+    # keeps the intent - the user's own channel settings win over the
+    # legacy config.json, which they cannot edit from this app - without
+    # the duplicate-keyword crash.
+    kwargs: dict[str, object] = {
+        "fps": settings.fps,
+        "codec": settings.codec,
+        "aspect_ratio": settings.aspect_ratio,
+        "ken_burns": settings.ken_burns,
+        "short_edge": settings.short_edge,
+        "kb_intensity": settings.kb_intensity,
+        "kb_mode": settings.kb_mode,
+        "render_engine": settings.render_engine,
+        "render_opts": settings.render_opts,
+    }
+    kwargs.update(_render_kwargs(channel_settings or {}))
+    return RenderRequest(project_folder=project.folder, **kwargs)  # type: ignore[arg-type]
 
 
 class _ConnectionManager:

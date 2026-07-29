@@ -85,3 +85,51 @@ def test_video_route_honours_range_and_returns_206(tmp_path):
 
     whole = video_path.read_bytes()
     assert r.content == whole[:100]
+
+
+def _project(folder) -> "ProjectDoc":
+    from avg.core.models import ProjectDoc
+
+    return ProjectDoc(
+        id="p1",
+        title="P",
+        folder=folder,
+        created=datetime.now(timezone.utc),
+    )
+
+
+def test_render_request_merges_channel_settings_over_the_legacy_config(tmp_path):
+    """Regression: POST /render died with a duplicate keyword argument.
+
+    `_build_render_request` spread the channel's render kwargs after
+    passing the same fields positionally from the legacy config.json, so
+    any channel that had `render_engine`, `fps`, `render_codec` or
+    `ken_burns` set produced
+
+        TypeError: RenderRequest() got multiple values for keyword
+        argument 'render_engine'
+
+    and every render returned 500. No test caught it because every test
+    pointed `output_root` at an empty tmp_path, where the config load
+    fails and the function returns from its fallback branch - the branch
+    that never had the collision.
+    """
+    from avg.api.app import _build_render_request
+
+    output_root = tmp_path / "output"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text(
+        json.dumps({"video": {"fps": 24, "render_engine": "auto"}}), encoding="utf-8"
+    )
+
+    request = _build_render_request(
+        _project(output_root / "p1"),
+        output_root,
+        channel_settings={"render_engine": "moviepy", "fps": 30, "render_codec": "libx265"},
+    )
+
+    # The channel wins over the legacy file, which the user cannot edit.
+    assert request.render_engine == "moviepy"
+    assert request.fps == 30
+    assert request.codec == "libx265"
