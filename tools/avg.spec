@@ -49,6 +49,7 @@ ENTRY = REPO_ROOT / "avg" / "shell.py"
 WEB_DIST = REPO_ROOT / "web" / "dist"
 VENDOR_FFMPEG = REPO_ROOT / "vendor" / "ffmpeg"
 AVG_ASSETS = REPO_ROOT / "avg" / "assets"
+ICON = REPO_ROOT / "assets" / "icon.ico"
 
 if not WEB_DIST.is_dir():
     raise SystemExit(
@@ -105,6 +106,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Every Windows size is baked into this .ico by tools/make_icon.py -
+    # without 16 and 32 the taskbar and title bar downscale the 256 and it
+    # goes muddy. Passed as a plain path rather than guarded on existence:
+    # a build with no icon is a build worth failing.
+    icon=str(ICON),
 )
 
 coll = COLLECT(
