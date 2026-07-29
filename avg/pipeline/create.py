@@ -32,8 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from avg.config.channels import Channel
-from avg.core.models import ProjectDoc
+from avg.core.models import PhaseRecord, ProjectDoc, Take
 from avg.core.settings_schema import channel_defaults
+from avg.core.takes import alias_root_take_phases
 
 # Sub-folders a fresh project needs before any phase can run, matching what
 # `avg.media.environment.render_workspace` already copies out of an existing
@@ -138,13 +139,30 @@ def new_project(topic: str, channel: Channel, output_root: Path) -> ProjectDoc:
 
     aspect_ratio = channel.settings.get("aspect_ratio") or channel_defaults()["aspect_ratio"]
 
+    # `phases` is created once and handed to BOTH the document and take 1,
+    # by reference. The runner mutates `project.phases[key]` in place, and
+    # the UI reads the CURRENT TAKE's records - if these were two dicts, a
+    # first run would advance one and display the other. That was the
+    # frozen phase rail: `migrate_to_takes` snapshotted `project.phases`
+    # into take 1 lazily, on the first `GET /takes`, and the run carried on
+    # mutating the original.
+    #
+    # Take 1 gets no folder of its own. Every phase writes in place, at the
+    # project root (`avg.pipeline.phases._common.script_dir`), so the root
+    # IS take 1's storage; `clone_take` knows to read it from there.
+    phases: dict[str, PhaseRecord] = {}
     doc = ProjectDoc(
         id=folder_name,
         title=topic,
         folder=folder,
         aspect_ratio=aspect_ratio,
         created=now,
-        phases={},
+        phases=phases,
+        takes=[Take(id=1, label="Take 1", created=now, phases=phases, storage="root")],
+        current_take_id=1,
     )
+    # Pydantic copied `phases` into both models on construction, so this is
+    # what actually makes them one object - see `alias_root_take_phases`.
+    alias_root_take_phases(doc)
     save_project(doc)
     return doc

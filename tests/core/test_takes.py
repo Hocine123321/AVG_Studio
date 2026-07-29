@@ -359,3 +359,32 @@ def test_estimate_seconds_no_takes_at_all_returns_none(tmp_path):
 
     assert seconds is None
     assert unknown == ["script"]
+
+
+def test_cloning_a_root_storage_take_reads_the_project_root(tmp_path):
+    """Take 1's artifacts live at the project root.
+
+    Phases write in place (`ctx.project.folder`), so a project created with
+    take 1 has no `takes/1/` folder at all. Cloning it must still find the
+    files - otherwise every 'new take' from a first run starts empty, which
+    is the exact failure `migrate_to_takes`' double-storage was kept to
+    avoid.
+    """
+    folder = tmp_path / "proj"
+    (folder / "script").mkdir(parents=True)
+    (folder / "script" / "brief.json").write_text('{"a": 1}', encoding="utf-8")
+
+    now = datetime.now(timezone.utc)
+    project = ProjectDoc(
+        id="p",
+        title="P",
+        folder=folder,
+        created=now,
+        phases={"brief": _done("brief")},
+        takes=[Take(id=1, label="Take 1", created=now, phases={"brief": _done("brief")}, storage="root")],
+        current_take_id=1,
+    )
+
+    take2 = clone_take(project, 1, ["brief"])
+
+    assert (take_folder(project, take2.id) / "script" / "brief.json").is_file()

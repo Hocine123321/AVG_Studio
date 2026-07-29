@@ -99,6 +99,46 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
 _LEGACY_ARTIFACT_DIRS: tuple[str, ...] = ("script", "images", "audio", "render")
 
 
+def take_root(project: ProjectDoc, take_id: int) -> Path:
+    """Where `take_id`'s artifacts actually are.
+
+    The project folder for a `storage="root"` take, its own folder
+    otherwise. Every caller that wants to READ a take's files goes through
+    this rather than `take_folder`, which only ever names the `takes/<id>/`
+    path and is still what a take that owns a folder is created at.
+    """
+    take = next((t for t in project.takes if t.id == take_id), None)
+    if take is not None and take.storage == "root":
+        return Path(project.folder)
+    return take_folder(project, take_id)
+
+
+def alias_root_take_phases(project: ProjectDoc) -> None:
+    """Make a `storage="root"` take's phase records the SAME OBJECT as
+    `project.phases`.
+
+    A root-storage take keeps its artifacts in the project folder itself,
+    so its records and `project.phases` describe the same files. Two dicts
+    holding the same facts is how the phase rail froze: the runner
+    advanced one of them and Studio displayed the other.
+
+    Aliasing rather than copying is deliberate, and it has to be done as
+    an assignment: pydantic validates (and therefore COPIES) a dict passed
+    to a model's constructor, so handing the same object to `ProjectDoc`
+    and `Take` produces two dicts, not one. `validate_assignment` is off,
+    so assigning afterwards keeps the reference.
+
+    Keyed on the declared `storage`, never on whether a folder happens to
+    exist: a take whose folder is merely absent would otherwise adopt the
+    project's records and lose its own. Idempotent, and a no-op for a
+    project whose current take owns its folder.
+    """
+    take = next((t for t in project.takes if t.id == project.current_take_id), None)
+    if take is None or take.storage != "root":
+        return
+    take.phases = project.phases
+
+
 def take_folder(project: ProjectDoc, take_id: int) -> Path:
     """`<project.folder>/takes/<take_id>/` - where that take's own copy of
     every artifact it owns lives, mirroring a fresh project's own
@@ -162,7 +202,13 @@ def clone_take(
 
     new_id = _next_take_id(project)
     dest_folder = take_folder(project, new_id)
-    source_folder = take_folder(project, source_take_id)
+    # `take_root`, not `take_folder`: a `storage="root"` take (take 1 of
+    # anything created after Slice 8) keeps its artifacts in the project
+    # folder itself, and copying from an empty `takes/1/` would make every
+    # "new take" off a first run start with nothing - the failure mode
+    # `migrate_to_takes`' deliberate double-storage exists to avoid for
+    # legacy projects.
+    source_folder = take_root(project, source_take_id)
 
     try:
         dest_folder.mkdir(parents=True, exist_ok=False)

@@ -39,6 +39,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from avg.core.models import PhaseRecord, ProjectDoc
+from avg.core.takes import alias_root_take_phases
 from avg.pipeline.registry import REGISTRY
 
 # New pipeline's phase order (resume position, not the legacy phase names).
@@ -123,6 +124,12 @@ def import_project(folder: Path) -> ProjectDoc:
     if native_doc is not None:
         if Path(native_doc.folder) != folder:
             native_doc = native_doc.model_copy(update={"folder": folder})
+        # Re-establish the aliasing that `new_project` set up and that a
+        # round trip through JSON necessarily broke: a take storing its
+        # artifacts at the project root shares one records dict with the
+        # project, or a run advances one copy while the screen reads the
+        # other. See `avg.core.takes.alias_root_take_phases`.
+        alias_root_take_phases(native_doc)
         return native_doc
 
     meta = project_data.get("meta", {})

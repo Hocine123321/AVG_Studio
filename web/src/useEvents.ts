@@ -65,6 +65,13 @@ export type EngineEvent =
   | RenderCancelledEvent
   | RenderFinishedEvent;
 
+/** One phase's live state, in the same shape `ProjectDoc.phases` uses. */
+export interface LivePhase {
+  status: "pending" | "running" | "done" | "failed";
+  duration_ms?: number;
+  error?: string | null;
+}
+
 export interface EventsState {
   /** The most recently seen event of each kind - not a history, and not
    * keyed per-project. `avg.api.app` enforces one render at a time for the

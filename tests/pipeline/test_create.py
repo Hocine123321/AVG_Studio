@@ -68,3 +68,28 @@ def test_new_project_creates_output_root_if_missing(tmp_path):
     output_root = tmp_path / "not_yet_created"
     project = new_project("Topic", _channel(), output_root)
     assert project.folder.is_dir()
+
+
+def test_a_new_project_has_take_1_from_the_start(tmp_path):
+    """The take is not created lazily on first read.
+
+    It used to be: `GET /takes` called `migrate_to_takes`, which COPIED
+    `project.phases` into the take as a snapshot. The runner then went on
+    mutating `project.phases` - a different dict - so a first run's rail
+    froze at whatever was true when the screen was opened.
+    """
+    doc = new_project("A topic", _channel(), tmp_path)
+
+    assert [t.id for t in doc.takes] == [1]
+    assert doc.current_take_id == 1
+
+
+def test_take_1_shares_the_phases_dict_rather_than_copying_it(tmp_path):
+    """Same object, not an equal one. This is what makes the runner's
+    in-place mutation visible through the take the UI reads."""
+    from avg.core.models import PhaseRecord
+
+    doc = new_project("A topic", _channel(), tmp_path)
+    doc.phases["brief"] = PhaseRecord(name="brief", status="done", duration_ms=10)
+
+    assert doc.takes[0].phases["brief"].status == "done"

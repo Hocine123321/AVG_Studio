@@ -55,6 +55,22 @@ class Take(BaseModel):
     rerolled_from: str | None = None
     phases: dict[str, PhaseRecord] = Field(default_factory=dict)
     master_output: Path | None = None
+    #: Where this take's artifacts actually live.
+    #:
+    #: `"own"` - `<project.folder>/takes/<id>/`, which is what a cloned
+    #: take and a migrated legacy take both get.
+    #:
+    #: `"root"` - the project folder itself. Take 1 of anything created
+    #: after Slice 8 is this: every phase writes in place
+    #: (`avg.pipeline.phases._common.script_dir`), so the project root IS
+    #: that take's storage and copying it into `takes/1/` would store the
+    #: same bytes twice.
+    #:
+    #: Declared rather than inferred from whether the folder exists. That
+    #: inference looked equivalent and was not: a take whose folder is
+    #: merely absent - one built in a test, one whose folder was removed -
+    #: would read as root storage and adopt the project's phase records.
+    storage: Literal["root", "own"] = "own"
 
 class ProjectDoc(BaseModel):
     schema_version: int = 1

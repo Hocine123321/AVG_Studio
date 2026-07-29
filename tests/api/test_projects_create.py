@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from avg.api.app import create_app
 from avg.config.channels import get_channel
 from avg.core.events import PhaseFinished, PhaseStarted
-from avg.core.takes import migrate_to_takes, take_folder
+from avg.core.takes import clone_take, take_folder
 
 TOKEN = "t0k"
 AUTH = {"X-AVG-Token": TOKEN}
@@ -169,16 +169,24 @@ def test_list_projects_derives_script_substate_from_current_artifacts(client):
     (script / "narration.txt").write_text("Narration", encoding="utf-8")
     assert substate() == "partial"
 
-    # Once the project has a current take, the top-level legacy artifacts
-    # must no longer influence the display state.
-    migrate_to_takes(project)
+    # Take 1 stores its artifacts AT the project root (Slice 8:
+    # `Take.storage == "root"`), so the root files are its files - this
+    # half used to assert the opposite, back when take 1 was created
+    # lazily by `migrate_to_takes` with a folder of its own.
     (script / "scenes.json").write_text("[]", encoding="utf-8")
-    assert substate() == "partial"
-
-    assert project.current_take_id is not None
-    current_script = take_folder(project, project.current_take_id) / "script"
-    (current_script / "scenes.json").write_text("[]", encoding="utf-8")
     assert substate() == "done"
+
+    # What still has to hold: a take that OWNS a folder reads only its own
+    # files, and the root's artifacts must not leak into it.
+    own = clone_take(project, 1, [])
+    project.current_take_id = own.id
+    assert own.storage == "own"
+    assert substate() == "pending"
+
+    own_script = take_folder(project, own.id) / "script"
+    own_script.mkdir(parents=True, exist_ok=True)
+    (own_script / "narration.txt").write_text("Narration", encoding="utf-8")
+    assert substate() == "partial"
 
 
 def test_create_override_never_persists_to_the_channel_document(client, paths):

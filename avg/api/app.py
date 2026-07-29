@@ -50,7 +50,7 @@ from avg.core.model_cache import ModelCache
 from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
-from avg.core.takes import take_folder
+from avg.core.takes import take_folder, take_root
 from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
@@ -483,8 +483,12 @@ def create_app(
         # value must always reflect the current take's files.
         projects = []
         for project in app.state.projects.values():
+            # `take_root`, not `take_folder`: take 1 of a project created
+            # after Slice 8 stores its artifacts in the project folder
+            # itself, so naming `takes/1/` here would look at an empty
+            # directory and report every script as pending.
             root = (
-                take_folder(project, project.current_take_id)
+                take_root(project, project.current_take_id)
                 if project.current_take_id is not None
                 else Path(project.folder)
             )
@@ -629,6 +633,17 @@ def create_app(
                         fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
                         fut.result()
             finally:
+                # Take 1 shares `project.phases` by reference (see
+                # `avg.core.takes.alias_root_take_phases`), so its phase
+                # records are already current. `master_output` is a value,
+                # not a dict, so it is copied across here - a take that
+                # finished a render must own its output path or the take
+                # strip shows a finished take with nothing to play.
+                take = next((t for t in project.takes if t.id == project.current_take_id), None)
+                if take is not None and project.master_output is not None:
+                    take.master_output = project.master_output
+                with suppress(Exception):
+                    save_project(project)
                 app.state.render_thread = None
                 app.state.rendering_project_id = None
                 app.state.pipeline_cancel_token = None

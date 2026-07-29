@@ -133,3 +133,48 @@ def test_render_request_merges_channel_settings_over_the_legacy_config(tmp_path)
     assert request.render_engine == "moviepy"
     assert request.fps == 30
     assert request.codec == "libx265"
+
+
+def test_a_pipeline_run_advances_the_current_takes_records(tmp_path, monkeypatch):
+    """The regression test for the frozen phase rail.
+
+    Runs one fake phase and asserts the CURRENT TAKE - what Studio reads -
+    saw it finish, not just `project.phases`. Before Slice 8 these were two
+    dicts: `GET /takes` snapshotted `project.phases` into take 1 lazily and
+    the runner carried on mutating the original.
+    """
+    import avg.api.app as app_module
+    from avg.core.models import PhaseRecord
+
+    def fake_run(project, **kwargs):
+        project.phases["brief"] = PhaseRecord(name="brief", status="done", duration_ms=5)
+        kwargs["on_phase_change"]()
+        return iter(())
+
+    monkeypatch.setattr(app_module, "run_pipeline", fake_run)
+
+    client = TestClient(
+        create_app(
+            token="t0k",
+            output_root=tmp_path / "output",
+            thumb_cache_dir=tmp_path / "thumbs",
+            settings_path=tmp_path / "settings.json",
+            channels_dir=tmp_path / "channels",
+            secrets_path=tmp_path / "secrets.dat",
+            errors_path=tmp_path / "errors.json",
+        )
+    )
+    channel = client.post("/api/channels", headers={"X-AVG-Token": "t0k"}, json={"label": "C"}).json()
+    client.post(f"/api/channels/{channel['id']}/activate", headers={"X-AVG-Token": "t0k"})
+
+    created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=5)
+
+    takes = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
+    current = next(t for t in takes["takes"] if t["id"] == takes["current_take_id"])
+    assert current["phases"]["brief"]["status"] == "done"
