@@ -409,6 +409,20 @@ a:hover {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Clears the status pill's band (top 14px, ~35px tall). The pill floats
+     over this area, and without the gutter it sat on top of whatever each
+     screen right-aligns in its header - on Studio that is the primary
+     action, which a status readout must never cover. Reserved here once
+     rather than per screen, so a screen added later cannot reintroduce the
+     collision. The pill ends at 49px; this leaves air below it rather than
+     letting a header sit flush against its edge. */
+  padding-top: 34px;
+}
+
+/* Welcome owns the whole window and has no header to protect - the gutter
+   would just push its centred content off-centre. */
+.app-shell__content:has(> .welcome) {
+  padding-top: 0;
 }
 
 /* ---- welcome (first run) ----

@@ -64,7 +64,6 @@ export default function HealthPanel() {
                 <th>Component</th>
                 <th>State</th>
                 <th>Version</th>
-                <th>Detail</th>
               </tr>
             </thead>
             <tbody>
@@ -76,9 +75,12 @@ export default function HealthPanel() {
                       {component.ok ? "Present" : "Missing"}
                     </span>
                   </td>
-                  <td className="mono">{component.version || "—"}</td>
-                  <td className="models__detail" title={component.detail}>
-                    {component.detail || "—"}
+                  {/* No Detail column here, per the 3rd redesign: this is
+                      the at-a-glance summary and the full reason for a
+                      failure lives on the App Health screen. The detail is
+                      still reachable as the row's tooltip. */}
+                  <td className="mono" title={component.detail}>
+                    {component.version || "—"}
                   </td>
                 </tr>
               ))}
