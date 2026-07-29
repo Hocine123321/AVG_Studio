@@ -88,7 +88,13 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "visuals": ("images",),
     "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3"),
     "director2": ("render/direction_plan.json", "render/card_plan.json"),
-    "captions": ("render/captions.ass",),
+    # `card_plan.json` appears here as well as under director2 because
+    # Captions REWRITES it in place, adding each card's start/end times
+    # (`avg/pipeline/phases/captions.py`). Those timings are captions'
+    # own output, so a take that keeps captions has to carry them - it
+    # only worked before because kept phases are in practice a prefix,
+    # and keeping captions therefore kept director2 too.
+    "captions": ("render/captions.ass", "render/card_plan.json"),
 }
 
 # What a legacy (pre-takes) project's artifacts look like at the TOP of its

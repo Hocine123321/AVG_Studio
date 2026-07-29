@@ -72,9 +72,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
+from avg.core.artifacts import available, resolve, spec_for
 from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
@@ -317,6 +319,72 @@ def _sync_current_take(project: ProjectDoc, take: Take) -> None:
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+
+
+@router.get("/api/projects/{project_id}/takes/{take_id}/artifacts")
+async def list_take_artifacts(project_id: str, take_id: int, request: Request) -> dict:
+    """What this take actually has on disk, by artifact key.
+
+    Drives the panel's header strip and lets it skip a body whose file was
+    never written - a phase that failed halfway leaves some of its
+    artifacts and not others, and "the file is not there" is a fact worth
+    stating rather than an empty view.
+    """
+    project = _get_project(request.app.state, project_id)
+    return {"files": available(project, take_id)}
+
+
+@router.get("/api/projects/{project_id}/takes/{take_id}/artifact/{key}")
+def get_take_artifact(project_id: str, take_id: int, key: str, request: Request) -> FileResponse:
+    # A plain `def`: FileResponse reads the file on a worker thread, and a
+    # ranged audio request must not stall the event loop carrying render
+    # progress. FileResponse is also what handles Range - it answers 206 +
+    # Content-Range straight off the ASGI scope, same as `project_video`.
+    project = _get_project(request.app.state, project_id)
+    path = resolve(project, take_id, key)
+    if path is None or not path.is_file():
+        # One 404 for unknown key, unknown take and missing file alike:
+        # which of the three it was is not something a file-serving route
+        # should tell a client.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such artifact")
+    spec = spec_for(key)
+    return FileResponse(path, media_type=spec.media_type if spec else "application/octet-stream")
+
+
+@router.get("/api/projects/{project_id}/takes/{take_id}/artifact/{key}/{name}")
+def get_take_artifact_file(
+    project_id: str, take_id: int, key: str, name: str, request: Request
+) -> FileResponse:
+    """One file out of a directory artifact (`images`).
+
+    `name` is validated against the directory's own listing rather than
+    sanitised - a name that is not in the listing does not exist, which is
+    both the security answer and the honest one.
+    """
+    project = _get_project(request.app.state, project_id)
+    folder = resolve(project, take_id, key)
+    if folder is None or not folder.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such artifact")
+    match = next((f for f in folder.iterdir() if f.is_file() and f.name == name), None)
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such file")
+    return FileResponse(match)
+
+
+@router.get("/api/projects/{project_id}/takes/{take_id}/artifact-list/{key}")
+async def list_take_artifact_dir(project_id: str, take_id: int, key: str, request: Request) -> dict:
+    """The filenames inside a directory artifact, sorted.
+
+    A separate path segment from `artifact/{key}` rather than a query
+    parameter on it: the two return different things (a listing and a
+    file), and one route that returns either depending on a flag is a
+    route with two contracts.
+    """
+    project = _get_project(request.app.state, project_id)
+    folder = resolve(project, take_id, key)
+    if folder is None or not folder.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such artifact")
+    return {"files": sorted(f.name for f in folder.iterdir() if f.is_file())}
 
 
 @router.get("/api/projects/{project_id}/takes")
