@@ -34,7 +34,7 @@ export const PHASE_DEFS: readonly PhaseDef[] = [
   { key: "visuals", label: "Visuals" },
   { key: "voice", label: "Voice & audio" },
   { key: "director2", label: "Director II" },
-  { key: "captions", label: "Captions" },
+  { key: "screen_text", label: "Screen Text" },
   { key: "render", label: "Render" },
 ];
 

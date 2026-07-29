@@ -1,6 +1,6 @@
 """Tests for the two "polish" phases wired into ids 5-6 of
 `avg.pipeline.registry.REGISTRY`: `avg.pipeline.phases.director.
-Director2Phase` and `avg.pipeline.phases.captions.CaptionsPhase`.
+Director2Phase` and `avg.pipeline.phases.captions.ScreenTextPhase`.
 
 No live API calls anywhere in this file:
   - Director II's text-model call is mocked the same way
@@ -50,7 +50,7 @@ from avg.core.models import ProjectDoc
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases import captions as captions_module
 from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, write_json
-from avg.pipeline.phases.captions import CaptionsPhase
+from avg.pipeline.phases.captions import ScreenTextPhase
 from avg.pipeline.phases.director import Director2Phase
 from avg.providers.text.router import TextResult
 
@@ -259,7 +259,7 @@ def test_director2_caps_card_frequency_to_roughly_one_per_three_scenes(tmp_path,
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# CaptionsPhase
+# ScreenTextPhase
 # ═══════════════════════════════════════════════════════════════════════
 
 _FIXED_DURATION_SECONDS = 12.0
@@ -276,21 +276,21 @@ def _write_audio(ctx: PhaseContext) -> None:
 def test_captions_inputs_ready_false_without_audio(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
-    assert CaptionsPhase().inputs_ready(ctx) is False
+    assert ScreenTextPhase().inputs_ready(ctx) is False
 
 
 def test_captions_inputs_ready_true_with_audio(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
     _write_audio(ctx)
-    assert CaptionsPhase().inputs_ready(ctx) is True
+    assert ScreenTextPhase().inputs_ready(ctx) is True
 
 
 def test_captions_raises_when_audio_is_missing(tmp_path):
     project = _project(tmp_path)
     ctx, _ = _ctx(project)
     with pytest.raises(AvgError) as excinfo:
-        CaptionsPhase().run(ctx)
+        ScreenTextPhase().run(ctx)
     assert excinfo.value.kind == ErrorKind.bug
 
 
@@ -300,7 +300,7 @@ def test_captions_raises_when_scenes_json_is_missing(tmp_path, monkeypatch):
     ctx, _ = _ctx(project)
     _write_audio(ctx)
     with pytest.raises(AvgError) as excinfo:
-        CaptionsPhase().run(ctx)
+        ScreenTextPhase().run(ctx)
     assert excinfo.value.kind == ErrorKind.bug
 
 
@@ -315,7 +315,7 @@ def test_captions_produced_with_no_assemblyai_key(tmp_path, monkeypatch):
     _write_audio(ctx)
     _write_scenes(ctx, ["In nineteen eighty seven a wall fell", "Golf hotel india juliet kilo lima"])
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
 
     ass_path = render_dir(ctx) / "captions.ass"
     assert ass_path.exists()
@@ -340,7 +340,7 @@ def test_captions_ass_header_matches_the_real_schema(tmp_path, monkeypatch):
     _write_audio(ctx)
     _write_scenes(ctx, ["In nineteen eighty seven everything changed forever"])
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
 
     assert "[Script Info]\nTitle: AVG Captions\nScriptType: v4.00+\n" in content
@@ -366,7 +366,7 @@ def test_captions_font_family_reaches_the_ass_style_line(tmp_path, monkeypatch):
     _write_audio(ctx)
     _write_scenes(ctx, ["A single simple scene of narration text."])
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
     assert "Style: Default,Bebas Neue," in content
 
@@ -380,7 +380,7 @@ def test_captions_font_family_defaults_to_arial_when_unset(tmp_path, monkeypatch
     _write_audio(ctx)
     _write_scenes(ctx, ["A single simple scene of narration text."])
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
     assert "Style: Default,Arial," in content
 
@@ -412,7 +412,7 @@ def test_captions_suppressed_during_a_takeover_card_window(tmp_path, monkeypatch
         "cards": [{"element": "focused", "scene": 1, "text": "irrelevant", "accent": "accent1"}]
     })
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
 
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
     dialogue_lines = [ln for ln in content.splitlines() if ln.startswith("Dialogue:")]
@@ -448,7 +448,7 @@ def test_captions_with_assemblyai_key_uses_real_transcription(tmp_path, monkeypa
     _write_audio(ctx)
     _write_scenes(ctx, ["Some narration text goes here."])
 
-    CaptionsPhase().run(ctx)
+    ScreenTextPhase().run(ctx)
 
     assert calls == [(b"fake-mp3-bytes", "aai-fake-key")]
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
@@ -473,7 +473,7 @@ def test_captions_degrades_to_estimated_timing_when_assemblyai_call_fails(tmp_pa
     _write_audio(ctx)
     _write_scenes(ctx, ["Some narration text goes here regardless."])
 
-    CaptionsPhase().run(ctx)  # must not raise
+    ScreenTextPhase().run(ctx)  # must not raise
 
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
     assert "Dialogue: 0," in content

@@ -261,7 +261,7 @@ SETTINGS: list[SettingSpec] = [
         type="bool",
         default=True,
         scope="channel",
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     SettingSpec(
         id="captions_provider",
@@ -272,7 +272,7 @@ SETTINGS: list[SettingSpec] = [
         default="assemblyai",
         scope="channel",
         choices=["assemblyai", "whisper"],
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     SettingSpec(
         id="captions_position",
@@ -283,7 +283,7 @@ SETTINGS: list[SettingSpec] = [
         default="bottom",
         scope="channel",
         choices=["top", "center", "bottom"],
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     SettingSpec(
         id="captions_animation_style",
@@ -294,7 +294,7 @@ SETTINGS: list[SettingSpec] = [
         default="fade",
         scope="channel",
         choices=["none", "fade", "pop"],
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     SettingSpec(
         id="captions_font_size",
@@ -304,7 +304,7 @@ SETTINGS: list[SettingSpec] = [
         type="int",
         default=0,
         scope="channel",
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     SettingSpec(
         id="font_family",
@@ -317,7 +317,7 @@ SETTINGS: list[SettingSpec] = [
         type="text",
         default="",
         scope="channel",
-        invalidates="captions",
+        invalidates="screen_text",
     ),
     # --- voice provider and options ---
     SettingSpec(

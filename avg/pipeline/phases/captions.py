@@ -382,10 +382,23 @@ def _dialogue_line(start: float, end: float, text: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class CaptionsPhase:
+class ScreenTextPhase:
+    """Phase 6 - the text that appears on screen.
+
+    Named "Screen Text" rather than "Captions" because it owns BOTH kinds:
+    the spoken-word captions written into `captions.ass`, and the takeover
+    cards' own text, whose windows this phase resolves into
+    `card_plan.json`. The old app called it "Captions & Takeover Text"
+    (`D:\\AI_Video_Gen\\info.txt:225`) - this is the same phase under a
+    shorter name.
+
+    The module keeps its own name: it is named for the file it writes,
+    `render/captions.ass`, which has not changed.
+    """
+
     id: int = 6
-    key: str = "captions"
-    name: str = "Captions & Takeover Text"
+    key: str = "screen_text"
+    name: str = "Screen Text"
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _optimized_voice_path(ctx).exists()

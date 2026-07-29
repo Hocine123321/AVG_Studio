@@ -73,7 +73,7 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 # `visuals`, `director2`, and `captions` all read it but never write it.
 #
 # One more thing neither hypothesis table mentions: `captions` REWRITES
-# `render/card_plan.json` in place (`CaptionsPhase.run` reads Director II's
+# `render/card_plan.json` in place (`ScreenTextPhase.run` reads Director II's
 # `card_plan.json`, resolves each card's `start`/`end`, and writes it back
 # enriched). That file's ownership still belongs to `director2` here, not
 # `captions` - `card_plan.json` exists and is meaningful even when captions
@@ -94,7 +94,7 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # own output, so a take that keeps captions has to carry them - it
     # only worked before because kept phases are in practice a prefix,
     # and keeping captions therefore kept director2 too.
-    "captions": ("render/captions.ass", "render/card_plan.json"),
+    "screen_text": ("render/captions.ass", "render/card_plan.json"),
 }
 
 # What a legacy (pre-takes) project's artifacts look like at the TOP of its

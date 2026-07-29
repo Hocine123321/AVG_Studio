@@ -72,11 +72,14 @@ ARTIFACTS: dict[str, tuple[ArtifactSpec, ...]] = {
     ),
     "director2": (
         ArtifactSpec("direction_plan", "render/direction_plan.json", "Motion plan", "application/json", "json"),
-        # Written here WITHOUT timings; Captions rewrites the same file in
-        # place to add them, which is why it appears under both phases.
+        # Written here WITHOUT timings; Screen Text rewrites the same file
+        # in place to add them, which is why it appears under both phases.
         ArtifactSpec("card_plan", "render/card_plan.json", "Caption cards", "application/json", "json"),
     ),
-    "captions": (
+    # The artifact KEYS below still say "captions" - they name the file
+    # (`render/captions.ass`), not the phase, and renaming them would
+    # change the URLs the panel fetches for no gain.
+    "screen_text": (
         ArtifactSpec("card_plan", "render/card_plan.json", "Timed caption cards", "application/json", "json"),
         ArtifactSpec("captions", "render/captions.ass", "Subtitle file", "text/plain", "text"),
     ),

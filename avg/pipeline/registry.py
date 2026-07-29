@@ -26,7 +26,7 @@ from dataclasses import dataclass
 
 from avg.core.models import ProjectDoc
 from avg.pipeline.phase import Phase, PhaseContext
-from avg.pipeline.phases.captions import CaptionsPhase
+from avg.pipeline.phases.captions import ScreenTextPhase
 from avg.pipeline.phases.director import Director1Phase, Director2Phase
 from avg.pipeline.phases.render import RenderPhase
 from avg.pipeline.phases.visuals import VisualsPhase
@@ -84,7 +84,7 @@ REGISTRY: tuple[Phase, ...] = (
     VisualsPhase(),
     VoicePhase(),
     Director2Phase(),
-    CaptionsPhase(),
+    ScreenTextPhase(),
     RenderPhase(),
 )
 

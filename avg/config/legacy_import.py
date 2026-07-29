@@ -99,6 +99,31 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+#: Phase keys that were renamed, old -> new. Applied on load, permanently.
+#:
+#: A phase key is DATA: it is written into every `project.json`, so a
+#: rename without this map makes the renamed phase read as never-run on
+#: every project already on disk - a resume would then redo work that was
+#: already done and, for Screen Text, already paid for. The old app carried
+#: the same kind of map for its own renames (`$PHASE_ORDER`'s legacy
+#: spellings in `D:\\AI_Video_Gen\\main.ps1`).
+PHASE_KEY_ALIASES: dict[str, str] = {"captions": "screen_text"}
+
+
+def _apply_phase_aliases(phases: object) -> dict:
+    """Rewrite a raw `phases` dict's keys through `PHASE_KEY_ALIASES`.
+
+    A record already under the new key wins - it is the one the current
+    code wrote, and an old duplicate must not overwrite it.
+    """
+    if not isinstance(phases, dict):
+        return {}
+    out: dict = {}
+    for key, record in phases.items():
+        out.setdefault(PHASE_KEY_ALIASES.get(key, key), record)
+    return out
+
+
 def import_project(folder: Path) -> ProjectDoc:
     """Read one project folder and build a ProjectDoc from it - AVG Studio's
     own, or a legacy PowerShell-app one (see this module's docstring for how
@@ -117,6 +142,17 @@ def import_project(folder: Path) -> ProjectDoc:
     # time, in case the project directory was ever moved or the output root
     # renamed - the same "the folder I was handed wins" rule the legacy
     # path below already follows.
+    # Rename-tolerance, applied to the document AND to every take: a take
+    # carries its own phase records, and a take whose Screen Text record
+    # stayed keyed `captions` would show the phase as never-run while the
+    # project showed it done.
+    if isinstance(project_data, dict):
+        if isinstance(project_data.get("phases"), dict):
+            project_data["phases"] = _apply_phase_aliases(project_data["phases"])
+        for take in project_data.get("takes") or []:
+            if isinstance(take, dict) and isinstance(take.get("phases"), dict):
+                take["phases"] = _apply_phase_aliases(take["phases"])
+
     try:
         native_doc = ProjectDoc.model_validate(project_data)
     except ValidationError:

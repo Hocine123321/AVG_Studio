@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 import pytest
 from avg.config.legacy_import import import_project, import_all
@@ -24,6 +26,47 @@ def test_marks_reached_phases_done():
 def test_complete_marks_every_phase_done():
     doc = import_project(COMPLETE)
     assert {p.status for p in doc.phases.values()} == {"done"}
+
+def test_a_project_keyed_captions_loads_as_screen_text(tmp_path):
+    """The rename must not cost thirteen projects their records.
+
+    The phase key is data: it sits in every project.json on disk. Renaming
+    it without an alias would make Screen Text read as never-run on every
+    existing project, so a resume would redo a transcription that was
+    already paid for.
+    """
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    now = datetime.now(timezone.utc).isoformat()
+    (folder / "project.json").write_text(
+        json.dumps(
+            {
+                "id": "p",
+                "title": "P",
+                "folder": str(folder),
+                "created": now,
+                "phases": {"captions": {"name": "Captions", "status": "done"}},
+                "takes": [
+                    {
+                        "id": 1,
+                        "label": "Take 1",
+                        "created": now,
+                        "storage": "root",
+                        "phases": {"captions": {"name": "Captions", "status": "done"}},
+                    }
+                ],
+                "current_take_id": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    doc = import_project(folder)
+
+    assert "captions" not in doc.phases
+    assert doc.phases["screen_text"].status == "done"
+    assert doc.takes[0].phases["screen_text"].status == "done"
+
 
 def test_scratch_folders_are_skipped(tmp_path):
     (tmp_path / "_filters_preview").mkdir()

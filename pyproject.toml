@@ -14,3 +14,13 @@ testpaths = ["tests"]
 [tool.mypy]
 strict = true
 files = ["avg"]
+
+# `pydub` ships no py.typed marker and no stubs exist for it. Installing the
+# package (2026-07-29, when it stopped being treated as optional - the Voice
+# phase has no path that skips it) therefore turned every deferred
+# `from pydub import ...` into an import-untyped error. Silencing the module
+# is the whole fix: the alternative is a `type: ignore` on each of the four
+# call sites, which then rots the moment stubs appear.
+[[tool.mypy.overrides]]
+module = ["pydub.*"]
+ignore_missing_imports = true

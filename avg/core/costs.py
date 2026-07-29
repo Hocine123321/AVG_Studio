@@ -43,7 +43,7 @@ LEAF_COST: dict[str, float] = {
     "visuals": 0.180,
     "voice": 0.0,
     "director2": 0.002,
-    "captions": 0.014,
+    "screen_text": 0.014,
     "render": 0.0,
 }
 
@@ -58,7 +58,7 @@ PHASE_LEAVES: dict[str, tuple[str, ...]] = {
     "visuals": ("visuals",),
     "voice": ("voice",),
     "director2": ("director2",),
-    "captions": ("captions",),
+    "screen_text": ("screen_text",),
     "render": ("render",),
 }
 

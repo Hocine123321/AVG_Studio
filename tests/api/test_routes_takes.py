@@ -230,9 +230,9 @@ def test_preview_computes_without_creating_or_starting_anything(client, paths):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["rerun"] == ["voice", "director2", "captions", "render"]
+    assert body["rerun"] == ["voice", "director2", "screen_text", "render"]
     assert body["keeps"] == ["brief", "script", "director1", "visuals"]
-    # voice/director2/captions have 1000ms of history each in take 1;
+    # voice/director2/screen_text have 1000ms of history each in take 1;
     # "render" has none (it's deliberately absent from `PHASE_ARTIFACTS` -
     # its one artifact, master_output.mp4, is never copied between takes -
     # see `avg.core.takes`'s own docstring), so it's named in `unknown`.
