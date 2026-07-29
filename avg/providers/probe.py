@@ -1,0 +1,115 @@
+"""Ask each of a provider's models to say one word, and see which answer.
+
+The port of `Invoke-WorkingModelsCacheUpdate`
+(`D:\\AI_Video_Gen\\modules\\visuals.ps1`): list a keyed provider's models,
+send each the smallest generation the API allows, and record a bool. The
+result feeds `avg.core.model_cache.ModelCache`, which is what turns the
+settings screen's free-text model fields into a picker of models that are
+known to work.
+
+Three properties are load-bearing, and all three come from the legacy
+function:
+
+  - **No key means no probe.** A provider with no key returns `{}` rather
+    than a sweep of failures - otherwise every model would be marked broken
+    for a reason that has nothing to do with the model.
+  - **One dead model never aborts the sweep.** Every failure is caught and
+    recorded as `False`; the loop always finishes.
+  - **`False` is recorded, not dropped.** The cache stores both verdicts so
+    the UI can say "probed and broken" rather than "never probed".
+
+This is the only module in this slice allowed to touch the network, and it
+does so exclusively through an injectable `Transport` - so no test can
+reach a real provider.
+"""
+
+from __future__ import annotations
+
+from typing import Iterable
+
+from avg.config.secrets import get_key
+from avg.providers.text.base import TextBackend
+from avg.providers.text.router import _BACKENDS, _build_backend
+from avg.providers.transport import Transport
+
+#: The prompt every probe sends. Deliberately trivial and answerable in a
+#: single token: this measures whether the model responds at all, and a
+#: longer prompt would cost more on the paid providers for no more signal.
+PROBE_PROMPT = "Reply with the word ok."
+
+
+def known_providers() -> list[str]:
+    """The text providers that can be probed at all.
+
+    Read from the router's backend table rather than restated here -
+    `avg/providers/text/router.py` is already the one place that knows
+    which provider names map to an implementation.
+    """
+    return sorted(_BACKENDS)
+
+
+def list_models(provider: str, transport: Transport | None) -> list[str]:
+    """The provider's advertised models.
+
+    A thin seam over the backend's own `list_models()` so a caller (and a
+    test) has one name to reach for, and so nothing here grows a second
+    model lister - `avg.providers.models` already owns fetch-then-cache.
+    """
+    backend: TextBackend = _build_backend(provider, transport)
+    return backend.list_models()
+
+
+def probe_provider(provider: str, *, transport: Transport | None = None) -> dict[str, bool]:
+    """Probe every model `provider` advertises. `{model_id: worked}`.
+
+    Never raises: an unknown provider, a missing key, an unreachable list
+    endpoint and a dead model all resolve to an empty or partial result,
+    because this runs as a sweep over every configured provider and one
+    bad entry must not cost the rest.
+    """
+    if provider not in _BACKENDS:
+        return {}
+    if not get_key(provider):
+        # No key means no call at all - never a probe that fails for the
+        # wrong reason and marks every model broken.
+        return {}
+
+    try:
+        models = list_models(provider, transport)
+    except Exception:
+        return {}
+
+    results: dict[str, bool] = {}
+    for model in models:
+        results[model] = _model_answers(provider, model, transport)
+    return results
+
+
+def _model_answers(provider: str, model: str, transport: Transport | None) -> bool:
+    """One model, one minimal generation. Any failure at all is `False`.
+
+    Deliberately does not distinguish *why* a model failed. A 404 (retired
+    model), a 429 (out of quota on this model tier) and a timeout are the
+    same answer to the question the cache asks - "can I pick this today?"
+    - and the error taxonomy already exists for the cases where the
+    difference matters.
+    """
+    try:
+        backend = _build_backend(provider, transport)
+        text = backend.generate(PROBE_PROMPT, model, max_tokens=1, temperature=0.0)
+    except Exception:
+        return False
+    return isinstance(text, str)
+
+
+def probe_all(
+    providers: Iterable[str] | None = None, *, transport: Transport | None = None
+) -> dict[str, dict[str, bool]]:
+    """Probe several providers. Unkeyed ones come back as an empty dict.
+
+    The empty entry is kept rather than omitted: "keyed but nothing
+    works" and "no key" are different states, and the UI has to be able
+    to say which.
+    """
+    names = list(providers) if providers is not None else known_providers()
+    return {name: probe_provider(name, transport=transport) for name in names}
