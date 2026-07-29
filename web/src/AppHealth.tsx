@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealthReport, type HealthReport } from "./api";
+import ErrorLog from "./ErrorLog";
 
 /**
  * The App Health screen: the legacy app's startup diagnostic, rebuilt.
@@ -95,6 +96,8 @@ export default function AppHealth() {
           </section>
         ))}
       </div>
+
+      <ErrorLog />
     </div>
   );
 }

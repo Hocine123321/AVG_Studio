@@ -211,6 +211,44 @@ export function archiveProjects(ids: string[], archived: boolean): Promise<{ arc
   return apiPost<{ archived: boolean; ids: string[] }>("/api/projects/archive", { ids, archived });
 }
 
+// ---- error log ----
+
+export type ErrorSeverity = "critical" | "needs_review" | "low";
+
+/** One recorded failure. Mirrors `avg.core.error_store.ErrorRecord`.
+ * `detail` is a traceback or a provider body; it is already redacted
+ * server-side, so it can be shown and copied as-is. */
+export interface AppError {
+  id: string;
+  when: string;
+  severity: ErrorSeverity;
+  source: string;
+  summary: string;
+  detail: string;
+  context: Record<string, string>;
+}
+
+export function getErrors(): Promise<{ errors: AppError[] }> {
+  return apiGet<{ errors: AppError[] }>("/api/errors");
+}
+
+export function clearErrors(): Promise<{ cleared: boolean }> {
+  return apiDelete<{ cleared: boolean }>("/api/errors");
+}
+
+/** Report a failure only the frontend can see - a dropped socket, an image
+ * that would not load. Fire-and-forget by convention: a failure to report
+ * a failure must never surface as a second error. */
+export function reportError(body: {
+  severity: ErrorSeverity;
+  source: string;
+  summary: string;
+  detail?: string;
+  context?: Record<string, string>;
+}): Promise<{ recorded: string }> {
+  return apiPost<{ recorded: string }>("/api/errors", body);
+}
+
 // ---- component health ----
 
 export interface HealthComponent {
