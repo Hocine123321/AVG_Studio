@@ -395,7 +395,6 @@ def create_app(
         try:
             report = import_all(output_root)
             app.state.projects = {p.id: p for p in report.imported}
-            app.state.storage_bytes = _library_bytes(app.state.projects.values())
         except Exception:
             # A library that fails to scan leaves the app usable and empty
             # rather than dead. Nothing below the API layer may print, and
@@ -403,7 +402,16 @@ def create_app(
             pass
         finally:
             app.state.projects_loading = False
+            # Released BEFORE the size walk below. `GET /api/projects` waits
+            # on this event, and a full recursive stat of every project
+            # folder is not something the library list should be held up by -
+            # it is one card's number, not the grid. Overview shows a dash
+            # until it lands, which is already what an absent
+            # `storage_bytes` means to it.
             app.state.library_loaded.set()
+
+        with suppress(Exception):
+            app.state.storage_bytes = _library_bytes(app.state.projects.values())
         _warm_thumbnails()
 
     def _warm_thumbnails() -> None:

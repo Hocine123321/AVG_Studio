@@ -18,6 +18,7 @@ profile's channels/settings/secrets.
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -428,4 +429,14 @@ def test_storage_bytes_sums_the_whole_library(client, paths):
             secrets_path=paths["secrets_path"],
         )
     )
-    assert reloaded.get("/api/projects", headers=AUTH).json()["storage_bytes"] >= 2048
+    # Polled, not read once: the size walk deliberately runs AFTER the
+    # library is released for reading, so the project list is never held up
+    # by a full recursive stat. That makes the figure eventually-correct by
+    # design, and a single read would be a race.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        total = reloaded.get("/api/projects", headers=AUTH).json()["storage_bytes"]
+        if total >= 2048:
+            break
+        time.sleep(0.05)
+    assert total >= 2048

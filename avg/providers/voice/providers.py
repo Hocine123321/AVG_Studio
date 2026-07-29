@@ -17,8 +17,7 @@ implementation of it.
 from __future__ import annotations
 
 import asyncio
-
-import edge_tts
+from typing import Any
 
 from avg.config.secrets import get_key
 from avg.core.errors import AvgError, ErrorKind
@@ -212,6 +211,42 @@ class ElevenLabsVoiceProvider:
 # story), so it is accepted and ignored.
 
 
+
+# ── edge-tts, imported on first use ─────────────────────────
+#
+# NOT a module-scope `import edge_tts`. That import costs ~2.0s of a ~4.3s
+# app startup (it drags in aiohttp), and this module is reached from
+# `avg.api.app` transitively - phase registry -> voice phase -> here - so
+# every launch of the app paid for a TTS library that nothing touches until
+# the voice phase actually runs, minutes into a pipeline if at all.
+#
+# The module `__getattr__` below is what keeps that lazy WITHOUT breaking
+# the existing seam: `tests/providers/test_voice.py` monkeypatches
+# `voice_module.edge_tts.Communicate` / `.list_voices`, and attribute access
+# on this module still resolves to the real package - it just imports it at
+# that moment rather than at startup. Callers inside this module go through
+# `_edge()`, since a module `__getattr__` is not consulted for a plain
+# global-name lookup.
+
+
+def _edge() -> Any:
+    """The `edge_tts` package, imported and cached on first use."""
+    module = globals().get("edge_tts")
+    if module is None:
+        import edge_tts as module  # noqa: PLC0415 - deliberately lazy, see above
+
+        globals()["edge_tts"] = module
+    return module
+
+
+def __getattr__(name: str) -> Any:
+    # PEP 562. Keeps `voice_module.edge_tts` working for the tests that
+    # patch it, without importing the package to define this module.
+    if name == "edge_tts":
+        return _edge()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 class EdgeVoiceProvider:
     name = "edge"
 
@@ -224,7 +259,7 @@ class EdgeVoiceProvider:
         """
         del model
         try:
-            communicate = edge_tts.Communicate(text, voice_id)
+            communicate = _edge().Communicate(text, voice_id)
             audio = bytearray()
             for chunk in communicate.stream_sync():
                 if chunk.get("type") == "audio" and chunk.get("data"):
@@ -242,7 +277,7 @@ class EdgeVoiceProvider:
         hardcoded list (matching every other provider's `list_voices`/
         `list_models` in this codebase)."""
         try:
-            voices = asyncio.run(edge_tts.list_voices())
+            voices = asyncio.run(_edge().list_voices())
         except Exception as exc:  # noqa: BLE001 - re-classified immediately below
             kind = classify(None, "", exc, self.name)
             raise AvgError(kind, f"Edge TTS voice list failed: {exc}", detail=str(exc)) from exc
