@@ -53,7 +53,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from avg.core.models import ProjectDoc
-from avg.core.takes import take_folder
+from avg.core.takes import take_root
 from avg.pipeline.phases._common import read_json, strip_delivery_markers
 
 _HOW_TO_IMPORT = """How to import this into CapCut
@@ -209,7 +209,7 @@ def _write_timing_csv(
 
 def export_take(project: ProjectDoc, take_id: int) -> Path:
     """Assemble `<project>/exports/take-<take_id>/` from that take's own
-    folder (`avg.core.takes.take_folder`) and return its path.
+    files (`avg.core.takes.take_root`) and return its path.
 
     Raises `ValueError` (never a partial folder - see module docstring) if:
     `take_id` names no take on `project`; the take has no `master_output`
@@ -231,7 +231,7 @@ def export_take(project: ProjectDoc, take_id: int) -> Path:
     if take.master_output is None or not Path(take.master_output).is_file():
         raise ValueError(f"take {take_id} has no finished render yet - nothing to export")
 
-    source = take_folder(project, take_id)
+    source = take_root(project, take_id)
 
     # Validate everything BEFORE creating a directory. Creating first and
     # cleaning up on failure leaves an empty `exports/` behind when the very
