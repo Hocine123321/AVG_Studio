@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import (
     CompositeFinished,
     PhaseFailed,
@@ -228,6 +228,11 @@ class RenderPhase:
                     )
                 )
             elif isinstance(event, CompositeFinished):
+                if not event.captions.startswith("burned"):
+                    # A finished video with no captions on it. The reason is
+                    # already in _composite.json; this puts it on the screen
+                    # the user checks when a video looks wrong.
+                    report_degradation(ctx, f"Render: captions were {event.captions}.")
                 rdir = render_dir(ctx)
                 rdir.mkdir(parents=True, exist_ok=True)
                 write_json(

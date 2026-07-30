@@ -51,7 +51,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._common import read_json, render_dir, script_dir, write_json
@@ -265,6 +265,16 @@ class VisualsPhase:
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
             raise AvgError(ErrorKind.bug, "visuals phase: every scene failed to generate an image")
+        if ok_count < total:
+            # A partial set of images is a finished phase with a worse video:
+            # the missing scenes repeat their neighbour's image (see
+            # `index_entries`). Worth recording - it is the reason a video
+            # has a picture on screen twice in a row.
+            report_degradation(
+                ctx,
+                f"Visuals: {total - ok_count} of {total} scene(s) had no image; "
+                "each repeats the nearest one instead.",
+            )
 
         manifest = {
             "version": 1,
@@ -330,10 +340,6 @@ def _write_safezones(ctx: PhaseContext, rdir: Path) -> None:
 
 
 def _warn_safezones(ctx: PhaseContext, reason: str) -> None:
-    ctx.emit(
-        ProgressEvent(
-            project_id=ctx.project.id,
-            percent=100,
-            message=f"Safezone analysis was skipped ({reason}); overlay placement will use defaults.",
-        )
-    )
+    message = f"Safezone analysis was skipped ({reason}); overlay placement will use defaults."
+    ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message=message))
+    report_degradation(ctx, message)

@@ -57,6 +57,12 @@ export default function ErrorLog() {
   const [copied, setCopied] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  /** Which severities to show. Degradations are recorded at `low` (Slice 9)
+   * - a fallback that rescued a run is not a failure, but it IS why a video
+   * came out different from the settings - and this is what keeps them from
+   * crowding out the things that actually broke. */
+  const [showLow, setShowLow] = useState(true);
+
   const load = useCallback(() => {
     getErrors()
       .then((res) => setErrors(res.errors))
@@ -76,6 +82,9 @@ export default function ErrorLog() {
     }
   }
 
+  const lowCount = (errors ?? []).filter((error) => error.severity === "low").length;
+  const visible = (errors ?? []).filter((error) => showLow || error.severity !== "low");
+
   return (
     <section className="errorlog" aria-label="Recent errors">
       <header className="errorlog__head">
@@ -86,6 +95,20 @@ export default function ErrorLog() {
           </p>
         </div>
         <span className="home__spacer" />
+        {lowCount > 0 && (
+          <button
+            type="button"
+            // `.btn--on` is the app's existing pressed-toggle look (Home's
+            // Archived pill uses it); a new class for the same gesture is
+            // the quiet kind of inconsistency tokens.css warns about.
+            className={`btn btn--sm${showLow ? " btn--on" : ""}`}
+            aria-pressed={showLow}
+            onClick={() => setShowLow((on) => !on)}
+            title="Recorded degradations: a run that worked, worse than asked"
+          >
+            {lowCount} minor
+          </button>
+        )}
         <button
           type="button"
           className="btn"
@@ -101,7 +124,7 @@ export default function ErrorLog() {
       )}
 
       <ul className="errorlog__list">
-        {(errors ?? []).map((error) => (
+        {visible.map((error) => (
           <li key={error.id} className="errorlog__row">
             <span className={SEVERITY_CLASS[error.severity]}>{SEVERITY_LABEL[error.severity]}</span>
             <button
@@ -113,6 +136,12 @@ export default function ErrorLog() {
               {error.summary}
             </button>
             <span className="errorlog__meta mono">{new Date(error.when).toLocaleString()}</span>
+            {error.context.phase && (
+              <span className="errorlog__meta">
+                {error.context.phase}
+                {error.context.take_id ? ` · take ${error.context.take_id}` : ""}
+              </span>
+            )}
             <button type="button" className="btn btn--sm" onClick={() => void copy(error)}>
               {copied === error.id ? "Copied" : "Copy"}
             </button>

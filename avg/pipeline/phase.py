@@ -78,6 +78,12 @@ class PhaseContext:
     #: without that detail having to become an event the UI would then need to
     #: decide what to do about.
     log: Any = None
+    #: The app's error store (`avg.core.error_store.ErrorStore`), or `None` in
+    #: unit contexts. A phase never touches it directly - it calls
+    #: `avg.core.errors.report_degradation`, which is what keeps "this run came
+    #: out worse than you asked" on the same screen as real failures without
+    #: any phase reaching into `app.state`.
+    errors: Any = None
 
 
 @runtime_checkable

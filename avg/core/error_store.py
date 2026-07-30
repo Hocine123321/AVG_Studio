@@ -155,6 +155,22 @@ class ErrorStore:
             self._write(rows)
         return record
 
+    def degraded(
+        self, *, source: str, summary: str, context: dict[str, str] | None = None
+    ) -> ErrorRecord:
+        """Record something that WORKED, worse than asked.
+
+        A fallback that rescued a run is not a failure and must not read as
+        one - but it is the reason a video came out different from what the
+        settings say, and until Slice 9 it left no trace anywhere. `low`
+        severity, so the panel can keep it out of the way of things that
+        actually broke while still being able to show it.
+
+        Goes through `record`, so it cannot become the one path that skips
+        redaction.
+        """
+        return self.record(severity="low", source=source, summary=summary, detail="", context=context)
+
     def all(self) -> list[ErrorRecord]:
         """Newest first."""
         out: list[ErrorRecord] = []

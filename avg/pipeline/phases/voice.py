@@ -63,7 +63,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import VOICE_MP3_BITRATE, remove_silences_core
 from avg.pipeline.phase import PhaseContext
@@ -282,13 +282,12 @@ class VoicePhase:
         try:
             _write_scene_audio_map(ctx, audio_dir)
         except Exception as exc:  # noqa: BLE001 - see above
-            ctx.emit(
-                ProgressEvent(
-                    project_id=ctx.project.id,
-                    percent=100,
-                    message=f"Per-scene audio map could not be measured ({exc}); the render will divide the track evenly.",
-                )
+            message = (
+                f"Per-scene audio map could not be measured ({exc}); "
+                "the render will divide the track evenly."
             )
+            ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message=message))
+            report_degradation(ctx, message)
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Voice & Audio complete."))
 

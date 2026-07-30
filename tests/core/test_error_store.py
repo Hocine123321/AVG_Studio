@@ -93,3 +93,32 @@ def test_classification_follows_the_legacy_vocabulary():
     assert classify(kind="auth", status=401, source="providers") == "needs_review"
     # Everything else.
     assert classify(kind=None, status=404, source="api") == "low"
+
+
+def test_a_degradation_is_low_severity_and_still_recorded(tmp_path):
+    """A run that quietly produced a WORSE video is the class of event that
+    went entirely unseen: the fallback worked, so nothing failed, so nothing
+    was recorded, and the user never learned their narration came from a
+    different provider than the one they picked."""
+    store = ErrorStore(tmp_path / "errors.json")
+
+    store.degraded(
+        source="pipeline",
+        summary="ElevenLabs unavailable; used Edge TTS",
+        context={"project_id": "p", "phase": "voice"},
+    )
+
+    record = store.all()[0]
+    assert record.severity == "low"
+    assert record.context["phase"] == "voice"
+    assert "Edge TTS" in record.summary
+
+
+def test_a_degradation_is_redacted_like_anything_else(tmp_path):
+    """It goes through `record`, so it cannot become the one path that leaks
+    a key."""
+    store = ErrorStore(tmp_path / "errors.json")
+
+    store.degraded(source="pipeline", summary="refused with x-api-key: sk-abcdefghijklmnop")
+
+    assert "sk-abcdefghijklmnop" not in store.all()[0].summary

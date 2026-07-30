@@ -61,7 +61,7 @@ from typing import Any, Callable
 import httpx
 
 from avg.config.secrets import get_key, has_key
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.media.vendor.avg import _target_size
 from avg.pipeline.phase import PhaseContext
@@ -276,13 +276,12 @@ def _get_words(
             try:
                 words = _transcribe_with_assemblyai(audio_path.read_bytes(), key)
             except Exception as exc:  # noqa: BLE001 - any transcription failure degrades, never raises
-                ctx.emit(
-                    ProgressEvent(
-                        project_id=ctx.project.id,
-                        percent=5,
-                        message=f"AssemblyAI transcription unavailable ({exc}); using estimated timing.",
-                    )
-                )
+                message = f"AssemblyAI transcription unavailable ({exc}); using estimated timing."
+                ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=5, message=message))
+                # Recorded, because the captions the user gets are word-timed
+                # by a proportional guess rather than by a transcript - and
+                # nothing else on any screen would ever say so.
+                report_degradation(ctx, message)
             else:
                 if words:
                     return words, True

@@ -286,3 +286,52 @@ def test_a_socket_whose_loop_died_is_dropped_not_retried():
     manager.broadcast_threadsafe({"type": "job_started"})
 
     assert manager._sockets == {}
+
+
+def test_a_phase_failure_is_recorded_in_the_error_store(tmp_path, monkeypatch):
+    """It was not.
+
+    Two call sites fed the error store - the HTTP middleware and the UI's own
+    POST - so a phase that failed mid-run left nothing in the panel the user
+    opens when something breaks. A real example sat unlogged on disk for days:
+    `brief failed 'NoneType' object has no attribute 'phases'`.
+    """
+    import avg.api.app as app_module
+    from avg.core.events import PhaseFailed
+
+    def failing_run(project, **kwargs):
+        yield PhaseFailed(
+            project_id=project.id, phase="brief", kind="bug", message="boom", detail="a traceback"
+        )
+
+    monkeypatch.setattr(app_module, "run_pipeline", failing_run)
+
+    client = TestClient(
+        create_app(
+            token="t0k",
+            output_root=tmp_path / "output",
+            thumb_cache_dir=tmp_path / "thumbs",
+            settings_path=tmp_path / "settings.json",
+            channels_dir=tmp_path / "channels",
+            secrets_path=tmp_path / "secrets.dat",
+            errors_path=tmp_path / "errors.json",
+        )
+    )
+    channel = client.post("/api/channels", headers={"X-AVG-Token": "t0k"}, json={"label": "C"}).json()
+    client.post(f"/api/channels/{channel['id']}/activate", headers={"X-AVG-Token": "t0k"})
+
+    created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
+    assert created.status_code == 201
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
+
+    errors = client.get("/api/errors", headers={"X-AVG-Token": "t0k"}).json()["errors"]
+    entry = next(e for e in errors if "boom" in e["summary"])
+    assert entry["context"]["project_id"] == created.json()["id"]
+    assert entry["context"]["phase"] == "brief"
+    assert entry["detail"] == "a traceback"
+    # `ErrorKind` is a str-Enum, so `str()` on it yields "ErrorKind.bug" and
+    # `classify` matches none of its names - which filed every failure as
+    # `low`, next to the recovered degradations it is meant to outrank.
+    assert entry["severity"] == "critical"

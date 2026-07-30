@@ -702,10 +702,32 @@ def create_app(
                 app.state.manager.broadcast_threadsafe(event.model_dump(mode="json"))
 
         def _log(event: Any) -> None:
-            """Log one event. Called from the one place events funnel through,
-            so the log and the socket cannot describe different runs."""
+            """Log one event, and record it if it is a failure.
+
+            Called from the one place events funnel through, so the log, the
+            socket and the error panel cannot describe different runs. Before
+            this, TWO call sites fed the error store - the HTTP middleware and
+            the UI's own POST - so a phase that failed mid-run left nothing in
+            the panel the user opens when something breaks.
+            """
             with suppress(Exception):
                 take_log.event(event.model_dump(mode="json"))
+            if isinstance(event, PhaseFailed):
+                with suppress(Exception):
+                    app.state.error_store.record(
+                        # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()` gives
+                        # "ErrorKind.bug" and `classify` matches none of its
+                        # names - which silently filed every failure as `low`.
+                        severity=classify(kind=event.kind.value, status=None, source="pipeline"),
+                        source="pipeline",
+                        summary=f"{event.phase} failed: {event.message}",
+                        detail=event.detail or "",
+                        context={
+                            "project_id": event.project_id,
+                            "take_id": str(project.current_take_id or ""),
+                            "phase": event.phase,
+                        },
+                    )
 
         def _worker() -> None:
             # Every outbound provider call this run makes lands on this log -
@@ -739,15 +761,25 @@ def create_app(
                     cancel_token=cancel_token,
                     on_phase_change=lambda: save_project(project),
                     log=take_log,
+                    errors=app.state.error_store,
                 ):
                     _log(event)
                     _emit(event)
             except BaseException as exc:
                 # A worker-thread crash used to vanish: the HTTP middleware
                 # only ever saw request exceptions, and this thread has no
-                # request. Recorded, then re-raised - this observes, it does
-                # not swallow.
-                take_log.error(f"{type(exc).__name__}: {exc}", detail="".join(traceback.format_exception(exc)))
+                # request. Recorded in both places, then re-raised - this
+                # observes, it does not swallow.
+                detail = "".join(traceback.format_exception(exc))
+                take_log.error(f"{type(exc).__name__}: {exc}", detail=detail)
+                with suppress(Exception):
+                    app.state.error_store.record(
+                        severity="critical",
+                        source="pipeline",
+                        summary=f"pipeline worker crashed: {type(exc).__name__}: {exc}",
+                        detail=detail,
+                        context={"project_id": project.id},
+                    )
                 raise
             finally:
                 take_log.info("job finished")
@@ -896,7 +928,16 @@ def create_app(
                 with render_workspace(req.project_folder) as workspace:
                     _run_render(req.model_copy(update={"project_folder": workspace}))
             except BaseException as exc:
-                take_log.error(f"{type(exc).__name__}: {exc}", detail="".join(traceback.format_exception(exc)))
+                detail = "".join(traceback.format_exception(exc))
+                take_log.error(f"{type(exc).__name__}: {exc}", detail=detail)
+                with suppress(Exception):
+                    app.state.error_store.record(
+                        severity="critical",
+                        source="pipeline",
+                        summary=f"render worker crashed: {type(exc).__name__}: {exc}",
+                        detail=detail,
+                        context={"project_id": project_id},
+                    )
                 raise
             finally:
                 take_log.info("job finished")
@@ -925,6 +966,18 @@ def create_app(
             for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
                 with suppress(Exception):
                     take_log.event(event.model_dump(mode="json"))
+                if isinstance(event, PhaseFailed):
+                    with suppress(Exception):
+                        app.state.error_store.record(
+                            # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()` gives
+                        # "ErrorKind.bug" and `classify` matches none of its
+                        # names - which silently filed every failure as `low`.
+                        severity=classify(kind=event.kind.value, status=None, source="pipeline"),
+                            source="pipeline",
+                            summary=f"render failed: {event.message}",
+                            detail=event.detail or "",
+                            context={"project_id": project_id, "phase": "render"},
+                        )
                 # Both the broadcast and the cached-project update are
                 # suppressed: neither may abort this `for` loop early, because
                 # that would skip the rest of the drain and leave the child

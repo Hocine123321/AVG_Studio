@@ -94,7 +94,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._common import (
@@ -509,13 +509,9 @@ def _write_scene_timings(ctx: PhaseContext, rdir: Path) -> None:
         )
         write_json(rdir / "scene_timings.json", timings)
     except Exception as exc:  # noqa: BLE001 - non-fatal, see docstring
-        ctx.emit(
-            ProgressEvent(
-                project_id=ctx.project.id,
-                percent=100,
-                message=f"Scene timings could not be precomputed ({exc}); the render will derive them.",
-            )
-        )
+        message = f"Scene timings could not be precomputed ({exc}); the render will derive them."
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message=message))
+        report_degradation(ctx, message)
 
 
 def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any]) -> int:
@@ -543,13 +539,9 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
             resolve_font_family(ctx),
         )
     except Exception as exc:  # noqa: BLE001 - see docstring
-        ctx.emit(
-            ProgressEvent(
-                project_id=ctx.project.id,
-                percent=100,
-                message=f"Overlay assets could not be drawn ({exc}); the render will composite without cards.",
-            )
-        )
+        message = f"Overlay assets could not be drawn ({exc}); the render will composite without cards."
+        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message=message))
+        report_degradation(ctx, message)
         return 0
 
 
