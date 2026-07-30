@@ -7,6 +7,7 @@ one proving a caller cannot ask for a file the table does not name.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
@@ -120,3 +121,39 @@ def test_an_unknown_take_is_404(client):
 def test_artifacts_require_a_token(client):
     assert client.get("/api/projects/proj-artifacts/takes/1/artifacts").status_code == 401
     assert client.get("/api/projects/proj-artifacts/takes/1/artifact/brief").status_code == 401
+
+
+def test_the_log_route_serves_the_tail(client):
+    """A verbose log of a long run is megabytes, and the question is nearly
+    always what happened at the end."""
+    from avg.core.take_log import TakeLog
+
+    # The library scan is asynchronous, so the log is written straight to the
+    # take's own folder - which for a root-storage take is the project folder.
+    folder = Path(client.app.state.output_root) / "proj-artifacts"
+    log = TakeLog(folder / "take.log")
+    for i in range(10):
+        log.info(f"line {i}")
+    log.close()
+
+    body = client.get(
+        "/api/projects/proj-artifacts/takes/1/log?tail=3", headers=AUTH
+    ).json()
+
+    assert len(body["lines"]) == 3
+    assert "line 9" in body["lines"][-1]
+    assert body["truncated"] is True
+    assert body["total"] == 10
+
+
+def test_the_log_route_404s_for_a_take_with_no_log(client):
+    """Nothing has run in it, or it predates the log. Either way there is
+    honestly nothing to show."""
+    assert (
+        client.get("/api/projects/proj-artifacts/takes/1/log", headers=AUTH).status_code
+        == 404
+    )
+
+
+def test_the_log_route_requires_a_token(client):
+    assert client.get("/api/projects/proj-artifacts/takes/1/log").status_code == 401

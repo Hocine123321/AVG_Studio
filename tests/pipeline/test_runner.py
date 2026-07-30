@@ -230,13 +230,13 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     # test, not a render test - stand in a fake engine that yields the same
     # event sequence the real one does on success.
     class _FakeEngine:
-        def render(self, request, project_id):
+        def render(self, request, project_id, *, on_stderr=None):
             yield ProgressEvent(project_id=project_id, percent=100, message="rendered")
             output = request.project_folder / "master_output.mp4"
             output.write_bytes(b"video")
             yield RenderFinished(project_id=project_id, output=output, size_bytes=5)
 
-        def composite(self, request, project_id):
+        def composite(self, request, project_id, *, on_stderr=None):
             # Part 2 of the render, added in Slice 9: the phase runs both
             # parts, so a fake engine has to answer both or the phase never
             # finishes.

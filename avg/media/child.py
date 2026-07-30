@@ -21,7 +21,10 @@ child's exit code (see `avg.media.engine.classify_exit`).
 
 from __future__ import annotations
 
+import io
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager, redirect_stderr, suppress
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +39,10 @@ from avg.media.environment import suppress_console_windows
 # Matches the old app's guard: an output file smaller than this never
 # represents a real render, however cleanly the render code returned.
 _MIN_OUTPUT_BYTES = 1024
+
+#: Stderr is shipped in chunks: one render can print thousands of lines, and a
+#: single queue message the size of a whole log is worse than fifty.
+_STDERR_CHUNK_CHARS = 4000
 
 
 def run_child(kwargs: dict[str, Any], q: Any) -> None:
@@ -92,7 +99,13 @@ def run_child(kwargs: dict[str, Any], q: Any) -> None:
                 # that SystemExit propagates out of run_child and becomes
                 # the child's exit code, which is exactly what
                 # classify_exit is for. Not caught here.
-                vendor_avg.render_project(**kwargs)
+                #
+                # Its stderr is captured and shipped over the queue rather
+                # than left to a console a windowed build does not have:
+                # every real render diagnosis the vendored engine offers
+                # lives there, and until Slice 9 all of it went nowhere.
+                with _captured_stderr(q):
+                    vendor_avg.render_project(**kwargs)
             finally:
                 vendor_avg.PROGRESS_SINK = None
 
@@ -254,6 +267,8 @@ def run_composite_child(kwargs: dict[str, Any], q: Any) -> None:
 
             vendor_avg.PROGRESS_SINK = _sink  # type: ignore[assignment]  # vendored global is declared None
             try:
+                stderr_ctx = _captured_stderr(q)
+                stderr_ctx.__enter__()
                 if not deferred:
                     overlays_code = _run_vendor(vendor_avg.cmd_overlay_render, _composite_argv_overlay(kwargs))
                     _VENDOR_CALLS.append("overlay_render")
@@ -266,6 +281,7 @@ def run_composite_child(kwargs: dict[str, Any], q: Any) -> None:
                     # which one happened.
                     captions_code = 2
             finally:
+                stderr_ctx.__exit__(None, None, None)
                 vendor_avg.PROGRESS_SINK = None
 
         if 1 in (overlays_code, captions_code):
@@ -298,3 +314,25 @@ def _captions_outcome(code: int, enabled: bool) -> str:
     if not enabled:
         return "skipped: captions are switched off for this channel"
     return "skipped: no transcription was available"
+
+
+@contextmanager
+def _captured_stderr(q: Any) -> Iterator[None]:
+    """Ship whatever the vendored engine writes to stderr over the queue.
+
+    Flushed in a `finally` so a `sys.exit` mid-render still delivers the
+    reason - the vendored code reports most of its diagnoses by printing to
+    stderr and then exiting, and the parent has no other way to see them.
+    Chunked because one render can print thousands of lines and a single
+    queue message the size of a whole log is worse than fifty.
+    """
+    buffer = io.StringIO()
+    try:
+        with redirect_stderr(buffer):
+            yield
+    finally:
+        text = buffer.getvalue().strip()
+        if text:
+            with suppress(Exception):
+                for start in range(0, len(text), _STDERR_CHUNK_CHARS):
+                    q.put(("stderr", text[start : start + _STDERR_CHUNK_CHARS]))

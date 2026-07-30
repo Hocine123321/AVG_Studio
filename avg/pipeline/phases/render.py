@@ -184,7 +184,14 @@ class RenderPhase:
         # the one phase long enough that waiting for a phase boundary would
         # feel broken.
         # ── Part 1: the base video ────────────────────────────────────────
-        for event in engine.render(request, ctx.project.id):
+        # The vendored engine's stderr goes to the take's log. It is where
+        # every real render diagnosis lives, and a windowed build has no
+        # console for it to fall out of.
+        def _stderr(text: str) -> None:
+            if ctx.log is not None:
+                ctx.log.error("render stderr", detail=text)
+
+        for event in engine.render(request, ctx.project.id, on_stderr=_stderr):
             if ctx.cancel_token.cancelled:
                 engine.cancel()
 
@@ -207,7 +214,7 @@ class RenderPhase:
         # is also what `render_substate` reads: the vendored caption pass
         # replaces master_output.mp4 in place, so the video itself cannot say
         # whether anything was baked into it.
-        for event in engine.composite(_composite_request(ctx), ctx.project.id):
+        for event in engine.composite(_composite_request(ctx), ctx.project.id, on_stderr=_stderr):
             if ctx.cancel_token.cancelled:
                 engine.cancel()
 

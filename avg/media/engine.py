@@ -18,8 +18,8 @@ import multiprocessing as mp
 import os
 import queue as queue_mod
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -157,7 +157,11 @@ class MediaEngine:
         self._cancelled = False
 
     def render(
-        self, req: RenderRequest, project_id: str
+        self,
+        req: RenderRequest,
+        project_id: str,
+        *,
+        on_stderr: Callable[[str], None] | None = None,
     ) -> Iterator[ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished]:
         """Run a render in a child process, yielding events as it goes.
 
@@ -181,6 +185,14 @@ class MediaEngine:
             if kind == "progress":
                 _, percent, message = msg
                 return ProgressEvent(project_id=project_id, percent=percent, message=message)
+            if kind == "stderr":
+                # The vendored engine's own diagnosis. Handed to the caller's
+                # log rather than yielded: it is not an event the UI has any
+                # decision to make about.
+                if on_stderr is not None:
+                    with suppress(Exception):
+                        on_stderr(msg[1])
+                return None
             if kind == "result":
                 _, output, size = msg
                 result["output"] = output
@@ -256,7 +268,11 @@ class MediaEngine:
             )
 
     def composite(
-        self, req: CompositeRequest, project_id: str
+        self,
+        req: CompositeRequest,
+        project_id: str,
+        *,
+        on_stderr: Callable[[str], None] | None = None,
     ) -> Iterator[ProgressEvent | PhaseFailed | CompositeFinished]:
         """Run part 2 of a render - overlays, cards and captions - in its own
         child process.
@@ -289,6 +305,11 @@ class MediaEngine:
             if kind == "progress":
                 _, percent, message = msg
                 return ProgressEvent(project_id=project_id, percent=percent, message=message)
+            if kind == "stderr":
+                if on_stderr is not None:
+                    with suppress(Exception):
+                        on_stderr(msg[1])
+                return None
             if kind == "composite":
                 _, overlays, captions = msg
                 result["overlays"] = overlays

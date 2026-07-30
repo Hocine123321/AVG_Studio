@@ -79,6 +79,7 @@ def run(
     cancel_token: CancellationToken | None = None,
     phases: Sequence[Phase] = REGISTRY,
     on_phase_change: Callable[[], None] | None = None,
+    log: Any = None,
 ) -> Iterator[Any]:
     """Run `phases` (`REGISTRY` by default - see that module's docstring for
     why nothing else should ever pass a different order in production)
@@ -162,6 +163,7 @@ def run(
             router=router,
             emit=buffered.append,
             cancel_token=cancel_token,
+            log=log,
         )
 
         yield PhaseStarted(project_id=project.id, phase=phase.key)

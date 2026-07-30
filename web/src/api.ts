@@ -323,6 +323,26 @@ export function getTakeArtifacts(projectId: string, takeId: number): Promise<Tak
   );
 }
 
+/** `GET /api/projects/{id}/takes/{take}/log` — the tail of a take's run log.
+ *
+ * Lines rather than raw text, and a tail rather than the whole file: a verbose
+ * log of a long run is megabytes and the question is nearly always what
+ * happened at the end. `truncated` is what lets the panel say so instead of
+ * implying it showed everything. A take with no log 404s, which the caller
+ * treats as "nothing has run here yet" rather than an error.
+ */
+export interface TakeLogTail {
+  lines: string[];
+  truncated: boolean;
+  total: number;
+}
+
+export function getTakeLog(projectId: string, takeId: number, tail = 400): Promise<TakeLogTail> {
+  return apiGet<TakeLogTail>(
+    `/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}/log?tail=${tail}`,
+  );
+}
+
 /** The filenames inside a directory artifact, sorted. */
 export function getTakeArtifactList(
   projectId: string,

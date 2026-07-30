@@ -117,6 +117,18 @@ SETTINGS: list[SettingSpec] = [
         choices=["night", "day"],
         invalidates=None,
     ),
+    SettingSpec(
+        id="verbose_log",
+        group="runtime",
+        label="Verbose take log",
+        help="Write every prompt and response into the take's log. Useful when a model is misbehaving; the files get large.",
+        type="bool",
+        default=False,
+        scope="app",
+        # Nothing is invalidated: this changes what is RECORDED about a run,
+        # never what the run produces.
+        invalidates=None,
+    ),
     # --- video format and length (channel scope: a production choice) ---
     SettingSpec(
         id="video_form",

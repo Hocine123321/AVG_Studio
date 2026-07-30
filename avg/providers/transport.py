@@ -52,6 +52,7 @@ import json as json_lib
 import os
 import re
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -240,6 +241,17 @@ def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+#: The run log every outbound call is recorded on, or `None` when no job is
+#: running (the normal state for a settings screen probing a provider).
+#:
+#: A module-level handle set and cleared by the job worker
+#: (`avg.api.app`), rather than a parameter: this module has no idea which
+#: project it is serving, and threading a project through every provider so
+#: that it could find out would be a far worse coupling than one handle whose
+#: lifetime the worker owns. Never read by tests, which assert on fixtures.
+CURRENT_TAKE_LOG: Any = None
+
+
 class Transport:
     """Sends one HTTP request, either for real (record mode, retried per
     `POLICY`) or against a recorded fixture (replay mode, never touching
@@ -324,7 +336,13 @@ class Transport:
         if self.mode == "replay":
             return self._replay(fixture_path, method_u, url)
 
-        response = self._send_with_retry(method_u, url, headers, json, timeout, provider)
+        started = time.monotonic()
+        try:
+            response = self._send_with_retry(method_u, url, headers, json, timeout, provider)
+        except Exception as exc:
+            _log_call(method_u, url, None, started, provider=provider, outcome=str(exc))
+            raise
+        _log_call(method_u, url, response.status_code, started, provider=provider)
         # Live performs the call and stops there. Only `record` writes:
         # a live run writing fixtures would quietly rewrite the corpus the
         # test suite replays, from a real account, during normal use.
@@ -455,3 +473,25 @@ def request(
         return transport.request(method, url, headers=headers, json=json, timeout=timeout, provider=provider)
     finally:
         transport.close()
+
+
+def _log_call(
+    method: str, url: str, status: int | None, started: float, *, provider: str, outcome: str = ""
+) -> None:
+    """Record one outbound call on the run log, if a job owns one.
+
+    Never raises and never blocks anything: a logging failure must not turn a
+    successful provider call into a failed one.
+    """
+    log = CURRENT_TAKE_LOG
+    if log is None:
+        return
+    with suppress(Exception):
+        log.call(
+            method,
+            url,
+            status,
+            int((time.monotonic() - started) * 1000),
+            provider=provider or None,
+            outcome=outcome or None,
+        )

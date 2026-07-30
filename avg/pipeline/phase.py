@@ -72,6 +72,12 @@ class PhaseContext:
     router: Any
     emit: Callable[[Any], None]
     cancel_token: CancellationToken
+    #: The take's run log (`avg.core.take_log.TakeLog`), or `None` in unit
+    #: contexts that build a bare context. A phase logs the DETAIL behind its
+    #: events here - a model it fell back to, a file it could not read -
+    #: without that detail having to become an event the UI would then need to
+    #: decide what to do about.
+    log: Any = None
 
 
 @runtime_checkable

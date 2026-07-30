@@ -40,12 +40,13 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     group (the default text model plus model/backup/on-failure for five
     router phases), 55 before `render_threads`, and 56 before three dead
     switches (python_exe, performance_mode, run_as_admin) were removed, and
-    53 before Slice 8 added `live_list_source`. The count is kept as a
+    53 before Slice 8 added `live_list_source`, and 54 before Slice 9
+    added `verbose_log`. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 54
+    assert len(SETTINGS) == 55
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

@@ -3590,3 +3590,35 @@ a:hover {
 .livelist__note input {
   width: 100%;
 }
+
+/* ── the take's run log, inside the artifact panel ───────────────────────
+   Same surface, border and radius as `.artifact-strip` above it, so the two
+   read as one panel. Monospaced and scrolling INSIDE its own box: a log line
+   is long and a run is hundreds of them, and neither may stretch the page. */
+.artifact-log {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  overflow: hidden;
+}
+
+.artifact-log__note {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.artifact-log__body {
+  margin: 0;
+  padding: 12px 16px;
+  max-height: 420px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre;
+}

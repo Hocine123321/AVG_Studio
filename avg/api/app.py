@@ -49,6 +49,7 @@ from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
 from avg.core.model_cache import ModelCache
 from avg.core.model_prefs import ModelPrefs
+from avg.core.take_log import TakeLog, log_path_for
 from avg.core.events import JobStarted, JobStep, PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
@@ -62,6 +63,7 @@ from avg.pipeline.phases.render import _render_kwargs
 from avg.pipeline.phases.render import render_substate
 from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
+from avg.providers import transport as transport_mod
 from avg.providers.text.router import config_from_settings
 
 from .deps import require_token
@@ -229,25 +231,66 @@ class _ConnectionManager:
     """Tracks connected `/ws/events` sockets and fans engine events out to them.
 
     A dead or slow socket must never block delivery to the others and must
-    never take the whole broadcast down with it - each send is isolated,
-    and a socket that fails to receive is dropped rather than retried.
+    never take the whole broadcast down with it - each send is isolated, and a
+    socket that fails to receive is dropped rather than retried.
+
+    **Each socket is remembered with the event loop it was accepted on**, and
+    that is the loop its sends are scheduled onto. A background job cannot use
+    the loop of the REQUEST that started it: an HTTP request's loop belongs to
+    that request, and by the time a render's first event is ready the response
+    has long since returned. Scheduling onto it raises "Event loop is closed"
+    and the event is silently dropped - which is exactly what happened to
+    every event a job emitted after its own start had won a race against the
+    response returning (found 2026-07-30, when adding a file write before the
+    first emit made the loss deterministic).
     """
 
     def __init__(self) -> None:
-        self._sockets: set[WebSocket] = set()
+        self._sockets: dict[WebSocket, asyncio.AbstractEventLoop] = {}
 
     def add(self, ws: WebSocket) -> None:
-        self._sockets.add(ws)
+        # Called from inside the socket's own handler, so this IS its loop.
+        self._sockets[ws] = asyncio.get_running_loop()
 
     def remove(self, ws: WebSocket) -> None:
-        self._sockets.discard(ws)
+        self._sockets.pop(ws, None)
 
-    async def broadcast(self, payload: dict) -> None:
+    async def broadcast(self, payload: dict[str, Any]) -> None:
+        """Send to every socket from within an event loop.
+
+        Kept for callers already running on the loop (the tests, and any
+        future in-loop emitter). A background thread must use
+        `broadcast_threadsafe` instead.
+        """
         for ws in list(self._sockets):
             try:
                 await ws.send_json(payload)
             except Exception:
-                self._sockets.discard(ws)
+                self._sockets.pop(ws, None)
+
+    def broadcast_threadsafe(self, payload: dict[str, Any]) -> None:
+        """Send to every socket from a worker thread.
+
+        Each send is scheduled onto the loop that owns its socket, and
+        submission order per loop is FIFO - so a client still sees events in
+        the order the job emitted them. Deliberately does NOT wait for
+        delivery: blocking a job thread on the event loop being serviced is
+        what deadlocks a job that starts between two requests.
+        """
+        for ws, loop in list(self._sockets.items()):
+            if loop.is_closed():
+                self._sockets.pop(ws, None)
+                continue
+            try:
+                asyncio.run_coroutine_threadsafe(self._send_one(ws, payload), loop)
+            except Exception:
+                self._sockets.pop(ws, None)
+
+    async def _send_one(self, ws: WebSocket, payload: dict[str, Any]) -> None:
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            self._sockets.pop(ws, None)
 
 
 def _apply_terminal_event(project: ProjectDoc | None, event: Event) -> None:
@@ -464,6 +507,19 @@ def create_app(
 
     threading.Thread(target=_load_library, daemon=True, name="avg-library-load").start()
 
+    def _app_values(_app: FastAPI) -> dict[str, Any]:
+        """The app-scope settings document's values, or an empty dict.
+
+        Read fresh off disk per job rather than cached: `verbose_log` is meant
+        to be flipped and take effect on the NEXT run, without a restart. A
+        failure to read it must never stop a render, hence the tolerance -
+        an unreadable settings file simply means non-verbose.
+        """
+        try:
+            return dict(load_settings(app.state.settings_path).values or {})
+        except Exception:  # noqa: BLE001 - see docstring
+            return {}
+
     def _library() -> dict[str, ProjectDoc]:
         """The project cache, once the startup scan has had its chance.
 
@@ -624,23 +680,50 @@ def create_app(
 
         cancel_token = CancellationToken()
         app.state.pipeline_cancel_token = cancel_token
-        loop = asyncio.get_running_loop()
 
-        async def _dispatch(event: Any) -> None:
-            await app.state.manager.broadcast(event.model_dump(mode="json"))
+        # One run log for this job, on the take the run belongs to. Built here
+        # rather than inside the worker so the route can fail loudly if the
+        # path is wrong, and closed in the worker's `finally`.
+        take_log = TakeLog(
+            log_path_for(project, project.current_take_id or 1),
+            verbose=bool(_app_values(app).get("verbose_log")),
+        )
 
         def _emit(event: Any) -> None:
-            # Submitted, not awaited - see the render worker's `_emit` for
-            # why waiting here deadlocks.
+            """Broadcast one event from the worker thread.
+
+            Through the manager, which schedules each send onto the loop that
+            owns its socket. This used to schedule onto the loop of the
+            REQUEST that started the job - a loop that closes the moment the
+            201 is returned, after which every event was dropped with "Event
+            loop is closed" and nothing said so.
+            """
             with suppress(Exception):
-                asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
+                app.state.manager.broadcast_threadsafe(event.model_dump(mode="json"))
+
+        def _log(event: Any) -> None:
+            """Log one event. Called from the one place events funnel through,
+            so the log and the socket cannot describe different runs."""
+            with suppress(Exception):
+                take_log.event(event.model_dump(mode="json"))
 
         def _worker() -> None:
+            # Every outbound provider call this run makes lands on this log -
+            # see `avg.providers.transport.CURRENT_TAKE_LOG` for why the handle
+            # is module-level rather than threaded through every provider.
+            transport_mod.CURRENT_TAKE_LOG = take_log
             try:
                 # A pipeline has no preparation step - it starts working
                 # immediately - but it still has to say it began, or the
                 # status pill has nothing to show until the first phase
                 # emits progress.
+                take_log.info(
+                    "job started",
+                    kind="pipeline",
+                    project=project.id,
+                    take=project.current_take_id,
+                    topic=project.title,
+                )
                 _emit(JobStarted(project_id=project.id, kind="pipeline"))
                 # `project` is the SAME object cached in `app.state.projects`
                 # - `run_pipeline` mutates its `.phases[key]` records in
@@ -655,11 +738,21 @@ def create_app(
                     start_from=0,
                     cancel_token=cancel_token,
                     on_phase_change=lambda: save_project(project),
+                    log=take_log,
                 ):
-                    with suppress(Exception):
-                        fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
-                        fut.result()
+                    _log(event)
+                    _emit(event)
+            except BaseException as exc:
+                # A worker-thread crash used to vanish: the HTTP middleware
+                # only ever saw request exceptions, and this thread has no
+                # request. Recorded, then re-raised - this observes, it does
+                # not swallow.
+                take_log.error(f"{type(exc).__name__}: {exc}", detail="".join(traceback.format_exception(exc)))
+                raise
             finally:
+                take_log.info("job finished")
+                take_log.close()
+                transport_mod.CURRENT_TAKE_LOG = None
                 # Take 1 shares `project.phases` by reference (see
                 # `avg.core.takes.alias_root_take_phases`), so its phase
                 # records are already current. `master_output` is a value,
@@ -757,38 +850,35 @@ def create_app(
             app.state.output_root,
             channel_settings=(channel.settings if channel else None),
         )
-        loop = asyncio.get_running_loop()
-
-        async def _dispatch(event: Event) -> None:
-            # Runs on the event loop (via run_coroutine_threadsafe below),
-            # never on the worker thread - so the cached-project mutation
-            # below never races a concurrent GET /api/projects.
-            await app.state.manager.broadcast(event.model_dump(mode="json"))
-            _apply_terminal_event(app.state.projects.get(project_id), event)
 
         def _emit(event: Any) -> None:
             """Broadcast one event from the worker thread.
 
-            Deliberately NOT through `_dispatch`, which also calls
-            `_apply_terminal_event` - that function creates a `render`
-            PhaseRecord for anything that is not a ProgressEvent, so
-            routing a JobStarted through it would invent a render record
-            on a project that has not rendered anything.
+            Deliberately does NOT apply `_apply_terminal_event` - that
+            function creates a `render` PhaseRecord for anything that is not a
+            ProgressEvent, so routing a JobStarted through it would invent a
+            render record on a project that has not rendered anything.
+
+            Submitted, never waited on: submission order per socket is FIFO so
+            the sequence a client sees is still exact, while blocking on
+            delivery would make this worker depend on the loop being serviced
+            right now - which deadlocks the moment a job starts between two
+            requests.
             """
-            # Submitted, never waited on. `run_coroutine_threadsafe`
-            # preserves submission order, so the sequence a client sees is
-            # still exact - but blocking on the result would make this
-            # worker depend on the loop being serviced right now, which
-            # deadlocks the moment a job starts between two requests.
             with suppress(Exception):
-                asyncio.run_coroutine_threadsafe(
-                    app.state.manager.broadcast(event.model_dump(mode="json")), loop
-                )
+                app.state.manager.broadcast_threadsafe(event.model_dump(mode="json"))
+
+        take_log = TakeLog(
+            log_path_for(project, project.current_take_id or 1),
+            verbose=bool(_app_values(app).get("verbose_log")),
+        )
 
         def _worker() -> None:
+            transport_mod.CURRENT_TAKE_LOG = take_log
             try:
                 # Announced before a single file is touched: preparing the
                 # workspace is the part that used to look like a hang.
+                take_log.info("job started", kind="render", project=project_id)
                 _emit(JobStarted(project_id=project_id, kind="render"))
                 _emit(
                     JobStep(
@@ -805,9 +895,25 @@ def create_app(
                 # Slice 1 exists to compare the new output against.
                 with render_workspace(req.project_folder) as workspace:
                     _run_render(req.model_copy(update={"project_folder": workspace}))
+            except BaseException as exc:
+                take_log.error(f"{type(exc).__name__}: {exc}", detail="".join(traceback.format_exception(exc)))
+                raise
             finally:
+                take_log.info("job finished")
+                take_log.close()
+                transport_mod.CURRENT_TAKE_LOG = None
                 app.state.render_thread = None
                 app.state.rendering_project_id = None
+
+        def _log_stderr(text: str) -> None:
+            """The vendored engine's own diagnosis, straight onto the log.
+
+            This route drives MediaEngine directly rather than through the
+            render PHASE, so it needs its own forwarding - without it, a
+            /render job's stderr goes nowhere while a pipeline render's is
+            recorded.
+            """
+            take_log.error("render stderr", detail=text)
 
         def _run_render(req: RenderRequest) -> None:
             # A plain `for` loop that is never broken out of early - this is
@@ -816,17 +922,16 @@ def create_app(
             # when it ends in PhaseFailed or RenderCancelled rather than
             # RenderFinished. Nobody else consumes this generator, so if this
             # loop stopped early the child would never be joined.
-            for event in app.state.engine.render(req, project_id):
+            for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
                 with suppress(Exception):
-                    # Both submitting to the loop and waiting for delivery
-                    # are inside the same suppress: if the loop has gone away
-                    # (or a socket write blows up) `run_coroutine_threadsafe`
-                    # itself raises synchronously, before `fut.result()` is
-                    # ever reached. Either failure must never abort this
-                    # `for` loop early - that would skip the rest of the
-                    # drain and leave the child process unjoined.
-                    fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
-                    fut.result()
+                    take_log.event(event.model_dump(mode="json"))
+                # Both the broadcast and the cached-project update are
+                # suppressed: neither may abort this `for` loop early, because
+                # that would skip the rest of the drain and leave the child
+                # process unjoined.
+                _emit(event)
+                with suppress(Exception):
+                    _apply_terminal_event(app.state.projects.get(project_id), event)
 
         app.state.rendering_project_id = project_id
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-render-{project_id}")

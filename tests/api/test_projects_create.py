@@ -202,9 +202,24 @@ def test_create_override_never_persists_to_the_channel_document(client, paths):
     assert "video_form" not in on_disk.settings
 
 
+def _wait_for_idle(client: TestClient) -> None:
+    """Wait for the running pipeline job to finish.
+
+    One job at a time is the documented rule (`app.state.render_thread`), so a
+    second create while the first is still running is a 409 BY DESIGN. Tests
+    that want two projects have to let the first job end rather than relying
+    on it happening to be quick - which is what they did until 2026-07-30,
+    when a job that took a few milliseconds longer turned them red.
+    """
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
+
+
 def test_two_creates_from_the_same_topic_get_distinct_projects(client):
     _activate_channel(client)
     a = client.post("/api/projects", headers=AUTH, json={"topic": "Same Topic"}).json()
+    _wait_for_idle(client)
     b = client.post("/api/projects", headers=AUTH, json={"topic": "Same Topic"}).json()
     assert a["id"] != b["id"]
 
@@ -359,7 +374,9 @@ def test_create_with_a_malformed_model_setting_is_a_400_and_starts_nothing(clien
 def test_archive_hides_projects_and_survives_a_reload(client, paths):
     _activate_channel(client)
     first = client.post("/api/projects", headers=AUTH, json={"topic": "One"}).json()
+    _wait_for_idle(client)
     second = client.post("/api/projects", headers=AUTH, json={"topic": "Two"}).json()
+    _wait_for_idle(client)
 
     listed = client.get("/api/projects", headers=AUTH).json()["projects"]
     assert all(p["archived"] is False for p in listed)

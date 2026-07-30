@@ -26,7 +26,7 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, TextIO
 
 from avg.core.error_store import _redact
 from avg.core.models import ProjectDoc
@@ -61,6 +61,11 @@ class TakeLog:
         self._lock = Lock()
         self._last: str | None = None
         self._repeats = 0
+        #: Held open for the job's lifetime rather than reopened per line. A
+        #: pipeline run emits hundreds of lines, and an open/write/close for
+        #: each one is slow enough to matter: it delayed a run's completion
+        #: far enough that a following request saw the job still running.
+        self._handle: TextIO | None = None
 
     # ── levels ────────────────────────────────────────────────────────────
 
@@ -116,9 +121,13 @@ class TakeLog:
             self._append(_redact(body).rstrip() + "\n")
 
     def close(self) -> None:
-        """Flush a pending repeat count. Safe to call twice."""
+        """Flush a pending repeat count and release the file. Safe twice."""
         with self._lock:
             self._flush_repeats()
+            handle, self._handle = self._handle, None
+            if handle is not None:
+                with suppress(Exception):
+                    handle.close()
 
     # ── internals ─────────────────────────────────────────────────────────
 
@@ -154,7 +163,15 @@ class TakeLog:
         # A log that cannot be written must never stop a run - the same
         # tolerance `ErrorStore` applies to its own unreadable file. Covers a
         # read-only folder, a path whose parent is a file, and a locked file.
+        # A failed OPEN is remembered as `None`, so an unwritable path costs
+        # one failed attempt per line rather than a raised exception, and the
+        # run carries on either way.
         with suppress(Exception):
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(text)
+            if self._handle is None:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._handle = self.path.open("a", encoding="utf-8")
+            self._handle.write(text)
+            # Flushed per line: a log read while the job is still running -
+            # which is the whole point of the log route - must show the run
+            # as far as it has got, not as far as a buffer happened to fill.
+            self._handle.flush()

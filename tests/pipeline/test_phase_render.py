@@ -58,10 +58,10 @@ class _Engine:
         self.cancelled = False
         self.composite_requests: list[object] = []
 
-    def render(self, request, project_id):
+    def render(self, request, project_id, *, on_stderr=None):
         yield from self._events_for(request, project_id)
 
-    def composite(self, request, project_id):
+    def composite(self, request, project_id, *, on_stderr=None):
         self.composite_requests.append(request)
         if self._composite_for is not None:
             yield from self._composite_for(request, project_id)

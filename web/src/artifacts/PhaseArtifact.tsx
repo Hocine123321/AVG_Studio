@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getTakeArtifacts, type TakeArtifacts } from "../api";
+import { getTakeArtifacts, getTakeLog, type TakeArtifacts, type TakeLogTail } from "../api";
 import {
   BriefBody,
   CaptionsBody,
@@ -56,6 +56,13 @@ export interface PhaseArtifactProps {
 
 export default function PhaseArtifact({ projectId, takeId, phaseKey, duration, cost }: PhaseArtifactProps) {
   const [artifacts, setArtifacts] = useState<TakeArtifacts | null>(null);
+  /** The take's run log, fetched only once asked for: it is per TAKE, not per
+   * phase, so opening it on every row click would re-download the same file
+   * eight times over. `null` means "not asked for yet", `[]` means "asked and
+   * there is none" - a take that has not run yet 404s, which is a fact worth
+   * showing rather than an error. */
+  const [log, setLog] = useState<TakeLogTail | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
 
   useEffect(() => {
     if (takeId === null) {
@@ -102,8 +109,39 @@ export default function PhaseArtifact({ projectId, takeId, phaseKey, duration, c
         <span className="artifact-strip__item mono">
           {formatBytes(own.reduce((sum, [, size]) => sum + size, 0))}
         </span>
+        {/* Unaccented: the filled terracotta action on this screen is
+            Studio's own CTA, and a log toggle is not competing with it. */}
+        <button
+          type="button"
+          className="btn btn--sm"
+          onClick={() => {
+            setLogOpen((open) => !open);
+            if (log === null) {
+              getTakeLog(projectId, takeId)
+                .then(setLog)
+                .catch(() => setLog({ lines: [], truncated: false, total: 0 }));
+            }
+          }}
+        >
+          {logOpen ? "Hide log" : "Log"}
+        </button>
       </div>
       <Body projectId={projectId} takeId={takeId} files={files} />
+      {logOpen &&
+        (log === null ? (
+          <p className="artifact-empty">Loading the log…</p>
+        ) : log.lines.length === 0 ? (
+          <p className="artifact-empty">No log for this take yet — nothing has run in it.</p>
+        ) : (
+          <div className="artifact-log">
+            {log.truncated && (
+              <p className="artifact-log__note">
+                Showing the last {log.lines.length} of {log.total} lines.
+              </p>
+            )}
+            <pre className="artifact-log__body">{log.lines.join("\n")}</pre>
+          </div>
+        ))}
     </div>
   );
 }

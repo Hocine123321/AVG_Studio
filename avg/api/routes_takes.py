@@ -81,6 +81,7 @@ from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
+from avg.core.take_log import log_path_for
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
 from avg.export.capcut import export_take
 from avg.pipeline.create import save_project
@@ -650,3 +651,29 @@ async def export_take_route(project_id: str, take_id: int, request: Request) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return {"folder": str(folder)}
+
+
+@router.get("/api/projects/{project_id}/takes/{take_id}/log")
+async def get_take_log(
+    project_id: str, take_id: int, request: Request, tail: int = 400
+) -> dict[str, Any]:
+    """The tail of this take's run log.
+
+    Tail rather than the whole file, and lines rather than raw text: a verbose
+    log of a long run is megabytes, and the question being asked is almost
+    always "what happened at the end". `truncated` tells the UI to say so
+    instead of implying it showed everything.
+
+    A take with no log is a 404 - either nothing has run in it yet, or it is a
+    take from before the log existed. Both are honestly "there is no log
+    here", which is what the panel says.
+    """
+    project = _get_project(request.app.state, project_id)
+    path = log_path_for(project, take_id)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no log for this take")
+    # `errors="replace"`: a log is diagnostic text and a single bad byte -
+    # from a provider echoing something odd - must not make it unreadable.
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    limit = max(tail, 1)
+    return {"lines": lines[-limit:], "truncated": len(lines) > limit, "total": len(lines)}

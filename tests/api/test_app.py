@@ -1,4 +1,5 @@
 import json
+import threading
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -209,3 +210,79 @@ def test_job_started_is_the_first_event_a_render_emits(tmp_path):
     # percentage - it has no measurable denominator.
     assert second["type"] == "job_step"
     assert second["step"] == "preparing"
+
+
+def test_a_broadcast_from_a_worker_thread_reaches_a_socket_on_another_loop():
+    """The regression test for silently dropped job events.
+
+    Both job workers used to schedule their broadcasts onto
+    `asyncio.get_running_loop()` as captured inside the ROUTE - the loop of
+    that one request, which closes when the response returns. Every event a
+    job emitted afterwards raised "Event loop is closed" into a
+    `suppress(Exception)` and vanished; it only looked like it worked because
+    a job's first events usually won a race against the response.
+
+    So the manager now remembers the loop each socket was accepted on. This
+    drives that directly: a socket registered on one loop, a broadcast from a
+    plain thread, and the payload has to arrive.
+    """
+    import asyncio
+    import threading
+
+    from avg.api.app import _ConnectionManager
+
+    received: list[dict] = []
+    ready = threading.Event()
+    loop_holder: list[asyncio.AbstractEventLoop] = []
+
+    class _FakeSocket:
+        async def send_json(self, payload: dict) -> None:
+            received.append(payload)
+
+    manager = _ConnectionManager()
+
+    async def _serve() -> None:
+        loop_holder.append(asyncio.get_running_loop())
+        manager.add(_FakeSocket())  # registers THIS loop, as the real route does
+        ready.set()
+        await asyncio.sleep(0.5)
+
+    thread = threading.Thread(target=lambda: asyncio.run(_serve()), daemon=True)
+    thread.start()
+    assert ready.wait(timeout=5)
+
+    # From a thread that is not the loop's - exactly a job worker's position.
+    manager.broadcast_threadsafe({"type": "job_started"})
+    thread.join(timeout=5)
+
+    assert received == [{"type": "job_started"}]
+
+
+def test_a_socket_whose_loop_died_is_dropped_not_retried():
+    """A closed loop is a gone client. Dropping it keeps a dead socket from
+    costing every later broadcast an exception."""
+    import asyncio
+    import threading
+
+    from avg.api.app import _ConnectionManager
+
+    manager = _ConnectionManager()
+
+    class _FakeSocket:
+        async def send_json(self, payload: dict) -> None:  # pragma: no cover
+            raise AssertionError("must not be sent to")
+
+    def _register() -> None:
+        asyncio.run(_register_async())
+
+    async def _register_async() -> None:
+        manager.add(_FakeSocket())
+
+    thread = threading.Thread(target=_register, daemon=True)
+    thread.start()
+    thread.join(timeout=5)
+    # The loop that socket was registered on is now closed.
+
+    manager.broadcast_threadsafe({"type": "job_started"})
+
+    assert manager._sockets == {}
