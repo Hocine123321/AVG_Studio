@@ -864,8 +864,11 @@ a:hover {
 
 .project-card__thumb {
   position: relative;
+  /* The default only; `ProjectCard.tsx` overrides it inline with the
+     project's own ratio. Rows are deliberately no longer a uniform height:
+     cropping a widescreen frame into a portrait card misrepresents the
+     video the card stands for. */
   aspect-ratio: 9 / 16;
-  max-height: 246px;
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -883,6 +886,14 @@ a:hover {
   background: linear-gradient(158deg, var(--surface-2), var(--canvas));
 }
 
+.project-card__noimg {
+  margin: 0;
+  padding: 0 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--dim);
+}
+
 .project-card__scrim {
   position: absolute;
   inset: 0;
@@ -897,6 +908,7 @@ a:hover {
   right: 11px;
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 6px;
   z-index: 2;
 }

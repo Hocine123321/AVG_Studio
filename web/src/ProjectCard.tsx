@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { ProjectDoc } from "./api";
 import { thumbnailUrl } from "./api";
-import { IconFrame } from "./Icons";
 
 type CardState = "done" | "failed" | "running" | "incomplete";
 
@@ -86,11 +85,24 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
     statusLabel = "Rendering";
   }
 
+  // The project's own ratio, as a CSS `aspect-ratio` value. `aspect_ratio`
+  // arrives from `GET /api/projects` as "9:16" or "16:9"; anything else
+  // falls back to portrait rather than producing an invalid declaration.
+  const aspect = /^\d+:\d+$/.test(project.aspect_ratio)
+    ? project.aspect_ratio.replace(":", " / ")
+    : "9 / 16";
+
   return (
     <article className="project-card" onClick={open}>
-      <div className={`project-card__thumb${thumbBroken ? " project-card__thumb--empty" : ""}`}>
+      <div
+        className={`project-card__thumb${thumbBroken ? " project-card__thumb--empty" : ""}`}
+        style={{ aspectRatio: aspect }}
+      >
         {thumbBroken ? (
-          <IconFrame size={30} />
+          // `GET .../thumbnail` 404s honestly for a project that never
+          // generated an image. A grey frame icon reads as a broken image;
+          // a sentence says which of the two it actually is.
+          <p className="project-card__noimg">No images yet</p>
         ) : (
           <img
             className="washed"
@@ -104,6 +116,8 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
 
       <div className="project-card__scrim" />
 
+      {/* The status chip owns the left, the aspect chip the right. A long
+          "Failed · render" and the aspect chip used to share a corner. */}
       <div className="project-card__badges">
         <span className={statusPillClass}>{statusLabel}</span>
         <span className="pill pill--ar">{project.aspect_ratio}</span>
@@ -121,10 +135,16 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
         </p>
       </div>
 
+      {/* No `.btn--primary` anywhere on a card. Home spends its one filled
+          terracotta action on "New video"; thirteen filled buttons in a
+          grid taught the user nothing about which one to press. The card's
+          state is already carried by its chip - sage for done, amber for
+          running, red for failed - which is colour the state earned and
+          which no longer competes with a button for the same meaning. */}
       <div className="project-card__actions" onClick={(e) => e.stopPropagation()}>
         {state === "done" && (
           <>
-            <button type="button" className="btn btn--primary" onClick={open}>
+            <button type="button" className="btn" onClick={open}>
               Play
             </button>
             <button type="button" className="btn" onClick={render}>
@@ -134,7 +154,7 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
         )}
         {state === "failed" && (
           <>
-            <button type="button" className="btn btn--primary" onClick={render}>
+            <button type="button" className="btn" onClick={render}>
               Resume
             </button>
             <button type="button" className="btn" onClick={open}>
@@ -143,7 +163,7 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
           </>
         )}
         {(state === "running" || state === "incomplete") && (
-          <button type="button" className="btn btn--primary" onClick={open}>
+          <button type="button" className="btn" onClick={open}>
             {state === "running" ? "Open studio" : "Open"}
           </button>
         )}

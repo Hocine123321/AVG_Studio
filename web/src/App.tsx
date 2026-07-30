@@ -292,6 +292,7 @@ export default function App() {
           onGoSettings={() => setScreen({ name: "settings" })}
           onGoHealth={() => setScreen({ name: "health" })}
           onGoChannels={() => setScreen({ name: "channels" })}
+          onCreate={() => setScreen({ name: "create" })}
         />
       );
     }

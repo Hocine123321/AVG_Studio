@@ -26,6 +26,9 @@ export interface HomeProps {
   onGoSettings: () => void;
   onGoHealth: () => void;
   onGoChannels: () => void;
+  /** Home's single filled terracotta action. Every card action is plain
+   * `.btn`; this is the one thing on the screen the eye should land on. */
+  onCreate: () => void;
 }
 
 function formatClock(ms: number): string {
@@ -103,7 +106,7 @@ function Hero({ project, progress, onOpen, onCancel }: HeroProps) {
           </p>
 
           <div className="hero__actions">
-            <button type="button" className="btn btn--primary" onClick={() => onOpen(project.id)}>
+            <button type="button" className="btn" onClick={() => onOpen(project.id)}>
               Open studio
             </button>
             <button type="button" className="btn btn--ghost" onClick={() => onCancel(project.id)}>
@@ -138,6 +141,7 @@ export default function Home({
   onGoSettings,
   onGoHealth,
   onGoChannels,
+  onCreate,
 }: HomeProps) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -217,6 +221,9 @@ export default function Home({
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search projects by title"
         />
+        <button type="button" className="btn btn--primary" onClick={onCreate}>
+          New video
+        </button>
       </header>
 
       <Overview
