@@ -88,11 +88,14 @@ export default function Settings() {
   const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
 
   const [search, setSearch] = useState("");
-  /** Which group is currently in view. Derived from an IntersectionObserver,
-   * never from a click: clicking scrolls, and the observer then reports
-   * where the scroll landed - so the mark can never disagree with the page. */
+  /** Which group is currently in view. Derived from an IntersectionObserver
+   * while the user scrolls, and set outright by a click - see `jumpTo`,
+   * which silences the observer for the length of the smooth scroll so the
+   * mark does not flicker through every group the animation crosses. */
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const jumping = useRef(false);
+  const jumpTimer = useRef<number | null>(null);
 
   useEffect(() => {
     Promise.all([getSettingsSchema(), getSettingsValues(), getChannels(), getKeys()])
@@ -255,6 +258,11 @@ export default function Settings() {
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // A click already knows where it is going. Ignoring the observer
+        // for the length of the smooth scroll is what stops the mark
+        // flickering through every group the animation passes over and
+        // then landing wherever the last callback happened to fire.
+        if (jumping.current) return;
         for (const entry of entries) {
           if (entry.isIntersecting) {
             setActiveGroup(entry.target.getAttribute("data-settings-group"));
@@ -272,6 +280,17 @@ export default function Settings() {
       ?.querySelector(`[data-settings-group="${group}"]`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveGroup(group);
+    // Long enough to cover a smooth scroll the whole height of the page.
+    // There is no event for "a smooth scroll finished" - `scrollend` is not
+    // in this WebView2 - so this is a timer, and it is deliberately generous:
+    // the cost of it being too long is that the mark lags the scroll for a
+    // moment, and the cost of it being too short is the flicker it exists to
+    // prevent.
+    if (jumpTimer.current !== null) window.clearTimeout(jumpTimer.current);
+    jumping.current = true;
+    jumpTimer.current = window.setTimeout(() => {
+      jumping.current = false;
+    }, 700);
   }
 
   if (loadError) {

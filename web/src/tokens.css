@@ -1695,8 +1695,14 @@ a:hover {
 }
 
 /* A smooth jump must not land the group's heading under the floating
-   status pill, whose band `.app-shell__content` already reserves. */
-.settings-group {
+   status pill, whose band `.app-shell__content` already reserves.
+
+   On `[data-settings-group]`, not on `.settings-group`: `scroll-margin`
+   only applies to the element `scrollIntoView` was actually called on, and
+   `Settings.tsx`'s `jumpTo` targets the wrapping div (the one that may
+   also carry the Components or Models panel above the group's heading).
+   Set on the inner `<section>` it was silently doing nothing. */
+[data-settings-group] {
   scroll-margin-top: 12px;
 }
 
