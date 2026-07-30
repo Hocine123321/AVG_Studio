@@ -268,11 +268,17 @@ export interface HealthComponent {
   /** Whether the app can work without it. An optional component that is
    * missing is worth knowing about, not worth reading as a broken app. */
   required?: boolean;
+  /** The distribution name an Install action would name, or `""` when
+   * there is nothing to install — FFmpeg is a binary, not a pip package. */
+  package?: string;
 }
 
 export interface HealthResponse {
   components: HealthComponent[];
   ok: boolean;
+  /** False in a frozen build. A required dependency missing there is a
+   * packaging bug in the build, so the row explains instead of acting. */
+  can_install?: boolean;
 }
 
 /** `GET /api/health`. `refresh` is the Recheck button and skips the
@@ -281,6 +287,14 @@ export interface HealthResponse {
  * response - reporting the breakage is the point. */
 export function getHealth(refresh = false): Promise<HealthResponse> {
   return apiGet<HealthResponse>(`/api/health${refresh ? "?refresh=true" : ""}`);
+}
+
+/** `POST /api/health/install`. One dependency, by distribution name; the
+ * backend refuses anything that is not one of its own packages and refuses
+ * outright in a frozen build. Returns pip's own combined output, so the
+ * card shows what pip said rather than a verdict this app invented. */
+export function installPackage(pkg: string): Promise<{ ok: boolean; output: string }> {
+  return apiPost<{ ok: boolean; output: string }>("/api/health/install", { package: pkg });
 }
 
 /** One stage of the App Health pipeline. The order the backend returns them

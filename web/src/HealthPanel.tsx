@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getHealth, type HealthResponse } from "./api";
+import { getHealth, installPackage, type HealthResponse } from "./api";
 
 /**
  * The Components table: is every render dependency actually here, and does
@@ -19,6 +19,8 @@ export default function HealthPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [output, setOutput] = useState<string | null>(null);
 
   const load = useCallback(async (refresh: boolean) => {
     setBusy(true);
@@ -35,6 +37,22 @@ export default function HealthPanel() {
   useEffect(() => {
     void load(false);
   }, [load]);
+
+  async function install(pkg: string) {
+    setInstalling(pkg);
+    setOutput(null);
+    try {
+      const res = await installPackage(pkg);
+      setOutput(res.output.trim() || (res.ok ? "installed" : "pip said nothing"));
+      // Re-check rather than assume: a pip that reported success and a
+      // package that actually imports are two different claims.
+      await load(true);
+    } catch (err) {
+      setOutput(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstalling(null);
+    }
+  }
 
   return (
     <section className="models-panel" aria-label="Components">
@@ -64,6 +82,7 @@ export default function HealthPanel() {
                 <th>Component</th>
                 <th>State</th>
                 <th>Version</th>
+                <th>Fix</th>
               </tr>
             </thead>
             <tbody>
@@ -82,12 +101,37 @@ export default function HealthPanel() {
                   <td className="mono" title={component.detail}>
                     {component.version || "—"}
                   </td>
+                  <td>
+                    {component.ok ? (
+                      "—"
+                    ) : !component.package ? (
+                      // FFmpeg. Not a pip package, so there is nothing
+                      // honest to offer here.
+                      <span className="field-row__help">Not a pip package</span>
+                    ) : health.can_install === false ? (
+                      // A packaged build. A missing required dependency
+                      // there is a bug in the build, not something to paper
+                      // over at runtime.
+                      <span className="field-row__help">Bundled — reinstall AVG Studio</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        disabled={installing !== null}
+                        onClick={() => void install(component.package!)}
+                      >
+                        {installing === component.package ? "Installing…" : "Install"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {output && <pre className="artifact-prose">{output}</pre>}
     </section>
   );
 }
