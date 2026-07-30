@@ -52,6 +52,7 @@ class ArtifactSpec:
 ARTIFACTS: dict[str, tuple[ArtifactSpec, ...]] = {
     "brief": (
         ArtifactSpec("brief", "script/brief.json", "Brief", "application/json", "json"),
+        ArtifactSpec("research", "script/topic_research.txt", "Research", "text/plain", "text"),
     ),
     "script": (
         ArtifactSpec("narration", "script/narration.txt", "Narration", "text/plain", "text"),

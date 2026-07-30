@@ -82,7 +82,10 @@ from avg.core.models import PhaseRecord, ProjectDoc, Take  # noqa: F401 - re-exp
 # forward, and a take that keeps both needs it copied only once (harmless -
 # `card_plan.json` is a single file, not a merge of two owners' output).
 PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
-    "brief": ("script/brief.json",),
+    # `topic_research.txt` rides along because the research call was PAID
+    # for: a clone that kept the Brief but not its research would make the
+    # next script write without it, or pay again.
+    "brief": ("script/brief.json", "script/topic_research.txt"),
     "script": ("script/narration.txt", "script/scenes.json"),
     "director1": (
         "script/video_map.json",

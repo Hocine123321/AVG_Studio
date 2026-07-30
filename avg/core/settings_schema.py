@@ -131,6 +131,21 @@ SETTINGS: list[SettingSpec] = [
     ),
     # --- video format and length (channel scope: a production choice) ---
     SettingSpec(
+        id="topic_research",
+        group="creative",
+        label="Research the topic first",
+        help=(
+            "Spend one extra AI call gathering the facts about the topic before the brief is "
+            "written. The script then draws on it."
+        ),
+        type="bool",
+        default=False,
+        scope="channel",
+        # A different brief means a different script and everything after it -
+        # the same chain every other writing setting invalidates.
+        invalidates="brief",
+    ),
+    SettingSpec(
         id="video_form",
         group="video",
         label="Form",

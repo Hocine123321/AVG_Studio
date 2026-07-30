@@ -195,6 +195,30 @@ class CreativeInputs:
 
 # ── Phase 0: Creative Brief ─────────────────────────────────────────────
 
+def build_research_prompt(topic: str) -> str:
+    """Brief part 1's prompt: the facts a short video about `topic` should be
+    accurate about.
+
+    Ported from the legacy Brief's `[Part 1] Researching the topic`
+    (`D:\\AI_Video_Gen\\info.txt:245-252`), which cached its answer to
+    `topic_research.txt` and let Phase 1 reuse it rather than paying for a
+    second call.
+
+    Plain prose, no JSON: the output is CONTEXT for a later prompt, and asking
+    a model for structure it does not need is how a research call starts
+    failing to parse for no benefit.
+    """
+    return (
+        "You are a researcher briefing a scriptwriter.\n\n"
+        f"TOPIC: {topic}\n\n"
+        "List the facts a short video about this topic must get right: what is "
+        "actually true, the specific names, numbers and dates that matter, and "
+        "the common misconception a casual writer would repeat. Be concrete and "
+        "brief - at most 200 words, plain prose, no headings, no preamble. If "
+        "you are unsure of a detail, say so rather than inventing it."
+    )
+
+
 def build_brief_prompt(
     inputs: CreativeInputs,
     *,

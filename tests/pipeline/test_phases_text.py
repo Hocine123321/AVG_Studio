@@ -548,3 +548,82 @@ def test_director1_all_scenes_invalid_degrades_to_default_per_scene(tmp_path, mo
         {"scene": 1, "role": "", "beat": "none", "visual_intent": "BACKGROUND"},
         {"scene": 2, "role": "", "beat": "none", "visual_intent": "BACKGROUND"},
     ]
+
+
+# ── topic research (Brief part 1) ─────────────────────────────────────────
+
+
+def test_research_is_off_by_default_and_costs_no_call(tmp_path, monkeypatch):
+    """It is an extra AI call per video. Off unless asked for, and when it is
+    off no file is written - an empty research file would read as "research
+    happened and found nothing"."""
+    brief_reply = json.dumps({"emotional_arc": "curiosity", "tone": "warm", "angle": "a"})
+    fake = _QueueGenerator([brief_reply])
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({}))
+
+    BriefPhase().run(ctx)
+
+    assert not (project.folder / "script" / "topic_research.txt").exists()
+    assert len(fake.calls) == 1
+
+
+def test_the_brief_researches_first_when_asked(tmp_path, monkeypatch):
+    """Legacy's Brief had two parts: one research call cached to
+    topic_research.txt, then the brief itself - and Script reused the cached
+    text rather than paying for a second call
+    (`D:\AI_Video_Gen\info.txt:245-252`). Only the brief survived the port,
+    so every script was written with no research behind it."""
+    research_reply = "Lighthouses were striped for daytime identification, called day marks."
+    brief_reply = json.dumps({"emotional_arc": "curiosity", "tone": "warm", "angle": "a"})
+    fake = _QueueGenerator([research_reply, brief_reply])
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({"topic_research": True}))
+
+    BriefPhase().run(ctx)
+
+    text = (project.folder / "script" / "topic_research.txt").read_text(encoding="utf-8")
+    assert "day marks" in text
+    # Research first, brief second - the brief is meant to be written WITH the
+    # research in hand, which is the only reason to spend the call.
+    assert [phase for phase, _ in fake.calls] == ["brief", "brief"]
+
+
+def test_a_failed_research_call_writes_nothing_and_does_not_fail_the_brief(tmp_path, monkeypatch):
+    """The brief is the phase's real output. A research call that fails costs
+    the script its background, not the run."""
+    brief_reply = json.dumps({"emotional_arc": "curiosity", "tone": "warm", "angle": "a"})
+
+    calls: list[str] = []
+
+    def flaky(prompt: str, phase: str, *, config):
+        calls.append(phase)
+        if len(calls) == 1:
+            raise RuntimeError("no pollen")
+        return TextResult(text=brief_reply, provider="fake", model="fake")
+
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", flaky)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({"topic_research": True}))
+
+    BriefPhase().run(ctx)  # must NOT raise
+
+    assert not (project.folder / "script" / "topic_research.txt").exists()
+    assert read_json(project.folder / "script" / "brief.json")["emotional_arc"] == "curiosity"
+
+
+def test_the_script_prompt_carries_the_research(tmp_path):
+    """A cached file nothing reads is worse than no file: it costs a call and
+    changes nothing."""
+    from avg.pipeline.phases.writing import read_research
+
+    (tmp_path / "script").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "script" / "topic_research.txt").write_text("Striped for contrast.", encoding="utf-8")
+
+    assert "Striped for contrast." in read_research(tmp_path)
+    assert read_research(tmp_path / "elsewhere") == ""
