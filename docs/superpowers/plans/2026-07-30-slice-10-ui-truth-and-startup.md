@@ -15,7 +15,8 @@
 Every task's requirements implicitly include all of these.
 
 - **Interpreter is `.venv-build/Scripts/python.exe`.** System `python` lacks the dependencies. Tests: `.venv-build/Scripts/python.exe -m pytest tests -q`. Types: `.venv-build/Scripts/python.exe -m mypy`.
-- **Baseline measured 2026-07-30: `746 passed`.** No task may end with fewer than 746. mypy must stay clean over its 687 files.
+- **Baseline measured 2026-07-30: `746 passed`.** No task may end with fewer than 746.
+- **mypy baseline is `Found 687 errors in 22 files`** (mostly `avg/api/app.py` and `avg/shell.py`). It does not pass clean and this slice does not fix that. The bar is that your change adds nothing to the count — verify by stashing if unsure.
 - **No live API calls in tests, ever.** `tests/conftest.py` forces `AVG_REPLAY_FIXTURES=1` session-wide. Never call a real provider; never record a fixture in this slice.
 - **Nothing below `avg/api/` may print or prompt.** Lower layers return values or emit typed events.
 - **Never use a native form control.** No `<select>`, no `<input type="checkbox">`, no `<input type="radio">`. Use `web/src/Select.tsx` for choices and the `.switch` pattern for booleans. `<details>`/`<summary>` is permitted and must be styled.
@@ -1247,7 +1248,7 @@ Expected: at least 755 passed (746 baseline + 9 new).
 .venv-build/Scripts/python.exe -m mypy
 ```
 
-Expected: `Success: no issues found`.
+Expected: `Found 687 errors in 22 files` — the pre-existing baseline, unchanged. mypy does NOT pass clean on this repo; the bar is that your change adds nothing to that count.
 
 - [ ] **Step 10: Commit**
 
@@ -1647,7 +1648,7 @@ Expected: at least 761 passed.
 .venv-build/Scripts/python.exe -m mypy
 ```
 
-Expected: `Success: no issues found`.
+Expected: `Found 687 errors in 22 files` — the pre-existing baseline, unchanged. mypy does NOT pass clean on this repo; the bar is that your change adds nothing to that count.
 
 - [ ] **Step 10: Commit**
 
@@ -2213,7 +2214,7 @@ Expected: at least 768 passed. If an existing health test asserts the exact key 
 .venv-build/Scripts/python.exe -m mypy
 ```
 
-Expected: `Success: no issues found`.
+Expected: `Found 687 errors in 22 files` — the pre-existing baseline, unchanged. mypy does NOT pass clean on this repo; the bar is that your change adds nothing to that count.
 
 - [ ] **Step 7: Commit**
 
@@ -2668,7 +2669,7 @@ Expected: at least 770 passed.
 .venv-build/Scripts/python.exe -m mypy
 ```
 
-Expected: `Success: no issues found`.
+Expected: `Found 687 errors in 22 files` — the pre-existing baseline, unchanged. mypy does NOT pass clean on this repo; the bar is that your change adds nothing to that count.
 
 - [ ] **Step 8: Measure time to window, by hand, before and after**
 
@@ -2719,7 +2720,7 @@ Expected: at least 770 passed, never fewer than 746.
 .venv-build/Scripts/python.exe -m mypy
 ```
 
-Expected: `Success: no issues found`.
+Expected: `Found 687 errors in 22 files` — the pre-existing baseline, unchanged. mypy does NOT pass clean on this repo; the bar is that your change adds nothing to that count.
 
 ```bash
 cd web && npm run build && npm run lint
