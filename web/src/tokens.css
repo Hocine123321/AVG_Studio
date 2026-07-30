@@ -419,9 +419,21 @@ a:hover {
   padding-top: 34px;
 }
 
+/* The screen's animated wrapper (App.tsx). It exists so `.screen-enter`'s
+   transform is not on the scroll container - see that class. It must be
+   transparent to layout: a flex column at least as tall as the scrollport,
+   so `.home`/`.settings`'s `min-height: 100%` and `.welcome`'s `flex: 1`
+   still resolve against a definite height. */
+.app-shell__screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 /* Welcome owns the whole window and has no header to protect - the gutter
-   would just push its centred content off-centre. */
-.app-shell__content:has(> .welcome) {
+   would just push its centred content off-centre. Descendant `:has`, not
+   child: Welcome now sits inside `.app-shell__screen`. */
+.app-shell__content:has(.welcome) {
   padding-top: 0;
 }
 
@@ -433,7 +445,10 @@ a:hover {
    inside `.app-shell__content`. */
 
 .welcome {
-  height: 100%;
+  /* A flex child of `.app-shell__screen`, which is at least as tall as the
+     scrollport - `flex: 1` fills it. A percentage height would resolve
+     against that wrapper's auto height and collapse. */
+  flex: 1;
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -2976,6 +2991,32 @@ a:hover {
   animation: avg-pulse 1.4s ease-in-out infinite;
 }
 
+/* An indeterminate ring while a job runs: one arc rotating, the shape a
+   user already reads as "working". Same 7px optical weight as the dot it
+   replaces, grown to 13px so the arc is legible. */
+.statuspill__ring {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--pill) 26%, transparent);
+  border-top-color: var(--pill);
+  animation: avg-spin 0.9s linear infinite;
+}
+
+@keyframes avg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pill-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.96);
+  }
+}
+
 @keyframes avg-pulse {
   0%,
   100% {
@@ -2992,6 +3033,7 @@ a:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  animation: pill-pop 0.28s ease-out;
 }
 
 .statuspill__clock,
@@ -3000,7 +3042,9 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .statuspill__dot {
+  .statuspill__dot,
+  .statuspill__ring,
+  .statuspill__label {
     animation: none;
   }
 }

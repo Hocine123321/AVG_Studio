@@ -41,11 +41,22 @@ export default function StatusBar({ connected }: { connected: boolean }) {
 
   const kind = !connected ? "error" : lead !== null ? "busy" : "ready";
   const label = kind === "error" ? "Reconnecting" : lead !== null ? lead.label : "Ready!";
+  // The ring is for a JOB - a render or a pipeline, registered `high` from
+  // the event socket (see activity.ts). An ordinary request keeps the dot:
+  // a spinner for a 40ms GET would make the pill cry wolf.
+  const running = lead !== null && lead.priority === "high";
 
   return (
     <div className={`statuspill statuspill--${kind}`} role="status" aria-live="polite">
-      <span className="statuspill__dot" aria-hidden="true" />
-      <span className="statuspill__label">
+      {running ? (
+        <span className="statuspill__ring" aria-hidden="true" />
+      ) : (
+        <span className="statuspill__dot" aria-hidden="true" />
+      )}
+      {/* Keyed on the mark so the label replays its pop each time the pill
+          changes between resting and working - "Ready!" slides in as the
+          ring spins up and pops back out when the job ends. */}
+      <span className="statuspill__label" key={running ? "running" : "resting"}>
         {label}
         {lead !== null && "…"}
       </span>

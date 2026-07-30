@@ -324,9 +324,19 @@ export default function App() {
       <div className="app-shell__main">
         {/* `key` on the screen name, not the content: remounting on a route
             change is what lets the enter transition actually run each time
-            rather than only on first paint. */}
-        <div className="app-shell__content screen-enter" key={screen.name}>
-          {content}
+            rather than only on first paint.
+
+            The animated element is a wrapper INSIDE the scroll container,
+            never the container itself. `.screen-enter` animates a
+            transform, and a transformed box contributes its shifted
+            position to its ancestor's scrollable overflow - with the class
+            on `.app-shell__content` the document was 6px taller than the
+            viewport for the animation's 0.18s and grew a second scrollbar
+            next to the real one. */}
+        <div className="app-shell__content">
+          <div className="app-shell__screen screen-enter" key={screen.name}>
+            {content}
+          </div>
         </div>
         <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
         <StatusBar connected={events.connected} />
