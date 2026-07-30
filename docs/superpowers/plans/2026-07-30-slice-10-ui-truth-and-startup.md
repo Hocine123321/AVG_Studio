@@ -85,36 +85,26 @@ In `web/src/App.tsx`, replace lines 324-330:
 
 ```css
 /* The screen's animated wrapper (App.tsx). It exists so `.screen-enter`'s
-   transform is not on the scroll container - see that class. It must be
-   transparent to layout: a flex column at least as tall as the scrollport,
-   so `.home`/`.settings`'s `min-height: 100%` and `.welcome`'s `flex: 1`
-   still resolve against a definite height. */
+   transform is not on the scroll container - see that class.
+
+   `height`, NOT `min-height`, and this is the whole subtlety: every screen
+   root (`.home`, `.settings`, `.studio`, `.channels`, `.create`) sizes
+   itself with `min-height: 100%`, and a percentage resolves against its
+   parent's HEIGHT. A wrapper with only `min-height` has an auto height, so
+   all five collapse to their content. `.app-shell__content` is a flex item
+   with `flex: 1` in a fixed-height column, so its height is definite and
+   `100%` here is real.
+
+   A screen taller than the scrollport simply overflows this box and
+   `.app-shell__content` scrolls it, which is what it is for. Deliberately
+   NOT a flex column: flex items shrink by default, so a tall screen would
+   be squashed to fit instead of overflowing. */
 .app-shell__screen {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
+  height: 100%;
 }
 ```
 
-Replace the `:has` rule at lines 422-426 (the Welcome gutter exception — Welcome is no longer a direct child):
-
-```css
-/* Welcome owns the whole window and has no header to protect - the gutter
-   would just push its centred content off-centre. Descendant `:has`, not
-   child: Welcome now sits inside `.app-shell__screen`. */
-.app-shell__content:has(.welcome) {
-  padding-top: 0;
-}
-```
-
-Change `.welcome`'s first declaration (line 436) from `height: 100%;` to:
-
-```css
-  /* A flex child of `.app-shell__screen`, which is at least as tall as the
-     scrollport - `flex: 1` fills it. A percentage height would resolve
-     against that wrapper's auto height and collapse. */
-  flex: 1;
-```
+Leave the `.app-shell__content:has(> .welcome)` rule and `.welcome`'s own `height: 100%` exactly as they are. `App.tsx` returns `<Welcome />` early, in place of the whole shell (`App.tsx:223-230`), so Welcome never renders inside this wrapper and nothing about it changes here.
 
 - [ ] **Step 3: Look at it — no second scrollbar**
 
