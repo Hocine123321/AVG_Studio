@@ -63,6 +63,11 @@ class Component:
     #: installed it" - the split exists because a dozen equal-weight rows
     #: cannot answer "which missing one is why nothing works".
     required: bool = True
+    #: The distribution name this row could be installed under, or `""`
+    #: when there is nothing to install. FFmpeg is a binary, not a pip
+    #: package - its row explains rather than acting, which is the honest
+    #: answer and not a missing feature.
+    package: str = ""
 
 
 @dataclass
@@ -111,6 +116,18 @@ _PACKAGES: tuple[tuple[str, str, str, bool], ...] = (
 )
 
 
+def installable_packages() -> set[str]:
+    """The distribution names an install action may name, and nothing else.
+
+    Derived from `_PACKAGES` rather than restated: a package added there is
+    installable with no second edit, and a name that is not in that table
+    can never reach a shell. `avg/api/routes_settings.py` validates every
+    install request against this set before it builds an argv - the request
+    body is data, not a command line.
+    """
+    return {distribution for _label, _module, distribution, _required in _PACKAGES}
+
+
 def _check_package(label: str, module: str, distribution: str, required: bool) -> Component:
     # Importing to check costs whatever that import costs - which for
     # edge-tts is the ~2s that Slice 7 took OFF startup. That is fine and
@@ -121,7 +138,13 @@ def _check_package(label: str, module: str, distribution: str, required: bool) -
     try:
         __import__(module)
     except Exception as exc:  # noqa: BLE001 - any import failure is the answer
-        return Component(name=label, ok=False, detail=f"cannot import: {exc}", required=required)
+        return Component(
+            name=label,
+            ok=False,
+            detail=f"cannot import: {exc}",
+            required=required,
+            package=distribution,
+        )
     try:
         version = metadata.version(distribution)
     except Exception:  # noqa: BLE001
@@ -129,9 +152,13 @@ def _check_package(label: str, module: str, distribution: str, required: bool) -
         # builds. Present and usable is the thing being reported, so this
         # is healthy with an unknown version, not a failure.
         return Component(
-            name=label, ok=True, detail="installed (version unavailable)", required=required
+            name=label,
+            ok=True,
+            detail="installed (version unavailable)",
+            required=required,
+            package=distribution,
         )
-    return Component(name=label, ok=True, version=version, required=required)
+    return Component(name=label, ok=True, version=version, required=required, package=distribution)
 
 
 def _check_ffmpeg() -> Component:

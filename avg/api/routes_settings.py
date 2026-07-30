@@ -37,6 +37,8 @@ in through the generic values route either.
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Literal
@@ -140,15 +142,98 @@ async def get_health(refresh: bool = False) -> dict:
     component: a failure is an ordinary row with `ok: false` and a reason,
     which is what lets this screen report a broken FFmpeg instead of 500ing
     about it.
+
+    `can_install` is false in a frozen build. A required dependency missing
+    THERE is a packaging bug in the build, not something a user should paper
+    over at runtime - so the row explains instead of offering an action. See
+    `POST /api/health/install`.
     """
     components = health.check_all(refresh=refresh)
     return {
         "components": [
-            {"name": c.name, "ok": c.ok, "version": c.version, "detail": c.detail, "required": c.required}
+            {
+                "name": c.name,
+                "ok": c.ok,
+                "version": c.version,
+                "detail": c.detail,
+                "required": c.required,
+                "package": c.package,
+            }
             for c in components
         ],
         "ok": all(c.ok for c in components),
+        "can_install": not getattr(sys, "frozen", False),
     }
+
+
+class InstallRequest(BaseModel):
+    """`POST /api/health/install` - one package, by distribution name."""
+
+    package: str
+
+
+@router.post("/api/health/install")
+async def install_package(body: InstallRequest, request: Request) -> dict:
+    """Install one missing dependency with pip, in a dev checkout only.
+
+    Two refusals, both deliberate:
+
+    - **Not a package this app knows.** The request body names something
+      that gets shelled, so it is validated against
+      `health.installable_packages()` - derived from `_PACKAGES` - before
+      any argv exists. There is no path from a request to an arbitrary
+      install, and the name is passed as one argv element, never through a
+      shell.
+    - **A frozen build.** A required dependency missing from a packaged app
+      is a packaging bug in the build. That is the `pydub` lesson from Slice
+      9, where the real fix was to bundle it and correct this module's claim
+      that it was optional - and it is why no private package directory is
+      ever put on `sys.path`. An app running a mix of bundled and downloaded
+      code is the hardest kind of "works on my machine" to debug, and it
+      needs the network at exactly the moment something is already wrong.
+
+    Runs on a worker thread (pip is tens of seconds) and returns pip's own
+    combined output, so the user reads what pip said rather than a verdict
+    this route invented.
+    """
+    if getattr(sys, "frozen", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "this is a packaged build - a missing dependency here is a bug in the "
+                "build, not something to install at runtime. Reinstall AVG Studio."
+            ),
+        )
+
+    package = body.package.strip()
+    if package not in health.installable_packages():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{package!r} is not one of this app's own dependencies",
+        )
+
+    def _run() -> tuple[int, str]:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", package],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            # No console window flashes on Windows when the app is frozen
+            # and windowed; harmless everywhere else.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return result.returncode, f"{result.stdout or ''}{result.stderr or ''}"
+
+    try:
+        code, output = await asyncio.to_thread(_run)
+    except Exception as exc:  # noqa: BLE001 - the reason is the answer
+        return {"ok": False, "output": f"could not run pip: {exc}"}
+
+    if code == 0:
+        # The five-minute component cache would otherwise keep reporting the
+        # package as missing for the rest of it.
+        health.clear_cache()
+    return {"ok": code == 0, "output": output}
 
 
 class ErrorReport(BaseModel):
