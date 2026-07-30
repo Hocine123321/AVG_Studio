@@ -128,9 +128,12 @@ def test_refresh_lists_and_never_generates(client, monkeypatch):
         lambda provider, **_kw: calls.append(f"voice:{provider}")
         or [{"voice_id": "en-US-AriaNeural", "name": "Aria", "locale": "en-US", "gender": "Female"}],
     )
-    # If anything reached for the probe, the sweep would be spending money.
+    # Listing text catalogues is fine here - it costs nothing, same as the
+    # image and voice lists above - but nothing may reach for a real
+    # completion. That is Test Providers' job, on its own button.
+    monkeypatch.setattr("avg.api.routes_settings.probe.known_providers", lambda: [])
     monkeypatch.setattr(
-        "avg.api.routes_settings.probe_all",
+        "avg.api.routes_settings.probe.probe_models",
         lambda *a, **k: pytest.fail("refresh must not probe"),
     )
 
@@ -149,6 +152,7 @@ def test_refresh_keeps_the_text_probe_results(client, monkeypatch):
     client.app.state.model_cache.save({"groq": {"llama-3.3": True}})
     monkeypatch.setattr("avg.providers.catalogues.list_image_models", lambda *a, **k: [])
     monkeypatch.setattr("avg.providers.catalogues.list_voices", lambda *a, **k: [])
+    monkeypatch.setattr("avg.api.routes_settings.probe.known_providers", lambda: [])
 
     client.post("/api/live-list/refresh", headers=AUTH)
 

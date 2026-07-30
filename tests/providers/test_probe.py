@@ -147,6 +147,19 @@ def test_an_unkeyed_elevenlabs_is_untested_not_unreachable(monkeypatch):
     assert probe.check_reachable("voice", "elevenlabs") is None
 
 
+def test_an_unknown_voice_provider_is_untested_not_unreachable(monkeypatch):
+    """Mirrors the image branch's guard above. Without it, a voice
+    provider `catalogues.voice_providers()` does not know about would fall
+    through to `list_voices` and read as `False` - "unreachable", a
+    verdict nothing earned - instead of the `None` an unproven provider
+    should report."""
+    monkeypatch.setattr(
+        "avg.providers.catalogues.list_voices",
+        lambda *a, **k: pytest.fail("an unknown provider has no catalogue to list"),
+    )
+    assert probe.check_reachable("voice", "not-a-real-provider") is None
+
+
 def test_voice_reachability_lists_and_does_not_synthesise(monkeypatch):
     monkeypatch.setattr("avg.providers.probe.get_key", lambda _p: "k")
     monkeypatch.setattr(

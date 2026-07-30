@@ -30,7 +30,7 @@ import { IconCheck, IconPlus } from "./Icons";
  * One filled terracotta action on this screen: Refresh catalogues.
  */
 const TABS: { kind: LiveKind; label: string; hint: string }[] = [
-  { kind: "text", label: "Text models", hint: "Verified by the model-cache probe on App Health." },
+  { kind: "text", label: "Text models", hint: "Listed from each provider. Proving one costs a real completion, so only ticked models are tested, by Test Providers on App Health." },
   { kind: "image", label: "Image models", hint: "Listed from each provider — image generation is never used to test one." },
   { kind: "voice", label: "Voices", hint: "Listed from Edge and ElevenLabs. Listing costs nothing; synthesising would." },
 ];

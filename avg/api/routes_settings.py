@@ -56,8 +56,7 @@ from avg.core.settings_schema import (
     validate_value,
 )
 from avg.core.model_prefs import KINDS, ModelPrefs
-from avg.providers import catalogues
-from avg.providers.probe import probe_all
+from avg.providers import catalogues, probe
 
 from .deps import require_token
 
@@ -207,20 +206,43 @@ async def clear_errors(request: Request) -> dict:
 
 @router.get("/api/models/cache")
 async def get_model_cache(request: Request) -> dict:
-    """Which models each provider proved working, and when that was checked.
+    """What the last provider test proved, in the three states it can prove.
 
-    `providers` holds only proven models; a provider that was probed and
-    had nothing work appears with an empty list, which is a different
-    statement from being absent. `updated: null` means no sweep has ever
-    run - the UI says "build the cache", never invents a model list.
+    - `providers` - models a real completion succeeded on, per provider.
+      Proven only; a provider probed with nothing working appears with an
+      empty list, which is a different statement from being absent.
+    - `text` - the full per-model verdicts including the failures, so the
+      UI can say `failed` rather than fall back to `untested`.
+    - `reachable` - per `kind/provider`, whether the provider answered its
+      own catalogue. THIS MODEL is unproven either way; reachability is a
+      fact about a provider.
+
+    An entry absent from `text` or `reachable` is UNTESTED. `updated: null`
+    means no test has ever run - the UI says so and never invents a list.
     """
     cache = request.app.state.model_cache
     updated = cache.updated_at()
     return {
         "updated": updated.isoformat() if updated is not None else None,
         "providers": {p: cache.working(p) for p in cache.providers()},
+        "text": {
+            p: cache.verdicts(p) for p in cache.providers() if not p.startswith("__")
+        },
+        "reachable": cache.reach(),
         "building": _probe_running(request.app.state),
     }
+
+
+def _by_provider(entry_ids: list[str]) -> dict[str, list[str]]:
+    """`["groq/a", "groq/b"]` -> `{"groq": ["a", "b"]}`. Ids without a
+    provider prefix are dropped rather than guessed at."""
+    out: dict[str, list[str]] = {}
+    for entry_id in entry_ids:
+        provider, _, model = entry_id.partition("/")
+        if not provider or not model:
+            continue
+        out.setdefault(provider, []).append(model)
+    return {provider: sorted(models) for provider, models in out.items()}
 
 
 def _probe_running(app_state: Any) -> bool:
@@ -230,35 +252,72 @@ def _probe_running(app_state: Any) -> bool:
 
 @router.post("/api/models/cache/build", status_code=status.HTTP_202_ACCEPTED)
 async def build_model_cache(request: Request) -> dict:
-    """Probe every keyed provider's models and store the verdicts.
+    """Test Providers: prove the ticked text models, reach the rest.
+
+    Three verdicts, and only one of them costs anything:
+
+      | Kind  | What runs                        | Verdict                   |
+      |-------|-----------------------------------|---------------------------|
+      | Text  | A real minimal completion per    | `working` / `failed`      |
+      |       | TICKED model                     |                            |
+      | Image | The provider's catalogue fetch   | `reachable`/`unreachable` |
+      | Voice | The provider's voice list        | `reachable`/`unreachable` |
+
+    **Nothing that costs money is probed.** An image probe is a paid image
+    and an ElevenLabs probe is paid characters, which is why Slice 8 made
+    images and voices listed rather than probed; reachability is a
+    catalogue GET, which both serve for free.
+
+    Only ticked text models, and only providers with at least one ticked
+    entry: a sweep over everything a provider advertises is precisely what
+    the Live List exists to replace, and a provider nobody shortlisted is
+    not worth a call.
 
     Runs on a background thread with a single slot and a 409 on a second
-    start, matching how renders are guarded: a sweep is one call per model
-    per keyed provider, so two at once would double the spend and the
-    second would overwrite the first's results anyway.
-
-    Deliberately NOT sharing the render slot - probing does not touch a
-    project or the media engine, and blocking a render behind a model
-    sweep (or the reverse) would be a limitation with no cause.
+    start, matching how renders are guarded. Deliberately NOT sharing the
+    render slot - testing providers touches no project and no media engine.
     """
     app_state = request.app.state
     if _probe_running(app_state):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="a model cache build is already running",
+            detail="a provider test is already running",
         )
 
     cache = app_state.model_cache
+    prefs, _scope = _prefs_for_scope(app_state)
 
     def _sweep() -> None:
         # Never raises out of the thread: a failed sweep leaves the
-        # previous cache in place, which is more useful than an empty one.
+        # previous verdicts in place, which is more useful than none.
         try:
-            cache.save(probe_all())
+            results = probe.probe_models(_by_provider(prefs.selected_ids("text")))
+
+            reachable: dict[str, bool] = {}
+            for kind in ("image", "voice"):
+                for provider in sorted(_by_provider(prefs.selected_ids(kind))):
+                    verdict = probe.check_reachable(kind, provider)
+                    # `None` is "there was nothing to ask" - an unkeyed
+                    # ElevenLabs, or a provider that publishes no catalogue
+                    # at all. Storing it would turn untested into a verdict.
+                    if verdict is not None:
+                        reachable[f"{kind}/{provider}"] = verdict
+
+            # The `__`-namespaced catalogue entries are what the Live List
+            # lists. `save` replaces the whole document, so they are carried
+            # forward explicitly - dropping them would empty the very screen
+            # the ticks came from.
+            merged: dict[str, dict[str, bool]] = {
+                provider: {model: True for model in cache.working(provider)}
+                for provider in cache.providers()
+                if provider.startswith("__")
+            }
+            merged.update(results)
+            cache.save(merged, reachable=reachable)
         except Exception:
             pass
 
-    thread = threading.Thread(target=_sweep, name="model-cache-build", daemon=True)
+    thread = threading.Thread(target=_sweep, name="provider-test", daemon=True)
     app_state.probe_thread = thread
     thread.start()
     return {"started": True}
@@ -339,14 +398,26 @@ def _entry_rows(prefs: ModelPrefs, kind: str, known: dict[str, str]) -> list[dic
 
 
 def _known_text(app_state: Any) -> dict[str, str]:
-    """Text models a probe proved working, as `provider/model`."""
+    """Text models the pickers could offer, as `provider/model`.
+
+    Two sources, and the probed one wins: a model the catalogue merely
+    lists is `catalogue` ("Listed"), and a model a real completion
+    succeeded on is `probed` ("Verified"). Listing has to be here at all
+    because Test Providers only proves the models the user TICKED - and on
+    a fresh install nothing has been ticked yet, so without the advertised
+    list the text tab would have nothing to tick.
+    """
     cache = app_state.model_cache
-    return {
-        f"{provider}/{model}": "probed"
-        for provider in cache.providers()
-        if not provider.startswith("__")
-        for model in cache.working(provider)
-    }
+    known = _known_from_catalogue(app_state, "text")
+    known.update(
+        {
+            f"{provider}/{model}": "probed"
+            for provider in cache.providers()
+            if not provider.startswith("__")
+            for model in cache.working(provider)
+        }
+    )
+    return known
 
 
 def _known_from_catalogue(app_state: Any, kind: str) -> dict[str, str]:
@@ -370,9 +441,10 @@ def _known_from_catalogue(app_state: Any, kind: str) -> dict[str, str]:
 async def get_live_list(request: Request) -> dict:
     """Everything the pickers could offer, plus what the user said about it.
 
-    Never touches the network: text entries come from the probe cache and
-    image/voice entries from the last catalogue refresh. A GET that went
-    listing would make opening a screen cost provider calls.
+    Never touches the network: text, image and voice entries all come from
+    whatever the last catalogue refresh and the last provider test wrote to
+    the cache. A GET that went listing would make opening a screen cost
+    provider calls.
     """
     app_state = request.app.state
     prefs, scope = _prefs_for_scope(app_state)
@@ -387,12 +459,16 @@ async def get_live_list(request: Request) -> dict:
 
 @router.post("/api/live-list/refresh")
 async def refresh_live_list(request: Request) -> dict:
-    """Re-list image models and voices. Listing only - nothing is generated.
+    """Re-list text, image and voice catalogues. Listing only - nothing is
+    generated and nothing is proved.
 
     Probing an image model means paying for an image and probing an
     ElevenLabs voice costs characters, so the Live List curates what a
-    provider advertises rather than proving it. Text models keep their own
-    probe, on its own button, because there the verdict is cheap and real.
+    provider advertises rather than proving it. Text models are listed here
+    too - free, same as the other two - because that is what puts a model
+    in front of the user to tick in the first place. Test Providers, on its
+    own button, is what actually proves the ticked ones: there the verdict
+    is a real completion, cheap enough to run only on what was chosen.
     """
     app_state = request.app.state
     cache = app_state.model_cache
@@ -416,6 +492,18 @@ async def refresh_live_list(request: Request) -> dict:
             for provider in cache.providers()
             if not provider.startswith("__")
         }
+
+        # Text models are LISTED here and PROVED by Test Providers. Listing
+        # is a plain catalogue GET on every text provider - it costs
+        # nothing, exactly like the image and voice lists below - and it is
+        # what puts a model in front of the user to tick in the first place.
+        for provider in probe.known_providers():
+            try:
+                models = probe.list_models(provider, None)
+            except Exception:
+                models = []
+            if models:
+                results[f"__text__{provider}"] = {model: True for model in models}
 
         for provider in catalogues.image_providers():
             models = catalogues.list_image_models(provider)

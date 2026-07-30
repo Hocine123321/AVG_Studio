@@ -214,6 +214,8 @@ def check_reachable(
             return None
         return bool(catalogues.list_image_models(provider, transport=transport))
     if kind == "voice":
+        if provider not in catalogues.voice_providers():
+            return None
         if provider == "elevenlabs" and not get_key("elevenlabs"):
             return None
         return bool(catalogues.list_voices(provider, transport=transport))
