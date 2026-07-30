@@ -274,43 +274,54 @@ def main() -> None:
     started: list[tuple["uvicorn.Server", threading.Thread]] = []
 
     def _boot() -> None:
-        # Frozen builds ship their own ffmpeg/ffprobe (vendor/ffmpeg) because
-        # a clean target machine has neither on PATH. This must run before
-        # anything shells out - including a render child process, which
-        # inherits this modified PATH from the environment at the time it is
-        # spawned. No-op in development. See avg.media.environment.
-        #
-        # Same reasoning for window flashes: this process warms thumbnails by
-        # shelling out to ffprobe/ffmpeg, and a windowed build has no console
-        # for them to inherit, so each call would pop one.
-        from avg.media.environment import prepend_to_path, suppress_console_windows  # noqa: PLC0415
-
-        prepend_to_path()
-        suppress_console_windows()
-
-        # The expensive imports, deliberately here rather than at module
-        # scope - this is the 1.6s the window no longer waits behind.
-        import uvicorn  # noqa: PLC0415
-
-        from avg.api.app import create_app  # noqa: PLC0415
-
-        port = pick_port()
-        token = make_token()
-        app = create_app(token=token, output_root=resolve_output_root())
-
-        server = uvicorn.Server(
-            uvicorn.Config(app, host=HOST, port=port, log_level="warning")
-        )
-        server_thread = threading.Thread(
-            target=server.run, daemon=True, name="avg-api-server"
-        )
-        server_thread.start()
-        started.append((server, server_thread))
-
+        # Everything below can fail - a corrupt settings file, a port that
+        # vanishes between `pick_port` and the bind, `create_app` itself
+        # raising - and every one of those failures has to reach the splash
+        # rather than leave it on "Starting up…" forever with nothing
+        # running and no way for the user to tell short of a task-manager
+        # kill. Wrapping the whole body, not just `_wait_until_ready`'s wait,
+        # is what makes that true regardless of which line fails.
+        server: uvicorn.Server | None = None
         try:
+            # Frozen builds ship their own ffmpeg/ffprobe (vendor/ffmpeg)
+            # because a clean target machine has neither on PATH. This must
+            # run before anything shells out - including a render child
+            # process, which inherits this modified PATH from the
+            # environment at the time it is spawned. No-op in development.
+            # See avg.media.environment.
+            #
+            # Same reasoning for window flashes: this process warms
+            # thumbnails by shelling out to ffprobe/ffmpeg, and a windowed
+            # build has no console for them to inherit, so each call would
+            # pop one.
+            from avg.media.environment import prepend_to_path, suppress_console_windows  # noqa: PLC0415
+
+            prepend_to_path()
+            suppress_console_windows()
+
+            # The expensive imports, deliberately here rather than at module
+            # scope - this is the 1.6s the window no longer waits behind.
+            import uvicorn  # noqa: PLC0415
+
+            from avg.api.app import create_app  # noqa: PLC0415
+
+            port = pick_port()
+            token = make_token()
+            app = create_app(token=token, output_root=resolve_output_root())
+
+            server = uvicorn.Server(
+                uvicorn.Config(app, host=HOST, port=port, log_level="warning")
+            )
+            server_thread = threading.Thread(
+                target=server.run, daemon=True, name="avg-api-server"
+            )
+            server_thread.start()
+            started.append((server, server_thread))
+
             _wait_until_ready(f"http://{HOST}:{port}/api/settings/schema", token)
-        except RuntimeError as exc:
-            server.should_exit = True
+        except Exception as exc:
+            if server is not None:
+                server.should_exit = True
             # Nothing below `avg/api/` may print, but this is the shell and
             # the window is the only surface there is: a failure here means
             # the app never started, and the splash must say so rather than
