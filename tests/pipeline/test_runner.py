@@ -20,7 +20,7 @@ import pytest
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, ProgressEvent, RenderFinished
+from avg.core.events import CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, ProgressEvent, RenderFinished
 from avg.core.models import ProjectDoc
 from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
@@ -235,6 +235,12 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
             output = request.project_folder / "master_output.mp4"
             output.write_bytes(b"video")
             yield RenderFinished(project_id=project_id, output=output, size_bytes=5)
+
+        def composite(self, request, project_id):
+            # Part 2 of the render, added in Slice 9: the phase runs both
+            # parts, so a fake engine has to answer both or the phase never
+            # finishes.
+            yield CompositeFinished(project_id=project_id, overlays=0, captions="burned")
 
         def cancel(self) -> None:
             pass

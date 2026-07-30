@@ -7,7 +7,7 @@ reaches the user, as an HTTP response or a WebSocket message.
 
 Routes (see the task-7 and task-10.5 briefs for the exact contract):
 
-    GET  /api/projects                          -> {"projects": [ProjectDoc-shaped dict + script_substate, ...]}
+    GET  /api/projects                          -> {"projects": [ProjectDoc-shaped dict + script_substate + render_substate, ...]}
     POST /api/projects                           -> 201 ProjectDoc (creates + starts the full pipeline)
     POST /api/projects/{project_id}/render       -> 202 {"started": true}
     POST /api/projects/{project_id}/cancel       -> {"cancelled": true}
@@ -59,6 +59,7 @@ from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.phases.render import _render_kwargs
+from avg.pipeline.phases.render import render_substate
 from avg.pipeline.phases.writing import script_substate
 from avg.pipeline.runner import run as run_pipeline
 from avg.providers.text.router import config_from_settings
@@ -489,9 +490,12 @@ def create_app(
         # `loading: true` is the honest answer.
         await asyncio.to_thread(app.state.library_loaded.wait, _LIBRARY_WAIT_S)
 
-        # ``script_substate`` is derived from artifacts at read time, not put
-        # on ProjectDoc: the document is persisted, while this display-only
-        # value must always reflect the current take's files.
+        # ``script_substate``/``render_substate`` are derived from artifacts
+        # at read time, not put on ProjectDoc: the document is persisted,
+        # while these display-only values must always reflect the current
+        # take's files. The render one answers "base video only" versus
+        # "overlays and captions baked in too" - see
+        # `avg.pipeline.phases.render.render_substate`.
         projects = []
         for project in app.state.projects.values():
             # `take_root`, not `take_folder`: take 1 of a project created
@@ -507,6 +511,7 @@ def create_app(
                 {
                     **project.model_dump(mode="json"),
                     "script_substate": script_substate(root / "script"),
+                    "render_substate": render_substate(root),
                 }
             )
         return {
