@@ -1673,10 +1673,6 @@ a:hover {
   gap: 3px;
 }
 
-.settings__nav-list[aria-disabled="true"] {
-  opacity: 0.5;
-}
-
 .settings__nav-item {
   text-align: left;
   border: 0;
@@ -1696,6 +1692,12 @@ a:hover {
 .settings__nav-item--on {
   background: var(--surface-2);
   color: var(--text);
+}
+
+/* A smooth jump must not land the group's heading under the floating
+   status pill, whose band `.app-shell__content` already reserves. */
+.settings-group {
+  scroll-margin-top: 12px;
 }
 
 .settings__content {

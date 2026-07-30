@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteProviderKey,
   getChannels,
@@ -89,7 +89,11 @@ export default function Settings() {
   const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
 
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState<string>("all");
+  /** Which group is currently in view. Derived from an IntersectionObserver,
+   * never from a click: clicking scrolls, and the observer then reports
+   * where the scroll landed - so the mark can never disagree with the page. */
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     Promise.all([getSettingsSchema(), getSettingsValues(), getChannels(), getKeys()])
@@ -222,23 +226,54 @@ export default function Settings() {
   const query = search.trim().toLowerCase();
   const searching = query.length > 0;
 
+  /** Search filters fields by label, help and id, and a group with no
+   * surviving field disappears from the page AND from the nav. Every group
+   * renders otherwise - the nav navigates, it no longer filters. */
   const visibleGroups = useMemo(() => {
-    if (searching) {
-      return groups
-        .map((g) => ({
-          ...g,
-          specs: g.specs.filter(
-            (s) =>
-              s.label.toLowerCase().includes(query) ||
-              s.help.toLowerCase().includes(query) ||
-              s.id.toLowerCase().includes(query),
-          ),
-        }))
-        .filter((g) => g.specs.length > 0);
-    }
-    if (category === "all") return groups;
-    return groups.filter((g) => g.group === category);
-  }, [groups, searching, query, category]);
+    if (!searching) return groups;
+    return groups
+      .map((g) => ({
+        ...g,
+        specs: g.specs.filter(
+          (s) =>
+            s.label.toLowerCase().includes(query) ||
+            s.help.toLowerCase().includes(query) ||
+            s.id.toLowerCase().includes(query),
+        ),
+      }))
+      .filter((g) => g.specs.length > 0);
+  }, [groups, searching, query]);
+
+  // Marks whichever group crosses the middle band of the viewport. The
+  // root is the viewport rather than `.app-shell__content`: the scroll
+  // container fills the viewport, so the two agree, and reaching for an
+  // ancestor by class from here would couple this screen to the shell.
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return;
+    const sections = Array.from(root.querySelectorAll<HTMLElement>("[data-settings-group]"));
+    if (sections.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveGroup(entry.target.getAttribute("data-settings-group"));
+          }
+        }
+      },
+      { rootMargin: "-40% 0px -55% 0px", threshold: 0 },
+    );
+    for (const section of sections) observer.observe(section);
+    return () => observer.disconnect();
+  }, [visibleGroups]);
+
+  function jumpTo(group: string) {
+    contentRef.current
+      ?.querySelector(`[data-settings-group="${group}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveGroup(group);
+  }
 
   if (loadError) {
     return (
@@ -283,20 +318,14 @@ export default function Settings() {
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Search settings by name or description"
           />
-          <div className="settings__nav-list" aria-disabled={searching || undefined}>
-            <button
-              type="button"
-              className={`settings__nav-item${!searching && category === "all" ? " settings__nav-item--on" : ""}`}
-              onClick={() => setCategory("all")}
-            >
-              All settings
-            </button>
-            {groups.map((g) => (
+          <div className="settings__nav-list">
+            {visibleGroups.map((g) => (
               <button
                 key={g.group}
                 type="button"
-                className={`settings__nav-item${!searching && category === g.group ? " settings__nav-item--on" : ""}`}
-                onClick={() => setCategory(g.group)}
+                aria-current={activeGroup === g.group || undefined}
+                className={`settings__nav-item${activeGroup === g.group ? " settings__nav-item--on" : ""}`}
+                onClick={() => jumpTo(g.group)}
               >
                 {g.label}
               </button>
@@ -304,7 +333,7 @@ export default function Settings() {
           </div>
         </nav>
 
-        <div className="settings__content">
+        <div className="settings__content" ref={contentRef}>
           {searching && (
             <p className="settings__result-count">
               {matchCount} match{matchCount === 1 ? "" : "es"} for &ldquo;{search.trim()}&rdquo;
@@ -315,16 +344,14 @@ export default function Settings() {
             <p className="home__empty">Nothing matches &ldquo;{search.trim()}&rdquo;.</p>
           ) : (
             visibleGroups.map((g) => (
-              <div key={g.group}>
+              <div key={g.group} data-settings-group={g.group}>
                 {/* Only when the whole group is on screen: while searching,
                     a filtered subset of the model fields would give the
                     overview table nothing coherent to summarise. */}
                 {/* Components sits with Paths rather than getting a nav
                     entry of its own: both answer "where are this app's
                     tools and do they work", and Paths owns the Python
-                    executable setting. Hidden while searching for the same
-                    reason the models table is - a filtered field list has
-                    nothing coherent to head. */}
+                    executable setting. */}
                 {g.group === "paths" && !searching && <HealthPanel />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
