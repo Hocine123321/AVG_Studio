@@ -100,3 +100,20 @@ class PipelineCancelled(BaseModel):
     type: str = "pipeline_cancelled"
     project_id: str
     phase: str
+
+
+class CompositeFinished(BaseModel):
+    """Part 2 of a render finished, carrying what it actually managed to do.
+
+    `captions` is a sentence rather than a boolean because "skipped" has a
+    reason worth keeping: a render that produced a perfectly good video with
+    no captions is a real outcome - the vendored pass answers 2 for it, not 1
+    (`avg/media/vendor/avg.py:3329`) - and the user is owed the reason rather
+    than left to guess. `avg.pipeline.phases.render` writes the same string
+    into `render/_composite.json`, so the answer survives the session.
+    """
+
+    type: str = "composite_finished"
+    project_id: str
+    overlays: int
+    captions: str

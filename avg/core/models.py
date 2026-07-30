@@ -116,3 +116,30 @@ class RenderRequest(BaseModel):
     kb_mode: str = "dynamic"
     render_engine: str = "auto"
     render_opts: dict = Field(default_factory=dict)
+
+
+class CompositeRequest(BaseModel):
+    """Part 2 of a render: what to composite onto a finished base video.
+
+    Separate from `RenderRequest` because the two share nothing but the
+    folder. This pass encodes no frames of its own, so it takes no fps,
+    codec, thread count or Ken Burns setting; it cares instead about caption
+    styling and about which transcription provider seeded the vendored cache.
+
+    `provider` must match what the Screen Text phase used - it is part of
+    that cache's key (`avg/media/vendor/avg.py:3557`), and a mismatch is a
+    silent cache miss that re-transcribes and re-pays. The phase records it
+    in `render/_transcript_source.json` for exactly this reason.
+    """
+
+    project_folder: Path
+    provider: str = "estimated"
+    font: str = ""
+    font_size: int = 56
+    font_color: str = "&HFFFFFF"
+    position: str = "bottom"
+    max_words: int = 7
+    animation: str = "pop"
+    animation_speed: str = "normal"
+    render_engine: str = "auto"
+    captions_enabled: bool = True

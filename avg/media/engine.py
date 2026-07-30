@@ -24,9 +24,15 @@ from pathlib import Path
 from typing import Any
 
 from avg.core.errors import ErrorKind
-from avg.core.events import PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
-from avg.core.models import RenderRequest
-from avg.media.child import run_child
+from avg.core.events import (
+    CompositeFinished,
+    PhaseFailed,
+    ProgressEvent,
+    RenderCancelled,
+    RenderFinished,
+)
+from avg.core.models import CompositeRequest, RenderRequest
+from avg.media.child import run_child, run_composite_child
 
 # How often the parent wakes up to check whether the child is still alive
 # while waiting for the next queue message. Small enough that tests (which
@@ -117,6 +123,32 @@ def _request_to_kwargs(req: RenderRequest) -> dict[str, Any]:
     }
 
 
+def _composite_to_kwargs(req: CompositeRequest) -> dict[str, Any]:
+    """Translate a CompositeRequest into `run_composite_child`'s kwargs.
+
+    Same reasoning as `_request_to_kwargs`: the child is a fresh spawned
+    interpreter, and a plain dict of primitives is unambiguously picklable
+    and needs nothing beyond stdlib to unpack.
+
+    `project_folder` becomes `project_path` because that is the name the
+    vendored `cmd_*` argv builders use for it - having the child translate
+    would put the vendor's vocabulary on both sides of the process boundary.
+    """
+    return {
+        "project_path": str(req.project_folder),
+        "provider": req.provider,
+        "font": req.font,
+        "font_size": req.font_size,
+        "font_color": req.font_color,
+        "position": req.position,
+        "max_words": req.max_words,
+        "animation": req.animation,
+        "animation_speed": req.animation_speed,
+        "render_engine": req.render_engine,
+        "captions_enabled": req.captions_enabled,
+    }
+
+
 class MediaEngine:
     """Runs one render at a time in a spawned child process."""
 
@@ -135,7 +167,7 @@ class MediaEngine:
         crashed or killed child becomes an event the caller can handle, not
         something that takes the caller down with it.
         """
-        q: mp.queues.Queue = _CTX.Queue()
+        q: mp.queues.Queue[Any] = _CTX.Queue()
         proc = _CTX.Process(target=run_child, args=(_request_to_kwargs(req), q), daemon=True)
         self._proc = proc
         self._cancelled = False
@@ -144,7 +176,7 @@ class MediaEngine:
 
         result: dict[str, Any] = {"output": None, "size": 0, "seen": False, "error": None}
 
-        def _consume(msg: tuple) -> ProgressEvent | None:
+        def _consume(msg: tuple[Any, ...]) -> ProgressEvent | None:
             kind = msg[0]
             if kind == "progress":
                 _, percent, message = msg
@@ -222,6 +254,104 @@ class MediaEngine:
                 message=result["error"] or f"render child exited with code {exitcode}",
                 detail=f"exit code {exitcode}",
             )
+
+    def composite(
+        self, req: CompositeRequest, project_id: str
+    ) -> Iterator[ProgressEvent | PhaseFailed | CompositeFinished]:
+        """Run part 2 of a render - overlays, cards and captions - in its own
+        child process.
+
+        Its OWN child, not a continuation of the base render's: a moviepy
+        out-of-memory kill during the base encode cannot poison this pass,
+        and a retry of this pass reuses the finished `master_output.mp4`
+        instead of re-encoding it.
+
+        Yields progress, then exactly one terminal event - `CompositeFinished`
+        carrying what was baked, or `PhaseFailed`. A vendored pass answering
+        "skipped" (exit 2) is a finish, not a failure: the base video exists,
+        and reporting a failure would throw away a finished encode.
+
+        The drain loop is never broken out of early, for the same reason
+        `render`'s is not - running it to exhaustion is what guarantees the
+        child gets joined.
+        """
+        q: mp.queues.Queue[Any] = _CTX.Queue()
+        proc = _CTX.Process(target=run_composite_child, args=(_composite_to_kwargs(req), q), daemon=True)
+        self._proc = proc
+        self._cancelled = False
+        with _clean_sys_path():
+            proc.start()
+
+        result: dict[str, Any] = {"overlays": 0, "captions": "", "seen": False, "error": None}
+
+        def _consume(msg: tuple[Any, ...]) -> ProgressEvent | None:
+            kind = msg[0]
+            if kind == "progress":
+                _, percent, message = msg
+                return ProgressEvent(project_id=project_id, percent=percent, message=message)
+            if kind == "composite":
+                _, overlays, captions = msg
+                result["overlays"] = overlays
+                result["captions"] = captions
+                result["seen"] = True
+            elif kind == "error":
+                result["error"] = msg[1]
+            return None
+
+        try:
+            while True:
+                try:
+                    msg = q.get(timeout=_POLL_SECONDS)
+                except queue_mod.Empty:
+                    if proc.is_alive():
+                        continue
+                    break
+                event = _consume(msg)
+                if event is not None:
+                    yield event
+
+            while True:
+                try:
+                    msg = q.get_nowait()
+                except queue_mod.Empty:
+                    break
+                event = _consume(msg)
+                if event is not None:
+                    yield event
+        finally:
+            proc.join(_JOIN_TIMEOUT)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(_JOIN_TIMEOUT)
+
+        exitcode = proc.exitcode if proc.exitcode is not None else -1
+
+        if result["error"] is not None:
+            yield PhaseFailed(
+                project_id=project_id,
+                phase="render",
+                kind=ErrorKind.bug,
+                message=str(result["error"]),
+                detail=f"exit code {exitcode}",
+            )
+            return
+
+        kind = classify_exit(exitcode, saw_result=bool(result["seen"]))
+        if kind is not None:
+            yield PhaseFailed(
+                project_id=project_id,
+                phase="render",
+                kind=kind,
+                message=f"composite child exited with code {exitcode}",
+                detail=f"exit code {exitcode}",
+            )
+            return
+
+        yield CompositeFinished(
+            project_id=project_id,
+            overlays=int(result["overlays"]),
+            captions=str(result["captions"]),
+        )
 
     def cancel(self) -> None:
         """Stop a running render. Safe to call even if nothing is running."""
