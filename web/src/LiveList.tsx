@@ -53,6 +53,9 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState("");
+  // Edge alone advertises 322 voices. A shortlist is what this screen is
+  // for, and scrolling to build one is not a way to build one.
+  const [query, setQuery] = useState("");
   // Voice-only filters. Edge alone advertises several hundred voices, so
   // the shortlist is the point of this screen rather than a limitation.
   const [locale, setLocale] = useState("all");
@@ -136,8 +139,19 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     return ["all", ...[...found].sort()];
   }, [data]);
 
+  const needle = query.trim().toLowerCase();
   const visible = rows.filter((row) => {
     if (onlySelected && !row.selected) return false;
+    if (needle) {
+      const info = meta[row.id];
+      // The id carries the provider ("edge/en-GB-RyanNeural"), so a query
+      // for a provider, a model, a note, a language or a gender all land
+      // in this one haystack.
+      const haystack = [row.id, row.note, info?.locale ?? "", info?.gender ?? ""]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(needle)) return false;
+    }
     if (kind !== "voice") return true;
     const info = meta[row.id];
     if (locale !== "all" && info?.locale !== locale) return false;
@@ -199,6 +213,16 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
             OS grey with square corners, and they were the only two things
             on this screen ignoring the theme. `Select.tsx` exists for
             exactly this reason. */}
+        <input
+          className="settings__search"
+          type="search"
+          style={{ maxWidth: 260 }}
+          placeholder="Search this list…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search entries by id, provider, note, language or gender"
+        />
+
         <div className="livelist__filter">
           <button
             type="button"
@@ -264,7 +288,7 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         <p className="home__empty">
           {rows.length === 0
             ? kind === "text"
-              ? "No verified text models yet — build the model cache on App health."
+              ? "No text models listed yet — press Refresh catalogues."
               : "Nothing listed yet — press Refresh catalogues."
             : "Nothing matches these filters."}
         </p>
