@@ -116,29 +116,41 @@ export function ScriptBody({ projectId, takeId, files }: BodyProps) {
 
   return (
     <div className="artifact-stack">
-      {narration && (
-        <section>
-          <p className="lbl">Narration</p>
-          {/* The narration is what the voice phase will read aloud, so it
-              is shown as prose rather than as a field in a table. */}
-          <pre className="artifact-prose">{narration}</pre>
-        </section>
-      )}
       {Array.isArray(scenes) && scenes.length > 0 && (
-        <section>
+        <>
           <p className="lbl">{scenes.length} scenes</p>
-          <ol className="artifact-cards">
-            {scenes.map((scene, i) => (
-              <li key={scene.index ?? i} className="artifact-card">
-                <span className="artifact-card__num">{scene.index ?? i + 1}</span>
-                <div className="artifact-card__body">
-                  <p>{scene.text}</p>
-                  {scene.label && <span className="chip">{scene.label}</span>}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
+          {/* The same `.artifact-table` Director I and II use. The scene
+              texts already contain every word of the narration, so this is
+              the script - the prose below is the same words again, which is
+              why it is folded away rather than printed at full height. */}
+          <table className="artifact-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Text</th>
+                <th>Label</th>
+                <th>Image prompt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scenes.map((scene, i) => (
+                <tr key={scene.index ?? i}>
+                  <td className="mono">{scene.index ?? i + 1}</td>
+                  <td>{scene.text}</td>
+                  <td>{scene.label ? <span className="chip">{scene.label}</span> : "—"}</td>
+                  <td>{scene.image_prompt || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      {narration && (
+        <details className="artifact-disclosure">
+          <summary>Narration</summary>
+          {/* Prose, because this is what the voice phase reads aloud. */}
+          <pre className="artifact-prose">{narration}</pre>
+        </details>
       )}
     </div>
   );
