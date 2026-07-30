@@ -2,18 +2,42 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { buildModelCache, getModelCache, type ModelCacheResponse } from "./api";
 
 /**
- * Build and report the working-models cache, on App Health.
+ * Test Providers, on App Health.
  *
- * Probing is one generation call per model on every keyed provider, so it
- * is a deliberate action with a visible cost, not something that happens on
- * a screen load. The button is plain, not terracotta: App Health already
- * spends its one filled action on "Re-run everything".
+ * What it runs, and what each result is allowed to claim:
  *
- * The count per provider is what makes the cache legible - "groq · 4
- * verified" answers the question the model pickers raise ("why is this list
- * short?") without opening a file.
+ *   - **Working** — a real minimal completion succeeded on this text model.
+ *     Text only; it is the one verdict that costs anything, and only ticked
+ *     models are ever tested.
+ *   - **Reachable** — the provider answered its own catalogue with this key.
+ *     THIS MODEL is unproven. Image and voice providers get this and nothing
+ *     more: an image probe is a paid image and an ElevenLabs probe is paid
+ *     characters, which is why Slice 8 made them listed rather than probed.
+ *   - **Untested** — never checked. The absence of a verdict, not a verdict.
+ *
+ * The button is plain, not terracotta: App Health already spends its one
+ * filled action on "Re-run everything".
  */
 const POLL_MS = 3000;
+
+interface Row {
+  key: string;
+  label: string;
+  verdict: "working" | "failed" | "reachable" | "unreachable";
+  detail: string;
+}
+
+function chipFor(verdict: Row["verdict"]): string {
+  if (verdict === "working" || verdict === "reachable") return "chip chip--ok";
+  return "chip chip--bad";
+}
+
+const VERDICT_LABEL: Record<Row["verdict"], string> = {
+  working: "Working",
+  failed: "Failed",
+  reachable: "Reachable",
+  unreachable: "Unreachable",
+};
 
 export default function ModelCacheCard() {
   const [cache, setCache] = useState<ModelCacheResponse | null>(null);
@@ -32,8 +56,8 @@ export default function ModelCacheCard() {
     void load();
   }, [load]);
 
-  // Polled while a sweep runs, and only then: the build takes tens of
-  // seconds on a real account and has no event of its own to listen for.
+  // Polled while a test runs, and only then: it takes tens of seconds on a
+  // real account and has no event of its own to listen for.
   useEffect(() => {
     if (!cache?.building) return;
     timer.current = window.setTimeout(() => void load(), POLL_MS);
@@ -42,7 +66,7 @@ export default function ModelCacheCard() {
     };
   }, [cache, load]);
 
-  async function build() {
+  async function run() {
     setError(null);
     try {
       await buildModelCache();
@@ -52,38 +76,67 @@ export default function ModelCacheCard() {
     }
   }
 
-  const providers = Object.entries(cache?.providers ?? {});
+  const rows: Row[] = [];
+  for (const [provider, models] of Object.entries(cache?.text ?? {})) {
+    for (const [model, ok] of Object.entries(models)) {
+      rows.push({
+        key: `text:${provider}/${model}`,
+        label: `${provider}/${model}`,
+        verdict: ok ? "working" : "failed",
+        detail: ok ? "a real completion succeeded" : "the completion did not answer",
+      });
+    }
+  }
+  for (const [key, ok] of Object.entries(cache?.reachable ?? {})) {
+    rows.push({
+      key: `reach:${key}`,
+      label: key,
+      verdict: ok ? "reachable" : "unreachable",
+      // Stated, never implied: this is the whole reason the two words are
+      // different. Nothing was generated and nothing was synthesised.
+      detail: ok
+        ? "the provider answered its catalogue — this entry itself is unproven"
+        : "the provider's catalogue did not answer",
+    });
+  }
   const building = Boolean(cache?.building);
 
   return (
-    <section className="errorlog" aria-label="Model cache">
+    <section className="errorlog" aria-label="Test providers">
       <header className="errorlog__head">
         <div>
-          <h2 className="health-stage__title">Model cache</h2>
+          <h2 className="health-stage__title">Test providers</h2>
           <p className="health-stage__detail">
             {cache?.updated
-              ? `Last checked ${new Date(cache.updated).toLocaleString()}.`
-              : "Never checked. Models are typed by hand until this runs."}
+              ? `Last tested ${new Date(cache.updated).toLocaleString()}.`
+              : "Untested. Nothing here has been checked yet."}{" "}
+            Ticked text models get a real completion; image and voice providers get their own
+            catalogue only — nothing that costs money is ever generated.
           </p>
         </div>
         <span className="home__spacer" />
-        {/* "Build" next to a timestamp reading "Last checked 14:02" is
-            asking whether the first build ever happened. */}
-        <button type="button" className="btn" onClick={() => void build()} disabled={building}>
-          {building ? "Probing…" : cache?.updated ? "Re-build model cache" : "Build model cache"}
+        <button type="button" className="btn" onClick={() => void run()} disabled={building}>
+          {building ? "Testing…" : cache?.updated ? "Test again" : "Test providers"}
         </button>
       </header>
 
-      {error && <p className="settings__save-error">Could not build the cache: {error}</p>}
+      {error && <p className="settings__save-error">Could not test the providers: {error}</p>}
+
+      {rows.length === 0 && !building && (
+        <p className="home__empty">
+          Untested. Tick the models and voices you want on the Live List, then press Test
+          providers.
+        </p>
+      )}
 
       <ul className="errorlog__list">
-        {providers.map(([provider, models]) => (
-          <li key={provider} className="errorlog__row">
-            <span className={models.length > 0 ? "chip chip--ok" : "chip"}>{provider}</span>
-            <span className="errorlog__summary" style={{ cursor: "default" }}>
-              {models.length > 0 ? models.join(", ") : "nothing answered"}
+        {rows.map((row) => (
+          <li key={row.key} className="errorlog__row">
+            <span className={chipFor(row.verdict)}>{VERDICT_LABEL[row.verdict]}</span>
+            <span className="errorlog__summary mono" style={{ cursor: "default" }}>
+              {row.label}
             </span>
-            <span className="errorlog__meta mono">{models.length} verified</span>
+            <span className="errorlog__meta">{row.detail}</span>
           </li>
         ))}
       </ul>

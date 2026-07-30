@@ -448,14 +448,25 @@ export function removeLiveEntry(kind: LiveKind, entryId: string): Promise<{ remo
 
 // ---- working-models cache ----
 
-/** `GET /api/models/cache`. `providers` holds ONLY models a probe proved
- * working; a provider that was probed and had nothing work appears with an
- * empty list, which is a different statement from being absent. `updated:
- * null` means no sweep has ever run - the UI says "build the cache" and
- * never invents a model list. See `avg/core/model_cache.py`. */
+/** `GET /api/models/cache` — what the last provider test proved.
+ *
+ * Three states, and the third is the absence of the other two:
+ *
+ *   - `text[provider][model] === true`  — a real completion succeeded.
+ *   - `text[provider][model] === false` — it ran and failed.
+ *   - absent                            — never tested.
+ *
+ * `reachable` is keyed `kind/provider` and says the provider answered its
+ * own catalogue with this key. THIS MODEL is unproven either way —
+ * reachability is a fact about a provider, not a model. `providers` keeps
+ * its old meaning (proven models only) because the pickers read it.
+ * `updated: null` means no test has ever run. See
+ * `avg/core/model_cache.py`. */
 export interface ModelCacheResponse {
   updated: string | null;
   providers: Record<string, string[]>;
+  text: Record<string, Record<string, boolean>>;
+  reachable: Record<string, boolean>;
   building: boolean;
 }
 
