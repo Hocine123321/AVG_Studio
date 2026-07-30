@@ -7,6 +7,14 @@ process: uvicorn serves the ASGI app on a background daemon thread while
 `webview.start()` blocks the main thread running the native window's
 message loop.
 
+The window opens first, on `splash_html()` - a page built from nothing, no
+imports required. `main()` hands that straight to `webview.create_window`
+and only then, inside `_boot` running on pywebview's own worker thread,
+imports `fastapi`/`uvicorn`/`avg.api.app` (measured 2026-07-30 at ~1.6s
+cold), builds the server, and points the window at the real URL. Before
+this task those imports ran at module scope and the window did not exist
+until they finished, so the app showed nothing at all for that 1.6s.
+
 Two things here are load-bearing for safety, not just style:
 
 - **Loopback only.** The server binds `HOST` (`127.0.0.1`), never
@@ -37,13 +45,15 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import uvicorn
 import webview
 
-from avg.api.app import create_app
-from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings
-from avg.media.environment import prepend_to_path, suppress_console_windows
+if TYPE_CHECKING:
+    # Only for the `started` annotation in `main` below - never imported at
+    # runtime (that is the entire point of this task), so this costs mypy
+    # nothing to check and the app nothing to run.
+    import uvicorn
 
 HOST = "127.0.0.1"
 
@@ -68,6 +78,11 @@ def resolve_output_root() -> Path:
       4. `%USERPROFILE%/Videos/AVG Studio` - where a Windows user expects
          their videos to be, and created on demand.
     """
+    # Imported here, not at module scope: `avg.config.settings` pulls in
+    # pydantic, and this module's whole point is that nothing heavy runs
+    # before the window is on screen. See `main`.
+    from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings  # noqa: PLC0415
+
     override = os.environ.get("AVG_OUTPUT_ROOT", "").strip()
     if override:
         return Path(override)
@@ -141,6 +156,47 @@ def make_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+#: The splash's canvas colour, kept in step with `--canvas` in
+#: `web/src/tokens.css`. Duplicated on purpose and duplicated nowhere else:
+#: this page must render before anything is imported, so it cannot read a
+#: stylesheet the server has not started serving yet.
+SPLASH_CANVAS = "#1c1a16"
+SPLASH_TEXT = "#f2ebdd"
+
+
+def splash_html() -> str:
+    """The page the window shows while the server is still being built.
+
+    Inline HTML, not a file, and a pure function of nothing: it must render
+    before `fastapi`, `uvicorn` and `avg.api.app` are imported (~1.6s cold,
+    measured 2026-07-30), and a page that needed the server running to load
+    would defeat its own purpose. That is also why there is no URL of any
+    kind in it - a test asserts that.
+
+    It carries the app's canvas colour, its name, and nothing that moves
+    except a single slow pulse, so a slow machine does not show a spinner
+    that outlives its welcome.
+    """
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>AVG Studio</title>
+<style>
+  html, body {{ height: 100%; margin: 0; }}
+  body {{
+    background: {SPLASH_CANVAS};
+    color: {SPLASH_TEXT};
+    display: grid;
+    place-items: center;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }}
+  .name {{ font-size: 30px; letter-spacing: 0.02em; animation: pulse 2.2s ease-in-out infinite; }}
+  .sub {{ margin-top: 10px; font-size: 13px; opacity: 0.55; text-align: center; }}
+  @keyframes pulse {{ 50% {{ opacity: 0.55; }} }}
+  @media (prefers-reduced-motion: reduce) {{ .name {{ animation: none; }} }}
+</style></head>
+<body><div><div class="name">AVG Studio</div><div class="sub">Starting up…</div></div></body>
+</html>"""
+
+
 def _wait_until_ready(url: str, token: str, timeout: float = _READY_TIMEOUT_S) -> None:
     """Block until `url` answers authenticated with `token`, or raise.
 
@@ -181,54 +237,96 @@ def _wait_until_ready(url: str, token: str, timeout: float = _READY_TIMEOUT_S) -
 
 
 def main() -> None:
-    """Wire up the background server and the native window, then run.
+    """Open the window, then build the server behind it.
 
-    Picks a port and a token, builds the app, starts uvicorn on a daemon
-    thread bound to loopback only, waits for it to actually answer, opens
-    the window, and runs the native event loop until the window closes -
-    at which point the server thread is told to stop and joined so nothing
-    outlives the window.
+    The order is the whole change. Importing `fastapi`, `uvicorn` and
+    `avg.api.app` costs ~1.6s cold (measured 2026-07-30 with
+    `python -X importtime`; `create_app` itself is 42ms), and all of it used
+    to happen before pywebview was asked for a window - so the app showed
+    nothing at all for that time. Now the window opens immediately on
+    `splash_html()`, and `_boot` does the imports, the build and the server
+    start on pywebview's own worker thread before pointing the window at the
+    real URL.
+
+    The imports still happen. They are what the server needs. They just
+    happen behind a window that already looks like the app rather than
+    behind nothing.
     """
-    # Frozen builds ship their own ffmpeg/ffprobe (vendor/ffmpeg) because a
-    # clean target machine has neither on PATH. This must run before
-    # anything shells out - including a render child process, which
-    # inherits this modified PATH from the environment at the time it is
-    # spawned. No-op in development. See avg.media.environment.
-    prepend_to_path()
-
-    # Same reasoning, for window flashes rather than binaries: this process
-    # warms thumbnails by shelling out to ffprobe/ffmpeg, and a windowed
-    # build has no console for them to inherit, so each call would pop one.
-    # Installed here, once, before the server thread starts.
-    suppress_console_windows()
-
-    port = pick_port()
-    token = make_token()
-    app = create_app(token=token, output_root=resolve_output_root())
-
-    server = uvicorn.Server(
-        uvicorn.Config(app, host=HOST, port=port, log_level="warning")
-    )
-    server_thread = threading.Thread(target=server.run, daemon=True, name="avg-api-server")
-    server_thread.start()
-
-    try:
-        _wait_until_ready(f"http://{HOST}:{port}/api/settings/schema", token)
-    except RuntimeError:
-        server.should_exit = True
-        raise
-
-    webview.create_window(
+    window = webview.create_window(
         "AVG Studio",
-        f"http://{HOST}:{port}/?token={token}",
+        html=splash_html(),
         js_api=_Api(),
         width=1280,
         height=820,
     )
-    webview.start()
+    # `create_window` is typed as returning `Window | None`, but the only
+    # way it returns `None` is if pywebview's GUI toolkit failed to
+    # initialise at all - nothing this function has done by this point
+    # could cause that, and if it happened there is no window to report the
+    # failure through anyway. Asserting here rather than threading an
+    # `Optional` through the rest of `main` and `_boot`.
+    assert window is not None
 
-    server.should_exit = True
-    server_thread.join(timeout=5)
+    # Set by `_boot` so the teardown below can stop what it started. A list
+    # rather than a `nonlocal` because `_boot` runs on another thread and
+    # this is the simplest handoff that needs no lock: one writer, one
+    # reader, and the reader only runs after `webview.start()` returns.
+    started: list[tuple["uvicorn.Server", threading.Thread]] = []
+
+    def _boot() -> None:
+        # Frozen builds ship their own ffmpeg/ffprobe (vendor/ffmpeg) because
+        # a clean target machine has neither on PATH. This must run before
+        # anything shells out - including a render child process, which
+        # inherits this modified PATH from the environment at the time it is
+        # spawned. No-op in development. See avg.media.environment.
+        #
+        # Same reasoning for window flashes: this process warms thumbnails by
+        # shelling out to ffprobe/ffmpeg, and a windowed build has no console
+        # for them to inherit, so each call would pop one.
+        from avg.media.environment import prepend_to_path, suppress_console_windows  # noqa: PLC0415
+
+        prepend_to_path()
+        suppress_console_windows()
+
+        # The expensive imports, deliberately here rather than at module
+        # scope - this is the 1.6s the window no longer waits behind.
+        import uvicorn  # noqa: PLC0415
+
+        from avg.api.app import create_app  # noqa: PLC0415
+
+        port = pick_port()
+        token = make_token()
+        app = create_app(token=token, output_root=resolve_output_root())
+
+        server = uvicorn.Server(
+            uvicorn.Config(app, host=HOST, port=port, log_level="warning")
+        )
+        server_thread = threading.Thread(
+            target=server.run, daemon=True, name="avg-api-server"
+        )
+        server_thread.start()
+        started.append((server, server_thread))
+
+        try:
+            _wait_until_ready(f"http://{HOST}:{port}/api/settings/schema", token)
+        except RuntimeError as exc:
+            server.should_exit = True
+            # Nothing below `avg/api/` may print, but this is the shell and
+            # the window is the only surface there is: a failure here means
+            # the app never started, and the splash must say so rather than
+            # sit on "Starting up…" forever.
+            window.load_html(
+                splash_html().replace("Starting up…", f"Could not start: {exc}")
+            )
+            return
+
+        window.load_url(f"http://{HOST}:{port}/?token={token}")
+
+    webview.start(_boot, private_mode=False)
+
+    for server, server_thread in started:
+        server.should_exit = True
+        server_thread.join(timeout=5)
 
 
 if __name__ == "__main__":
