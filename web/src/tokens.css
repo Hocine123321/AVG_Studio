@@ -3503,9 +3503,17 @@ a:hover {
   border-radius: var(--radius-sm);
 }
 
+/* Inside the disclosure the prose IS the panel's body, so it drops the
+   frame it wears when it stands alone. Left with its own border, radius
+   and `--canvas` background it read as a box nested in a box: a second
+   border flush against the card's, and 12px top corners notching against
+   the card's straight edge. */
 .artifact-disclosure > .artifact-prose {
   margin: 0;
   padding: 0 14px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

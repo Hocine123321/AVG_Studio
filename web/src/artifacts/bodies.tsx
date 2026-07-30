@@ -136,7 +136,7 @@ export function ScriptBody({ projectId, takeId, files }: BodyProps) {
               {scenes.map((scene, i) => (
                 <tr key={scene.index ?? i}>
                   <td className="mono">{scene.index ?? i + 1}</td>
-                  <td>{scene.text}</td>
+                  <td>{scene.text || "—"}</td>
                   <td>{scene.label ? <span className="chip">{scene.label}</span> : "—"}</td>
                   <td>{scene.image_prompt || "—"}</td>
                 </tr>
