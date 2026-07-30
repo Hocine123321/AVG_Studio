@@ -2528,8 +2528,8 @@ Insert after `make_token` (after line 141):
 #: `web/src/tokens.css`. Duplicated on purpose and duplicated nowhere else:
 #: this page must render before anything is imported, so it cannot read a
 #: stylesheet the server has not started serving yet.
-SPLASH_CANVAS = "#17140f"
-SPLASH_TEXT = "#f2ece2"
+SPLASH_CANVAS = "#1c1a16"
+SPLASH_TEXT = "#f2ebdd"
 
 
 def splash_html() -> str:
