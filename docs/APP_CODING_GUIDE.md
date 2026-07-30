@@ -148,10 +148,11 @@ All require `X-AVG-Token` (the WebSocket takes it as a query parameter).
 | GET/POST/PATCH/DELETE | `/api/channels[/{id}]`, `/{id}/activate` | channel documents | `config.channels` |
 | GET/POST/DELETE | `/api/keys[/{provider}]` | **booleans only**, never a key | `config.secrets` |
 | GET | `/api/health`, `/api/health/report` | components, three stages | `core.health` |
+| POST | `/api/health/install` | installs one of this app's own dependencies; refuses in a frozen build | `core.health` |
 | GET/POST/DELETE | `/api/errors` | the error log; POST is how the UI reports itself | `core.error_store` |
 | GET | `/api/costs` | the maintained cost table | `core.costs` |
 | GET | `/api/models/cache` | proven models per provider | `core.model_cache` |
-| POST | `/api/models/cache/build` | 202, or 409 while one runs | `providers.probe` |
+| POST | `/api/models/cache/build` | Test Providers: 202, or 409 while one runs. Ticked text models get a completion; image/voice providers only a catalogue fetch | `providers.probe` |
 | GET/POST/PATCH/DELETE | `/api/projects/{id}/takes/...` | takes, preview, select, export | `core.takes`, `export.capcut` |
 
 ---
