@@ -35,7 +35,18 @@ export const PHASE_DEFS: readonly PhaseDef[] = [
   { key: "voice", label: "Voice & audio" },
   { key: "director2", label: "Director II" },
   { key: "screen_text", label: "Screen Text" },
-  { key: "render", label: "Render" },
+  {
+    // Two parts, as the old app had: the base encode, then the pass that
+    // composites overlays, cards and captions onto it
+    // (`avg/pipeline/phases/render.py`). Their state comes from
+    // `render_substate`, derived off disk on the backend.
+    key: "render",
+    label: "Render",
+    sub: [
+      { key: "base", label: "Base video" },
+      { key: "composite", label: "Overlays & captions" },
+    ],
+  },
 ];
 
 /** The reroll API accepts only the eight backend phase keys. In particular,

@@ -113,6 +113,10 @@ export interface ProjectImagesResponse {
 
 export type PhaseStatus = "pending" | "running" | "done" | "failed";
 export type ScriptSubstate = "pending" | "partial" | "done";
+/** How far the two-part render got, derived off disk by
+ * `avg.pipeline.phases.render.render_substate`. `"base"` means the video
+ * exists but the overlays-and-captions pass has not run - the rail's 1/2. */
+export type RenderSubstate = "none" | "base" | "done";
 
 export interface PhaseRecord {
   name?: string;
@@ -157,6 +161,9 @@ export interface ProjectDoc {
    * take's artifacts. `POST /api/projects` returns the persisted ProjectDoc
    * directly, so callers must tolerate it being absent until the next list. */
   script_substate?: ScriptSubstate;
+  /** Same read-time-derived footing as `script_substate` above, and absent
+   * for the same reason on `POST /api/projects`. */
+  render_substate?: RenderSubstate;
   /** Hidden from Home's default view. Absent on documents written before
    * Slice 6C, which is why every read treats undefined as false. */
   archived?: boolean;

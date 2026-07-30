@@ -30,7 +30,10 @@ const BODIES: Record<string, typeof BriefBody> = {
   visuals: VisualsBody,
   voice: VoiceBody,
   director2: Director2Body,
-  captions: CaptionsBody,
+  // Keyed by PHASE KEY, so this moved with the Slice 9 rename. The component
+  // keeps its own name: it renders `captions.ass` and the timed cards, which
+  // is what the file is still called.
+  screen_text: CaptionsBody,
 };
 
 function formatBytes(n: number): string {

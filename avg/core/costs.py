@@ -32,9 +32,9 @@ from typing import Mapping
 
 CURRENCY = "USD"
 
-# One entry per display leaf, in pipeline order. `voice` and `render` are
-# zero because Edge TTS is free and rendering is local CPU - not because
-# they are unknown.
+# One entry per display leaf, in pipeline order. `voice` and both render
+# leaves are zero because Edge TTS is free and rendering is local CPU - not
+# because they are unknown.
 LEAF_COST: dict[str, float] = {
     "brief": 0.004,
     "draft": 0.007,
@@ -44,7 +44,11 @@ LEAF_COST: dict[str, float] = {
     "voice": 0.0,
     "director2": 0.002,
     "screen_text": 0.014,
-    "render": 0.0,
+    # Render's two display leaves (`web/src/phases.ts`): the base encode and
+    # the overlays-and-captions pass. Both zero because rendering is local
+    # CPU, not because either is unknown.
+    "base": 0.0,
+    "composite": 0.0,
 }
 
 # Which leaves make up each pipeline phase key. Every key here is a real
@@ -59,7 +63,7 @@ PHASE_LEAVES: dict[str, tuple[str, ...]] = {
     "voice": ("voice",),
     "director2": ("director2",),
     "screen_text": ("screen_text",),
-    "render": ("render",),
+    "render": ("base", "composite"),
 }
 
 # How a target length scales the whole-video estimate. Sub-linear on

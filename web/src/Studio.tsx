@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { createTake, deleteTake, getCosts, getTakes, renameTake, videoUrl } from "./api";
-import type { CostTable, PhaseRecord, PhaseStatus, ProjectDoc, ScriptSubstate, Take } from "./api";
+import type {
+  CostTable,
+  PhaseRecord,
+  PhaseStatus,
+  ProjectDoc,
+  RenderSubstate,
+  ScriptSubstate,
+  Take,
+} from "./api";
 import { formatUsd, projectSpend } from "./costs";
 import type { LivePhase, PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
 import { IconAlert, IconArrowLeft, IconCheck, IconPlay, IconStop } from "./Icons";
@@ -94,6 +102,7 @@ function totalDurationMs(phases: Record<string, PhaseRecord>): number {
 function displayStatuses(
   phases: Record<string, PhaseRecord>,
   scriptSubstate: ScriptSubstate | undefined,
+  renderSubstate: RenderSubstate | undefined,
   activePhase: string | null,
 ): Record<string, PhaseStatus> {
   const statuses: Record<string, PhaseStatus> = {};
@@ -112,6 +121,23 @@ function displayStatuses(
     const resolved = scriptSubstate ?? (statuses.script === "done" ? "done" : "pending");
     statuses.draft = resolved === "pending" ? "pending" : "done";
     statuses.segmentation = resolved === "done" ? "done" : "pending";
+  }
+
+  // Render's own two parts, from the same disk-derived substate the backend
+  // sends for Script. "base" means the video exists and the
+  // overlays-and-captions pass has not run - the 1/2 the rail shows.
+  if (activePhase === "render") {
+    // Only the base encode can be the live one: part 2 begins after part 1
+    // has finished, and the backend's progress is a single scaled stream.
+    statuses.base = "running";
+    statuses.composite = "pending";
+  } else if (statuses.render === "failed") {
+    statuses.base = "failed";
+    statuses.composite = "failed";
+  } else {
+    const resolvedRender = renderSubstate ?? (statuses.render === "done" ? "done" : "none");
+    statuses.base = resolvedRender === "none" ? "pending" : "done";
+    statuses.composite = resolvedRender === "done" ? "done" : "pending";
   }
   return statuses;
 }
@@ -492,7 +518,13 @@ export default function Studio({
   // take must not inherit that current take's artifact state, so its own
   // persisted Script record remains the fallback in `displayStatuses`.
   const selectedScriptSubstate = isCurrentTake ? project.script_substate : undefined;
-  const statuses = displayStatuses(phasesForSelected, selectedScriptSubstate, activePhase);
+  const selectedRenderSubstate = isCurrentTake ? project.render_substate : undefined;
+  const statuses = displayStatuses(
+    phasesForSelected,
+    selectedScriptSubstate,
+    selectedRenderSubstate,
+    activePhase,
+  );
 
   // Anything in this take mid-flight counts as running, not just `render` -
   // a project generating images is as busy as one encoding video, and the
