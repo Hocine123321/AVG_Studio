@@ -839,10 +839,17 @@ a:hover {
 
 /* ---- library grid ---- */
 
+/* Multi-column masonry, not CSS Grid. Grid rows are never independent per
+   column - a row's height is always the tallest item placed in it - and
+   Slice 10 made cards keep their own aspect ratio (a 9:16 thumbnail runs
+   ~400px+ tall, a 16:9 one ~150px). Mixed into the same implicit grid row,
+   the short card's cell stretched to the tall one's height and left a dead
+   band below it: a full-width blank gap that looked like missing cards.
+   Columns flow independently under `column-width`, so no card's height
+   ever depends on its neighbour's. */
 .project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--cardmin), 1fr));
-  gap: var(--gap);
+  column-width: var(--cardmin);
+  column-gap: var(--gap);
   position: relative;
 }
 
@@ -2575,6 +2582,14 @@ a:hover {
 
 .project-cell {
   position: relative;
+  /* Column layout has no row-gap of its own - `margin-bottom` is what
+     separates one card from the next one down its column, matching
+     `.project-grid`'s `column-gap` on the horizontal axis. `break-inside:
+     avoid` is what stops a card being sliced across a column break, which
+     multi-column layout will otherwise do to a tall block same as it would
+     text. */
+  margin-bottom: var(--gap);
+  break-inside: avoid;
 }
 
 /* Centred, just BELOW the chip row - the only part of a card nothing else
