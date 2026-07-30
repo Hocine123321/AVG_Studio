@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createTake, deleteTake, getCosts, getTakes, renameTake, videoUrl } from "./api";
+import { deleteTake, getCosts, getTakes, renameTake, resumeProject, videoUrl } from "./api";
 import type {
   CostTable,
   PhaseRecord,
@@ -532,11 +532,19 @@ export default function Studio({
   const isRunning =
     runningTakeId === selectedTakeId ||
     PHASE_ORDER.some(({ key }) => phasesForSelected[key]?.status === "running");
+  const record = phasesForSelected[selected];
+  const selectedDef = PHASE_DEFS.find((def) => def.key === selected);
+  const selectedStatus = selectedDef ? groupStatus(selectedDef, statuses) : "pending";
+  const label = selectedDef?.label ?? selected;
+
   const resume = resumeTarget(phasesForSelected);
+  // With nothing left to run, the button acts on the phase you are AIMING AT
+  // in the rail. It used to say "Run again" and call /render regardless of the
+  // selection, so pressing it while looking at Script re-encoded the video.
   const actionLabel = isRunning
     ? "Cancel"
     : resume === null
-      ? "Run again"
+      ? `Run again · ${label}`
       : resume.key === "render"
         ? "Start render"
         : `Continue · ${resume.label}`;
@@ -550,25 +558,34 @@ export default function Studio({
       return;
     }
     setResumeError(null);
+
+    // Nothing unfinished: re-run the phase being LOOKED AT, in a new take.
+    // The current take's artifacts are what a re-run would overwrite, and
+    // takes exist precisely so that is a choice rather than a side effect.
+    // Same panel the per-phase button opens - one mechanism, two ways in.
+    if (resume === null) {
+      setRerollTarget(selected);
+      setPanelOpen(true);
+      return;
+    }
+
     setResuming(true);
     try {
-      if (resume === null || resume.key === "render") {
+      if (resume.key === "render") {
         await onStartRender();
         return;
       }
-      const take = await createTake(project.id, { overrides: {}, reroll_from: resume.key });
-      handleTakeCreated(take);
+      // A resume CONTINUES the take being viewed. It used to call createTake,
+      // which produced a take per press - one project on disk carries five
+      // identical ones.
+      await resumeProject(project.id, resume.key);
+      await refreshTakes();
     } catch (err) {
       setResumeError(extractDetail(err instanceof Error ? err.message : String(err)));
     } finally {
       setResuming(false);
     }
   }
-
-  const record = phasesForSelected[selected];
-  const selectedDef = PHASE_DEFS.find((def) => def.key === selected);
-  const selectedStatus = selectedDef ? groupStatus(selectedDef, statuses) : "pending";
-  const label = selectedDef?.label ?? selected;
 
   return (
     <div className="studio">

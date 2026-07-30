@@ -58,6 +58,7 @@ from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
+from avg.pipeline.registry import BY_KEY
 from avg.pipeline.phase import CancellationToken
 from avg.pipeline.phases.render import _render_kwargs
 from avg.pipeline.phases.render import render_substate
@@ -95,6 +96,17 @@ class ArchiveRequest(BaseModel):
 
     ids: list[str]
     archived: bool = True
+
+
+class ResumeBody(BaseModel):
+    """`POST /api/projects/{id}/resume`'s body.
+
+    `from_phase` is a `avg.pipeline.registry` key, validated against `BY_KEY`
+    in the route rather than typed as an enum here, so an unknown key is a 400
+    naming the offending value instead of a 422 the user cannot read.
+    """
+
+    from_phase: str
 
 
 class ProjectCreate(BaseModel):
@@ -604,80 +616,25 @@ def create_app(
             save_project(project)
         return {"archived": body.archived, "ids": list(body.ids)}
 
-    @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
-    async def create_project(body: ProjectCreate) -> ProjectDoc:
-        """Create a project for `body.topic` under the active channel, then
-        run the whole pipeline (`avg.pipeline.registry.REGISTRY`, phase 0
-        on) against it on a background thread - the exact
-        drain-a-generator-and-broadcast pattern `start_render` below already
-        uses for `MediaEngine.render()`, reused rather than duplicated (see
-        this module's docstring on why that split exists). Returns the
-        freshly created `ProjectDoc` immediately, well before the pipeline
-        itself finishes, so the caller can navigate to Studio and watch it
-        run over `/ws/events`.
+    def _start_pipeline_job(
+        project: ProjectDoc,
+        *,
+        channel: Any,
+        router_config: Any,
+        start_from: int,
+    ) -> None:
+        """Run the pipeline against `project` on the single job thread.
+
+        Extracted from `POST /api/projects` so `POST /{id}/resume` runs the
+        SAME worker rather than a copy: the two differ only in `start_from`,
+        and a copy would let them drift on the parts that matter - the run
+        log's lifetime, the failure recording, the take's `master_output`
+        hand-off, and the `finally` that frees the job slot.
+
+        The caller has already checked `app.state.render_thread` and answered
+        409; this does not re-check, because both callers hold the event loop
+        between that check and here, so nothing else can take the slot.
         """
-        topic = body.topic.strip()
-        if not topic:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="topic must not be empty")
-
-        active_id = channels_config.active_channel_id(app.state.settings_path)
-        if active_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="no active channel — activate a channel before creating a video",
-            )
-        channel = channels_config.get_channel(active_id, app.state.channels_dir)
-        if channel is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"active channel {active_id!r} no longer exists",
-            )
-
-        # Validate every override against the catalogue and fold it onto a
-        # THROWAWAY copy of the channel's settings dict - `channel` itself
-        # is never mutated or saved (see `ProjectCreate`'s docstring above).
-        effective_settings = dict(channel.settings)
-        for setting_id, raw_value in body.overrides.items():
-            spec = get_spec(setting_id)
-            if spec is None or spec.scope != "channel":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{setting_id!r} is not a per-video creative setting",
-                )
-            try:
-                effective_settings[setting_id] = validate_value(spec, raw_value)
-            except SettingValidationError as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        effective_channel = channel.model_copy(update={"settings": effective_settings})
-
-        # Built here, not inside the worker: a malformed 'provider/model'
-        # setting is a bad request, and must be a 400 the user sees rather
-        # than a phase that fails minutes later. Until this existed the
-        # runner was handed `router=None` and every text phase died on
-        # `None.phases` - the whole per-phase routing layer was unreachable.
-        try:
-            router_config = config_from_settings(
-                effective_channel.settings,
-                # Channels written before the models group existed have no
-                # `text_model_default` key; the catalogue's own default is
-                # what they get, not an error.
-                fallback_default=str(get_spec("text_model_default").default),  # type: ignore[union-attr]
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-        # The same one-job-at-a-time guard `start_render` enforces below -
-        # a full pipeline run and a `/render` MediaEngine run share the one
-        # `render_thread` slot, never a second job mechanism.
-        if app.state.render_thread is not None and app.state.render_thread.is_alive():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"a pipeline is already running for project {app.state.rendering_project_id!r}",
-            )
-
-        project = new_project(topic, effective_channel, app.state.output_root)
-        app.state.projects[project.id] = project
-
         cancel_token = CancellationToken()
         app.state.pipeline_cancel_token = cancel_token
 
@@ -755,9 +712,9 @@ def create_app(
                 # reflects each phase's outcome as it happens.
                 for event in run_pipeline(
                     project,
-                    channel=effective_channel,
+                    channel=channel,
                     router=router_config,
-                    start_from=0,
+                    start_from=start_from,
                     cancel_token=cancel_token,
                     on_phase_change=lambda: save_project(project),
                     log=take_log,
@@ -805,7 +762,154 @@ def create_app(
         app.state.render_thread = thread
         thread.start()
 
+    @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
+    async def create_project(body: ProjectCreate) -> ProjectDoc:
+        """Create a project for `body.topic` under the active channel, then
+        run the whole pipeline (`avg.pipeline.registry.REGISTRY`, phase 0
+        on) against it on a background thread - the exact
+        drain-a-generator-and-broadcast pattern `start_render` below already
+        uses for `MediaEngine.render()`, reused rather than duplicated (see
+        this module's docstring on why that split exists). Returns the
+        freshly created `ProjectDoc` immediately, well before the pipeline
+        itself finishes, so the caller can navigate to Studio and watch it
+        run over `/ws/events`.
+        """
+        topic = body.topic.strip()
+        if not topic:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="topic must not be empty")
+
+        active_id = channels_config.active_channel_id(app.state.settings_path)
+        if active_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no active channel — activate a channel before creating a video",
+            )
+        channel = channels_config.get_channel(active_id, app.state.channels_dir)
+        if channel is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"active channel {active_id!r} no longer exists",
+            )
+
+        # Validate every override against the catalogue and fold it onto a
+        # THROWAWAY copy of the channel's settings dict - `channel` itself
+        # is never mutated or saved (see `ProjectCreate`'s docstring above).
+        effective_settings = dict(channel.settings)
+        for setting_id, raw_value in body.overrides.items():
+            spec = get_spec(setting_id)
+            if spec is None or spec.scope != "channel":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{setting_id!r} is not a per-video creative setting",
+                )
+            try:
+                effective_settings[setting_id] = validate_value(spec, raw_value)
+            except SettingValidationError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        effective_channel = channel.model_copy(update={"settings": effective_settings})
+
+        # Built here, not inside the worker: a malformed 'provider/model'
+        # setting is a bad request, and must be a 400 the user sees rather
+        # than a phase that fails minutes later. Until this existed the
+        # runner was handed `router=None` and every text phase died on
+        # `None.phases` - the whole per-phase routing layer was unreachable.
+        try:
+            router_config = config_from_settings(
+                effective_channel.settings,
+                # Channels written before the models group existed have no
+                # `text_model_default` key; the catalogue's own default is
+                # what they get, not an error.
+                fallback_default=str(get_spec("text_model_default").default),  # type: ignore[union-attr]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        # The same one-job-at-a-time guard `start_render` enforces below -
+        # a full pipeline run and a `/render` MediaEngine run share the one
+        # `render_thread` slot, never a second job mechanism.
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"a pipeline is already running for project {app.state.rendering_project_id!r}",
+            )
+
+        project = new_project(topic, effective_channel, app.state.output_root)
+        app.state.projects[project.id] = project
+
+        _start_pipeline_job(
+            project,
+            channel=effective_channel,
+            router_config=router_config,
+            start_from=0,
+        )
+
         return project
+
+    @app.post(
+        "/api/projects/{project_id}/resume",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_token)],
+    )
+    async def resume_project(project_id: str, body: ResumeBody) -> dict[str, Any]:
+        """Continue the project's current take, from `from_phase` onward.
+
+        **NOT a clone.** `POST /takes` with `reroll_from` was what the UI
+        called for this, and it created a take per press - one project on disk
+        carries takes 2 through 6, each holding the same four script files,
+        which is the same Continue button pressed five times.
+
+        The distinction the UI was missing: re-running a phase that already
+        FINISHED needs a new take, because that take's artifacts are what
+        would be overwritten. Continuing a phase that never finished has
+        nothing to protect, so it runs in the take the user is looking at.
+
+        Takes the same single job slot as `POST /api/projects` and `/render`,
+        so a second press while one runs is a 409.
+        """
+        project = _library().get(project_id)
+        if project is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such project")
+
+        phase = BY_KEY.get(body.from_phase)
+        if phase is None:
+            # The key comes from a client and `start_from` is an id into
+            # REGISTRY, so an unknown one must be a 400 naming the offender -
+            # never a silent run from zero that redoes the whole video.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown phase {body.from_phase!r}",
+            )
+
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"a job is already running for project {app.state.rendering_project_id!r}",
+            )
+
+        # Resolved the same way `POST /api/projects` does it - id first, then
+        # the document - rather than through a second helper.
+        active_id = channels_config.active_channel_id(app.state.settings_path)
+        channel = channels_config.get_channel(active_id, app.state.channels_dir) if active_id else None
+        if channel is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no active channel — activate a channel before resuming",
+            )
+        try:
+            router_config = config_from_settings(
+                channel.settings,
+                fallback_default=str(get_spec("text_model_default").default),  # type: ignore[union-attr]
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        _start_pipeline_job(
+            project,
+            channel=channel,
+            router_config=router_config,
+            start_from=phase.id,
+        )
+        return {"take_id": project.current_take_id, "from_phase": body.from_phase}
 
     @app.get("/api/settings", dependencies=[Depends(require_token)])
     async def get_settings() -> dict:

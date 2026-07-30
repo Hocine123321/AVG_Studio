@@ -323,6 +323,25 @@ export function getTakeArtifacts(projectId: string, takeId: number): Promise<Tak
   );
 }
 
+/** `POST /api/projects/{id}/resume` — continue the current take from
+ * `fromPhase` onward.
+ *
+ * Deliberately NOT `createTake`: a resume is the same attempt continuing, and
+ * calling createTake here is what left one project with five identical takes
+ * (takes 2-6, each holding the same four script files). A new take is for
+ * re-running a phase that already FINISHED, whose artifacts would otherwise
+ * be overwritten.
+ */
+export function resumeProject(
+  projectId: string,
+  fromPhase: string,
+): Promise<{ take_id: number; from_phase: string }> {
+  return apiPost<{ take_id: number; from_phase: string }>(
+    `/api/projects/${encodeURIComponent(projectId)}/resume`,
+    { from_phase: fromPhase },
+  );
+}
+
 /** `GET /api/projects/{id}/takes/{take}/log` — the tail of a take's run log.
  *
  * Lines rather than raw text, and a tail rather than the whole file: a verbose

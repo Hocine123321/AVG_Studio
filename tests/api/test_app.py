@@ -335,3 +335,137 @@ def test_a_phase_failure_is_recorded_in_the_error_store(tmp_path, monkeypatch):
     # `classify` matches none of its names - which filed every failure as
     # `low`, next to the recovered degradations it is meant to outrank.
     assert entry["severity"] == "critical"
+
+
+def _pipeline_client(tmp_path, monkeypatch, run):
+    """A client with an active channel and a stubbed pipeline."""
+    import avg.api.app as app_module
+
+    monkeypatch.setattr(app_module, "run_pipeline", run)
+    client = TestClient(
+        create_app(
+            token="t0k",
+            output_root=tmp_path / "output",
+            thumb_cache_dir=tmp_path / "thumbs",
+            settings_path=tmp_path / "settings.json",
+            channels_dir=tmp_path / "channels",
+            secrets_path=tmp_path / "secrets.dat",
+            errors_path=tmp_path / "errors.json",
+        )
+    )
+    channel = client.post("/api/channels", headers={"X-AVG-Token": "t0k"}, json={"label": "C"}).json()
+    client.post(f"/api/channels/{channel['id']}/activate", headers={"X-AVG-Token": "t0k"})
+    return client
+
+
+def _join_job(client):
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
+
+
+def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
+    """It created one per press.
+
+    A project on disk carries takes 2 through 6, each holding the same four
+    script files and nothing else - the same Continue button pressed five
+    times. A take is for re-running something that FINISHED; a resume is the
+    same attempt, continuing.
+    """
+    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
+    project_id = client.post(
+        "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
+    ).json()["id"]
+    _join_job(client)
+
+    before = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
+    res = client.post(
+        f"/api/projects/{project_id}/resume",
+        headers={"X-AVG-Token": "t0k"},
+        json={"from_phase": "visuals"},
+    )
+    assert res.status_code == 202
+    _join_job(client)
+
+    after = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
+    assert [t["id"] for t in after["takes"]] == [t["id"] for t in before["takes"]]
+    assert res.json()["take_id"] == after["current_take_id"]
+
+
+def test_resume_starts_from_the_phase_it_was_given(tmp_path, monkeypatch):
+    """`from_phase` is a REGISTRY key; the runner takes an id. A resume that
+    quietly restarted at zero would redo - and re-pay for - the whole video."""
+    seen: list[int] = []
+
+    def run(project, **kwargs):
+        seen.append(kwargs["start_from"])
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, run)
+    project_id = client.post(
+        "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
+    ).json()["id"]
+    _join_job(client)
+
+    client.post(
+        f"/api/projects/{project_id}/resume",
+        headers={"X-AVG-Token": "t0k"},
+        json={"from_phase": "screen_text"},
+    )
+    _join_job(client)
+
+    assert seen == [0, 6]  # the create started at Brief, the resume at Screen Text
+
+
+def test_resume_rejects_a_phase_that_is_not_in_the_registry(tmp_path, monkeypatch):
+    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
+    project_id = client.post(
+        "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
+    ).json()["id"]
+    _join_job(client)
+
+    res = client.post(
+        f"/api/projects/{project_id}/resume",
+        headers={"X-AVG-Token": "t0k"},
+        json={"from_phase": "nonsense"},
+    )
+    assert res.status_code == 400
+    assert "nonsense" in res.json()["detail"]
+
+
+def test_resume_409s_while_a_job_runs(tmp_path, monkeypatch):
+    """One job at a time is enforced by the single render_thread slot, and
+    this route must not be the exception that quietly allows two."""
+    release = threading.Event()
+
+    def slow_run(project, **kwargs):
+        release.wait(timeout=10)
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, slow_run)
+    project_id = client.post(
+        "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
+    ).json()["id"]
+
+    res = client.post(
+        f"/api/projects/{project_id}/resume",
+        headers={"X-AVG-Token": "t0k"},
+        json={"from_phase": "visuals"},
+    )
+    assert res.status_code == 409
+
+    release.set()
+    _join_job(client)
+
+
+def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
+    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
+    res = client.post(
+        "/api/projects/nope/resume", headers={"X-AVG-Token": "t0k"}, json={"from_phase": "visuals"}
+    )
+    assert res.status_code == 404
+
+
+def test_resume_requires_a_token(tmp_path, monkeypatch):
+    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
+    assert client.post("/api/projects/x/resume", json={"from_phase": "visuals"}).status_code == 401
