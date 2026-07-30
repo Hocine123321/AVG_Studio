@@ -30,6 +30,7 @@ from typing import Iterable
 import httpx
 
 from avg.config.secrets import get_key
+from avg.providers import catalogues
 from avg.providers.text.base import TextBackend
 from avg.providers.text.router import _BACKENDS, _build_backend
 from avg.providers.transport import Transport
@@ -151,3 +152,69 @@ def probe_all(
     """
     names = list(providers) if providers is not None else known_providers()
     return {name: probe_provider(name, transport=transport) for name in names}
+
+
+def probe_models(
+    selection: dict[str, list[str]], *, transport: Transport | None = None
+) -> dict[str, dict[str, bool]]:
+    """Probe exactly the models named, provider by provider. `{provider: {model: worked}}`.
+
+    The difference from `probe_all` is the whole point of the Live List: a
+    sweep that tests everything a provider advertises spends a call per
+    listed model on models the user will never choose. Here the caller
+    passes the shortlist and nothing else is touched - no catalogue is even
+    fetched, because the caller already knows the ids.
+
+    Never raises, for the same reason `probe_all` does not: this runs as a
+    sweep and one dead provider must not cost the rest. An unkeyed or
+    unknown provider comes back as an empty dict, which reads as "nothing
+    proved" rather than "everything broken".
+    """
+    owned = transport is None
+    transport = transport if transport is not None else _probe_transport()
+    try:
+        results: dict[str, dict[str, bool]] = {}
+        for provider, models in selection.items():
+            if provider not in _BACKENDS or not get_key(provider):
+                # No key means no call at all - never a probe that fails for
+                # the wrong reason and marks every model broken.
+                results[provider] = {}
+                continue
+            results[provider] = {
+                model: _model_answers(provider, model, transport) for model in models
+            }
+        return results
+    finally:
+        if owned:
+            transport.close()
+
+
+def check_reachable(
+    kind: str, provider: str, *, transport: Transport | None = None
+) -> bool | None:
+    """Did this provider answer its own catalogue? `None` means untested.
+
+    Three values, and the third is the one that matters:
+
+      - `True`  - the provider answered with this key. THIS MODEL is still
+                  unproven; reachability is a fact about a provider.
+      - `False` - it has a catalogue endpoint and that endpoint did not answer.
+      - `None`  - there was nothing to ask. OpenAI and Gemini publish no
+                  image catalogue at all, and an unkeyed ElevenLabs has
+                  nothing to say - reporting either `unreachable` would be a
+                  verdict nothing earned.
+
+    **Nothing here costs money.** Probing an image model means paying for an
+    image and probing an ElevenLabs voice costs characters, which is exactly
+    why Slice 8 made images and voices listed rather than probed. A
+    catalogue GET is free on every provider that has one.
+    """
+    if kind == "image":
+        if provider not in catalogues.image_providers():
+            return None
+        return bool(catalogues.list_image_models(provider, transport=transport))
+    if kind == "voice":
+        if provider == "elevenlabs" and not get_key("elevenlabs"):
+            return None
+        return bool(catalogues.list_voices(provider, transport=transport))
+    return None

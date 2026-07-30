@@ -65,6 +65,22 @@ class ModelCache:
             return []
         return sorted(model for model, ok in entry.items() if ok is True)
 
+    def verdicts(self, provider: str) -> dict[str, bool]:
+        """Every verdict this provider's last sweep recorded, `False` included.
+
+        `working()` answers "what can I pick today" and therefore drops the
+        failures. This answers "what did the sweep prove", which is what a
+        screen reporting `working` / `failed` / `untested` needs: an absent
+        entry is untested, and a `False` entry is a real, earned failure.
+        """
+        models = self._load().get("models", {})
+        if not isinstance(models, dict):
+            return {}
+        entry = models.get(provider)
+        if not isinstance(entry, dict):
+            return {}
+        return {str(model): bool(ok) for model, ok in entry.items()}
+
     def providers(self) -> list[str]:
         """Every provider with an entry, probed or not."""
         models = self._load().get("models", {})
@@ -98,10 +114,28 @@ class ModelCache:
             if isinstance(value, dict)
         }
 
+    def reach(self) -> dict[str, bool]:
+        """Whether each provider answered its own catalogue, by `kind/provider`.
+
+        Reachability is a fact about a PROVIDER, not about a model - an
+        image provider that answers its catalogue has proved the key works
+        and the endpoint is up, and has proved nothing at all about any one
+        model. Storing it per model would be a claim the check never made.
+
+        A provider absent from this map is UNTESTED, which is a different
+        statement from `False`. Nothing here ever writes an absent provider
+        as `False`.
+        """
+        raw = self._load().get("reachable")
+        if not isinstance(raw, dict):
+            return {}
+        return {str(key): bool(value) for key, value in raw.items()}
+
     def save(
         self,
         results: dict[str, dict[str, bool]],
         meta: dict[str, dict[str, str]] | None = None,
+        reachable: dict[str, bool] | None = None,
     ) -> None:
         """Replace the document with one sweep's results.
 
@@ -109,19 +143,23 @@ class ModelCache:
         working has to be able to disappear, and a merge would keep a
         stale `true` alive forever.
 
-        `meta` is the exception, and only in one direction: passing `None`
-        keeps whatever was stored, so a text probe - which knows nothing
-        about voices - does not wipe the language and gender a catalogue
-        refresh put there.
+        `meta` and `reachable` are the exceptions, and only in one
+        direction: passing `None` keeps whatever was stored, so a text
+        probe - which knows nothing about voices or image endpoints - does
+        not wipe the language and gender a catalogue refresh put there, nor
+        the reachability an earlier provider test proved. Passing an
+        explicit `{}` still clears them.
         """
-        kept = self.meta() if meta is None else meta
+        kept_meta = self.meta() if meta is None else meta
+        kept_reach = self.reach() if reachable is None else reachable
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(
                 {
                     "updated": datetime.now(timezone.utc).isoformat(),
                     "models": {p: dict(sorted(m.items())) for p, m in results.items()},
-                    "meta": dict(sorted(kept.items())),
+                    "meta": dict(sorted(kept_meta.items())),
+                    "reachable": dict(sorted(kept_reach.items())),
                 },
                 indent=2,
             ),

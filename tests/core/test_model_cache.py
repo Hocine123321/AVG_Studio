@@ -61,3 +61,39 @@ def test_a_save_replaces_rather_than_merges(tmp_path):
     cache.save({"groq": {"a": True}})
     assert cache.working("groq") == ["a"]
     assert cache.providers() == ["groq"]
+
+
+def test_verdicts_reports_failures_not_only_successes(tmp_path):
+    """`working()` answers "what can I pick"; `verdicts()` answers "what did
+    the sweep prove", and a proven failure is a real answer the UI has to be
+    able to state as `failed` rather than as `untested`."""
+    cache = ModelCache(tmp_path / "working_models.json")
+    cache.save({"groq": {"good": True, "dead": False}})
+
+    assert cache.working("groq") == ["good"]
+    assert cache.verdicts("groq") == {"good": True, "dead": False}
+    assert cache.verdicts("never-swept") == {}
+
+
+def test_reachability_is_stored_per_provider_and_survives_a_text_only_save(tmp_path):
+    """Reachability is a fact about a PROVIDER, not a model, so it lives
+    beside the per-model verdicts rather than pretending to be one. Passing
+    `reachable=None` keeps it, exactly as `meta=None` keeps the meta - a
+    text sweep knows nothing about image providers and must not wipe them."""
+    cache = ModelCache(tmp_path / "working_models.json")
+    cache.save({}, reachable={"image/pollinations": True, "voice/edge": False})
+    assert cache.reach() == {"image/pollinations": True, "voice/edge": False}
+
+    cache.save({"groq": {"good": True}})
+    assert cache.reach() == {"image/pollinations": True, "voice/edge": False}
+
+    cache.save({}, reachable={})
+    assert cache.reach() == {}
+
+
+def test_a_provider_with_no_stored_reachability_is_absent_not_false(tmp_path):
+    """Untested is the ABSENCE of a verdict, never a stored one: a provider
+    nobody has swept has not been proved unreachable."""
+    cache = ModelCache(tmp_path / "working_models.json")
+    cache.save({}, reachable={"image/pollinations": True})
+    assert "image/stablehorde" not in cache.reach()
