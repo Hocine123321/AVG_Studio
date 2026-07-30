@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+from typing import Any
 import pytest
 from avg.core.errors import ErrorKind
 from avg.media.engine import classify_exit
@@ -176,3 +178,52 @@ def test_captions_switched_off_skips_the_burn_without_calling_it(tmp_path):
     )
 
     assert "caption_burn" not in _VENDOR_CALLS
+
+
+class _RecordingQueue:
+    """Stands in for the child's multiprocessing queue when the child is
+    called IN-PROCESS. A real one cannot be read after `run_composite_child`
+    returns - it closes its own handle in a finally, which is exactly the
+    flush discipline that makes the real cross-process case reliable."""
+
+    def __init__(self) -> None:
+        self.messages: list[tuple] = []
+
+    def put(self, message: tuple) -> None:
+        self.messages.append(message)
+
+    def close(self) -> None:
+        pass
+
+    def join_thread(self) -> None:
+        pass
+
+
+def test_the_overlay_count_survives_the_bake(tmp_path, monkeypatch):
+    """The vendored caption pass DELETES render/_final_layers.json once it has
+    baked those layers in (`_bake_deferred_overlays`), so counting afterwards
+    reported 0 overlays on a video that visibly had one - found by reading
+    _composite.json after a real render, not by a test."""
+    import avg.media.child as child_mod
+
+    project = _base_video(tmp_path)
+    layers = project / "render" / "_final_layers.json"
+    layers.write_text(
+        '[{"png": "a.png", "start": 0.0, "end": 1.0}, {"png": "b.png", "start": 1.0, "end": 2.0}]',
+        encoding="utf-8",
+    )
+
+    def burn_and_consume(call, argv):
+        # What the real pass does: bakes the layers, then removes the manifest.
+        layers.unlink()
+        return 0
+
+    monkeypatch.setattr(child_mod, "_run_vendor", burn_and_consume)
+    monkeypatch.setattr(child_mod, "_captured_stderr", lambda q: nullcontext())
+
+    queue = _RecordingQueue()
+    child_mod.run_composite_child({"project_path": str(project), "provider": "estimated"}, queue)
+
+    composite = next(m for m in queue.messages if m[0] == "composite")
+    assert composite[1] == 2
+    assert composite[2] == "burned"

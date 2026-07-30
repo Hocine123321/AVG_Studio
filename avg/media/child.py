@@ -252,6 +252,11 @@ def run_composite_child(kwargs: dict[str, Any], q: Any) -> None:
 
     try:
         deferred = (project / "render" / "_final_layers.json").is_file()
+        # Counted BEFORE the passes run: the vendored caption pass DELETES
+        # `_final_layers.json` once it has baked those layers in
+        # (`_bake_deferred_overlays`), so counting afterwards reported 0
+        # overlays on a video that visibly had one.
+        layer_count = _layer_count(project) if deferred else 0
         captions_enabled = bool(kwargs.get("captions_enabled", True))
         overlays_code = 0
         _sink(0, "Compositing overlays and captions...")
@@ -287,7 +292,7 @@ def run_composite_child(kwargs: dict[str, Any], q: Any) -> None:
         if 1 in (overlays_code, captions_code):
             q.put(("error", f"composite pass failed (overlays={overlays_code}, captions={captions_code})"))
         else:
-            q.put(("composite", _layer_count(project) if deferred else 0, _captions_outcome(captions_code, captions_enabled)))
+            q.put(("composite", layer_count, _captions_outcome(captions_code, captions_enabled)))
         _sink(100, "Overlays and captions applied.")
     finally:
         # Same flush discipline as `run_child`: close and join the feeder
