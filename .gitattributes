@@ -1,8 +1,0 @@
-# Vendored media layer: byte-for-byte copies of the old app's python/avg.py and
-# overlay_design.py. Git's autocrlf silently rewrites line endings in the stored
-# BLOB while leaving the working file untouched, so a corrupted copy passes an
-# on-disk diff and only shows up in git hash-object. Never convert these.
-avg/media/vendor/** -text
-
-# Everything else: normalise to LF in the repository.
-* text=auto

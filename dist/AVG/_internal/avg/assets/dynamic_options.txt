@@ -1,0 +1,46 @@
+﻿## CATEGORY: trend_countries
+## OPTION: US | United States
+## OPTION: GB | United Kingdom
+## OPTION: DE | Germany
+## OPTION: FR | France
+## OPTION: IN | India
+## OPTION: ES | Spain
+## OPTION: AE | United Arab Emirates
+## OPTION: SA | Saudi Arabia
+
+
+## CATEGORY: color_themes
+## OPTION: soft_dark | Soft Dark — easy on the eyes (default) | Accent=Cyan;Text=White;Note=Gray;Muted=DarkGray;Success=Green;Warning=DarkYellow
+## OPTION: monochrome_dark | Monochrome Dark — zero saturation, dark background | Accent=Gray;Text=White;Note=Gray;Muted=DarkGray;Success=White;Warning=Gray
+## OPTION: monochrome_light | Monochrome Light — zero saturation, light background | Accent=Gray;Text=Black;Note=DarkGray;Muted=Gray;Success=Black;Warning=DarkGray
+## OPTION: dark | High Contrast Dark — maximum readability | Accent=Cyan;Text=White;Note=Gray;Muted=DarkGray;Success=Green;Warning=Yellow
+## OPTION: light | Light — bright background | Accent=Blue;Text=Black;Note=DarkGray;Muted=Gray;Success=DarkGreen;Warning=DarkRed
+## OPTION: high_contrast_light | High Contrast Light | Accent=Blue;Text=Black;Note=Black;Muted=DarkGray;Success=Green;Warning=Red
+## OPTION: neon | Neon — vibrant accent colors | Accent=Yellow;Text=White;Note=Cyan;Muted=Gray;Success=Green;Warning=Red
+## OPTION: terminal_hacker | Terminal Green — classic monospaced vibe | Accent=Green;Text=LightGreen;Note=DarkGreen;Muted=DarkGreen;Success=Green;Warning=Yellow
+## OPTION: editorial_cream | Editorial Cream — bookish/academic feel | Accent=Red;Text=DarkSlateGray;Note=Brown;Muted=Gray;Success=DarkGreen;Warning=Red
+
+
+## CATEGORY: video_tone
+## OPTION: documentary_cinematic | Documentary — cinematic realism | grounded cinematic realism, real environments and authentic detail, natural and dramatic lighting, wide establishing shots and meaningful close-ups, archival documentary feel, no cartoonish or synthetic looks
+## OPTION: news_broadcast | News — clean broadcast | neutral broadcast look, factual B-roll of the real places, people, objects and documents involved, straight framing, even lighting, no stylization and no drama
+## OPTION: dark_cinematic | Dark & Cinematic | dark atmospheric cinematic frames, deep shadows and moody low-key lighting, ominous scale and isolation, high contrast with subtle film grain, unsettling and suspenseful mood
+## OPTION: epic_cinematic | Epic Cinematic | dramatic lighting, epic scale, sweeping movie-quality visuals, rich color and deep contrast
+## OPTION: realistic | Realistic / Photographic | true-to-life photographic imagery, natural lighting, believable detail, no stylization
+## OPTION: vibrant | Vibrant & Bold | bold saturated colors, high energy, high contrast, punchy modern look
+## OPTION: minimal | Minimal & Clean | flat, clean, whitespace-heavy, modern minimal aesthetic
+## OPTION: wireframe | Wireframe / Line Art | minimalist 2D wireframe and line art, clean solid outlines, simple diagrammatic figures on flat backgrounds
+## OPTION: custom | Custom... | type your own tone/style description
+
+
+## CATEGORY: brand_presets
+## OPTION: wireframe_ink | Wireframe Ink — hand-drawn line art (perfect match) | bg=#FFFFFF;panel=rgba(255,255,255,0.95);panel_stroke=rgba(0,0,0,1.0);text=#000000;text2=#404040;accent1=#000000;accent2=#555555;highlight=#000000
+## OPTION: modern_dark | Modern Dark — clean cinematic (default) | font_path=;font_bold_path=;bg=#0B0F1A;panel=rgba(15,22,36,0.88);panel_stroke=rgba(255,255,255,0.12);text=#F2F4F8;text2=#B8BEC9;accent1=#FF4D6D;accent2=#FF9F43;highlight=#FFD93D
+## OPTION: tiktok_viral | TikTok Viral — high-energy social style | font_path=;font_bold_path=;bg=#000000;panel=rgba(0,0,0,0.8);panel_stroke=rgba(255,255,255,0.1);text=#FFFFFF;text2=#FE2C55;accent1=#FE2C55;accent2=#25F4EE;highlight=#FFFFFF
+## OPTION: neon_cyber | Neon Cyber — electric sci-fi | bg=#050014;panel=rgba(20,0,40,0.90);panel_stroke=rgba(0,255,255,0.20);text=#E0F7FF;text2=#9AA3B2;accent1=#00F0FF;accent2=#FF00AA;highlight=#F9FF00
+## OPTION: warm_organic | Warm Organic — earthy and friendly | bg=#1A120B;panel=rgba(60,40,25,0.88);panel_stroke=rgba(255,230,180,0.15);text=#FFF8F0;text2=#D7CCC8;accent1=#FF8C42;accent2=#FFC857;highlight=#C5E1A5
+## OPTION: clean_light | Clean Light — bright and minimal | bg=#F5F7FA;panel=rgba(255,255,255,0.95);panel_stroke=rgba(0,0,0,0.08);text=#1A1A2E;text2=#4A4A68;accent1=#2563EB;accent2=#7C3AED;highlight=#F59E0B
+## OPTION: luxury_gold | Luxury Gold — premium and elegant | bg=#0D0D0D;panel=rgba(25,25,25,0.92);panel_stroke=rgba(212,175,55,0.20);text=#F8F5F2;text2=#B0A89E;accent1=#D4AF37;accent2=#C0A062;highlight=#FFFFFF
+## OPTION: vsauce_curiosity | Vsauce Curiosity — existential and scientific | bg=#0A0B10;panel=rgba(18,20,28,0.90);panel_stroke=rgba(255,255,255,0.08);text=#F0F4F8;text2=#A0AEC0;accent1=#FF5722;accent2=#00E5FF;highlight=#FFD700
+## OPTION: academic_editorial | Academic Editorial — clean high-contrast cream | bg=#FBF9F5;panel=rgba(244,240,232,0.95);panel_stroke=rgba(40,30,20,0.15);text=#1F1F1F;text2=#5E5346;accent1=#A93226;accent2=#2E4053;highlight=#D35400
+## OPTION: tactical_terminal | Tactical Terminal — dark green and black | bg=#050A05;panel=rgba(10,20,10,0.90);panel_stroke=rgba(0,255,0,0.15);text=#39FF14;text2=#1A8A0C;accent1=#39FF14;accent2=#00FFCC;highlight=#FFFFFF

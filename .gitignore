@@ -1,46 +1,16 @@
+# General
+*.log
+*.tmp
+.env
+Thumbs.db
+.DS_Store
+
 # Python
 __pycache__/
-*.py[cod]
-.venv/
+*.pyc
 venv/
-*.egg-info/
+.venv/
 
-# Build output
-build/
-dist/
-*.spec.bak
+# PowerShell
+*.ps1xml
 
-# Web
-node_modules/
-web/dist/
-
-# Runtime data — never commit
-runtime/
-output/
-logs/
-*.log
-secrets.dat
-.env
-
-# Editor / OS
-.vscode/
-.idea/
-Thumbs.db
-desktop.ini
-
-# Build tooling
-.venv-build/
-*.spec
-# ...except the checked-in PyInstaller spec Task 11 builds from.
-!tools/avg.spec
-
-# Installer output (built by ISCC from installer/avg.iss)
-installer/*.exe
-
-# Bundled ffmpeg (128 MB, fetched by tools/fetch_ffmpeg.py)
-vendor/
-
-# Release output, produced by "Build Installer.bat" - always rebuildable from
-# source, never committed. "AVG APP" is a mirror of dist/AVG plus a launcher.
-AVG APP/
-dist/
