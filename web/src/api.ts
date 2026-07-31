@@ -317,6 +317,24 @@ export function getHealthReport(refresh = false): Promise<HealthReport> {
   return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
 }
 
+// ---- phase registry ----
+
+/** One phase as the backend defines it. `avg/pipeline/registry.py` is the
+ * single source of truth for phase order and identity; this is that list.
+ * Named `ApiPhaseDef` because `web/src/phases.ts` already exports a
+ * `PhaseDef` for its own nested sub-step display, which this does not
+ * replace. */
+export interface ApiPhaseDef {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+}
+
+export function getPhases(): Promise<{ phases: ApiPhaseDef[] }> {
+  return apiGet<{ phases: ApiPhaseDef[] }>("/api/phases");
+}
+
 // ---- take artifacts ----
 
 /** `GET /api/projects/{id}/takes/{take}/artifacts` - artifact key to size
@@ -430,6 +448,10 @@ export interface LiveListResponse {
   voice: LiveEntry[];
   /** Language and gender per voice id, for the voice tab's filters. */
   voice_meta: Record<string, { name: string; locale: string; gender: string }>;
+  /** ISO-8601 timestamp of the last catalogue refresh, or `null` if the
+   * catalogues have never been listed. A stale catalogue that says nothing
+   * is how one Gemini entry looked like all there was. */
+  updated: string | null;
 }
 
 export function getLiveList(): Promise<LiveListResponse> {
