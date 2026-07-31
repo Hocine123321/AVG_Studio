@@ -95,6 +95,12 @@
   --gap: 18px;
   --cardmin: 188px;
   --row: 48px;
+
+  /* Scales every transition and animation duration. Set from the
+     `motion_scale` setting by Settings.tsx; 1 is full, 0.5 reduced, 0 none.
+     The `prefers-reduced-motion` block below is unchanged and still wins -
+     this setting can only reduce motion, never restore it. */
+  --motion-scale: 1;
 }
 
 [data-theme="day"] {
@@ -861,7 +867,7 @@ a:hover {
   position: relative;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.18s, box-shadow 0.18s;
+  transition: transform calc(0.18s * var(--motion-scale)), box-shadow calc(0.18s * var(--motion-scale));
 }
 
 .project-card:hover {
@@ -2857,17 +2863,17 @@ a:hover {
 }
 
 .screen-enter {
-  animation: rise-in 0.18s ease-out;
+  animation: rise-in calc(0.18s * var(--motion-scale)) ease-out;
 }
 
 .take-panel,
 .modal,
 .popup {
-  animation: rise-in 0.16s ease-out;
+  animation: rise-in calc(0.16s * var(--motion-scale)) ease-out;
 }
 
 .studio__banner {
-  animation: fade-in 0.16s ease-out;
+  animation: fade-in calc(0.16s * var(--motion-scale)) ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3055,7 +3061,9 @@ a:hover {
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--pill) 26%, transparent);
   border-top-color: var(--pill);
-  animation: avg-spin 0.9s linear infinite;
+  /* `max()` guards against a scale of 0 producing a zero-duration infinite
+     animation, which spins forever at no visible rate instead of stopping. */
+  animation: avg-spin calc(0.9s / max(var(--motion-scale), 0.01)) linear infinite;
 }
 
 @keyframes avg-spin {
@@ -3087,7 +3095,7 @@ a:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: pill-pop 0.28s ease-out;
+  animation: pill-pop calc(0.28s * var(--motion-scale)) ease-out;
 }
 
 .statuspill__clock,

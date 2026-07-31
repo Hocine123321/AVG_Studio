@@ -272,9 +272,9 @@ export default function App() {
         <Create onCreated={handleProjectCreated} onGoToChannels={() => setScreen({ name: "channels" })} />
       );
     } else if (screen.name === "settings") {
-      content = <Settings />;
+      content = <Settings onOpenLiveList={() => setScreen({ name: "livelist" })} />;
     } else if (screen.name === "livelist") {
-    content = <LiveList onBack={() => setScreen({ name: "health" })} />;
+    content = <LiveList onBack={() => setScreen({ name: "settings" })} />;
   } else if (screen.name === "health") {
       content = <AppHealth />;
     } else if (screen.name === "channels") {
