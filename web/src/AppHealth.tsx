@@ -18,16 +18,16 @@ import ModelCacheCard from "./ModelCacheCard";
  *
  * One filled terracotta action here: Re-run everything.
  */
-export default function AppHealth({ onOpenLiveList }: { onOpenLiveList?: () => void }) {
+export default function AppHealth() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (refresh: boolean) => {
+  const load = useCallback(async (refresh: boolean, deep = false) => {
     setBusy(true);
     setError(null);
     try {
-      setReport(await getHealthReport(refresh));
+      setReport(await getHealthReport(refresh, deep));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -56,6 +56,9 @@ export default function AppHealth({ onOpenLiveList }: { onOpenLiveList?: () => v
         )}
         <button type="button" className="btn btn--primary" onClick={() => void load(true)} disabled={busy}>
           {busy ? "Running…" : "Re-run everything"}
+        </button>
+        <button type="button" className="btn" onClick={() => void load(true, true)} disabled={busy}>
+          {busy ? "Checking…" : "Deep check"}
         </button>
       </header>
 
@@ -102,24 +105,6 @@ export default function AppHealth({ onOpenLiveList }: { onOpenLiveList?: () => v
       </div>
 
       <ModelCacheCard />
-
-      {onOpenLiveList && (
-        <section className="errorlog" aria-label="Live List">
-          <header className="errorlog__head">
-            <div>
-              <h2 className="health-stage__title">Live List</h2>
-              <p className="health-stage__detail">
-                Choose which models and voices the Settings pickers offer, mark favourites, and note
-                what each one is good for.
-              </p>
-            </div>
-            <span className="home__spacer" />
-            <button type="button" className="btn" onClick={onOpenLiveList}>
-              Open Live List
-            </button>
-          </header>
-        </section>
-      )}
 
       <ErrorLog />
     </div>
