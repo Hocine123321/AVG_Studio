@@ -45,7 +45,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import webview
 
@@ -162,6 +162,21 @@ def make_token() -> str:
 #: stylesheet the server has not started serving yet.
 SPLASH_CANVAS = "#1c1a16"
 SPLASH_TEXT = "#f2ebdd"
+
+
+def should_check_at_startup(values: dict[str, Any]) -> bool:
+    """Whether to warm the component check while the library loads.
+
+    Reads the `startup_check` app setting (`avg.core.settings_schema`).
+    Anything that is not exactly `False` means yes: a malformed stored value
+    is not a reason to silently skip a diagnostic, and the setting exists to
+    save a moment, not to hide a problem.
+
+    A pure function of the values dict so it can be called on the boot path
+    without a server, an app instance, or a settings file - the same property
+    `splash_html` has, and for the same reason.
+    """
+    return values.get("startup_check", True) is not False
 
 
 def splash_html() -> str:
@@ -332,6 +347,16 @@ def main() -> None:
             return
 
         window.load_url(f"http://{HOST}:{port}/?token={token}")
+
+        from avg.config.settings import load_settings  # noqa: PLC0415
+
+        if should_check_at_startup(load_settings().values):
+            # Warms the five-minute component cache on the boot thread so
+            # App health answers instantly the first time it is opened.
+            # Never blocks the window: this runs after `load_url`.
+            from avg.core.health import check_all  # noqa: PLC0415
+
+            check_all()
 
     webview.start(_boot, private_mode=False)
 
