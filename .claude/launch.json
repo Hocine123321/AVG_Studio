@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "avg_dev_serve",
+      "runtimeExecutable": ".venv-build\\Scripts\\python.exe",
+      "runtimeArgs": ["tools/_dev_serve.py"],
+      "port": 8756
+    }
+  ]
+}

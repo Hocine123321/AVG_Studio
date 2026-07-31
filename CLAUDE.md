@@ -124,12 +124,12 @@ Every slice: brainstorm → spec → plan → subagent-driven execution, using t
 - `.superpowers/sdd/progress.md` — the running ledger of every decision and defect found. Sessions have died mid-slice six times; **that file plus `git log` is what makes resuming possible. Trust it over recollection.**
 - `docs/decisions/` — packaging and other standing decisions.
 
-Slices 1–8 are done, **671 tests passing**: installer, config, providers, the 8-phase pipeline, takes + CapCut export, the mockup's six features, repair/diagnostics/model cache, and pipeline truth + the per-phase artifact panel + the Live List. Still open and cosmetic: toasts and the device-frame player (Slice 6C leftovers). Deferred with its own plan pending: the codebase-simplification refactor, whose input is `docs/APP_CODING_GUIDE.md`.
+Slices 1–10 are done, **671 tests passing**: installer, config, providers, the 8-phase pipeline, takes + CapCut export, the mockup's six features, repair/diagnostics/model cache, and pipeline truth + the per-phase artifact panel + the Live List. Still open and cosmetic: toasts and the device-frame player (Slice 6C leftovers). Deferred with its own plan pending: the codebase-simplification refactor, whose input is `docs/APP_CODING_GUIDE.md`.
 
 ## Account state (affects what you can actually exercise)
 
 Only **Groq** currently generates text — a Slice 7 probe found 5 of its 10 models working. Gemini has exactly one working text model (32 listed); HuggingFace returns `model_not_supported` on all 20; Pollinations has no pollen budget.
 
-**Images are currently broken on this account**: a real run on 2026-07-29 failed at Visuals with "every scene failed to generate an image" against `pollinations/flux`, key present. Stable Horde lists 156 models and has no key set — it is the untested alternative. OpenAI and Gemini images do not work and publish no catalogue at all.
+
 
 Voice: **Edge TTS is free, always works, and advertises 322 voices**; ElevenLabs is keyed with 23. Listing voices costs nothing on either; synthesising costs characters on ElevenLabs, which is why the Live List lists image models and voices rather than probing them.
