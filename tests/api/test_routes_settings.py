@@ -447,3 +447,27 @@ def test_health_report_checks_the_isolated_paths_not_the_real_profile(client, pa
     safeguards = next(s for s in body["stages"] if s["key"] == "safeguards")
     writable = next(c for c in safeguards["checks"] if c["name"] == "Library folder writable")
     assert str(paths["output_root"]) in writable["detail"]
+
+
+# ── Slice 11 Task 4: GET /api/phases ────────────────────────────────────────
+
+def test_phases_route_serves_the_registry_in_order(client):
+    body = client.get("/api/phases", headers=AUTH).json()
+    keys = [p["key"] for p in body["phases"]]
+    assert keys == [
+        "brief", "script", "director1", "visuals",
+        "voice", "director2", "screen_text", "render",
+    ]
+    assert [p["id"] for p in body["phases"]] == list(range(8))
+
+
+def test_every_phase_describes_itself(client):
+    """The description is what an un-started phase panel shows instead of an
+    empty box. A blank one would put the panel straight back where it was."""
+    body = client.get("/api/phases", headers=AUTH).json()
+    for phase in body["phases"]:
+        assert phase["description"].strip(), phase["key"]
+
+
+def test_the_phases_route_requires_a_token(client):
+    assert client.get("/api/phases").status_code == 401

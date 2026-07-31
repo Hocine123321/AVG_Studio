@@ -424,6 +424,9 @@ class ScreenTextPhase:
     id: int = 6
     key: str = "screen_text"
     name: str = "Screen Text"
+    description: str = (
+        "Transcribes the narration and writes the caption file the renderer burns in. Writes render/captions.ass."
+    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _optimized_voice_path(ctx).exists()

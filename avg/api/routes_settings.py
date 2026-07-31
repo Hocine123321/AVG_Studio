@@ -289,6 +289,41 @@ async def clear_errors(request: Request) -> dict:
     return {"cleared": True}
 
 
+@router.get("/api/phases")
+async def get_phases() -> dict:
+    """The pipeline's phases, in order, with what each one is for.
+
+    Serves `avg.pipeline.registry.REGISTRY` - the single source of truth for
+    phase order and identity. `web/src/phases.ts` has carried a hand-kept
+    copy of the keys since Slice 1, with its own docstring calling itself
+    duplication "until the backend serves phase definitions"; this is that
+    route. It does not retire that file, which also owns the nested
+    sub-step display REGISTRY does not model.
+    """
+    from avg.pipeline.registry import REGISTRY  # noqa: PLC0415 - keeps the pipeline off the import path
+
+    return {
+        "phases": [
+            {"id": p.id, "key": p.key, "name": p.name, "description": p.description}
+            for p in REGISTRY
+        ]
+    }
+
+
+#: Providers that cannot generate without a key, by `kind/provider`. Edge
+#: needs none (it is the free voice provider) and Pollinations needs none,
+#: so neither appears. Stable Horde's CATALOGUE is public while its
+#: generation endpoint is not - which is exactly the trap this exists to
+#: close: it reads "Reachable" and then 403s on the first real image.
+_NEEDS_KEY: tuple[str, ...] = (
+    "image/stablehorde",
+    "image/openai",
+    "image/gemini",
+    "image/huggingface",
+    "voice/elevenlabs",
+)
+
+
 @router.get("/api/models/cache")
 async def get_model_cache(request: Request) -> dict:
     """What the last provider test proved, in the three states it can prove.
@@ -301,6 +336,10 @@ async def get_model_cache(request: Request) -> dict:
     - `reachable` - per `kind/provider`, whether the provider answered its
       own catalogue. THIS MODEL is unproven either way; reachability is a
       fact about a provider.
+    - `needs_key` - per `kind/provider`, `true` when that provider requires
+      a key and has none. A provider can be reachable - its catalogue is a
+      public GET - and still be unable to produce anything, which is what
+      walked a keyless Stable Horde into a 403 while reading "Reachable".
 
     An entry absent from `text` or `reachable` is UNTESTED. `updated: null`
     means no test has ever run - the UI says so and never invents a list.
@@ -314,6 +353,11 @@ async def get_model_cache(request: Request) -> dict:
             p: cache.verdicts(p) for p in cache.providers() if not p.startswith("__")
         },
         "reachable": cache.reach(),
+        "needs_key": {
+            entry: True
+            for entry in _NEEDS_KEY
+            if not secrets_config.get_key(entry.split("/", 1)[1])
+        },
         "building": _probe_running(request.app.state),
     }
 
@@ -539,6 +583,11 @@ async def get_live_list(request: Request) -> dict:
         "image": _entry_rows(prefs, "image", _known_from_catalogue(app_state, "image")),
         "voice": _entry_rows(prefs, "voice", _known_from_catalogue(app_state, "voice")),
         "voice_meta": app_state.model_cache.meta(),
+        "updated": (
+            app_state.model_cache.updated_at().isoformat()
+            if app_state.model_cache.updated_at() is not None
+            else None
+        ),
     }
 
 
