@@ -20,7 +20,7 @@ import type { SettingsCtx } from "./fields/types";
  * value on the backend needs no matching entry here to show up correctly;
  * this map only ever improves on the fallback, never gates it. */
 const GROUP_LABELS: Record<string, string> = {
-  runtime: "Runtime & components",
+  app: "App & components",
   video: "Video format",
   captions: "Captions",
   voice: "Voice",
@@ -377,7 +377,7 @@ export default function Settings() {
                     captions, voice, images, render, keys), so this panel
                     had silently never rendered. Keyed to a real group, it
                     is on screen again. */}
-                {g.group === "runtime" && !searching && <HealthPanel />}
+                {g.group === "app" && !searching && <HealthPanel />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}

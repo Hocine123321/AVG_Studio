@@ -110,3 +110,35 @@ def test_images_have_a_backup_and_a_failure_policy():
 
     assert BY_ID["image_on_failure"].choices == ["stop", "fall_back"]
     assert BY_ID["image_model_backup"].source == "live_list:image"
+
+
+def test_the_app_group_replaces_runtime():
+    from avg.core.settings_schema import SETTINGS
+
+    groups = {s.group for s in SETTINGS}
+    assert "app" in groups
+    assert "runtime" not in groups
+
+
+def test_the_app_group_holds_the_apps_own_behaviour():
+    from avg.core.settings_schema import BY_ID
+
+    for setting_id in ("theme", "verbose_log", "motion_scale", "startup_check"):
+        assert BY_ID[setting_id].group == "app", setting_id
+        assert BY_ID[setting_id].scope == "app", setting_id
+
+    assert BY_ID["motion_scale"].choices == ["full", "reduced", "none"]
+    assert BY_ID["startup_check"].default is True
+
+
+def test_settings_source_is_a_channel_choice_like_live_list_source():
+    """Whole-document either/or, the shape `live_list_source` already
+    ships - never per-field inheritance."""
+    from avg.core.settings_schema import BY_ID
+
+    spec = BY_ID["settings_source"]
+    assert spec.group == "app"
+    assert spec.scope == "channel"
+    assert spec.choices == ["channel", "global"]
+    assert spec.default == "channel"
+    assert spec.invalidates is None
