@@ -95,3 +95,18 @@ def test_the_known_unwired_list_does_not_outlive_the_problem():
         "these are wired now - remove them from KNOWN_UNWIRED: "
         f"{sorted(KNOWN_UNWIRED - still_dead)}"
     )
+
+
+def test_images_have_a_backup_and_a_failure_policy():
+    """Mirrors the per-phase text triplet the Settings screen already
+    renders - `— model`, `— backup`, `— if both fail`."""
+    from avg.core.settings_schema import BY_ID
+
+    for setting_id in ("image_provider_backup", "image_model_backup", "image_on_failure"):
+        spec = BY_ID[setting_id]
+        assert spec.group == "images"
+        assert spec.scope == "channel"
+        assert spec.invalidates == "visuals"
+
+    assert BY_ID["image_on_failure"].choices == ["stop", "fall_back"]
+    assert BY_ID["image_model_backup"].source == "live_list:image"
