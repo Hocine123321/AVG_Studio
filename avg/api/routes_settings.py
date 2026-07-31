@@ -47,6 +47,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
+from avg.config import channel_defaults as channel_defaults_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
@@ -107,17 +108,42 @@ def _app_values(app_state: Any) -> dict[str, Any]:
 
 
 def _channel_values(app_state: Any) -> dict[str, Any]:
-    """Current value for every `scope="channel"` setting, read from the
-    active channel's document - or each setting's default if no channel is
-    active, or the active id no longer resolves to a real channel."""
+    """Current value for every `scope="channel"` setting.
+
+    Read from the active channel's own document, or - when that channel's
+    `settings_source` says `"global"` - from the app-wide defaults document,
+    WHOLE. There is no third case: a field absent from whichever document is
+    selected resolves to the `SettingSpec`'s own default, never to the other
+    document.
+
+    That is what keeps this from being the mechanism `CLAUDE.md` deletes.
+    The three legacy bugs came from per-field, implicit inheritance; there is
+    no per-field resolution here to get wrong. Same shape as
+    `live_list_source` (see `_prefs_for_scope`).
+
+    `settings_source` itself is ALWAYS read from the channel's own document -
+    otherwise a channel switched to `"global"` could never be switched back.
+    """
     active_id = channels_config.active_channel_id(app_state.settings_path)
     channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
-    source = channel.settings if channel is not None else {}
-    return {
-        spec.id: source.get(spec.id, spec.default)
+    own = channel.settings if channel is not None else {}
+
+    source = str(own.get("settings_source", "channel"))
+    if source == "global":
+        selected: dict[str, Any] = channel_defaults_config.load_defaults(
+            getattr(app_state, "channel_defaults_path", None)
+        )
+    else:
+        selected = dict(own)
+
+    values = {
+        spec.id: selected.get(spec.id, spec.default)
         for spec in SETTINGS
         if spec.scope == "channel"
     }
+    # The switch is the channel's own, whichever document the rest came from.
+    values["settings_source"] = source
+    return values
 
 
 def _values_payload(app_state: Any) -> dict[str, Any]:
@@ -830,6 +856,41 @@ async def post_settings_values(body: SettingsValuesUpdate, request: Request) -> 
         save_settings(doc, app_state.settings_path)
 
     return _values_payload(app_state)
+
+
+@router.post("/api/settings/port-to-global")
+async def port_to_global(request: Request) -> dict:
+    """Copy the active channel's channel-scope values into the app-wide defaults.
+
+    One explicit, user-initiated snapshot - never an automatic capture. That
+    distinction is the whole reason this is allowed to exist beside
+    `CLAUDE.md`'s "no apply/capture step": the rule deletes the LIVE copy
+    mechanism, where a value silently tracked another document. This writes
+    once, when asked, and the two documents are unrelated afterwards.
+
+    Secrets are never copied - `type="secret"` values live in
+    `avg.config.secrets` alone and are not part of any channel document.
+    App-scope settings are not copied either: they belong to the app, not to
+    a channel's snapshot.
+    """
+    app_state = request.app.state
+    active_id = channels_config.active_channel_id(app_state.settings_path)
+    channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
+    if channel is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no active channel — activate a channel before porting its settings",
+        )
+
+    ported = {
+        spec.id: channel.settings[spec.id]
+        for spec in SETTINGS
+        if spec.scope == "channel" and spec.type != "secret" and spec.id in channel.settings
+    }
+    channel_defaults_config.save_defaults(
+        ported, getattr(app_state, "channel_defaults_path", None)
+    )
+    return {"ported": len(ported)}
 
 
 @router.get("/api/channels")
