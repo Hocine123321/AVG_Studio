@@ -340,7 +340,7 @@ export default function App() {
           </div>
         </div>
         <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
-        <StatusBar connected={events.connected} />
+        <StatusBar connected={events.connected} loading={projects === null} />
       </div>
     </div>
   );

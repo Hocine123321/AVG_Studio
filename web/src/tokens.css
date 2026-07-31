@@ -3046,6 +3046,48 @@ a:hover {
   --pill: var(--bad);
 }
 
+.statuspill--loading {
+  --pill: var(--accent);
+  padding: 10px 16px;
+}
+
+/* An indeterminate bar, in the pill's own slot, while the library is still
+   being counted. Deliberately slim and slow - it reports, it does not
+   demand attention. */
+.statusbar-load {
+  display: block;
+  width: 76px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pill) 24%, transparent);
+  overflow: hidden;
+}
+
+.statusbar-load__fill {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--pill);
+  animation: statusbar-sweep calc(1.3s / max(var(--motion-scale, 1), 0.01)) ease-in-out infinite;
+}
+
+@keyframes statusbar-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusbar-load__fill {
+    animation: none;
+    width: 100%;
+  }
+}
+
 .statuspill__dot {
   width: 7px;
   height: 7px;
