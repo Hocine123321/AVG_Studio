@@ -680,3 +680,84 @@ def test_voice_emits_completion_progress_event(tmp_path, monkeypatch):
     VoicePhase().run(ctx)
 
     assert any(isinstance(e, ProgressEvent) and e.percent == 100 for e in events)
+
+
+# ── Slice 11 Task 1: a failed scene keeps its error kind ───────────────────
+
+def test_a_scene_failure_keeps_the_error_kind_not_just_the_words():
+    """`_SceneResult.error` alone cannot tell an auth failure from a
+    timeout, and the phase-level error is built from these."""
+    from avg.core.errors import AvgError, ErrorKind
+    from avg.pipeline.phases.visuals import _generate_one
+
+    class _Boom:
+        name = "stablehorde"
+
+        def generate(self, *_a, **_k):
+            raise AvgError(ErrorKind.auth, "stablehorde request failed with HTTP 403")
+
+    result = _generate_one(_Boom(), "a prompt", "9:16", "flux", 1, Path("unused.png"))
+
+    assert result.ok is False
+    assert result.kind is ErrorKind.auth
+    assert "403" in result.error
+
+
+def test_the_dominant_kind_is_the_most_common_one():
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _SceneResult, _dominant_kind
+
+    results = {
+        1: _SceneResult(scene=1, ok=False, error="a", kind=ErrorKind.auth),
+        2: _SceneResult(scene=2, ok=False, error="b", kind=ErrorKind.auth),
+        3: _SceneResult(scene=3, ok=False, error="c", kind=ErrorKind.timeout),
+    }
+    assert _dominant_kind(results) is ErrorKind.auth
+
+
+def test_a_tie_breaks_by_the_taxonomys_own_priority_order():
+    """`_CHECK_ORDER` in `avg/providers/errors.py` already encodes which
+    classification is the more actionable claim. No second ordering is
+    invented here."""
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _SceneResult, _dominant_kind
+
+    results = {
+        1: _SceneResult(scene=1, ok=False, error="a", kind=ErrorKind.timeout),
+        2: _SceneResult(scene=2, ok=False, error="b", kind=ErrorKind.auth),
+    }
+    # auth precedes timeout in _CHECK_ORDER.
+    assert _dominant_kind(results) is ErrorKind.auth
+
+
+def test_an_unclassified_failure_falls_back_to_bug():
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _SceneResult, _dominant_kind
+
+    results = {1: _SceneResult(scene=1, ok=False, error="something odd", kind=None)}
+    assert _dominant_kind(results) is ErrorKind.bug
+
+
+# ── Slice 11 Task 2: image fallback policy ─────────────────────────────────
+
+def test_an_auth_failure_falls_back_to_the_backup_once():
+    """POLICY says `auth -> switch_key` and `quota -> switch_provider`, so a
+    different provider could plausibly help. The backup is tried exactly
+    once - never chained - matching the text router's own rule."""
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _should_fall_back
+
+    assert _should_fall_back(ErrorKind.auth) is True
+    assert _should_fall_back(ErrorKind.quota) is True
+    assert _should_fall_back(ErrorKind.model_missing) is True
+
+
+def test_a_failure_a_second_provider_would_repeat_never_falls_back():
+    """`POLICY` marks these `on_exhausted="fail"` - a different provider
+    fails identically, so trying one spends money for nothing."""
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _should_fall_back
+
+    assert _should_fall_back(ErrorKind.content_filter) is False
+    assert _should_fall_back(ErrorKind.bug) is False
+    assert _should_fall_back(ErrorKind.dependency) is False
