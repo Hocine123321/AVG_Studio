@@ -69,6 +69,7 @@ from avg.providers.text.router import config_from_settings
 from .deps import require_token
 from .routes_settings import router as settings_router
 from .routes_takes import router as takes_router
+from .routes_preview import router as preview_router
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
 
@@ -401,6 +402,9 @@ def create_app(
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None
+    # One preview at a time. Its own lock, deliberately not the render slot:
+    # a preview must never block a render, or be blocked by one.
+    app.state.preview_lock = threading.Lock()
     # The app-wide defaults a channel can read instead of its own document
     # (`settings_source`). Its own file, beside settings.json, for the same
     # reason the error log and the model cache have theirs.
@@ -1243,6 +1247,10 @@ def create_app(
     # The takes surface (Slice 5, Task 3) - same reasoning as settings_router
     # above: a separate router kept thin, included before the static mount.
     app.include_router(takes_router)
+
+    # Preview routes (Slice 14) - same reasoning: a separate router kept
+    # thin, included before the static mount.
+    app.include_router(preview_router)
 
     # Serves the built UI. Mounted last and at "/" deliberately: FastAPI
     # matches routes in registration order, so the exact-path routes above
