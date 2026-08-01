@@ -248,6 +248,15 @@ a:hover {
   color: var(--bad);
 }
 
+/* Suggested: deliberately NOT filled like chip--ok (Verified) or
+   chip--amber (Added by you). An opinion gets an outline, not a solid
+   colour - the same restraint that keeps a probe's verdict the only
+   filled-green chip on this screen. */
+.chip--accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -3880,6 +3889,23 @@ a:hover {
 .livelist__meta {
   font-size: 11px;
   color: var(--dim);
+}
+
+/* The model's own claimed cost tier. Text, not colour-coded by price - the
+   app has no price to code it by. */
+.chip--tier {
+  text-transform: capitalize;
+  border-color: var(--line-2);
+  color: var(--dim);
+}
+
+.livelist__reason {
+  font-size: 11px;
+  color: var(--dim);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .livelist__note {
