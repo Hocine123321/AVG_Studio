@@ -402,6 +402,9 @@ def create_app(
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None
+    # The suggestion run's own single slot - one text call, and two at once
+    # would just overwrite each other.
+    app.state.suggest_thread = None
     # One preview at a time. Its own lock, deliberately not the render slot:
     # a preview must never block a render, or be blocked by one.
     app.state.preview_lock = threading.Lock()
