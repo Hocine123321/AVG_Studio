@@ -713,3 +713,59 @@ export function selectTake(projectId: string, takeId: number): Promise<{ current
 export function renameTake(projectId: string, takeId: number, label: string): Promise<Take> {
   return apiPatch<Take>(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}`, { label });
 }
+
+/** Free previews — safe to call whenever a setting changes. Each returns a
+ * blob URL the caller must revoke when it is replaced. */
+export function previewCaption(body: {
+  width: number; height: number; font_name: string; font_size: number; position: string;
+}): Promise<string> {
+  return blobUrl("/api/preview/caption", body);
+}
+
+export function previewOverlay(body: {
+  spec: Record<string, unknown>; width: number; height: number;
+}): Promise<string> {
+  return blobUrl("/api/preview/overlay", body);
+}
+
+/** PAID on ElevenLabs. `confirm_paid` must come from an explicit press —
+ * never from a settings change. The backend refuses it either way. */
+export function previewVoice(body: {
+  provider: string; voice_id: string; confirm_paid?: boolean;
+}): Promise<string> {
+  return blobUrl("/api/preview/voice", body);
+}
+
+/** PAID, always. Same rule. */
+export function previewImage(body: {
+  provider: string; model: string; aspect_ratio: string; confirm_paid: boolean;
+}): Promise<string> {
+  return blobUrl("/api/preview/image", body);
+}
+
+/** Posts `body` and turns a binary (image/png or audio/mpeg) response into a
+ * blob URL. Not routed through `request()` above: that helper always parses
+ * the response as JSON, and a preview response is the media bytes
+ * themselves. On failure, surfaces the server's `detail` sentence (Slice
+ * 11's classified errors) rather than a raw JSON blob. */
+async function blobUrl(path: string, body: unknown): Promise<string> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AVG-Token": TOKEN },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      if (typeof parsed.detail === "string" && parsed.detail !== "") {
+        detail = parsed.detail;
+      }
+    } catch {
+      // Not JSON - fall back to the raw body.
+    }
+    throw new Error(detail || `${path} failed: ${res.status}`);
+  }
+  return URL.createObjectURL(await res.blob());
+}

@@ -12,6 +12,7 @@ import {
 } from "./api";
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
+import PreviewPanel from "./PreviewPanel";
 import SettingsGroup from "./SettingsGroup";
 import type { SettingsCtx } from "./fields/types";
 
@@ -389,6 +390,9 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                     had silently never rendered. Keyed to a real group, it
                     is on screen again. */}
                 {g.group === "app" && !searching && <HealthPanel />}
+                {g.group === "captions" && !searching && <PreviewPanel kind="caption" valueOf={valueById} />}
+                {g.group === "voice" && !searching && <PreviewPanel kind="voice" valueOf={valueById} />}
+                {g.group === "images" && !searching && <PreviewPanel kind="images" valueOf={valueById} />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}
