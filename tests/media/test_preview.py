@@ -69,3 +69,48 @@ def test_a_caption_preview_leaves_nothing_behind(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     caption_png("[Script Info]\n", 320, 180)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_paid_voice_providers_are_named_in_one_place():
+    """Edge is the free provider; ElevenLabs spends characters. The route
+    reads this set to decide what needs an explicit press."""
+    from avg.media.preview import PAID_VOICE_PROVIDERS
+
+    assert "elevenlabs" in PAID_VOICE_PROVIDERS
+    assert "edge" not in PAID_VOICE_PROVIDERS
+
+
+def test_a_voice_sample_speaks_the_shared_sentence(monkeypatch):
+    """Never invents its own text - one constant, so every provider says the
+    same thing and the panel can quote it."""
+    from avg.media import preview
+
+    spoken: list[str] = []
+
+    class _Fake:
+        def synthesize(self, text, *, voice_id, model):
+            spoken.append(text)
+            return b"ID3fake-audio"
+
+    monkeypatch.setattr(preview, "_voice_backend", lambda provider: _Fake())
+    data = preview.voice_sample("edge", "en-GB-RyanNeural")
+
+    assert data == b"ID3fake-audio"
+    assert spoken == [preview.SAMPLE_SENTENCE]
+
+
+def test_an_unknown_voice_provider_returns_nothing(monkeypatch):
+    from avg.media import preview
+
+    assert preview.voice_sample("not-a-provider", "x") == b""
+
+
+def test_a_failing_synthesis_returns_nothing_rather_than_raising(monkeypatch):
+    from avg.media import preview
+
+    class _Boom:
+        def synthesize(self, text, *, voice_id, model):
+            raise RuntimeError("provider down")
+
+    monkeypatch.setattr(preview, "_voice_backend", lambda provider: _Boom())
+    assert preview.voice_sample("edge", "x") == b""
