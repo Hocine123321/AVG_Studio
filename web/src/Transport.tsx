@@ -38,7 +38,18 @@ function TransportThumb({ projectId }: { projectId: string }) {
  * Purely presentational; every action is a callback prop.
  */
 export default function Transport({ events, projects, onCancel, onOpen }: TransportProps) {
-  const { progress, failure, cancelled, finished, connected, jobStarted, jobStep } = events;
+  const { progress, byProject, failure, cancelled, finished, connected, jobStarted, jobStep } = events;
+
+  // Slice 16: several jobs may run at once. The bar still shows exactly
+  // one - a fixed dock of several bars is out of this slice's scope (see
+  // the design note) - but which one is now a choice rather than a given,
+  // since `progress` (last-write-wins across every project) is no longer
+  // reliably "the" job.
+  const runningIds = Object.keys(byProject);
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const shownId = pinnedId && runningIds.includes(pinnedId) ? pinnedId : (progress?.project_id ?? runningIds[0]);
+  const shown = shownId ? byProject[shownId] : undefined;
+  const others = runningIds.filter((id) => id !== shownId);
 
   if (!connected) {
     return (
@@ -49,22 +60,32 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
     );
   }
 
-  if (progress) {
-    const title = titleFor(projects, progress.project_id);
+  if (shown) {
+    const title = titleFor(projects, shown.project_id);
     return (
       <div className="transport transport--running">
-        <TransportThumb projectId={progress.project_id} />
+        <TransportThumb projectId={shown.project_id} />
         <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
-        <button type="button" className="transport__open" onClick={() => onOpen(progress.project_id)}>
+        <button type="button" className="transport__open" onClick={() => onOpen(shown.project_id)}>
           <span className="transport__label">Rendering “{title}”</span>
-          <span className="transport__detail">{progress.message}</span>
+          <span className="transport__detail">{shown.message}</span>
         </button>
         <span className="transport__spacer" />
         <div className="transport__bar">
-          <div className="transport__bar-fill" style={{ width: `${progress.percent}%` }} />
+          <div className="transport__bar-fill" style={{ width: `${shown.percent}%` }} />
         </div>
-        <span className="transport__percent">{progress.percent}%</span>
-        <button type="button" className="btn btn--sm" onClick={() => onCancel(progress.project_id)}>
+        <span className="transport__percent">{shown.percent}%</span>
+        {others.length > 0 && (
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            onClick={() => setPinnedId(others[0])}
+            title="Switch to another running video"
+          >
+            +{others.length} more
+          </button>
+        )}
+        <button type="button" className="btn btn--sm" onClick={() => onCancel(shown.project_id)}>
           <IconStop size={12} />
           Cancel
         </button>

@@ -852,6 +852,48 @@ a:hover {
   transition: width 0.3s linear;
 }
 
+/* Several jobs at once (Slice 16) - compact rows, one per running or
+   queued project. Reserved for 2+ jobs; a single one still gets the full
+   Hero above, where there's room to spend. */
+.job-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.job-row__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.job-row__title {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* ---- library grid ---- */
 
 /* Multi-column masonry, not CSS Grid. Grid rows are never independent per

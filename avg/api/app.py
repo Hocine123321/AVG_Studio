@@ -583,6 +583,15 @@ def create_app(
         # take's files. The render one answers "base video only" versus
         # "overlays and captions baked in too" - see
         # `avg.pipeline.phases.render.render_substate`.
+        # Queue position, 1-indexed, for any project currently queued behind
+        # the job cap (Slice 16) - first started, first served, matching
+        # `avg.core.jobs.start_next_queued`'s own order. Without this the
+        # frontend has no way to distinguish "queued, waiting its turn" from
+        # "not running at all"; `GET /api/projects` is the one place already
+        # polled for every project's live state, so it is where this lives
+        # rather than a new route.
+        queue_order = [j.project_id for j in app.state.jobs.queued()]
+
         projects = []
         for project in app.state.projects.values():
             # `take_root`, not `take_folder`: take 1 of a project created
@@ -594,11 +603,13 @@ def create_app(
                 if project.current_take_id is not None
                 else Path(project.folder)
             )
+            queue_position = queue_order.index(project.id) + 1 if project.id in queue_order else None
             projects.append(
                 {
                     **project.model_dump(mode="json"),
                     "script_substate": script_substate(root / "script"),
                     "render_substate": render_substate(root),
+                    "queue_position": queue_position,
                 }
             )
         return {

@@ -167,6 +167,11 @@ export interface ProjectDoc {
   /** Hidden from Home's default view. Absent on documents written before
    * Slice 6C, which is why every read treats undefined as false. */
   archived?: boolean;
+  /** 1-indexed position behind the job cap (Slice 16), or `null`/absent
+   * when not queued - including when it's actually running. Same
+   * read-time-derived footing as `script_substate`: present on `GET
+   * /api/projects`, absent on `POST /api/projects`'s direct response. */
+  queue_position?: number | null;
 }
 
 export interface ProjectsResponse {

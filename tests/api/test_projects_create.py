@@ -324,6 +324,37 @@ def test_the_same_project_twice_is_still_a_conflict(client, monkeypatch):
         release.set()
 
 
+def test_queue_position_appears_only_for_queued_projects(client, monkeypatch):
+    """The one data source Home has for "queued, waiting its turn" - there
+    is no other route that exposes the job registry."""
+    client.post("/api/settings/values", headers=AUTH, json={"values": {"max_parallel_jobs": "1"}})
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
+    _activate_channel(client)
+
+    try:
+        r1 = client.post("/api/projects", headers=AUTH, json={"topic": "First"})
+        assert started.wait(timeout=5)
+        r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
+        id1, id2 = r1.json()["id"], r2.json()["id"]
+
+        body = client.get("/api/projects", headers=AUTH).json()
+        by_id = {p["id"]: p for p in body["projects"]}
+        assert by_id[id1]["queue_position"] is None  # running, not queued
+        assert by_id[id2]["queue_position"] == 1
+    finally:
+        release.set()
+
+
 def test_a_cap_of_one_behaves_exactly_as_this_app_always_has(client, monkeypatch):
     """The escape hatch, and the regression test for this whole slice: at
     `max_parallel_jobs=1`, a second project queues rather than starting -
