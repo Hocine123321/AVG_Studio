@@ -243,8 +243,7 @@ def test_preview_computes_without_creating_or_starting_anything(client, paths):
     assert len(project.takes) == 1
     assert project.current_take_id == 1
     assert not (project.folder / "takes" / "2").exists()
-    assert client.app.state.render_thread is None
-    assert client.app.state.rendering_project_id is None
+    assert client.app.state.jobs.get(project.id) is None
 
 
 def test_preview_of_unknown_project_is_404(client):
@@ -522,16 +521,15 @@ def test_failed_take_does_not_become_current(client, paths, monkeypatch):
     new_take_id = r.json()["id"]
 
     # The background thread is parked on `release` right now, so this
-    # reference is guaranteed to still be the live thread - no race.
-    thread = client.app.state.render_thread
+    # reference is guaranteed to still be the live job - no race.
+    job = client.app.state.jobs.get(project.id)
     release.set()
-    if thread is not None:
-        thread.join(timeout=5)
+    if job is not None and job.thread is not None:
+        job.thread.join(timeout=5)
 
     assert project.current_take_id == 1  # unchanged - the new take never became current
     assert new_take_id != 1
-    assert client.app.state.render_thread is None
-    assert client.app.state.rendering_project_id is None
+    assert client.app.state.jobs.get(project.id) is None
 
 
 def test_successful_take_becomes_current_and_updates_master_output(client, paths, monkeypatch):
@@ -560,10 +558,10 @@ def test_successful_take_becomes_current_and_updates_master_output(client, paths
     assert r.status_code == 201
     new_take_id = r.json()["id"]
 
-    thread = client.app.state.render_thread
+    job = client.app.state.jobs.get(project.id)
     release.set()
-    if thread is not None:
-        thread.join(timeout=5)
+    if job is not None and job.thread is not None:
+        job.thread.join(timeout=5)
 
     assert project.current_take_id == new_take_id
     assert project.master_output == project.folder / "takes" / str(new_take_id) / "master_output.mp4"

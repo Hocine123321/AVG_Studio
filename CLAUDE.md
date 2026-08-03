@@ -72,7 +72,7 @@ catches it.
 
 **`create_app(token, output_root, ...)` is the only construction entry point.** No module-level globals; every test builds a fully isolated instance, and the optional `thumb_cache_dir` / `settings_path` / `channels_dir` / `secrets_path` overrides exist so tests never touch the real `%APPDATA%` / `%LOCALAPPDATA%`.
 
-**One job at a time.** `app.state.render_thread` is a single slot shared by full-pipeline runs and `/render` jobs; a second start gets a 409.
+**Several jobs, one render.** `app.state.jobs` (`avg/core/jobs.py`) holds every in-flight job, keyed by project id, and `max_parallel_jobs` caps how many run at once (default 2; set it to 1 for this app's original behaviour). A second start for the **same project** is still a 409 — two runs would fight over one folder and one `project.json`. A start beyond the cap is **queued**, not refused. Renders serialise regardless, behind `app.state.render_lease`: `app.state.engine` is one `MediaEngine` tracking one child process.
 
 ### Key single-sources-of-truth
 

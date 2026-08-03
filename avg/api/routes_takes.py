@@ -79,6 +79,7 @@ from avg.config import channels as channels_config
 from avg.core.artifacts import ARTIFACTS, available, resolve, spec_for
 from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.invalidation import first_invalid_phase
+from avg.core.jobs import Job, max_parallel_jobs, start_next_queued
 from avg.core.models import ProjectDoc, Take
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.take_log import log_path_for
@@ -440,13 +441,14 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     app_state = request.app.state
     project = _get_project(app_state, project_id)
 
-    # The exact one-job-at-a-time guard `avg.api.app.create_project`/
-    # `start_render` already enforce - a take's pipeline run shares the same
-    # `render_thread` slot, never a second job mechanism.
-    if app_state.render_thread is not None and app_state.render_thread.is_alive():
+    # The exact per-project guard `avg.api.app.create_project`/`start_render`
+    # already enforce - a take's pipeline run shares the same job registry,
+    # never a second mechanism. Two runs of one project would fight over the
+    # same folder and the same project.json.
+    if app_state.jobs.is_running(project_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"a pipeline is already running for project {app_state.rendering_project_id!r}",
+            detail=f"project {project_id!r} is already running",
         )
 
     _validate_override_ids(body.overrides)
@@ -532,7 +534,6 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     )
 
     cancel_token = CancellationToken()
-    app_state.pipeline_cancel_token = cancel_token
     loop = asyncio.get_running_loop()
 
     async def _dispatch(event: Any) -> None:
@@ -576,14 +577,17 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             # reach disk until some unrelated later mutation happened to
             # trigger a save.
             save_project(project)
-            app_state.render_thread = None
-            app_state.rendering_project_id = None
-            app_state.pipeline_cancel_token = None
+            app_state.jobs.remove(project_id)
+            start_next_queued(app_state)
 
-    app_state.rendering_project_id = project_id
+    cap = max_parallel_jobs(app_state.settings_path)
+    at_capacity = app_state.jobs.count_running() >= cap
     thread = threading.Thread(target=_worker, daemon=True, name=f"avg-take-{project_id}-{new_take.id}")
-    app_state.render_thread = thread
-    thread.start()
+    app_state.jobs.add(
+        Job(project_id=project_id, kind="pipeline", thread=thread, cancel_token=cancel_token, queued=at_capacity)
+    )
+    if not at_capacity:
+        thread.start()
 
     return new_take
 

@@ -79,3 +79,42 @@ class JobRegistry:
     def is_running(self, project_id: str) -> bool:
         job = self.get(project_id)
         return job is not None and not job.queued and self._alive(job)
+
+
+def max_parallel_jobs(settings_path: Any) -> int:
+    """How many jobs may run at once. `1` reproduces this app's original
+    single-slot behaviour exactly, which is both the escape hatch when a
+    provider starts rate-limiting and the regression test for this change.
+
+    A free function here, not a closure in `avg.api.app`: `avg.api.
+    routes_takes` needs the exact same cap and queue-promotion logic for its
+    own take-creation job, and `app.py` imports the route modules rather
+    than the reverse - a closure there would be unreachable from here.
+    """
+    from avg.config.settings import load_settings  # noqa: PLC0415
+    from avg.core.settings_schema import get_spec  # noqa: PLC0415
+
+    raw = load_settings(settings_path).values.get(
+        "max_parallel_jobs", get_spec("max_parallel_jobs").default  # type: ignore[union-attr]
+    )
+    try:
+        return max(1, int(str(raw)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def start_next_queued(app_state: Any) -> None:
+    """Start the oldest queued job, if there is room.
+
+    Called from every teardown, so a slot freeing always moves the queue.
+    First started, first served - no priority, no reordering.
+    """
+    registry: JobRegistry = app_state.jobs
+    if registry.count_running() >= max_parallel_jobs(app_state.settings_path):
+        return
+    pending = registry.queued()
+    if not pending:
+        return
+    job = pending[0]
+    job.queued = False
+    job.thread.start()

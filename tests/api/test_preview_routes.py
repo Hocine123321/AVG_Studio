@@ -128,5 +128,5 @@ def test_a_second_preview_while_one_runs_is_refused(client, monkeypatch):
         release.set()
         worker.join(timeout=5)
 
-    # The render slot must be untouched by any preview.
-    assert client.app.state.render_thread is None
+    # No pipeline or render job was started as a side effect of a preview.
+    assert client.app.state.jobs.running() == []

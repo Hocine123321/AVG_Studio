@@ -46,6 +46,7 @@ from avg.config import channels as channels_config
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
+from avg.core.jobs import Job, JobRegistry, max_parallel_jobs, start_next_queued
 from avg.core.model_cache import ModelCache
 from avg.core.model_prefs import ModelPrefs
 from avg.core.take_log import TakeLog, log_path_for
@@ -440,19 +441,17 @@ def create_app(
                 )
             raise
 
-    # A single background thread at a time - MediaEngine itself only ever
-    # tracks one child process (see its docstring), so a second render
-    # starting while one is alive would silently overwrite that handle and
-    # leave `cancel()` unable to reach the first one. Slice 1 renders one
-    # project at a time; this is what enforces that instead of assuming it.
-    app.state.render_thread = None
-    app.state.rendering_project_id = None
-    # Set only while a `POST /api/projects`-started full pipeline is
-    # running (never by `/render`'s MediaEngine path) - `/cancel` below
-    # pokes this in addition to `engine.cancel()` so "Cancel" works no
-    # matter which of the two job kinds is currently occupying
-    # `render_thread`.
-    app.state.pipeline_cancel_token = None
+    # Every in-flight job, keyed by project id. Replaces the three singular
+    # fields this app used to carry - `render_thread`,
+    # `rendering_project_id` and `pipeline_cancel_token` - which between
+    # them assumed there could only ever be one. All three are gone
+    # deliberately: a leftover "current job" pointer would be silently
+    # overwritten by a second job, leaving the first uncancellable.
+    app.state.jobs = JobRegistry()
+    # One render at a time, whatever the job cap says: `app.state.engine` is
+    # a single MediaEngine tracking a single child process, and two renders
+    # on one machine would contend for the same cores anyway.
+    app.state.render_lease = threading.Lock()
 
     # Imported exactly once, here, at construction time - not per-request,
     # and not behind an ASGI lifespan/startup event: TestClient only runs
@@ -651,12 +650,12 @@ def create_app(
         log's lifetime, the failure recording, the take's `master_output`
         hand-off, and the `finally` that frees the job slot.
 
-        The caller has already checked `app.state.render_thread` and answered
-        409; this does not re-check, because both callers hold the event loop
-        between that check and here, so nothing else can take the slot.
+        The caller has already checked `app.state.jobs.is_running(project.id)`
+        and answered 409 for that project; this does not re-check, because
+        both callers hold the event loop between that check and here, so
+        nothing else can take that project's slot in between.
         """
         cancel_token = CancellationToken()
-        app.state.pipeline_cancel_token = cancel_token
 
         # One run log for this job, on the take the run belongs to. Built here
         # rather than inside the worker so the route can fail loudly if the
@@ -773,14 +772,23 @@ def create_app(
                     take.master_output = project.master_output
                 with suppress(Exception):
                     save_project(project)
-                app.state.render_thread = None
-                app.state.rendering_project_id = None
-                app.state.pipeline_cancel_token = None
+                app.state.jobs.remove(project.id)
+                start_next_queued(app.state)
 
-        app.state.rendering_project_id = project.id
+        cap = max_parallel_jobs(app.state.settings_path)
+        at_capacity = app.state.jobs.count_running() >= cap
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-pipeline-{project.id}")
-        app.state.render_thread = thread
-        thread.start()
+        app.state.jobs.add(
+            Job(
+                project_id=project.id,
+                kind="pipeline",
+                thread=thread,
+                cancel_token=cancel_token,
+                queued=at_capacity,
+            )
+        )
+        if not at_capacity:
+            thread.start()
 
     @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
     async def create_project(body: ProjectCreate) -> ProjectDoc:
@@ -844,15 +852,9 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-        # The same one-job-at-a-time guard `start_render` enforces below -
-        # a full pipeline run and a `/render` MediaEngine run share the one
-        # `render_thread` slot, never a second job mechanism.
-        if app.state.render_thread is not None and app.state.render_thread.is_alive():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"a pipeline is already running for project {app.state.rendering_project_id!r}",
-            )
-
+        # No same-project guard here: `project` does not exist yet, so it can
+        # never already be running. Capacity is handled inside
+        # `_start_pipeline_job` below, which queues rather than refuses.
         project = new_project(topic, effective_channel, app.state.output_root)
         app.state.projects[project.id] = project
 
@@ -900,10 +902,10 @@ def create_app(
                 detail=f"unknown phase {body.from_phase!r}",
             )
 
-        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+        if app.state.jobs.is_running(project.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"a job is already running for project {app.state.rendering_project_id!r}",
+                detail=f"project {project.id!r} is already running",
             )
 
         # Resolved the same way `POST /api/projects` does it - id first, then
@@ -994,10 +996,10 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
-        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+        if app.state.jobs.is_running(project.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"a render is already running for project {app.state.rendering_project_id!r}",
+                detail=f"project {project.id!r} is already running",
             )
 
         # The active channel's render_threads, when a channel is active -
@@ -1071,8 +1073,8 @@ def create_app(
                 take_log.info("job finished")
                 take_log.close()
                 transport_mod.CURRENT_TAKE_LOG = None
-                app.state.render_thread = None
-                app.state.rendering_project_id = None
+                app.state.jobs.remove(project_id)
+                start_next_queued(app.state)
 
         def _log_stderr(text: str) -> None:
             """The vendored engine's own diagnosis, straight onto the log.
@@ -1114,10 +1116,14 @@ def create_app(
                 with suppress(Exception):
                     _apply_terminal_event(app.state.projects.get(project_id), event)
 
-        app.state.rendering_project_id = project_id
+        cap = max_parallel_jobs(app.state.settings_path)
+        at_capacity = app.state.jobs.count_running() >= cap
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-render-{project_id}")
-        app.state.render_thread = thread
-        thread.start()
+        app.state.jobs.add(
+            Job(project_id=project_id, kind="render", thread=thread, cancel_token=None, queued=at_capacity)
+        )
+        if not at_capacity:
+            thread.start()
         return {"started": True}
 
     @app.post("/api/projects/{project_id}/cancel", dependencies=[Depends(require_token)])
@@ -1125,13 +1131,14 @@ def create_app(
         if project_id not in _library():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         app.state.engine.cancel()
-        # Best-effort for a full-pipeline run too - a no-op if `render_thread`
-        # is currently a `/render` MediaEngine job instead (or nothing at
-        # all). The runner only checks this BETWEEN phases (see
-        # `avg.pipeline.runner.run`'s docstring), so this stops the run at
-        # the next phase boundary, not mid-phase.
-        if app.state.pipeline_cancel_token is not None:
-            app.state.pipeline_cancel_token.cancel()
+        # Best-effort for a full-pipeline run too - a no-op if this project's
+        # job is currently a `/render` MediaEngine job instead (which has no
+        # cancel token of its own), or nothing at all. The runner only checks
+        # this BETWEEN phases (see `avg.pipeline.runner.run`'s docstring), so
+        # this stops the run at the next phase boundary, not mid-phase.
+        job = app.state.jobs.get(project_id)
+        if job is not None and job.cancel_token is not None:
+            job.cancel_token.cancel()
         return {"cancelled": True}
 
     @app.get("/api/projects/{project_id}/thumbnail", dependencies=[Depends(require_token)])
