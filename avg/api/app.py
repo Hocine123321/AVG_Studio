@@ -738,6 +738,7 @@ def create_app(
                     on_phase_change=lambda: save_project(project),
                     log=take_log,
                     errors=app.state.error_store,
+                    render_lease=app.state.render_lease,
                 ):
                     _log(event)
                     _emit(event)
@@ -1093,28 +1094,42 @@ def create_app(
             # when it ends in PhaseFailed or RenderCancelled rather than
             # RenderFinished. Nobody else consumes this generator, so if this
             # loop stopped early the child would never be joined.
-            for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
+            #
+            # One render at a time. Everything before Render overlaps
+            # freely (Slice 16's job cap); here the jobs line up. Held
+            # across the WHOLE drain, never released early - releasing it
+            # before the generator finishes is how a second child would be
+            # spawned while the first was still being joined.
+            if app.state.render_lease.locked():
                 with suppress(Exception):
-                    take_log.event(event.model_dump(mode="json"))
-                if isinstance(event, PhaseFailed):
+                    take_log.event(
+                        ProgressEvent(
+                            project_id=project_id, percent=0, message="Waiting for another render to finish..."
+                        ).model_dump(mode="json")
+                    )
+            with app.state.render_lease:
+                for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
                     with suppress(Exception):
-                        app.state.error_store.record(
-                            # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()` gives
-                        # "ErrorKind.bug" and `classify` matches none of its
-                        # names - which silently filed every failure as `low`.
-                        severity=classify(kind=event.kind.value, status=None, source="pipeline"),
-                            source="pipeline",
-                            summary=f"render failed: {event.message}",
-                            detail=event.detail or "",
-                            context={"project_id": project_id, "phase": "render"},
-                        )
-                # Both the broadcast and the cached-project update are
-                # suppressed: neither may abort this `for` loop early, because
-                # that would skip the rest of the drain and leave the child
-                # process unjoined.
-                _emit(event)
-                with suppress(Exception):
-                    _apply_terminal_event(app.state.projects.get(project_id), event)
+                        take_log.event(event.model_dump(mode="json"))
+                    if isinstance(event, PhaseFailed):
+                        with suppress(Exception):
+                            app.state.error_store.record(
+                                # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()`
+                                # gives "ErrorKind.bug" and `classify` matches none of its
+                                # names - which silently filed every failure as `low`.
+                                severity=classify(kind=event.kind.value, status=None, source="pipeline"),
+                                source="pipeline",
+                                summary=f"render failed: {event.message}",
+                                detail=event.detail or "",
+                                context={"project_id": project_id, "phase": "render"},
+                            )
+                    # Both the broadcast and the cached-project update are
+                    # suppressed: neither may abort this `for` loop early, because
+                    # that would skip the rest of the drain and leave the child
+                    # process unjoined.
+                    _emit(event)
+                    with suppress(Exception):
+                        _apply_terminal_event(app.state.projects.get(project_id), event)
 
         cap = max_parallel_jobs(app.state.settings_path)
         at_capacity = app.state.jobs.count_running() >= cap

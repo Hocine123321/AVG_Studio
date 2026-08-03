@@ -84,6 +84,14 @@ class PhaseContext:
     #: out worse than you asked" on the same screen as real failures without
     #: any phase reaching into `app.state`.
     errors: Any = None
+    #: `app.state.render_lease` (a `threading.Lock`), or `None` in unit
+    #: contexts. Only `RenderPhase` uses it - one `MediaEngine`, one child
+    #: process, so two renders (on different projects, now that Slice 16
+    #: lets them run their earlier phases in parallel) still take turns
+    #: here. `avg/pipeline/` may not import from `avg/api/`, so this arrives
+    #: the same way `log` and `errors` do: threaded through by the caller,
+    #: never reached for directly.
+    render_lease: Any = None
 
 
 @runtime_checkable

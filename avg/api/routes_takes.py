@@ -556,6 +556,7 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
                 # on `project.takes[...]` before this callback ever runs -
                 # this just needs to write the ONE real `project.json`.
                 on_phase_change=lambda: save_project(project),
+                render_lease=app_state.render_lease,
             ):
                 if isinstance(event, (PhaseFailed, PipelineCancelled)):
                     success = False

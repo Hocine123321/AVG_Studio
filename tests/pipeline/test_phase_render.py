@@ -40,6 +40,11 @@ def _ctx(tmp_path: Path, token: CancellationToken | None = None):
         router=None,
         emit=emitted.append,
         cancel_token=token or CancellationToken(),
+        # Slice 16: RenderPhase now reads this - None here means "no cap",
+        # matching PhaseContext's own default for every other caller that
+        # does not care about it.
+        render_lease=None,
+        log=None,
     )
     return ctx, emitted
 

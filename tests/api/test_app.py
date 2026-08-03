@@ -469,3 +469,63 @@ def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
 def test_resume_requires_a_token(tmp_path, monkeypatch):
     client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
     assert client.post("/api/projects/x/resume", json={"from_phase": "visuals"}).status_code == 401
+
+
+def test_two_renders_never_overlap(tmp_path, monkeypatch):
+    """One MediaEngine, one child process. Whatever the job cap says
+    (Slice 16), renders on different projects still take turns rather than
+    running their child processes side by side."""
+    import threading
+
+    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
+    AUTH = {"X-AVG-Token": "t0k"}
+
+    concurrent = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def fake_render(*_a, **_k):
+        nonlocal concurrent, peak
+        with guard:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        try:
+            yield from ()
+        finally:
+            with guard:
+                concurrent -= 1
+
+    monkeypatch.setattr(client.app.state.engine, "render", fake_render)
+
+    r1 = client.post("/api/projects", headers=AUTH, json={"topic": "A"})
+    r2 = client.post("/api/projects", headers=AUTH, json={"topic": "B"})
+    id1, id2 = r1.json()["id"], r2.json()["id"]
+    _join_job(client, id1)
+    _join_job(client, id2)
+
+    barrier_reached = threading.Event()
+    release = threading.Event()
+    original = fake_render
+
+    def blocking_render(*a, **k):
+        barrier_reached.set()
+        release.wait(timeout=5)
+        yield from original(*a, **k)
+
+    monkeypatch.setattr(client.app.state.engine, "render", blocking_render)
+
+    render1 = client.post(f"/api/projects/{id1}/render", headers=AUTH, json={})
+    assert render1.status_code == 202
+    assert barrier_reached.wait(timeout=5)
+
+    # A second render, on a DIFFERENT project, starting while the first
+    # holds the lease - it must queue behind the lease, not spawn a second
+    # child alongside it.
+    render2 = client.post(f"/api/projects/{id2}/render", headers=AUTH, json={})
+    assert render2.status_code == 202
+
+    release.set()
+    _join_job(client, id1)
+    _join_job(client, id2)
+
+    assert peak <= 1
