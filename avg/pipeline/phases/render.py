@@ -159,6 +159,9 @@ class RenderPhase:
     id: int = 7
     key: str = "render"
     name: str = "Render"
+    description: str = (
+        "Encodes the base video, then composites overlays and captions over it. Writes the finished mp4."
+    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         """The engine needs images and narration; everything else degrades."""

@@ -258,6 +258,9 @@ class VisualsPhase:
     id: int = 3
     key: str = "visuals"
     name: str = "Visuals"
+    description: str = (
+        "Generates one image per scene with the configured image provider. Writes images/ and images/manifest.json."
+    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _scenes_json_path(ctx).exists()

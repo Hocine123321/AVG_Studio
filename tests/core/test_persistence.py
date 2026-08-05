@@ -61,6 +61,7 @@ class RecordingPhase:
     id: int
     key: str
     name: str
+    description: str = "A recording stub."
     calls: list[str] = field(default_factory=list)
     fail_with: Exception | None = None
 

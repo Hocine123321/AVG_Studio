@@ -58,6 +58,7 @@ class RecordingPhase:
     id: int
     key: str
     name: str
+    description: str = "A recording stub."
     calls: list[str] = field(default_factory=list)
     fail_with: Exception | None = None
     emits: list[object] = field(default_factory=list)
@@ -449,7 +450,7 @@ def test_phase_receives_the_given_channel_and_router():
     seen: dict[str, Any] = {}
 
     class Probe:
-        id, key, name = 0, "brief", "Brief"
+        id, key, name, description = 0, "brief", "Brief", "A probe stub."
 
         def inputs_ready(self, ctx: PhaseContext) -> bool:
             return True

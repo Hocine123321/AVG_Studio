@@ -133,6 +133,27 @@ async def get_settings_schema() -> dict:
     return {"settings": [s.model_dump() for s in SETTINGS]}
 
 
+@router.get("/api/phases")
+async def get_phases() -> dict[str, Any]:
+    """The pipeline's phases, in order, with what each one is for.
+
+    Serves `avg.pipeline.registry.REGISTRY` - the single source of truth for
+    phase order and identity. `web/src/phases.ts` has carried a hand-kept
+    copy of the keys since Slice 1, with its own docstring calling itself
+    duplication "until the backend serves phase definitions"; this is that
+    route. It does not retire that file, which also owns the nested
+    sub-step display REGISTRY does not model.
+    """
+    from avg.pipeline.registry import REGISTRY  # noqa: PLC0415 - keeps the pipeline off the import path
+
+    return {
+        "phases": [
+            {"id": p.id, "key": p.key, "name": p.name, "description": p.description}
+            for p in REGISTRY
+        ]
+    }
+
+
 @router.get("/api/health")
 async def get_health(refresh: bool = False) -> dict:
     """Component states for the settings screen's Components table.

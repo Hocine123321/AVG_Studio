@@ -48,6 +48,7 @@ class _StubPhase:
     id: int
     key: str
     name: str
+    description: str = "A placeholder phase."
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return True

@@ -261,6 +261,9 @@ class Director1Phase:
     id: int = 2
     key: str = "director1"
     name: str = "Director I"
+    description: str = (
+        "Plans what each scene should show and how many images it needs. Writes video_map.json."
+    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _scenes_json_path(ctx).exists()
@@ -550,6 +553,9 @@ class Director2Phase:
     id: int = 5
     key: str = "director2"
     name: str = "Director II / AI Graphics"
+    description: str = (
+        "Plans motion, grade and any takeover cards over the images. Writes edit_plan.json."
+    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _scenes_json_path(ctx).exists()
