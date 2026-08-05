@@ -3,48 +3,45 @@ Written 2026-07-31, at the end of the previous chat session.
 Read this before touching anything.
 
 ================================================================
-1. READ THIS FIRST - THE REPO IS IN A SPLIT STATE
+1. READ THIS FIRST - SLICES 11-16 ARE **NOT** IMPLEMENTED
 ================================================================
 
-The committed history and the working tree DISAGREE, on purpose or not,
-and you must decide which one is wanted before you do anything else.
+THE CODE YOU HAVE IS SLICE 10. Slices 11 through 16 are DESIGNED and
+PLANNED but NOT BUILT. The user confirmed this directly.
 
-  HEAD          = 71c320d  (branch: main, local only, never pushed)
-                  Contains slices 11-16 IMPLEMENTED and committed.
+Verified on disk 2026-07-31:
+    avg/pipeline/phases/visuals.py   - no _dominant_kind      (Slice 11)
+    avg/core/settings_schema.py      - no image_provider_backup(Slice 11)
+    avg/api/app.py                   - no JobRegistry          (Slice 16)
+    avg/core/jobs.py                 - ABSENT                  (Slice 16)
+    avg/media/preview.py             - ABSENT                  (Slice 14)
+    avg/providers/recommend.py       - ABSENT                  (Slice 15)
+    pytest tests -q                  - 769 passed = Slice 10 baseline
 
-  WORKING TREE  = reverted to roughly the pre-Slice-11 state.
-                  Verified 2026-07-31: it imports fine and
-                  `pytest tests -q` reports 769 passed,
-                  which is exactly the Slice 10 baseline.
+  *** THE GIT LOG WILL MISLEAD YOU ***
+  `git log` shows commits that LOOK like slices 11-16 were built -
+  "feat: a job registry", "feat: renders take turns behind one lease",
+  "feat: a Suggested chip...", and so on, up to HEAD 71c320d.
 
-So the working tree is NOT broken. It is an older, coherent state,
-with uncommitted deletions of every module slices 12-16 added:
+  THAT WORK WAS ABANDONED AND REVERTED. Do not read those commit
+  subjects as done work. The working tree is the truth, and the
+  working tree is Slice 10.
 
-    avg/api/routes_preview.py         (Slice 14)
-    avg/media/preview.py              (Slice 14)
-    web/src/PreviewPanel.tsx          (Slice 14)
-    tests/api/test_preview_routes.py
-    tests/media/test_preview.py
-    avg/config/channel_defaults.py    (Slice 12)
-    tests/config/test_channel_defaults.py
-    avg/providers/recommend.py        (Slice 15)
-    tests/providers/test_recommend.py
-    avg/core/jobs.py                  (Slice 16)
-    tests/core/test_jobs.py
+  The revert is currently UNCOMMITTED, which means HEAD still holds
+  the abandoned code and `git status` shows it as deleted/modified
+  files. So:
 
-plus modifications to app.py, routes_settings.py, visuals.py,
-runner.py, registry.py, phase.py, settings_schema.py, shell.py,
-health.py, model_prefs.py and several test files.
+    - DO NOT run `git checkout -- .` or `git restore .` - that would
+      resurrect the abandoned implementation on top of a clean
+      Slice 10 tree.
+    - Committing the working tree as-is is what makes the revert
+      permanent. That is probably what the user wants, but ASK
+      FIRST - it is a large, hard-to-undo commit.
 
-  *** DANGER ***
-  `git add -A && git commit` right now would DELETE slices 11-16
-  from the codebase. `git checkout -- .` would throw away whatever
-  the working tree currently represents. BOTH are destructive.
-  Ask the user which state they want BEFORE running either.
-
-  To inspect what HEAD has that the tree does not:
-      git diff --stat
-      git diff --name-only --diff-filter=D
+  Confirm the state yourself before acting:
+      git status --short
+      grep -c "_dominant_kind" avg/pipeline/phases/visuals.py
+      .venv-build/Scripts/python.exe -m pytest tests -q
 
 ================================================================
 2. WHAT THIS PROJECT IS
@@ -99,11 +96,11 @@ PLANS - all committed, all in docs/superpowers/plans/
     2026-07-31-slice-15-smart-model-picker.md        (4 tasks)
     2026-07-31-slice-16-parallel-pipelines.md        (5 tasks)
 
-Then, per the git log, all six slices appear to have been EXECUTED
-on top of those plans - commits from "fix: a failed Visuals phase
-reports why" through "feat: Home and the Transport bar show several
-jobs", ending at HEAD 71c320d. See section 1: the working tree does
-not currently reflect that.
+An attempt was then made to execute all six, and it was ABANDONED and
+reverted - see section 1. The specs and the plans are good and are
+committed; the implementation is not there and must be done again.
+
+So the work available to pick up is: SIX WRITTEN PLANS, ZERO BUILT.
 
 ================================================================
 4. WHAT EACH SLICE IS FOR (one line each)
@@ -205,15 +202,19 @@ recollection after any compaction.
 7. SUGGESTED FIRST MOVES IN THE NEW CHAT
 ================================================================
 
-1. Run `git status --short` and `git log --oneline -12` yourself.
-   Do not trust this file over what you see.
-2. Ask the user which state they want: HEAD (slices 11-16 present)
-   or the working tree (Slice 10 baseline). Do not guess - both
-   directions are destructive to the other.
-3. Once resolved, run the suite and mypy to establish the real
-   baseline before changing anything.
-4. Then either execute a plan from docs/superpowers/plans/ or take
-   whatever new direction the user gives.
+1. Confirm the state yourself (section 1). The working tree is
+   Slice 10; the git log's slice 11-16 commits are abandoned work.
+2. Ask the user whether to commit the revert now, so the history
+   stops contradicting the code. Do not run `git checkout -- .`.
+3. Establish the baseline: pytest (expect 769) and mypy (expect 688
+   errors - that is normal here).
+4. Then start executing a plan from docs/superpowers/plans/, or take
+   whatever new direction the user gives. Slice 11 is the one that
+   gets a working video back, so it is the natural first pick.
+   Whatever the previous attempt did, the PLANS themselves were
+   reviewed and are worth following - but re-verify each task's
+   assumptions against the current code as you go, because the plans
+   quote line numbers that have since drifted.
 
 Open and unfinished, regardless of which state wins:
   * Toasts and the device-frame player (Slice 6C leftovers).
