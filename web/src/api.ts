@@ -313,8 +313,15 @@ export interface HealthReport {
   stages: HealthStage[];
 }
 
-export function getHealthReport(refresh = false): Promise<HealthReport> {
-  return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
+/** `deep` adds the fourth stage, which encodes a one-second clip and does a
+ * real settings and DPAPI round-trip. On demand only — it costs real disk
+ * and a subprocess, so nothing should request it on mount. */
+export function getHealthReport(refresh = false, deep = false): Promise<HealthReport> {
+  const params = new URLSearchParams();
+  if (refresh) params.set("refresh", "true");
+  if (deep) params.set("deep", "true");
+  const query = params.toString();
+  return apiGet<HealthReport>(`/api/health/report${query ? `?${query}` : ""}`);
 }
 
 // ---- take artifacts ----

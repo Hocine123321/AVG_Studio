@@ -276,7 +276,7 @@ export default function App() {
     } else if (screen.name === "livelist") {
     content = <LiveList onBack={() => setScreen({ name: "health" })} />;
   } else if (screen.name === "health") {
-      content = <AppHealth onOpenLiveList={() => setScreen({ name: "livelist" })} />;
+      content = <AppHealth />;
     } else if (screen.name === "channels") {
       content = <Channels />;
     } else {
