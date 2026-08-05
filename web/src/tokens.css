@@ -1337,6 +1337,21 @@ a:hover {
   color: var(--muted);
 }
 
+/* What an un-started phase's panel shows instead of nothing: the sentence
+   from `avg/pipeline/registry.py`. Same muted weight as `.artifact-empty`,
+   which states a missing file - both are "there is nothing here yet", so
+   they read the same on purpose. */
+.artifact-idle {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
 .artifact-progress__pct {
   font-family: var(--font-heading);
   font-size: 62px;

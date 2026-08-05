@@ -337,6 +337,22 @@ export function getTakeArtifacts(projectId: string, takeId: number): Promise<Tak
   );
 }
 
+/** One phase as the backend defines it. `avg/pipeline/registry.py` is the
+ * single source of truth for phase order and identity; this is that list.
+ * Named `ApiPhaseDef` because `web/src/phases.ts` already exports a
+ * `PhaseDef` for its own nested sub-step display, which this does not
+ * replace. */
+export interface ApiPhaseDef {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+}
+
+export function getPhases(): Promise<{ phases: ApiPhaseDef[] }> {
+  return apiGet<{ phases: ApiPhaseDef[] }>("/api/phases");
+}
+
 /** `POST /api/projects/{id}/resume` — continue the current take from
  * `fromPhase` onward.
  *
