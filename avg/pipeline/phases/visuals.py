@@ -143,6 +143,13 @@ class _SceneResult:
     ok: bool
     file: str | None = None
     error: str = ""
+    #: The classification the provider's own error already carried. Kept
+    #: beside the message because the message alone cannot tell a 403 from
+    #: a timeout, and the phase-level failure is built from these - see
+    #: `_dominant_kind`. `None` means the failure never reached the error
+    #: taxonomy at all (a provider raising something that is not an
+    #: `AvgError`), which is the one case that really is a bug.
+    kind: ErrorKind | None = None
 
 
 def _generate_one(
@@ -160,9 +167,34 @@ def _generate_one(
         out_path.write_bytes(data)
         return _SceneResult(scene=scene, ok=True, file=out_path.name)
     except AvgError as exc:
-        return _SceneResult(scene=scene, ok=False, error=exc.message)
+        return _SceneResult(scene=scene, ok=False, error=exc.message, kind=exc.kind)
     except Exception as exc:  # noqa: BLE001 - a provider bug must not sink the whole phase
-        return _SceneResult(scene=scene, ok=False, error=str(exc))
+        return _SceneResult(scene=scene, ok=False, error=str(exc), kind=None)
+
+
+def _dominant_kind(results: dict[int, _SceneResult]) -> ErrorKind:
+    """The classification that best explains why nothing was produced.
+
+    Most frequent wins. Ties break by `avg.providers.errors._CHECK_ORDER`,
+    which already encodes which classification is the more actionable claim
+    when a failure could be read two ways - no second ordering is invented
+    here. Falls back to `bug` when nothing was classified at all, which is
+    the one case where "bug" is the honest answer.
+    """
+    from avg.providers.errors import _CHECK_ORDER  # noqa: PLC0415 - avoids an import cycle
+
+    counts: dict[ErrorKind, int] = {}
+    for result in results.values():
+        if result.ok or result.kind is None:
+            continue
+        counts[result.kind] = counts.get(result.kind, 0) + 1
+    if not counts:
+        return ErrorKind.bug
+
+    def rank(kind: ErrorKind) -> int:
+        return _CHECK_ORDER.index(kind) if kind in _CHECK_ORDER else len(_CHECK_ORDER)
+
+    return min(counts, key=lambda kind: (-counts[kind], rank(kind)))
 
 
 def index_entries(results: dict[int, _SceneResult], total: int) -> list[str]:
@@ -264,7 +296,16 @@ class VisualsPhase:
 
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
-            raise AvgError(ErrorKind.bug, "visuals phase: every scene failed to generate an image")
+            # The reasons were on every `_SceneResult` all along; raising a
+            # bare `bug` here is what threw them away and left the take log
+            # reading `kind=bug detail=` for a plain missing API key.
+            kind = _dominant_kind(results)
+            reasons = sorted({r.error for r in results.values() if not r.ok and r.error})
+            detail = reasons[0] if reasons else "no reason reported"
+            raise AvgError(
+                kind,
+                f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}",
+            )
         if ok_count < total:
             # A partial set of images is a finished phase with a worse video:
             # the missing scenes repeat their neighbour's image (see
