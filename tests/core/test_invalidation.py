@@ -41,12 +41,15 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     router phases), 55 before `render_threads`, and 56 before three dead
     switches (python_exe, performance_mode, run_as_admin) were removed, and
     53 before Slice 8 added `live_list_source`, 54 before Slice 9
-    added `verbose_log`, and 55 before it added `topic_research`. The count is kept as a
+    added `verbose_log`, 55 before it added `topic_research`, and 59
+    before Slice 11 added the images group's own backup/on-failure triplet
+    (`image_provider_backup`, `image_model_backup`, `image_on_failure`),
+    mirroring the text router's shape. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 56
+    assert len(SETTINGS) == 59
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

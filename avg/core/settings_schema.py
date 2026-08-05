@@ -437,6 +437,43 @@ SETTINGS: list[SettingSpec] = [
         source="live_list:image",
     ),
     SettingSpec(
+        id="image_provider_backup",
+        group="images",
+        label="Image provider — backup",
+        help="Tried once if the primary provider fails in a way a different provider could survive. Leave unset to never fall back.",
+        type="choice",
+        default="",
+        scope="channel",
+        choices=["", "openai", "gemini", "pollinations", "stablehorde", "huggingface"],
+        invalidates="visuals",
+    ),
+    SettingSpec(
+        id="image_model_backup",
+        group="images",
+        label="Image model — backup",
+        help="Which model the backup provider should use. The Live List decides what is offered here.",
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="visuals",
+        source="live_list:image",
+    ),
+    SettingSpec(
+        id="image_on_failure",
+        group="images",
+        label="Images — if both fail",
+        help=(
+            "Stop the run, or fall back to the backup provider. Read by "
+            "`avg/pipeline/phases/visuals.py`. A failure a second provider "
+            "would hit identically - a blocked prompt, a bug - never falls back."
+        ),
+        type="choice",
+        default="stop",
+        scope="channel",
+        choices=["stop", "fall_back"],
+        invalidates="visuals",
+    ),
+    SettingSpec(
         id="image_quality",
         group="images",
         label="Image quality",

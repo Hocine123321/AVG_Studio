@@ -738,3 +738,26 @@ def test_an_unclassified_failure_falls_back_to_bug():
 
     results = {1: _SceneResult(scene=1, ok=False, error="something odd", kind=None)}
     assert _dominant_kind(results) is ErrorKind.bug
+
+
+def test_an_auth_failure_falls_back_to_the_backup_once():
+    """POLICY says `auth -> switch_key` and `quota -> switch_provider`, so a
+    different provider could plausibly help. The backup is tried exactly
+    once - never chained - matching the text router's own rule."""
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _should_fall_back
+
+    assert _should_fall_back(ErrorKind.auth) is True
+    assert _should_fall_back(ErrorKind.quota) is True
+    assert _should_fall_back(ErrorKind.model_missing) is True
+
+
+def test_a_failure_a_second_provider_would_repeat_never_falls_back():
+    """`POLICY` marks these `on_exhausted="fail"` - a different provider
+    fails identically, so trying one spends money for nothing."""
+    from avg.core.errors import ErrorKind
+    from avg.pipeline.phases.visuals import _should_fall_back
+
+    assert _should_fall_back(ErrorKind.content_filter) is False
+    assert _should_fall_back(ErrorKind.bug) is False
+    assert _should_fall_back(ErrorKind.dependency) is False

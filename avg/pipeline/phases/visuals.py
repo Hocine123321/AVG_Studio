@@ -32,11 +32,16 @@ brief). Every scene's outcome, good or bad, is recorded in
 one recorded failure" apart from "only eleven scenes existed".
 
 No retry loop here - `avg.providers.transport.Transport`/`POLICY` already
-own that inside a provider's own record-mode HTTP calls - and no
-cross-provider fallback (no image router exists yet in this codebase; see
-`tests/providers/test_images.py`'s own note on this). This phase asks
-exactly one configured provider for one image per scene and accepts
-whatever it returns.
+own that inside a provider's own record-mode HTTP calls. **Slice 11 added a
+cross-provider fallback** (`_should_fall_back`, wired into `run`): if every
+scene fails on the configured provider, `image_on_failure == "fall_back"`
+is set, a backup provider/model are configured, and `POLICY` says the
+dominant failure kind is one a different provider could plausibly survive
+(`switch_key`, `switch_provider`, `switch_model` - never `fail`), the whole
+scene set is regenerated once on the backup. This mirrors
+`avg/providers/text/router.py`'s own primary/backup/`on_failure` shape and
+its "exactly once, never chained" rule (the legacy `$triedFallback` flag) -
+a third attempt after both providers fail is not attempted.
 
 Writes `<project>/images/{NNN}.png` (1-indexed, zero-padded to 3 digits -
 the legacy app's own naming, and the order `avg.media.thumbnails.
@@ -197,6 +202,22 @@ def _dominant_kind(results: dict[int, _SceneResult]) -> ErrorKind:
     return min(counts, key=lambda kind: (-counts[kind], rank(kind)))
 
 
+def _should_fall_back(kind: ErrorKind) -> bool:
+    """Whether a different provider could plausibly survive this failure.
+
+    Consults `POLICY` and nothing else - no status code, no error string -
+    exactly as `avg/providers/text/router.py` does for text. A kind marked
+    `on_exhausted="fail"` (content_filter, bug, dependency) would fail the
+    same way on any provider, so falling back would spend money for nothing.
+    """
+    from avg.providers.errors import POLICY  # noqa: PLC0415 - avoids an import cycle
+
+    rule = POLICY.get(kind)
+    if rule is None:
+        return False
+    return rule.on_exhausted in {"switch_key", "switch_provider", "switch_model"}
+
+
 def index_entries(results: dict[int, _SceneResult], total: int) -> list[str]:
     """`render/index.json`'s contents: one path per scene, in scene order.
 
@@ -273,26 +294,49 @@ class VisualsPhase:
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {total} image(s)..."))
 
-        results: dict[int, _SceneResult] = {}
-        done = 0
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(_generate_one, provider, prompt, aspect_ratio, model, i, images_dir / f"{i:03d}.png"): i
-                for i, prompt in jobs
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                results[result.scene] = result
-                done += 1
-                percent = int(done / total * 100)
-                status = "ok" if result.ok else f"failed ({result.error})"
+        def _generate_all(prov: ImageProvider, prov_name: str, mdl: str) -> dict[int, _SceneResult]:
+            """One full pass over every scene with one provider."""
+            out: dict[int, _SceneResult] = {}
+            done = 0
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(_generate_one, prov, prompt, aspect_ratio, mdl, i, images_dir / f"{i:03d}.png"): i
+                    for i, prompt in jobs
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    out[result.scene] = result
+                    done += 1
+                    percent = int(done / total * 100)
+                    status = "ok" if result.ok else f"failed ({result.error})"
+                    ctx.emit(
+                        ProgressEvent(
+                            project_id=ctx.project.id,
+                            percent=percent,
+                            message=f"Scene {result.scene}/{total}: {status}",
+                        )
+                    )
+            return out
+
+        results = _generate_all(provider, provider_name, model)
+
+        if not any(r.ok for r in results.values()):
+            # Exactly once, never chained - the same rule the text router
+            # inherited from the legacy `$triedFallback` flag.
+            backup_provider = str(settings.get("image_provider_backup") or "")
+            backup_model = str(settings.get("image_model_backup") or "")
+            on_failure = str(settings.get("image_on_failure") or "stop")
+            kind = _dominant_kind(results)
+            if on_failure == "fall_back" and backup_provider and backup_model and _should_fall_back(kind):
                 ctx.emit(
                     ProgressEvent(
                         project_id=ctx.project.id,
-                        percent=percent,
-                        message=f"Scene {result.scene}/{total}: {status}",
+                        percent=0,
+                        message=f"Falling back to {backup_provider}/{backup_model}...",
                     )
                 )
+                provider_name, model = backup_provider, backup_model
+                results = _generate_all(_build_provider(backup_provider, transport), backup_provider, backup_model)
 
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
