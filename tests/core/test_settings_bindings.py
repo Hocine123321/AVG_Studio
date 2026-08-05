@@ -63,8 +63,25 @@ def _mentioned_in_backend(setting_id: str) -> bool:
 #                              tier. Needs a tier-to-size mapping decision.
 #   auto_style_lock          - "derive the style lock automatically" is a
 #                              feature that does not exist; nothing to bind.
+#   motion_scale              - its one reader is `web/src/tokens.css`'s
+#                              `--motion-scale` custom property, which this
+#                              guard cannot see because it only searches
+#                              `avg/` for a Python reader. Slice 12's Task 6
+#                              wires the frontend consumer; no backend
+#                              mention will ever exist for this one, and
+#                              that is expected, not a gap to close.
+#   startup_check             - declared here (Slice 12 Task 2) with
+#                              `avg/shell.py` named as its future reader,
+#                              but not wired yet: `avg/shell.py`'s own
+#                              reason for existing is keeping the window's
+#                              first paint off the critical path, and an
+#                              automatic startup check has to be designed
+#                              to respect that rather than bolted on in a
+#                              hurry. Left for Slice 13, which is the slice
+#                              that touches startup.
 #
-# Shrink this list. Never grow it.
+# Shrink this list. Never grow it without a reason as specific as the ones
+# above.
 KNOWN_UNWIRED = {
     "captions_provider",
     "captions_animation_style",
@@ -72,6 +89,8 @@ KNOWN_UNWIRED = {
     "voice_speed",
     "image_quality",
     "auto_style_lock",
+    "motion_scale",
+    "startup_check",
 }
 
 
@@ -110,3 +129,35 @@ def test_images_have_a_backup_and_a_failure_policy():
 
     assert BY_ID["image_on_failure"].choices == ["stop", "fall_back"]
     assert BY_ID["image_model_backup"].source == "live_list:image"
+
+
+def test_the_app_group_replaces_runtime():
+    from avg.core.settings_schema import SETTINGS
+
+    groups = {s.group for s in SETTINGS}
+    assert "app" in groups
+    assert "runtime" not in groups
+
+
+def test_the_app_group_holds_the_apps_own_behaviour():
+    from avg.core.settings_schema import BY_ID
+
+    for setting_id in ("theme", "verbose_log", "motion_scale", "startup_check"):
+        assert BY_ID[setting_id].group == "app", setting_id
+        assert BY_ID[setting_id].scope == "app", setting_id
+
+    assert BY_ID["motion_scale"].choices == ["full", "reduced", "none"]
+    assert BY_ID["startup_check"].default is True
+
+
+def test_settings_source_is_a_channel_choice_like_live_list_source():
+    """Whole-document either/or, the shape `live_list_source` already
+    ships - never per-field inheritance."""
+    from avg.core.settings_schema import BY_ID
+
+    spec = BY_ID["settings_source"]
+    assert spec.group == "app"
+    assert spec.scope == "channel"
+    assert spec.choices == ["channel", "global"]
+    assert spec.default == "channel"
+    assert spec.invalidates is None

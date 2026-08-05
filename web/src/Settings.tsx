@@ -20,7 +20,7 @@ import type { SettingsCtx } from "./fields/types";
  * value on the backend needs no matching entry here to show up correctly;
  * this map only ever improves on the fallback, never gates it. */
 const GROUP_LABELS: Record<string, string> = {
-  runtime: "Runtime & components",
+  app: "App & components",
   video: "Video format",
   captions: "Captions",
   voice: "Voice",
@@ -366,18 +366,21 @@ export default function Settings() {
                 {/* Only when the whole group is on screen: while searching,
                     a filtered subset of the model fields would give the
                     overview table nothing coherent to summarise. */}
-                {/* Components heads Runtime rather than getting a nav entry
-                    of its own: both answer "where are this app's tools and
-                    do they work", and Runtime is the first group the screen
-                    renders.
+                {/* Components heads App rather than getting a nav entry of
+                    its own: both answer "where are this app's tools and do
+                    they work", and App is the group that holds the app's
+                    own behaviour rather than a video's.
 
                     It was keyed to a `paths` group until 2026-07-30, and
                     `avg.core.settings_schema.SETTINGS` has no such group -
                     it declares nine (runtime, creative, video, models,
                     captions, voice, images, render, keys), so this panel
-                    had silently never rendered. Keyed to a real group, it
-                    is on screen again. */}
-                {g.group === "runtime" && !searching && <HealthPanel />}
+                    had silently never rendered. Slice 12 renamed `runtime`
+                    to `app` (a channel-scoped group would be the wrong home
+                    for "does this machine have ffmpeg"); this panel follows
+                    the group's new name rather than being left keyed to a
+                    group that no longer exists. */}
+                {g.group === "app" && !searching && <HealthPanel />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}

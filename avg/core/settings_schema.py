@@ -93,10 +93,10 @@ class SettingValidationError(ValueError):
 # both are plain dicts and nothing iterates them expecting only known ids.
 
 SETTINGS: list[SettingSpec] = [
-    # --- runtime / UI preferences (app scope) ---
+    # --- app / how the application itself behaves (app scope) ---
     SettingSpec(
         id="theme",
-        group="runtime",
+        group="app",
         label="Color theme",
         help="Visual theme for the app UI. Night is the default — a dark surround tells the truth about a frame's exposure.",
         type="choice",
@@ -119,7 +119,7 @@ SETTINGS: list[SettingSpec] = [
     ),
     SettingSpec(
         id="verbose_log",
-        group="runtime",
+        group="app",
         label="Verbose take log",
         help="Write every prompt and response into the take's log. Useful when a model is misbehaving; the files get large.",
         type="bool",
@@ -127,6 +127,54 @@ SETTINGS: list[SettingSpec] = [
         scope="app",
         # Nothing is invalidated: this changes what is RECORDED about a run,
         # never what the run produces.
+        invalidates=None,
+    ),
+    SettingSpec(
+        id="motion_scale",
+        group="app",
+        label="Animation",
+        help=(
+            "How much the interface moves. Read by `web/src/tokens.css` through the "
+            "`--motion-scale` custom property. Your operating system's own "
+            "reduced-motion preference always wins over this."
+        ),
+        type="choice",
+        default="full",
+        scope="app",
+        choices=["full", "reduced", "none"],
+        # Nothing is invalidated: this changes how the UI moves, never what a
+        # run produces.
+        invalidates=None,
+    ),
+    SettingSpec(
+        id="startup_check",
+        group="app",
+        label="Check components at startup",
+        help=(
+            "Run the dependency check while the library loads. Read by "
+            "`avg/shell.py`. Turning it off starts marginally faster and tells "
+            "you nothing until you open App health."
+        ),
+        type="bool",
+        default=True,
+        scope="app",
+        invalidates=None,
+    ),
+    SettingSpec(
+        id="settings_source",
+        group="app",
+        label="This channel's settings",
+        help=(
+            "Use this channel's own settings, or the app-wide defaults - whole "
+            "documents, never mixed field by field. Read by "
+            "`avg/api/routes_settings.py`."
+        ),
+        type="choice",
+        default="channel",
+        scope="channel",
+        choices=["channel", "global"],
+        # Nothing is invalidated: this changes WHERE a value is read from,
+        # not what any existing artifact was made with.
         invalidates=None,
     ),
     # --- video format and length (channel scope: a production choice) ---

@@ -44,12 +44,13 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     added `verbose_log`, 55 before it added `topic_research`, and 59
     before Slice 11 added the images group's own backup/on-failure triplet
     (`image_provider_backup`, `image_model_backup`, `image_on_failure`),
-    mirroring the text router's shape. The count is kept as a
-    deliberate tripwire on accidental additions or losses; the uniqueness
-    check is what actually matters, since `BY_ID` would silently swallow a
-    duplicated id.
+    mirroring the text router's shape, and 62 before Slice 12 added the
+    `app` group's `motion_scale`, `startup_check` and the channel-scoped
+    `settings_source`. The count is kept as a deliberate tripwire on
+    accidental additions or losses; the uniqueness check is what actually
+    matters, since `BY_ID` would silently swallow a duplicated id.
     """
-    assert len(SETTINGS) == 59
+    assert len(SETTINGS) == 62
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 
