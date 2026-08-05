@@ -130,11 +130,16 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
 
   // Derived from `data` alone: `meta` is a fresh object every render (it
   // falls back to `{}`), so depending on it would defeat the memo.
+  //
+  // One entry per LANGUAGE, not per locale. Edge advertises 322 voices
+  // across eleven English locales alone; `en-GB`, `en-US` and `en-AU` are
+  // one choice to a user building a shortlist, and eleven rows of "English"
+  // is the filter failing at the only job it has.
   const locales = useMemo(() => {
     const found = new Set<string>();
     for (const row of data?.voice ?? []) {
       const l = data?.voice_meta?.[row.id]?.locale;
-      if (l) found.add(l);
+      if (l) found.add(l.split("-")[0]);
     }
     return ["all", ...[...found].sort()];
   }, [data]);
@@ -154,7 +159,7 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     }
     if (kind !== "voice") return true;
     const info = meta[row.id];
-    if (locale !== "all" && info?.locale !== locale) return false;
+    if (locale !== "all" && (info?.locale ?? "").split("-")[0] !== locale) return false;
     if (gender !== "all" && (info?.gender ?? "").toLowerCase() !== gender) return false;
     return true;
   });
@@ -185,6 +190,12 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
       <p className="channels__note">
         Only ticked entries are offered when you pick a model in Settings. Favourites come first, and
         your note shows under the field as you choose.
+      </p>
+
+      <p className="channels__note">
+        {data?.updated
+          ? `Catalogues last listed ${new Date(data.updated).toLocaleString()}.`
+          : "Catalogues have never been listed — press Refresh catalogues to see what each provider offers."}
       </p>
 
       {error && <p className="settings__save-error">{error}</p>}

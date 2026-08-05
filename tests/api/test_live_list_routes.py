@@ -50,7 +50,14 @@ def test_every_route_requires_a_token(client):
 
 def test_an_empty_install_lists_nothing_rather_than_guessing(client):
     body = client.get("/api/live-list", headers=AUTH).json()
-    assert body == {"scope": "global", "text": [], "image": [], "voice": [], "voice_meta": {}}
+    assert body == {
+        "scope": "global",
+        "text": [],
+        "image": [],
+        "voice": [],
+        "voice_meta": {},
+        "updated": None,
+    }
 
 
 def test_probed_text_models_appear_with_their_source(client):
@@ -177,3 +184,11 @@ def test_a_channel_on_its_own_scope_does_not_read_the_global_list(client):
     client.post("/api/settings/values", headers=AUTH, json={"values": {"live_list_source": "global"}})
     global_rows = client.get("/api/live-list", headers=AUTH).json()["text"]
     assert [r["id"] for r in global_rows] == ["groq/global-only"]
+
+
+def test_the_live_list_says_when_it_was_last_listed(client):
+    """A stale catalogue that says nothing is why 33 Gemini models looked
+    like 1."""
+    body = client.get("/api/live-list", headers=AUTH).json()
+    assert "updated" in body
+    assert body["updated"] is None  # nothing has ever been listed here

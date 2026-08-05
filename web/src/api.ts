@@ -446,6 +446,10 @@ export interface LiveListResponse {
   voice: LiveEntry[];
   /** Language and gender per voice id, for the voice tab's filters. */
   voice_meta: Record<string, { name: string; locale: string; gender: string }>;
+  /** When the catalogue was last refreshed, or `null` if it never has been.
+   * A single Gemini model looks identical whether the catalogue holds one
+   * model or was simply never listed - this is what tells the two apart. */
+  updated: string | null;
 }
 
 export function getLiveList(): Promise<LiveListResponse> {

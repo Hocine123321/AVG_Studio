@@ -579,6 +579,11 @@ async def get_live_list(request: Request) -> dict:
         "image": _entry_rows(prefs, "image", _known_from_catalogue(app_state, "image")),
         "voice": _entry_rows(prefs, "voice", _known_from_catalogue(app_state, "voice")),
         "voice_meta": app_state.model_cache.meta(),
+        "updated": (
+            app_state.model_cache.updated_at().isoformat()
+            if app_state.model_cache.updated_at() is not None
+            else None
+        ),
     }
 
 
