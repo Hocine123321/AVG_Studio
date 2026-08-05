@@ -344,6 +344,7 @@ def create_app(
     errors_path: Path | None = None,
     model_cache_path: Path | None = None,
     model_prefs_path: Path | None = None,
+    channel_defaults_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -397,6 +398,12 @@ def create_app(
         Path(model_prefs_path)
         if model_prefs_path is not None
         else default_settings_path().with_name("model_prefs.json")
+    )
+    # The app-wide defaults a channel can read instead of its own document
+    # (`settings_source`). Its own file, beside settings.json, for the same
+    # reason the error log and the model cache have theirs.
+    app.state.channel_defaults_path = (
+        Path(channel_defaults_path) if channel_defaults_path is not None else None
     )
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
