@@ -201,9 +201,6 @@ class VoicePhase:
     id: int = 4
     key: str = "voice"
     name: str = "Voice & Audio"
-    description: str = (
-        "Synthesises the narration and assembles it with real pauses. Writes audio/."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _narration_path(ctx).exists()

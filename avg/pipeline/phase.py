@@ -84,14 +84,6 @@ class PhaseContext:
     #: out worse than you asked" on the same screen as real failures without
     #: any phase reaching into `app.state`.
     errors: Any = None
-    #: `app.state.render_lease` (a `threading.Lock`), or `None` in unit
-    #: contexts. Only `RenderPhase` uses it - one `MediaEngine`, one child
-    #: process, so two renders (on different projects, now that Slice 16
-    #: lets them run their earlier phases in parallel) still take turns
-    #: here. `avg/pipeline/` may not import from `avg/api/`, so this arrives
-    #: the same way `log` and `errors` do: threaded through by the caller,
-    #: never reached for directly.
-    render_lease: Any = None
 
 
 @runtime_checkable
@@ -124,19 +116,6 @@ class Phase(Protocol):
 
     @property
     def name(self) -> str: ...
-
-    @property
-    def description(self) -> str:
-        """One sentence: what this phase does and what it writes.
-
-        Shown by the Studio artifact panel when the phase has not run yet,
-        where there are no artifacts to show and the panel would otherwise
-        be empty. Lives on the phase - and so in
-        `avg.pipeline.registry.REGISTRY` - because that is where phase
-        identity lives; `web/src/phases.ts` is already duplication of this
-        registry and must not be given prose to duplicate as well.
-        """
-        ...
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         """Whether this phase's required inputs already exist for

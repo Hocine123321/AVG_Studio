@@ -378,29 +378,6 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
-#: What a caption preview shows. Short enough to fit one line at any of the
-#: supported positions, long enough to show wrapping behaviour.
-SAMPLE_CAPTION_TEXT = "This is what your captions will look like"
-
-
-def sample_ass(width: int, height: int, font_name: str, font_size: int, position: str) -> str:
-    """A one-line `.ass` file for the caption preview.
-
-    Built from this module's own `_ass_header` - the same construction the
-    real `captions.ass` uses, which itself matches the vendored engine's
-    `make_ass_header` field-for-field. A preview that restated those style
-    fields would be a second implementation, free to drift from what libass
-    actually burns, and that is precisely the lie the preview exists to
-    prevent.
-    """
-    header = _ass_header(width, height, font_name, font_size, position)
-    line = (
-        f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(2.0)},Default,,0,0,0,,"
-        f"{_ass_escape(SAMPLE_CAPTION_TEXT)}\n"
-    )
-    return header + line
-
-
 def _group_cues(words: list[dict], max_words: int = _MAX_WORDS_PER_CUE) -> list[dict]:
     """Consecutive words chunked into `{start, end, text}` caption cues of
     up to `max_words` each - simple fixed-size grouping (no sentence-
@@ -447,9 +424,6 @@ class ScreenTextPhase:
     id: int = 6
     key: str = "screen_text"
     name: str = "Screen Text"
-    description: str = (
-        "Transcribes the narration and writes the caption file the renderer burns in. Writes render/captions.ass."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _optimized_voice_path(ctx).exists()

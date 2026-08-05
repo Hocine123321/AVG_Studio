@@ -95,12 +95,6 @@
   --gap: 18px;
   --cardmin: 188px;
   --row: 48px;
-
-  /* Scales every transition and animation duration. Set from the
-     `motion_scale` setting by Settings.tsx; 1 is full, 0.5 reduced, 0 none.
-     The `prefers-reduced-motion` block below is unchanged and still wins -
-     this setting can only reduce motion, never restore it. */
-  --motion-scale: 1;
 }
 
 [data-theme="day"] {
@@ -246,15 +240,6 @@ a:hover {
   border-color: transparent;
   background: var(--bad-deep);
   color: var(--bad);
-}
-
-/* Suggested: deliberately NOT filled like chip--ok (Verified) or
-   chip--amber (Added by you). An opinion gets an outline, not a solid
-   colour - the same restraint that keeps a probe's verdict the only
-   filled-green chip on this screen. */
-.chip--accent {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 
 .btn {
@@ -852,48 +837,6 @@ a:hover {
   transition: width 0.3s linear;
 }
 
-/* Several jobs at once (Slice 16) - compact rows, one per running or
-   queued project. Reserved for 2+ jobs; a single one still gets the full
-   Hero above, where there's room to spend. */
-.job-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 22px;
-}
-
-.job-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  border: 1px solid var(--line);
-}
-
-.job-row__info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.job-row__title {
-  font-family: var(--font-heading);
-  font-size: 15px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.job-row__actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 /* ---- library grid ---- */
 
 /* Multi-column masonry, not CSS Grid. Grid rows are never independent per
@@ -918,7 +861,7 @@ a:hover {
   position: relative;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: transform calc(0.18s * var(--motion-scale)), box-shadow calc(0.18s * var(--motion-scale));
+  transition: transform 0.18s, box-shadow 0.18s;
 }
 
 .project-card:hover {
@@ -1392,21 +1335,6 @@ a:hover {
 
 .artifact-empty {
   color: var(--muted);
-}
-
-/* What an un-started phase's panel shows instead of nothing: the sentence
-   from `avg/pipeline/registry.py`. Same muted weight as `.artifact-empty`,
-   which states a missing file - both are "there is nothing here yet", so
-   they read the same on purpose. */
-.artifact-idle {
-  margin: 0;
-  padding: 14px 16px;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--muted);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
 }
 
 .artifact-progress__pct {
@@ -2064,72 +1992,6 @@ a:hover {
   max-width: 34ch;
   font-size: 12px;
   color: var(--dim);
-}
-
-.preview-frame {
-  position: relative;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  overflow: hidden;
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.preview-frame img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.preview-frame__empty {
-  padding: 18px;
-  font-size: 12px;
-  color: var(--dim);
-}
-
-.preview-frame__error {
-  padding: 10px 14px;
-  font-size: 12px;
-  color: var(--bad);
-}
-
-.preview-frame__note {
-  font-size: 12px;
-  color: var(--dim);
-  margin: 0 0 10px;
-}
-
-/* Keeps the frame's size while a preview renders - a spinner that changes
-   the layout is worse than the wait it reports. */
-.preview-frame--busy::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--text) 8%, transparent),
-    transparent
-  );
-  animation: preview-shimmer calc(1.4s / max(var(--motion-scale, 1), 0.01)) ease-in-out infinite;
-}
-
-@keyframes preview-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .preview-frame--busy::after {
-    animation: none;
-  }
 }
 
 /* The table is the widest thing on this screen; it scrolls inside its own
@@ -2980,17 +2842,17 @@ a:hover {
 }
 
 .screen-enter {
-  animation: rise-in calc(0.18s * var(--motion-scale)) ease-out;
+  animation: rise-in 0.18s ease-out;
 }
 
 .take-panel,
 .modal,
 .popup {
-  animation: rise-in calc(0.16s * var(--motion-scale)) ease-out;
+  animation: rise-in 0.16s ease-out;
 }
 
 .studio__banner {
-  animation: fade-in calc(0.16s * var(--motion-scale)) ease-out;
+  animation: fade-in 0.16s ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3141,14 +3003,6 @@ a:hover {
      it is not a control. */
   pointer-events: none;
   max-width: 320px;
-  /* The pill changes size as its contents change; without this it jumps.
-     `--motion-scale` (Slice 12) and the reduced-motion block below both
-     govern it, so the whole pill's motion is decided in two places, not
-     twelve. */
-  transition:
-    border-color calc(0.2s * var(--motion-scale, 1)) ease-out,
-    background-color calc(0.2s * var(--motion-scale, 1)) ease-out,
-    color calc(0.2s * var(--motion-scale, 1)) ease-out;
 }
 
 .statuspill--ready {
@@ -3163,66 +3017,12 @@ a:hover {
   --pill: var(--bad);
 }
 
-.statuspill--loading {
-  --pill: var(--accent);
-  padding: 10px 16px;
-}
-
-/* An indeterminate bar, in the pill's own slot, while the library is still
-   being counted. Deliberately slim and slow - it reports, it does not
-   demand attention. */
-.statusbar-load {
-  display: block;
-  width: 76px;
-  height: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--pill) 24%, transparent);
-  overflow: hidden;
-}
-
-.statusbar-load__fill {
-  display: block;
-  width: 40%;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--pill);
-  animation: statusbar-sweep calc(1.3s / max(var(--motion-scale, 1), 0.01)) ease-in-out infinite;
-}
-
-@keyframes statusbar-sweep {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(250%);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .statusbar-load__fill {
-    animation: none;
-    width: 100%;
-  }
-}
-
 .statuspill__dot {
   width: 7px;
   height: 7px;
   flex-shrink: 0;
   border-radius: 50%;
   background: var(--pill);
-}
-
-/* The resting mark. Same optical weight as the dot it replaces, sage
-   because sage means settled everywhere else in this app. */
-.statuspill__check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  color: var(--sage);
 }
 
 .statuspill--busy .statuspill__dot,
@@ -3240,9 +3040,7 @@ a:hover {
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--pill) 26%, transparent);
   border-top-color: var(--pill);
-  /* `max()` guards against a scale of 0 producing a zero-duration infinite
-     animation, which spins forever at no visible rate instead of stopping. */
-  animation: avg-spin calc(0.9s / max(var(--motion-scale, 1), 0.01)) linear infinite;
+  animation: avg-spin 0.9s linear infinite;
 }
 
 @keyframes avg-spin {
@@ -3274,7 +3072,7 @@ a:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: pill-pop calc(0.28s * var(--motion-scale, 1)) ease-out;
+  animation: pill-pop 0.28s ease-out;
 }
 
 .statuspill__clock,
@@ -3283,10 +3081,6 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .statuspill {
-    transition: none;
-  }
-
   .statuspill__dot,
   .statuspill__ring,
   .statuspill__label {
@@ -3931,23 +3725,6 @@ a:hover {
 .livelist__meta {
   font-size: 11px;
   color: var(--dim);
-}
-
-/* The model's own claimed cost tier. Text, not colour-coded by price - the
-   app has no price to code it by. */
-.chip--tier {
-  text-transform: capitalize;
-  border-color: var(--line-2);
-  color: var(--dim);
-}
-
-.livelist__reason {
-  font-size: 11px;
-  color: var(--dim);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .livelist__note {

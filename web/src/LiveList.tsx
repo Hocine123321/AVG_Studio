@@ -5,7 +5,6 @@ import {
   patchLiveEntry,
   refreshLiveList,
   removeLiveEntry,
-  suggestLiveList,
   type LiveEntry,
   type LiveKind,
   type LiveListResponse,
@@ -40,26 +39,13 @@ const SOURCE_LABEL: Record<LiveEntry["source"], string> = {
   probed: "Verified",
   catalogue: "Listed",
   manual: "Added by you",
-  suggested: "Suggested",
 };
 
 function sourceClass(source: LiveEntry["source"]): string {
   if (source === "probed") return "chip chip--ok";
   if (source === "manual") return "chip chip--amber";
-  // Deliberately not chip--ok: a suggestion is an opinion, and must not
-  // wear the same colour as something a probe proved.
-  if (source === "suggested") return "chip chip--accent";
   return "chip";
 }
-
-// Knowledge leads opinion: a real probe or a live catalogue listing
-// outranks a hand-added entry, which outranks an AI's guess.
-const SOURCE_RANK: Record<LiveEntry["source"], number> = {
-  probed: 0,
-  catalogue: 1,
-  manual: 2,
-  suggested: 3,
-};
 
 export default function LiveList({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<LiveListResponse | null>(null);
@@ -94,25 +80,6 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     setError(null);
     try {
       await refreshLiveList();
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /** Fires the run and polls until it lands - `suggest` runs on its own
-   * background thread, so the response is only "started", not the rows
-   * themselves. */
-  async function suggest(suggestKind: "models" | "voices") {
-    setBusy(true);
-    setError(null);
-    try {
-      await suggestLiveList(suggestKind);
-      // Same shape as the health check's own poll: a short fixed wait, then
-      // one reload. A single text call finishes in a few seconds at most.
-      await new Promise((resolve) => setTimeout(resolve, 4000));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -158,28 +125,16 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     }
   }
 
-  // The backend already orders favourites first, then alphabetically. This
-  // adds a second key on top: within a favourite/non-favourite bucket,
-  // knowledge leads opinion. A stable sort keeps the alphabetical order
-  // untouched within each source.
-  const rows = useMemo(() => {
-    const base = data?.[kind] ?? [];
-    return [...base].sort((a, b) => {
-      if (a.favourite !== b.favourite) return a.favourite ? -1 : 1;
-      return SOURCE_RANK[a.source] - SOURCE_RANK[b.source];
-    });
-  }, [data, kind]);
+  const rows = data?.[kind] ?? [];
   const meta = data?.voice_meta ?? {};
 
-  // One entry per LANGUAGE, not per locale. Edge advertises 322 voices
-  // across eleven English locales alone; `en-GB`, `en-US` and `en-AU` are
-  // one choice to a user building a shortlist, and eleven rows of "English"
-  // is the filter failing at the only job it has.
+  // Derived from `data` alone: `meta` is a fresh object every render (it
+  // falls back to `{}`), so depending on it would defeat the memo.
   const locales = useMemo(() => {
     const found = new Set<string>();
     for (const row of data?.voice ?? []) {
       const l = data?.voice_meta?.[row.id]?.locale;
-      if (l) found.add(l.split("-")[0]);
+      if (l) found.add(l);
     }
     return ["all", ...[...found].sort()];
   }, [data]);
@@ -199,7 +154,7 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     }
     if (kind !== "voice") return true;
     const info = meta[row.id];
-    if (locale !== "all" && (info?.locale ?? "").split("-")[0] !== locale) return false;
+    if (locale !== "all" && info?.locale !== locale) return false;
     if (gender !== "all" && (info?.gender ?? "").toLowerCase() !== gender) return false;
     return true;
   });
@@ -222,12 +177,6 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         <button type="button" className="btn" onClick={onBack}>
           Back to App health
         </button>
-        <button type="button" className="btn" onClick={() => void suggest("models")} disabled={busy}>
-          Suggest models
-        </button>
-        <button type="button" className="btn" onClick={() => void suggest("voices")} disabled={busy}>
-          Suggest voices
-        </button>
         <button type="button" className="btn btn--primary" onClick={() => void refresh()} disabled={busy}>
           {busy ? "Listing…" : "Refresh catalogues"}
         </button>
@@ -236,18 +185,6 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
       <p className="channels__note">
         Only ticked entries are offered when you pick a model in Settings. Favourites come first, and
         your note shows under the field as you choose.
-      </p>
-
-      <p className="channels__note">
-        Suggestions come from an AI reading these catalogues. The cost tiers and reasons are its
-        opinion — this app holds no pricing and has not checked them. Only “Verified” means a real
-        call succeeded.
-      </p>
-
-      <p className="channels__note">
-        {data?.updated
-          ? `Catalogues last listed ${new Date(data.updated).toLocaleString()}.`
-          : "Catalogues have never been listed — press Refresh catalogues to see what each provider offers."}
       </p>
 
       {error && <p className="settings__save-error">{error}</p>}
@@ -392,8 +329,6 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
               </div>
 
               <span className={sourceClass(entry.source)}>{SOURCE_LABEL[entry.source]}</span>
-              {entry.tier && <span className="chip chip--tier">{entry.tier}</span>}
-              {entry.reason && <span className="livelist__reason">{entry.reason}</span>}
 
               <div className="livelist__note">
                 <DeferredInput

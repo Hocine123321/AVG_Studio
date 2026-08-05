@@ -9,11 +9,10 @@ import { useRenderClock } from "./renderClock";
 
 export interface HomeProps {
   projects: ProjectDoc[];
-  /** Every running job's progress, keyed by project id (Slice 16 - several
-   * may run at once, up to `max_parallel_jobs`). A project with no entry
-   * here but a `queue_position` set is accepted and waiting its turn; one
-   * with neither is not running at all. */
-  progress: Record<string, ProgressEvent>;
+  /** The single render this whole process ever runs at once (see
+   * `avg/api/app.py` — a second `POST .../render` gets a 409), or `null`
+   * when nothing is in flight. */
+  progress: ProgressEvent | null;
   onOpen: (id: string) => void;
   onRender: (id: string) => void;
   onCancel: (id: string) => void;
@@ -122,67 +121,6 @@ function Hero({ project, progress, onOpen, onCancel }: HeroProps) {
 }
 
 /**
- * One compact row: a running job's progress, or a queued job's position.
- * Used once several jobs are live at once (Slice 16) - the full `Hero`
- * above is reserved for the single-job case, where there's room to spend.
- */
-function JobRow({
-  project,
-  progress,
-  queuePosition,
-  onOpen,
-  onCancel,
-}: {
-  project: ProjectDoc;
-  progress: ProgressEvent | null;
-  queuePosition: number | null;
-  onOpen: (id: string) => void;
-  onCancel: (id: string) => void;
-}) {
-  const pct = progress ? Math.min(Math.max(progress.percent, 0), 100) : 0;
-  return (
-    <div className="job-row">
-      <div className="job-row__info">
-        <p className="job-row__title" dir="auto" title={project.title}>
-          {project.title}
-        </p>
-        {progress ? (
-          <>
-            <p className="hero__meta">
-              <span>{progress.percent}%</span>
-              <span>{progress.message}</span>
-            </p>
-            <div className="track">
-              <span className="track__fill" style={{ width: `${pct}%` }} />
-            </div>
-          </>
-        ) : (
-          <p className="hero__meta">
-            <span>Queued · {ordinal(queuePosition ?? 1)}</span>
-          </p>
-        )}
-      </div>
-      <div className="job-row__actions">
-        <button type="button" className="btn btn--sm" onClick={() => onOpen(project.id)}>
-          Open
-        </button>
-        {progress && (
-          <button type="button" className="btn btn--sm btn--ghost" onClick={() => onCancel(project.id)}>
-            <IconStop />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
-}
-
-/**
  * The project grid.
  *
  * New here: a client-side title filter (no backend change needed — it reads
@@ -210,30 +148,20 @@ export default function Home({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
-  // Running: has a live progress entry. Queued: no progress yet, but the
-  // backend says it's waiting its turn (`queue_position`, added because
-  // there was otherwise no way to tell "queued" apart from "not running at
-  // all" - see `GET /api/projects`). Order matches arrival: running jobs by
-  // whichever `App.tsx` happened to fold last, queued jobs by position.
-  const runningProjects = projects.filter((p) => progress[p.id] !== undefined);
-  const queuedProjects = projects
-    .filter((p) => progress[p.id] === undefined && p.queue_position != null)
-    .sort((a, b) => (a.queue_position ?? 0) - (b.queue_position ?? 0));
-  const liveIds = new Set([...runningProjects.map((p) => p.id), ...queuedProjects.map((p) => p.id)]);
+  const renderingProject = progress ? (projects.find((p) => p.id === progress.project_id) ?? null) : null;
 
   const archivedCount = projects.filter((p) => p.archived).length;
 
   const gridProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
     return projects
-      .filter((p) => !liveIds.has(p.id))
+      .filter((p) => !(renderingProject && p.id === renderingProject.id))
       // Archived projects are hidden, not gone - `showArchived` is the only
       // way to see them, and it shows ONLY them so "Restore" has an obvious
       // place to act.
       .filter((p) => Boolean(p.archived) === showArchived)
       .filter((p) => (q ? p.title.toLowerCase().includes(q) : true));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, query, showArchived, runningProjects.length, queuedProjects.length]);
+  }, [projects, renderingProject, query, showArchived]);
 
   // A selection only ever means something for rows currently on screen;
   // dropping the rest avoids archiving something the user cannot see.
@@ -306,30 +234,12 @@ export default function Home({
         onGoChannels={onGoChannels}
       />
 
-      {runningProjects.length === 1 && queuedProjects.length === 0 && (
-        <Hero project={runningProjects[0]} progress={progress[runningProjects[0].id]} onOpen={onOpen} onCancel={onCancel} />
-      )}
-
-      {(runningProjects.length > 1 || queuedProjects.length > 0) && (
-        <div className="job-stack" aria-label="Running videos">
-          {runningProjects.map((p) => (
-            <JobRow key={p.id} project={p} progress={progress[p.id]} queuePosition={null} onOpen={onOpen} onCancel={onCancel} />
-          ))}
-          {queuedProjects.map((p) => (
-            <JobRow
-              key={p.id}
-              project={p}
-              progress={null}
-              queuePosition={p.queue_position ?? null}
-              onOpen={onOpen}
-              onCancel={onCancel}
-            />
-          ))}
-        </div>
+      {renderingProject && progress && (
+        <Hero project={renderingProject} progress={progress} onOpen={onOpen} onCancel={onCancel} />
       )}
 
       <div className="home__section">
-        <span className="lbl">{liveIds.size > 0 ? "Everything else" : "Library"}</span>
+        <span className="lbl">{renderingProject ? "Everything else" : "Library"}</span>
         <span className="home__rule" />
         <span className="home__count">
           {gridProjects.length} {gridProjects.length === 1 ? "video" : "videos"}

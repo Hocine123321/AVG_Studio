@@ -21,7 +21,6 @@ project folder, which is exactly where the engine writes it.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -160,9 +159,6 @@ class RenderPhase:
     id: int = 7
     key: str = "render"
     name: str = "Render"
-    description: str = (
-        "Encodes the base video, then composites overlays and captions over it. Writes the finished mp4."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         """The engine needs images and narration; everything else degrades."""
@@ -195,34 +191,23 @@ class RenderPhase:
             if ctx.log is not None:
                 ctx.log.error("render stderr", detail=text)
 
-        # One render at a time. Everything before this phase overlaps freely
-        # (Slice 16's job cap); here the jobs line up - one MediaEngine, one
-        # child process, so two renders would contend for the same cores
-        # anyway. Held across the WHOLE drain below, never released early:
-        # releasing it before the generator finishes is how a second child
-        # would be spawned while the first was still being joined.
-        lease = ctx.render_lease
-        if lease is not None and lease.locked():
-            ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Waiting for another render to finish..."))
+        for event in engine.render(request, ctx.project.id, on_stderr=_stderr):
+            if ctx.cancel_token.cancelled:
+                engine.cancel()
 
-        with lease if lease is not None else nullcontext():
-            for event in engine.render(request, ctx.project.id, on_stderr=_stderr):
-                if ctx.cancel_token.cancelled:
-                    engine.cancel()
-
-                if isinstance(event, ProgressEvent):
-                    # Scaled into 0-70: part 2 owns the rest, and two passes each
-                    # reporting 0-100 read as the render having started over.
-                    ctx.emit(event.model_copy(update={"percent": int(event.percent * _BASE_PERCENT_SPAN / 100)}))
-                elif isinstance(event, RenderFinished):
-                    ctx.project.master_output = event.output
-                    ctx.emit(event)
-                elif isinstance(event, RenderCancelled):
-                    ctx.emit(event)
-                    raise AvgError(ErrorKind.bug, "render cancelled")
-                elif isinstance(event, PhaseFailed):
-                    ctx.emit(event)
-                    raise AvgError(event.kind, event.message, event.detail)
+            if isinstance(event, ProgressEvent):
+                # Scaled into 0-70: part 2 owns the rest, and two passes each
+                # reporting 0-100 read as the render having started over.
+                ctx.emit(event.model_copy(update={"percent": int(event.percent * _BASE_PERCENT_SPAN / 100)}))
+            elif isinstance(event, RenderFinished):
+                ctx.project.master_output = event.output
+                ctx.emit(event)
+            elif isinstance(event, RenderCancelled):
+                ctx.emit(event)
+                raise AvgError(ErrorKind.bug, "render cancelled")
+            elif isinstance(event, PhaseFailed):
+                ctx.emit(event)
+                raise AvgError(event.kind, event.message, event.detail)
 
         # ── Part 2: overlays, cards and captions ──────────────────────────
         # Whatever this manages is recorded in render/_composite.json, which

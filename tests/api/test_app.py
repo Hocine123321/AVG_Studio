@@ -172,9 +172,9 @@ def test_a_pipeline_run_advances_the_current_takes_records(tmp_path, monkeypatch
     assert created.status_code == 201, created.text
     project_id = created.json()["id"]
 
-    job = client.app.state.jobs.get(project_id)
-    if job is not None and job.thread is not None:
-        job.thread.join(timeout=5)
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=5)
 
     takes = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     current = next(t for t in takes["takes"] if t["id"] == takes["current_take_id"])
@@ -322,9 +322,9 @@ def test_a_phase_failure_is_recorded_in_the_error_store(tmp_path, monkeypatch):
 
     created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
     assert created.status_code == 201
-    job = client.app.state.jobs.get(created.json()["id"])
-    if job is not None and job.thread is not None:
-        job.thread.join(timeout=10)
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
 
     errors = client.get("/api/errors", headers={"X-AVG-Token": "t0k"}).json()["errors"]
     entry = next(e for e in errors if "boom" in e["summary"])
@@ -358,10 +358,10 @@ def _pipeline_client(tmp_path, monkeypatch, run):
     return client
 
 
-def _join_job(client, project_id):
-    job = client.app.state.jobs.get(project_id)
-    if job is not None and job.thread is not None:
-        job.thread.join(timeout=10)
+def _join_job(client):
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
 
 
 def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
@@ -376,7 +376,7 @@ def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client, project_id)
+    _join_job(client)
 
     before = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     res = client.post(
@@ -385,7 +385,7 @@ def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
         json={"from_phase": "visuals"},
     )
     assert res.status_code == 202
-    _join_job(client, project_id)
+    _join_job(client)
 
     after = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     assert [t["id"] for t in after["takes"]] == [t["id"] for t in before["takes"]]
@@ -405,14 +405,14 @@ def test_resume_starts_from_the_phase_it_was_given(tmp_path, monkeypatch):
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client, project_id)
+    _join_job(client)
 
     client.post(
         f"/api/projects/{project_id}/resume",
         headers={"X-AVG-Token": "t0k"},
         json={"from_phase": "screen_text"},
     )
-    _join_job(client, project_id)
+    _join_job(client)
 
     assert seen == [0, 6]  # the create started at Brief, the resume at Screen Text
 
@@ -422,7 +422,7 @@ def test_resume_rejects_a_phase_that_is_not_in_the_registry(tmp_path, monkeypatc
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client, project_id)
+    _join_job(client)
 
     res = client.post(
         f"/api/projects/{project_id}/resume",
@@ -455,7 +455,7 @@ def test_resume_409s_while_a_job_runs(tmp_path, monkeypatch):
     assert res.status_code == 409
 
     release.set()
-    _join_job(client, project_id)
+    _join_job(client)
 
 
 def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
@@ -469,63 +469,3 @@ def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
 def test_resume_requires_a_token(tmp_path, monkeypatch):
     client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
     assert client.post("/api/projects/x/resume", json={"from_phase": "visuals"}).status_code == 401
-
-
-def test_two_renders_never_overlap(tmp_path, monkeypatch):
-    """One MediaEngine, one child process. Whatever the job cap says
-    (Slice 16), renders on different projects still take turns rather than
-    running their child processes side by side."""
-    import threading
-
-    client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
-    AUTH = {"X-AVG-Token": "t0k"}
-
-    concurrent = 0
-    peak = 0
-    guard = threading.Lock()
-
-    def fake_render(*_a, **_k):
-        nonlocal concurrent, peak
-        with guard:
-            concurrent += 1
-            peak = max(peak, concurrent)
-        try:
-            yield from ()
-        finally:
-            with guard:
-                concurrent -= 1
-
-    monkeypatch.setattr(client.app.state.engine, "render", fake_render)
-
-    r1 = client.post("/api/projects", headers=AUTH, json={"topic": "A"})
-    r2 = client.post("/api/projects", headers=AUTH, json={"topic": "B"})
-    id1, id2 = r1.json()["id"], r2.json()["id"]
-    _join_job(client, id1)
-    _join_job(client, id2)
-
-    barrier_reached = threading.Event()
-    release = threading.Event()
-    original = fake_render
-
-    def blocking_render(*a, **k):
-        barrier_reached.set()
-        release.wait(timeout=5)
-        yield from original(*a, **k)
-
-    monkeypatch.setattr(client.app.state.engine, "render", blocking_render)
-
-    render1 = client.post(f"/api/projects/{id1}/render", headers=AUTH, json={})
-    assert render1.status_code == 202
-    assert barrier_reached.wait(timeout=5)
-
-    # A second render, on a DIFFERENT project, starting while the first
-    # holds the lease - it must queue behind the lease, not spawn a second
-    # child alongside it.
-    render2 = client.post(f"/api/projects/{id2}/render", headers=AUTH, json={})
-    assert render2.status_code == 202
-
-    release.set()
-    _join_job(client, id1)
-    _join_job(client, id2)
-
-    assert peak <= 1

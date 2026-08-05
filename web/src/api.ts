@@ -167,11 +167,6 @@ export interface ProjectDoc {
   /** Hidden from Home's default view. Absent on documents written before
    * Slice 6C, which is why every read treats undefined as false. */
   archived?: boolean;
-  /** 1-indexed position behind the job cap (Slice 16), or `null`/absent
-   * when not queued - including when it's actually running. Same
-   * read-time-derived footing as `script_substate`: present on `GET
-   * /api/projects`, absent on `POST /api/projects`'s direct response. */
-  queue_position?: number | null;
 }
 
 export interface ProjectsResponse {
@@ -318,33 +313,8 @@ export interface HealthReport {
   stages: HealthStage[];
 }
 
-/** `deep` adds the fourth stage, which encodes a one-second clip and does a
- * real settings and DPAPI round-trip. On demand only — it costs real disk
- * and a subprocess, so nothing should request it on mount. */
-export function getHealthReport(refresh = false, deep = false): Promise<HealthReport> {
-  const params = new URLSearchParams();
-  if (refresh) params.set("refresh", "true");
-  if (deep) params.set("deep", "true");
-  const query = params.toString();
-  return apiGet<HealthReport>(`/api/health/report${query ? `?${query}` : ""}`);
-}
-
-// ---- phase registry ----
-
-/** One phase as the backend defines it. `avg/pipeline/registry.py` is the
- * single source of truth for phase order and identity; this is that list.
- * Named `ApiPhaseDef` because `web/src/phases.ts` already exports a
- * `PhaseDef` for its own nested sub-step display, which this does not
- * replace. */
-export interface ApiPhaseDef {
-  id: number;
-  key: string;
-  name: string;
-  description: string;
-}
-
-export function getPhases(): Promise<{ phases: ApiPhaseDef[] }> {
-  return apiGet<{ phases: ApiPhaseDef[] }>("/api/phases");
+export function getHealthReport(refresh = false): Promise<HealthReport> {
+  return apiGet<HealthReport>(`/api/health/report${refresh ? "?refresh=true" : ""}`);
 }
 
 // ---- take artifacts ----
@@ -437,7 +407,7 @@ export function artifactFileUrl(projectId: string, takeId: number, key: string, 
 // ---- Live List ----
 
 export type LiveKind = "text" | "image" | "voice";
-export type LiveSource = "probed" | "catalogue" | "manual" | "suggested";
+export type LiveSource = "probed" | "catalogue" | "manual";
 
 /** One row of the Live List: what the app knows about an entry, plus what
  * the user has said about it. `source` is how it got here - `probed` (a
@@ -449,12 +419,6 @@ export interface LiveEntry {
   selected: boolean;
   favourite: boolean;
   note: string;
-  /** The model's claimed cost tier, or null. An OPINION — the app holds no
-   * per-model pricing, so this was never measured. Absent for voices, which
-   * have no cost axis. */
-  tier: string | null;
-  /** One line of the model's reasoning. Also an opinion. */
-  reason: string;
 }
 
 export interface LiveListResponse {
@@ -466,10 +430,6 @@ export interface LiveListResponse {
   voice: LiveEntry[];
   /** Language and gender per voice id, for the voice tab's filters. */
   voice_meta: Record<string, { name: string; locale: string; gender: string }>;
-  /** ISO-8601 timestamp of the last catalogue refresh, or `null` if the
-   * catalogues have never been listed. A stale catalogue that says nothing
-   * is how one Gemini entry looked like all there was. */
-  updated: string | null;
 }
 
 export function getLiveList(): Promise<LiveListResponse> {
@@ -498,12 +458,6 @@ export function addLiveEntry(kind: LiveKind, entryId: string): Promise<{ added: 
 
 export function removeLiveEntry(kind: LiveKind, entryId: string): Promise<{ removed: string }> {
   return apiDelete<{ removed: string }>(`/api/live-list/${kind}/${encodeURIComponent(entryId)}`);
-}
-
-/** Ask a text model which entries are worth shortlisting. Costs one text
- * call. Results are recommendations, never measurements. */
-export function suggestLiveList(kind: "models" | "voices"): Promise<{ started: boolean }> {
-  return apiPost<{ started: boolean }>("/api/live-list/suggest", { kind });
 }
 
 // ---- working-models cache ----
@@ -729,60 +683,4 @@ export function selectTake(projectId: string, takeId: number): Promise<{ current
 
 export function renameTake(projectId: string, takeId: number, label: string): Promise<Take> {
   return apiPatch<Take>(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}`, { label });
-}
-
-/** Free previews — safe to call whenever a setting changes. Each returns a
- * blob URL the caller must revoke when it is replaced. */
-export function previewCaption(body: {
-  width: number; height: number; font_name: string; font_size: number; position: string;
-}): Promise<string> {
-  return blobUrl("/api/preview/caption", body);
-}
-
-export function previewOverlay(body: {
-  spec: Record<string, unknown>; width: number; height: number;
-}): Promise<string> {
-  return blobUrl("/api/preview/overlay", body);
-}
-
-/** PAID on ElevenLabs. `confirm_paid` must come from an explicit press —
- * never from a settings change. The backend refuses it either way. */
-export function previewVoice(body: {
-  provider: string; voice_id: string; confirm_paid?: boolean;
-}): Promise<string> {
-  return blobUrl("/api/preview/voice", body);
-}
-
-/** PAID, always. Same rule. */
-export function previewImage(body: {
-  provider: string; model: string; aspect_ratio: string; confirm_paid: boolean;
-}): Promise<string> {
-  return blobUrl("/api/preview/image", body);
-}
-
-/** Posts `body` and turns a binary (image/png or audio/mpeg) response into a
- * blob URL. Not routed through `request()` above: that helper always parses
- * the response as JSON, and a preview response is the media bytes
- * themselves. On failure, surfaces the server's `detail` sentence (Slice
- * 11's classified errors) rather than a raw JSON blob. */
-async function blobUrl(path: string, body: unknown): Promise<string> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-AVG-Token": TOKEN },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const raw = await res.text();
-    let detail = raw;
-    try {
-      const parsed = JSON.parse(raw) as { detail?: string };
-      if (typeof parsed.detail === "string" && parsed.detail !== "") {
-        detail = parsed.detail;
-      }
-    } catch {
-      // Not JSON - fall back to the raw body.
-    }
-    throw new Error(detail || `${path} failed: ${res.status}`);
-  }
-  return URL.createObjectURL(await res.blob());
 }

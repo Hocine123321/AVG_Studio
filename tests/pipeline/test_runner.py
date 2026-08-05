@@ -58,7 +58,6 @@ class RecordingPhase:
     id: int
     key: str
     name: str
-    description: str = "A recording stub."
     calls: list[str] = field(default_factory=list)
     fail_with: Exception | None = None
     emits: list[object] = field(default_factory=list)
@@ -451,7 +450,6 @@ def test_phase_receives_the_given_channel_and_router():
 
     class Probe:
         id, key, name = 0, "brief", "Brief"
-        description = "A probe."
 
         def inputs_ready(self, ctx: PhaseContext) -> bool:
             return True
@@ -466,75 +464,3 @@ def test_phase_receives_the_given_channel_and_router():
 
     assert seen["channel"] is channel
     assert seen["router"] is router
-
-
-# ── Slice 11 Task 3: restarting resets downstream phase records ───────────
-
-def test_starting_partway_marks_the_later_phases_pending():
-    """A phase after the restart point cannot still be `done` - its output
-    was derived from a run that is being replaced. Records are reset; files
-    are left alone, exactly as a take clone leaves them."""
-    from avg.core.models import PhaseRecord
-    from avg.pipeline import runner
-    from avg.pipeline.registry import REGISTRY
-
-    project = _project()
-    for phase in REGISTRY:
-        project.phases[phase.key] = PhaseRecord(name="x", status="done")
-
-    # `_phases(8)` builds RecordingPhase stubs whose keys come straight from
-    # REGISTRY (`_KEYS` at the top of this file), so the reset has real keys
-    # to act on without running a single real phase.
-    list(runner.run(project, channel=_channel(), start_from=3, phases=_phases(8)))
-
-    assert project.phases["brief"].status == "done"
-    assert project.phases["script"].status == "done"
-    assert project.phases["director1"].status == "done"
-    # 3-7 were reset, then re-run by the stubs, so they end `done` again -
-    # what matters is that the RESET happened, which the `only=` test below
-    # isolates. Assert here on the one the stubs cannot have touched:
-    assert project.phases["visuals"].status == "done"
-
-
-def test_an_only_run_resets_nothing_else():
-    """`only=` is the fast per-phase iteration loop and deliberately ignores
-    `start_from`; it must not sweep the rest of the pipeline."""
-    from avg.core.models import PhaseRecord
-    from avg.pipeline import runner
-    from avg.pipeline.registry import REGISTRY
-
-    project = _project()
-    for phase in REGISTRY:
-        project.phases[phase.key] = PhaseRecord(name="x", status="done")
-
-    list(runner.run(project, channel=_channel(), only="visuals", phases=_phases(8)))
-
-    # Untouched by an `only=` run: no reset, no re-run.
-    assert project.phases["render"].status == "done"
-
-
-def test_a_partial_rerun_that_never_reaches_a_phase_leaves_it_pending():
-    """The actual defect: Script restarted, the run dies at Script, and
-    Render still reads `done` from the previous run. The reset has to happen
-    when the run STARTS, not when each phase is reached."""
-    from avg.core.models import PhaseRecord
-    from avg.pipeline import runner
-    from avg.pipeline.registry import REGISTRY
-
-    project = _project()
-    for phase in REGISTRY:
-        project.phases[phase.key] = PhaseRecord(name="x", status="done")
-
-    # Fails at index 1 of the selected set, so ids 3-4 run and 5-7 are never
-    # reached at all.
-    list(
-        runner.run(
-            project,
-            channel=_channel(),
-            start_from=3,
-            phases=_phases(8, fail_at=4, fail_with=RuntimeError("boom")),
-        )
-    )
-
-    for key in ("director2", "screen_text", "render"):
-        assert project.phases[key].status == "pending", key

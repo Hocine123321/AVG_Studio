@@ -47,7 +47,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
-from avg.config import channel_defaults as channel_defaults_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
@@ -59,8 +58,7 @@ from avg.core.settings_schema import (
     validate_value,
 )
 from avg.core.model_prefs import KINDS, ModelPrefs
-from avg.providers import catalogues, probe, recommend
-from avg.providers.text.router import config_from_settings
+from avg.providers import catalogues, probe
 
 from .deps import require_token
 
@@ -109,42 +107,17 @@ def _app_values(app_state: Any) -> dict[str, Any]:
 
 
 def _channel_values(app_state: Any) -> dict[str, Any]:
-    """Current value for every `scope="channel"` setting.
-
-    Read from the active channel's own document, or - when that channel's
-    `settings_source` says `"global"` - from the app-wide defaults document,
-    WHOLE. There is no third case: a field absent from whichever document is
-    selected resolves to the `SettingSpec`'s own default, never to the other
-    document.
-
-    That is what keeps this from being the mechanism `CLAUDE.md` deletes.
-    The three legacy bugs came from per-field, implicit inheritance; there is
-    no per-field resolution here to get wrong. Same shape as
-    `live_list_source` (see `_prefs_for_scope`).
-
-    `settings_source` itself is ALWAYS read from the channel's own document -
-    otherwise a channel switched to `"global"` could never be switched back.
-    """
+    """Current value for every `scope="channel"` setting, read from the
+    active channel's document - or each setting's default if no channel is
+    active, or the active id no longer resolves to a real channel."""
     active_id = channels_config.active_channel_id(app_state.settings_path)
     channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
-    own = channel.settings if channel is not None else {}
-
-    source = str(own.get("settings_source", "channel"))
-    if source == "global":
-        selected: dict[str, Any] = channel_defaults_config.load_defaults(
-            getattr(app_state, "channel_defaults_path", None)
-        )
-    else:
-        selected = dict(own)
-
-    values = {
-        spec.id: selected.get(spec.id, spec.default)
+    source = channel.settings if channel is not None else {}
+    return {
+        spec.id: source.get(spec.id, spec.default)
         for spec in SETTINGS
         if spec.scope == "channel"
     }
-    # The switch is the channel's own, whichever document the rest came from.
-    values["settings_source"] = source
-    return values
 
 
 def _values_payload(app_state: Any) -> dict[str, Any]:
@@ -316,41 +289,6 @@ async def clear_errors(request: Request) -> dict:
     return {"cleared": True}
 
 
-@router.get("/api/phases")
-async def get_phases() -> dict:
-    """The pipeline's phases, in order, with what each one is for.
-
-    Serves `avg.pipeline.registry.REGISTRY` - the single source of truth for
-    phase order and identity. `web/src/phases.ts` has carried a hand-kept
-    copy of the keys since Slice 1, with its own docstring calling itself
-    duplication "until the backend serves phase definitions"; this is that
-    route. It does not retire that file, which also owns the nested
-    sub-step display REGISTRY does not model.
-    """
-    from avg.pipeline.registry import REGISTRY  # noqa: PLC0415 - keeps the pipeline off the import path
-
-    return {
-        "phases": [
-            {"id": p.id, "key": p.key, "name": p.name, "description": p.description}
-            for p in REGISTRY
-        ]
-    }
-
-
-#: Providers that cannot generate without a key, by `kind/provider`. Edge
-#: needs none (it is the free voice provider) and Pollinations needs none,
-#: so neither appears. Stable Horde's CATALOGUE is public while its
-#: generation endpoint is not - which is exactly the trap this exists to
-#: close: it reads "Reachable" and then 403s on the first real image.
-_NEEDS_KEY: tuple[str, ...] = (
-    "image/stablehorde",
-    "image/openai",
-    "image/gemini",
-    "image/huggingface",
-    "voice/elevenlabs",
-)
-
-
 @router.get("/api/models/cache")
 async def get_model_cache(request: Request) -> dict:
     """What the last provider test proved, in the three states it can prove.
@@ -363,10 +301,6 @@ async def get_model_cache(request: Request) -> dict:
     - `reachable` - per `kind/provider`, whether the provider answered its
       own catalogue. THIS MODEL is unproven either way; reachability is a
       fact about a provider.
-    - `needs_key` - per `kind/provider`, `true` when that provider requires
-      a key and has none. A provider can be reachable - its catalogue is a
-      public GET - and still be unable to produce anything, which is what
-      walked a keyless Stable Horde into a 403 while reading "Reachable".
 
     An entry absent from `text` or `reachable` is UNTESTED. `updated: null`
     means no test has ever run - the UI says so and never invents a list.
@@ -380,11 +314,6 @@ async def get_model_cache(request: Request) -> dict:
             p: cache.verdicts(p) for p in cache.providers() if not p.startswith("__")
         },
         "reachable": cache.reach(),
-        "needs_key": {
-            entry: True
-            for entry in _NEEDS_KEY
-            if not secrets_config.get_key(entry.split("/", 1)[1])
-        },
         "building": _probe_running(request.app.state),
     }
 
@@ -535,41 +464,18 @@ def _entry_rows(prefs: ModelPrefs, kind: str, known: dict[str, str]) -> list[dic
     than silently dropped: a model can vanish from a catalogue between
     refreshes, and losing the note attached to it would be worse than
     showing an entry that no longer resolves.
-
-    A suggestion is a fourth provenance and the WEAKEST: it is an opinion,
-    so anything the app has actually measured or listed outranks it. An
-    entry that is both suggested and probed reports `probed`, because a
-    measurement beats a recommendation.
-
-    `prefs.suggestions()` holds every kind's suggestions in one section, and
-    this function runs once per kind (text/image/voice) against the same
-    document - so suggestions are filtered to `kind` here, or a text
-    suggestion would leak onto the voice or image tab just because the ids
-    got unioned into the same set.
     """
     saved = prefs.all(kind)
-    suggested = {
-        entry_id: row for entry_id, row in prefs.suggestions().items() if row.get("kind") == kind
-    }
     rows: list[dict] = []
-    for entry_id in sorted(set(known) | set(saved) | set(suggested)):
+    for entry_id in sorted(set(known) | set(saved)):
         entry = saved.get(entry_id)
-        hint = suggested.get(entry_id)
-        if entry_id in known:
-            source = known[entry_id]
-        elif entry_id in suggested:
-            source = "suggested"
-        else:
-            source = "manual"
         rows.append(
             {
                 "id": entry_id,
-                "source": source,
+                "source": known.get(entry_id, "manual"),
                 "selected": bool(entry.selected) if entry else False,
                 "favourite": bool(entry.favourite) if entry else False,
                 "note": entry.note if entry else "",
-                "tier": (hint or {}).get("tier"),
-                "reason": str((hint or {}).get("reason", "")),
             }
         )
     rows.sort(key=lambda r: (not r["favourite"], r["id"].lower()))
@@ -633,11 +539,6 @@ async def get_live_list(request: Request) -> dict:
         "image": _entry_rows(prefs, "image", _known_from_catalogue(app_state, "image")),
         "voice": _entry_rows(prefs, "voice", _known_from_catalogue(app_state, "voice")),
         "voice_meta": app_state.model_cache.meta(),
-        "updated": (
-            app_state.model_cache.updated_at().isoformat()
-            if app_state.model_cache.updated_at() is not None
-            else None
-        ),
     }
 
 
@@ -710,85 +611,6 @@ async def refresh_live_list(request: Request) -> dict:
     return {"refreshed": True}
 
 
-class SuggestRequest(BaseModel):
-    """`POST /api/live-list/suggest` - which call to spend.
-
-    Two calls, not one: text and image share a cost axis and are chosen
-    together; voices have no cost axis at all. The user picks which to run.
-    """
-
-    kind: str
-
-
-def _suggest_running(app_state: Any) -> bool:
-    thread = getattr(app_state, "suggest_thread", None)
-    return thread is not None and thread.is_alive()
-
-
-@router.post("/api/live-list/suggest", status_code=status.HTTP_202_ACCEPTED)
-async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str, bool]:
-    """Ask a text model which entries are worth shortlisting.
-
-    The suggestions are an OPINION and are stored as one - in
-    `model_prefs.json` beside the user's ticks, never in
-    `working_models.json`, which records what a probe measured. The Live List
-    chips them `Suggested`, and a probe that later proves one outranks it.
-
-    Own slot, 409 on a second start, deliberately not the render slot.
-    """
-    if body.kind not in ("models", "voices"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"unknown kind {body.kind!r} - expected 'models' or 'voices'",
-        )
-
-    app_state = request.app.state
-    if _suggest_running(app_state):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="a suggestion run is already going",
-        )
-
-    prefs, _scope = _prefs_for_scope(app_state)
-    values = _channel_values(app_state)
-    try:
-        router_config = config_from_settings(
-            values, fallback_default=str(get_spec("text_model_default").default)  # type: ignore[union-attr]
-        )
-    except ValueError as exc:
-        # No text model configured at all: say so, rather than failing inside
-        # the worker where the user cannot see it.
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    text_ids = sorted(_known_text(app_state))
-    image_ids = sorted(_known_from_catalogue(app_state, "image"))
-    voice_ids = sorted(_known_from_catalogue(app_state, "voice"))
-
-    def _run() -> None:
-        # Never raises out of the thread: a failed run leaves the previous
-        # suggestions in place, which is more useful than none.
-        try:
-            if body.kind == "models":
-                rows = recommend.suggest_models(
-                    {"text": text_ids, "image": image_ids}, config=router_config
-                )
-            else:
-                rows = recommend.suggest_voices(voice_ids, config=router_config)
-            prefs.set_suggestions(
-                [
-                    {"entry_id": s.entry_id, "kind": s.kind, "tier": s.tier, "reason": s.reason}
-                    for s in rows
-                ]
-            )
-        except Exception:  # noqa: BLE001 - a failed run keeps the previous suggestions
-            pass
-
-    thread = threading.Thread(target=_run, name="live-list-suggest", daemon=True)
-    app_state.suggest_thread = thread
-    thread.start()
-    return {"started": True}
-
-
 @router.patch("/api/live-list/{kind}/{entry_id:path}")
 async def patch_live_entry(kind: str, entry_id: str, body: LiveEntryUpdate, request: Request) -> dict:
     if kind not in KINDS:
@@ -841,13 +663,12 @@ async def delete_live_entry(kind: str, entry_id: str, request: Request) -> dict:
 
 
 @router.get("/api/health/report")
-async def get_health_report(request: Request, refresh: bool = False, deep: bool = False) -> dict:
-    """The startup report behind the App Health screen.
+async def get_health_report(request: Request, refresh: bool = False) -> dict:
+    """The three-stage startup report behind the App Health screen.
 
     Dependency check -> App warmup -> Safeguards, in that order, because
     each stage assumes the one before it passed and "which stage failed" is
-    the whole diagnosis when a launch goes wrong. A fourth `deep` stage is
-    appended only when asked - it spends real disk and an ffmpeg subprocess.
+    the whole diagnosis when a launch goes wrong.
 
     Paths come from `app.state`, never resolved inside `avg.core.health`, so
     a test's isolated tmp_path is what gets checked rather than the real
@@ -859,7 +680,6 @@ async def get_health_report(request: Request, refresh: bool = False, deep: bool 
         settings_path=app_state.settings_path,
         channels_dir=app_state.channels_dir,
         output_root=app_state.output_root,
-        deep=deep,
     )
     return {
         "ok": all(stage.ok for stage in stages),
@@ -961,41 +781,6 @@ async def post_settings_values(body: SettingsValuesUpdate, request: Request) -> 
         save_settings(doc, app_state.settings_path)
 
     return _values_payload(app_state)
-
-
-@router.post("/api/settings/port-to-global")
-async def port_to_global(request: Request) -> dict:
-    """Copy the active channel's channel-scope values into the app-wide defaults.
-
-    One explicit, user-initiated snapshot - never an automatic capture. That
-    distinction is the whole reason this is allowed to exist beside
-    `CLAUDE.md`'s "no apply/capture step": the rule deletes the LIVE copy
-    mechanism, where a value silently tracked another document. This writes
-    once, when asked, and the two documents are unrelated afterwards.
-
-    Secrets are never copied - `type="secret"` values live in
-    `avg.config.secrets` alone and are not part of any channel document.
-    App-scope settings are not copied either: they belong to the app, not to
-    a channel's snapshot.
-    """
-    app_state = request.app.state
-    active_id = channels_config.active_channel_id(app_state.settings_path)
-    channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
-    if channel is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="no active channel — activate a channel before porting its settings",
-        )
-
-    ported = {
-        spec.id: channel.settings[spec.id]
-        for spec in SETTINGS
-        if spec.scope == "channel" and spec.type != "secret" and spec.id in channel.settings
-    }
-    channel_defaults_config.save_defaults(
-        ported, getattr(app_state, "channel_defaults_path", None)
-    )
-    return {"ported": len(ported)}
 
 
 @router.get("/api/channels")

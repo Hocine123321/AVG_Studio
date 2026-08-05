@@ -96,7 +96,7 @@ SETTINGS: list[SettingSpec] = [
     # --- runtime / UI preferences (app scope) ---
     SettingSpec(
         id="theme",
-        group="app",
+        group="runtime",
         label="Color theme",
         help="Visual theme for the app UI. Night is the default — a dark surround tells the truth about a frame's exposure.",
         type="choice",
@@ -119,7 +119,7 @@ SETTINGS: list[SettingSpec] = [
     ),
     SettingSpec(
         id="verbose_log",
-        group="app",
+        group="runtime",
         label="Verbose take log",
         help="Write every prompt and response into the take's log. Useful when a model is misbehaving; the files get large.",
         type="bool",
@@ -127,71 +127,6 @@ SETTINGS: list[SettingSpec] = [
         scope="app",
         # Nothing is invalidated: this changes what is RECORDED about a run,
         # never what the run produces.
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="motion_scale",
-        group="app",
-        label="Animation",
-        help=(
-            "How much the interface moves. Read by `web/src/tokens.css` through the "
-            "`--motion-scale` custom property. Your operating system's own "
-            "reduced-motion preference always wins over this."
-        ),
-        type="choice",
-        default="full",
-        scope="app",
-        choices=["full", "reduced", "none"],
-        # Nothing is invalidated: this changes how the UI moves, never what a
-        # run produces.
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="startup_check",
-        group="app",
-        label="Check components at startup",
-        help=(
-            "Run the dependency check while the library loads. Read by "
-            "`avg/shell.py`. Turning it off starts marginally faster and tells "
-            "you nothing until you open App health."
-        ),
-        type="bool",
-        default=True,
-        scope="app",
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="max_parallel_jobs",
-        group="app",
-        label="Videos at once",
-        help=(
-            "How many videos may be made at the same time. Read by "
-            "`avg/core/jobs.py`. Renders always take turns whatever this "
-            "says - there is one render engine. Raise it only if your "
-            "providers are not rate-limiting you; 1 behaves exactly as this "
-            "app always has."
-        ),
-        type="choice",
-        default="2",
-        scope="app",
-        choices=["1", "2", "3", "4"],
-        invalidates=None,
-    ),
-    SettingSpec(
-        id="settings_source",
-        group="app",
-        label="This channel's settings",
-        help=(
-            "Use this channel's own settings, or the app-wide defaults - whole "
-            "documents, never mixed field by field. Read by "
-            "`avg/api/routes_settings.py`."
-        ),
-        type="choice",
-        default="channel",
-        scope="channel",
-        choices=["channel", "global"],
-        # Nothing is invalidated: this changes WHERE a value is read from,
-        # not what any existing artifact was made with.
         invalidates=None,
     ),
     # --- video format and length (channel scope: a production choice) ---
@@ -500,43 +435,6 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="visuals",
         source="live_list:image",
-    ),
-    SettingSpec(
-        id="image_provider_backup",
-        group="images",
-        label="Image provider — backup",
-        help="Tried once if the primary provider fails in a way a different provider could survive. Leave unset to never fall back.",
-        type="choice",
-        default="",
-        scope="channel",
-        choices=["", "openai", "gemini", "pollinations", "stablehorde", "huggingface"],
-        invalidates="visuals",
-    ),
-    SettingSpec(
-        id="image_model_backup",
-        group="images",
-        label="Image model — backup",
-        help="Which model the backup provider should use. The Live List decides what is offered here.",
-        type="text",
-        default="",
-        scope="channel",
-        invalidates="visuals",
-        source="live_list:image",
-    ),
-    SettingSpec(
-        id="image_on_failure",
-        group="images",
-        label="Images — if both fail",
-        help=(
-            "Stop the run, or fall back to the backup provider. Read by "
-            "`avg/pipeline/phases/visuals.py`. A failure a second provider "
-            "would hit identically - a blocked prompt, a bug - never falls back."
-        ),
-        type="choice",
-        default="stop",
-        scope="channel",
-        choices=["stop", "fall_back"],
-        invalidates="visuals",
     ),
     SettingSpec(
         id="image_quality",

@@ -81,7 +81,6 @@ def run(
     on_phase_change: Callable[[], None] | None = None,
     log: Any = None,
     errors: Any = None,
-    render_lease: Any = None,
 ) -> Iterator[Any]:
     """Run `phases` (`REGISTRY` by default - see that module's docstring for
     why nothing else should ever pass a different order in production)
@@ -141,23 +140,6 @@ def run(
     cancel_token = cancel_token or CancellationToken()
     to_run = _select(phases, start_from, only)
 
-    # A phase after the restart point cannot still claim to be done: its
-    # output was derived from the run being replaced, and leaving the record
-    # alone is how a project ends up with Script `not started` next to a
-    # green Visuals - and a render whose images belong to a script that no
-    # longer exists. Records only; the FILES stay, exactly as they do for a
-    # cloned take. `only=` is exempt because it is the deliberate
-    # single-phase iteration loop and sweeps nothing.
-    if only is None:
-        for phase in phases:
-            if phase.id >= start_from:
-                record = project.phases.get(phase.key)
-                if record is not None and record.status == "done":
-                    record.status = "pending"
-                    record.error = None
-        if on_phase_change is not None:
-            on_phase_change()
-
     for phase in to_run:
         if cancel_token.cancelled:
             yield PipelineCancelled(project_id=project.id, phase=phase.key)
@@ -184,7 +166,6 @@ def run(
             cancel_token=cancel_token,
             log=log,
             errors=errors,
-            render_lease=render_lease,
         )
 
         yield PhaseStarted(project_id=project.id, phase=phase.key)

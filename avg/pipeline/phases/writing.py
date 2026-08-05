@@ -107,9 +107,6 @@ class BriefPhase:
     id: int = 0
     key: str = "brief"
     name: str = "Brief"
-    description: str = (
-        "Turns your topic into a brief: the angle, the audience and the tone the script will follow. Writes brief.json."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return True
@@ -251,9 +248,6 @@ class ScriptPhase:
     id: int = 1
     key: str = "script"
     name: str = "Script"
-    description: str = (
-        "Writes the narration and splits it into scenes, verbatim, in two passes. Writes narration.txt and scenes.json."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return True

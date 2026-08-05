@@ -203,22 +203,17 @@ def test_create_override_never_persists_to_the_channel_document(client, paths):
 
 
 def _wait_for_idle(client: TestClient) -> None:
-    """Wait for every currently running job to finish.
+    """Wait for the running pipeline job to finish.
 
-    Two DIFFERENT projects may now run at once up to `max_parallel_jobs`
-    (Slice 16) - this no longer waits out a single-slot invariant, just
-    whatever happens to be in flight right now, so a test that wants a
-    clean slate before its next assertion does not depend on a job
-    happening to be quick, which is what broke on 2026-07-30 when one took
-    a few milliseconds longer than expected.
-
-    A queued job's thread was never started, so only running jobs are
-    joined here - in these tests nothing outruns `max_parallel_jobs`, so
-    joining every running job leaves nothing else in flight.
+    One job at a time is the documented rule (`app.state.render_thread`), so a
+    second create while the first is still running is a 409 BY DESIGN. Tests
+    that want two projects have to let the first job end rather than relying
+    on it happening to be quick - which is what they did until 2026-07-30,
+    when a job that took a few milliseconds longer turned them red.
     """
-    for job in list(client.app.state.jobs.running()):
-        if job.thread is not None:
-            job.thread.join(timeout=10)
+    thread = client.app.state.render_thread
+    if thread is not None:
+        thread.join(timeout=10)
 
 
 def test_two_creates_from_the_same_topic_get_distinct_projects(client):
@@ -264,17 +259,7 @@ def test_create_starts_the_pipeline_and_streams_its_events_over_the_socket(clien
         assert second["phase"] == "brief"
 
 
-def test_a_second_different_project_now_queues_instead_of_refusing(client, monkeypatch):
-    """The invariant this slice deliberately replaces (Slice 16).
-
-    Before, a second create while any pipeline ran was a flat 409 - one
-    slot, shared by every project. Now a different project queues behind
-    the cap (`max_parallel_jobs`, default 2) instead of being turned away;
-    only the SAME project running twice stays a 409 (see
-    `test_the_same_project_twice_is_still_a_conflict`), because two runs of
-    one project would fight over the same folder and the same
-    project.json.
-    """
+def test_a_second_create_while_one_is_running_is_409(client, monkeypatch):
     started = threading.Event()
     release = threading.Event()
 
@@ -293,129 +278,9 @@ def test_a_second_different_project_now_queues_instead_of_refusing(client, monke
         assert started.wait(timeout=5)
 
         r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
-        assert r2.status_code == 201
-        assert client.app.state.jobs.is_running(r2.json()["id"]) is True  # cap is 2 by default
+        assert r2.status_code == 409
     finally:
         release.set()
-
-
-def test_the_same_project_twice_is_still_a_conflict(client, monkeypatch):
-    """The one guard the cap never removes: two runs of one project would
-    fight over the same folder and the same project.json."""
-    started = threading.Event()
-    release = threading.Event()
-
-    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
-        started.set()
-        release.wait(timeout=5)
-        return
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
-    _activate_channel(client)
-
-    try:
-        created = client.post("/api/projects", headers=AUTH, json={"topic": "x"}).json()
-        assert started.wait(timeout=5)
-
-        res = client.post(f"/api/projects/{created['id']}/resume", headers=AUTH, json={"from_phase": "voice"})
-        assert res.status_code == 409
-    finally:
-        release.set()
-
-
-def test_queue_position_appears_only_for_queued_projects(client, monkeypatch):
-    """The one data source Home has for "queued, waiting its turn" - there
-    is no other route that exposes the job registry."""
-    client.post("/api/settings/values", headers=AUTH, json={"values": {"max_parallel_jobs": "1"}})
-
-    started = threading.Event()
-    release = threading.Event()
-
-    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
-        started.set()
-        release.wait(timeout=5)
-        return
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
-    _activate_channel(client)
-
-    try:
-        r1 = client.post("/api/projects", headers=AUTH, json={"topic": "First"})
-        assert started.wait(timeout=5)
-        r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
-        id1, id2 = r1.json()["id"], r2.json()["id"]
-
-        body = client.get("/api/projects", headers=AUTH).json()
-        by_id = {p["id"]: p for p in body["projects"]}
-        assert by_id[id1]["queue_position"] is None  # running, not queued
-        assert by_id[id2]["queue_position"] == 1
-    finally:
-        release.set()
-
-
-def test_a_cap_of_one_behaves_exactly_as_this_app_always_has(client, monkeypatch):
-    """The escape hatch, and the regression test for this whole slice: at
-    `max_parallel_jobs=1`, a second project queues rather than starting -
-    the original single-slot behaviour, reproduced exactly."""
-    client.post("/api/settings/values", headers=AUTH, json={"values": {"max_parallel_jobs": "1"}})
-
-    started = threading.Event()
-    release = threading.Event()
-
-    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
-        started.set()
-        release.wait(timeout=5)
-        return
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
-    _activate_channel(client)
-
-    try:
-        r1 = client.post("/api/projects", headers=AUTH, json={"topic": "First"})
-        assert r1.status_code == 201
-        assert started.wait(timeout=5)
-
-        r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
-        assert r2.status_code == 201
-        second_id = r2.json()["id"]
-        # Accepted, but not running - the cap is full.
-        assert client.app.state.jobs.is_running(second_id) is False
-        assert client.app.state.jobs.get(second_id) is not None
-    finally:
-        release.set()
-
-
-def test_a_queued_job_starts_once_the_running_one_frees_its_slot(client, monkeypatch):
-    client.post("/api/settings/values", headers=AUTH, json={"values": {"max_parallel_jobs": "1"}})
-
-    first_release = threading.Event()
-    second_started = threading.Event()
-
-    def run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
-        if not first_release.is_set():
-            first_release.wait(timeout=5)
-        else:
-            second_started.set()
-        return
-        yield  # pragma: no cover
-
-    monkeypatch.setattr("avg.api.app.run_pipeline", run)
-    _activate_channel(client)
-
-    r1 = client.post("/api/projects", headers=AUTH, json={"topic": "First"})
-    r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
-    second_id = r2.json()["id"]
-    assert client.app.state.jobs.is_running(second_id) is False
-
-    first_release.set()
-    job1 = client.app.state.jobs.get(r1.json()["id"])
-    if job1 is not None and job1.thread is not None:
-        job1.thread.join(timeout=5)
-
-    assert second_started.wait(timeout=5)
 
 
 def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
@@ -436,9 +301,8 @@ def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
         assert started.wait(timeout=5)
 
         client.post(f"/api/projects/{created['id']}/cancel", headers=AUTH)
-        job = client.app.state.jobs.get(created["id"])
-        assert job is not None and job.cancel_token is not None
-        assert job.cancel_token.cancelled is True
+        assert client.app.state.pipeline_cancel_token is not None
+        assert client.app.state.pipeline_cancel_token.cancelled is True
     finally:
         release.set()
 

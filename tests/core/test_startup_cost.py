@@ -27,16 +27,3 @@ def test_importing_the_app_does_not_import_edge_tts():
         "importing avg.shell dragged in edge_tts/aiohttp again - that is ~2s "
         f"of startup for a library the voice phase imports on demand: {result.stdout!r}"
     )
-
-
-def test_the_api_module_does_not_pull_the_pipeline_at_import_time():
-    """`avg.config.legacy_import` costs ~0.50s because it transitively
-    imports `avg.pipeline.registry` and therefore every phase, provider and
-    media module. The library scan it serves runs on a background thread, so
-    that cost has no business being on the startup path.
-
-    Same seam Slice 10 asserted for `avg.shell` and uvicorn.
-    """
-    import avg.api.app as app_module
-
-    assert not hasattr(app_module, "import_all")

@@ -12,7 +12,6 @@ import {
 } from "./api";
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
-import PreviewPanel from "./PreviewPanel";
 import SettingsGroup from "./SettingsGroup";
 import type { SettingsCtx } from "./fields/types";
 
@@ -21,7 +20,7 @@ import type { SettingsCtx } from "./fields/types";
  * value on the backend needs no matching entry here to show up correctly;
  * this map only ever improves on the fallback, never gates it. */
 const GROUP_LABELS: Record<string, string> = {
-  app: "App & components",
+  runtime: "Runtime & components",
   video: "Video format",
   captions: "Captions",
   voice: "Voice",
@@ -72,7 +71,7 @@ function extractDetail(message: string): string {
  *    `SecretField`'s own transient input does, for as long as one request
  *    takes (see that file).
  */
-export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => void } = {}) {
+export default function Settings() {
   const [schema, setSchema] = useState<SettingSpec[] | null>(null);
   const [appValues, setAppValues] = useState<Record<string, unknown>>({});
   const [channelValues, setChannelValues] = useState<Record<string, unknown>>({});
@@ -110,17 +109,6 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, []);
-
-  useEffect(() => {
-    const scale = String(appValues["motion_scale"] ?? "full");
-    // One custom property drives every duration in tokens.css, rather than
-    // this being read at dozens of call sites. `prefers-reduced-motion`
-    // still wins - see that block in tokens.css, which is unchanged.
-    document.documentElement.style.setProperty(
-      "--motion-scale",
-      scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1",
-    );
-  }, [appValues]);
 
   const channelLabel = useMemo(() => {
     if (!activeChannelId) return null;
@@ -389,33 +377,13 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                     captions, voice, images, render, keys), so this panel
                     had silently never rendered. Keyed to a real group, it
                     is on screen again. */}
-                {g.group === "app" && !searching && <HealthPanel />}
-                {g.group === "captions" && !searching && <PreviewPanel kind="caption" valueOf={valueById} />}
-                {g.group === "voice" && !searching && <PreviewPanel kind="voice" valueOf={valueById} />}
-                {g.group === "images" && !searching && <PreviewPanel kind="images" valueOf={valueById} />}
+                {g.group === "runtime" && !searching && <HealthPanel />}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}
                     valueOf={valueById}
                     lengthPreset={valueById("length_preset") || "60s"}
                   />
-                )}
-                {g.group === "models" && !searching && onOpenLiveList && (
-                  <section className="models-panel" aria-label="Live List">
-                    <div className="spend-card">
-                      <div>
-                        <p className="lbl">Live List</p>
-                        <b>Which models these pickers may offer</b>
-                      </div>
-                      <span className="spend-card__note">
-                        Tick the models and voices you want offered, mark favourites, and note what
-                        each one is good for.
-                      </span>
-                      <button type="button" className="btn" onClick={onOpenLiveList}>
-                        Open Live List
-                      </button>
-                    </div>
-                  </section>
                 )}
                 <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />
               </div>

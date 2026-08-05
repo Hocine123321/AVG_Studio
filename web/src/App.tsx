@@ -249,7 +249,7 @@ export default function App() {
       content = project ? (
         <Studio
           project={project}
-          progress={events.byProject[project.id] ?? null}
+          progress={events.progress?.project_id === project.id ? events.progress : null}
           activePhase={events.phaseStarted?.project_id === project.id ? events.phaseStarted.phase : null}
           failure={events.failure?.project_id === project.id ? events.failure : null}
           cancelled={events.cancelled?.project_id === project.id ? events.cancelled : null}
@@ -272,18 +272,18 @@ export default function App() {
         <Create onCreated={handleProjectCreated} onGoToChannels={() => setScreen({ name: "channels" })} />
       );
     } else if (screen.name === "settings") {
-      content = <Settings onOpenLiveList={() => setScreen({ name: "livelist" })} />;
+      content = <Settings />;
     } else if (screen.name === "livelist") {
-    content = <LiveList onBack={() => setScreen({ name: "settings" })} />;
+    content = <LiveList onBack={() => setScreen({ name: "health" })} />;
   } else if (screen.name === "health") {
-      content = <AppHealth />;
+      content = <AppHealth onOpenLiveList={() => setScreen({ name: "livelist" })} />;
     } else if (screen.name === "channels") {
       content = <Channels />;
     } else {
       content = (
         <Home
           projects={live}
-          progress={events.byProject}
+          progress={events.progress}
           onOpen={openProject}
           onRender={openAndRender}
           onCancel={cancelRender}
@@ -340,7 +340,7 @@ export default function App() {
           </div>
         </div>
         <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
-        <StatusBar connected={events.connected} loading={projects === null} />
+        <StatusBar connected={events.connected} />
       </div>
     </div>
   );

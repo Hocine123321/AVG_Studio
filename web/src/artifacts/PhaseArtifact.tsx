@@ -1,12 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  getPhases,
-  getTakeArtifacts,
-  getTakeLog,
-  type ApiPhaseDef,
-  type TakeArtifacts,
-  type TakeLogTail,
-} from "../api";
+import { getTakeArtifacts, getTakeLog, type TakeArtifacts, type TakeLogTail } from "../api";
 import {
   BriefBody,
   CaptionsBody,
@@ -70,20 +63,6 @@ export default function PhaseArtifact({ projectId, takeId, phaseKey, duration, c
    * showing rather than an error. */
   const [log, setLog] = useState<TakeLogTail | null>(null);
   const [logOpen, setLogOpen] = useState(false);
-  const [phaseDefs, setPhaseDefs] = useState<ApiPhaseDef[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    getPhases()
-      .then((r) => {
-        if (!cancelled) setPhaseDefs(r.phases);
-      })
-      .catch(() => {
-        if (!cancelled) setPhaseDefs([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (takeId === null) {
@@ -104,25 +83,8 @@ export default function PhaseArtifact({ projectId, takeId, phaseKey, duration, c
   }, [projectId, takeId, phaseKey]);
 
   const Body = BODIES[phaseKey];
-  if (takeId === null) return null;
+  if (!Body || takeId === null) return null;
   if (artifacts === null) return <p className="artifact-empty">Loading…</p>;
-
-  const definition = phaseDefs?.find((p) => p.key === phaseKey) ?? null;
-
-  // An un-started phase has no artifacts, so every body renders "no X in
-  // this take" and the panel collapses to nothing. Saying what the phase is
-  // FOR is more use than an empty box - and it is the same information the
-  // pipeline rail is already showing a grey dot for.
-  const nothingYet = artifacts !== null && (artifacts.by_phase[phaseKey] ?? []).length === 0;
-  if (nothingYet && definition) {
-    return (
-      <div className="artifact-stack">
-        <p className="artifact-idle">{definition.description}</p>
-      </div>
-    );
-  }
-
-  if (!Body) return null;
 
   const { files } = artifacts;
   // This phase's own artifacts, not the take's total: the strip describes

@@ -108,13 +108,6 @@ export interface EventsState {
   /** Named work with no measurable percentage, e.g. preparing the render
    * workspace. Shown as the Transport bar's detail line. */
   jobStep: JobStepEvent | null;
-  /** Every live job's latest progress, keyed by project id. Events have
-   * always carried `project_id`; until now nothing kept more than one.
-   * The single-job `progress` field above is derived from the same events
-   * and stays for consumers that genuinely only care about one project
-   * (Studio, via `App.tsx`'s own filter). Cleared per-project on that
-   * project's own terminal event - never on another project's. */
-  byProject: Record<string, ProgressEvent>;
   /** False while the socket is down and a reconnect is pending - surfaced
    * so a dropped connection is something the user can see (Transport),
    * never something that fails silently. */
@@ -144,7 +137,6 @@ const INITIAL_STATE: EventsState = {
   finished: null,
   jobStarted: null,
   jobStep: null,
-  byProject: {},
   connected: false,
   phases: {},
 };
@@ -203,38 +195,6 @@ function foldPhases(
   return { ...previous, [id]: forProject };
 }
 
-/**
- * Fold one event into the accumulated per-project progress map.
- *
- * A progress event sets that project's entry; any of that SAME project's
- * terminal events clear it - a finished, cancelled or failed job has no
- * more progress to show. Another project's terminal event must never touch
- * this one's entry, which is the entire reason this is keyed rather than a
- * single last-write-wins field.
- */
-function foldByProject(
-  previous: EventsState["byProject"],
-  payload: { type: string } & Record<string, unknown>,
-): EventsState["byProject"] {
-  const id = typeof payload.project_id === "string" ? payload.project_id : null;
-  if (id === null) return previous;
-
-  if (payload.type === "progress") {
-    return { ...previous, [id]: payload as unknown as ProgressEvent };
-  }
-  const isTerminalForThisProject =
-    payload.type === "render_finished" ||
-    payload.type === "render_cancelled" ||
-    payload.type === "pipeline_cancelled" ||
-    payload.type === "phase_failed";
-  if (isTerminalForThisProject && id in previous) {
-    const next = { ...previous };
-    delete next[id];
-    return next;
-  }
-  return previous;
-}
-
 /** Every event replaces the prior terminal/progress state so the UI reflects
  * the most recent event, rather than accumulating stale outcomes. A progress
  * event deliberately retains its preceding phase_started association because
@@ -258,7 +218,6 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
   // piece of state that must survive the next event rather than be
   // replaced by it.
   const phases = foldPhases(previous.phases, payload);
-  const byProject = foldByProject(previous.byProject, payload);
 
   // Carried forward until a terminal event, like the phase map: the job is
   // still running while phases start and finish under it, and the status
@@ -276,7 +235,7 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
         : previous.jobStarted;
   const jobStep =
     payload.type === "job_step" ? (payload as unknown as JobStepEvent) : terminal ? null : previous.jobStep;
-  const carried = { phases, byProject, jobStarted, jobStep, connected: true };
+  const carried = { phases, jobStarted, jobStep, connected: true };
 
   switch (payload.type) {
     case "phase_started":

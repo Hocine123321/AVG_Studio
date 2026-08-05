@@ -43,10 +43,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
+from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
-from avg.core.jobs import Job, JobRegistry, max_parallel_jobs, start_next_queued
 from avg.core.model_cache import ModelCache
 from avg.core.model_prefs import ModelPrefs
 from avg.core.take_log import TakeLog, log_path_for
@@ -70,7 +70,6 @@ from avg.providers.text.router import config_from_settings
 from .deps import require_token
 from .routes_settings import router as settings_router
 from .routes_takes import router as takes_router
-from .routes_preview import router as preview_router
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
 
@@ -345,7 +344,6 @@ def create_app(
     errors_path: Path | None = None,
     model_cache_path: Path | None = None,
     model_prefs_path: Path | None = None,
-    channel_defaults_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -403,18 +401,6 @@ def create_app(
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None
-    # The suggestion run's own single slot - one text call, and two at once
-    # would just overwrite each other.
-    app.state.suggest_thread = None
-    # One preview at a time. Its own lock, deliberately not the render slot:
-    # a preview must never block a render, or be blocked by one.
-    app.state.preview_lock = threading.Lock()
-    # The app-wide defaults a channel can read instead of its own document
-    # (`settings_source`). Its own file, beside settings.json, for the same
-    # reason the error log and the model cache have theirs.
-    app.state.channel_defaults_path = (
-        Path(channel_defaults_path) if channel_defaults_path is not None else None
-    )
 
     @app.middleware("http")
     async def _record_unhandled(request: Request, call_next):
@@ -441,17 +427,19 @@ def create_app(
                 )
             raise
 
-    # Every in-flight job, keyed by project id. Replaces the three singular
-    # fields this app used to carry - `render_thread`,
-    # `rendering_project_id` and `pipeline_cancel_token` - which between
-    # them assumed there could only ever be one. All three are gone
-    # deliberately: a leftover "current job" pointer would be silently
-    # overwritten by a second job, leaving the first uncancellable.
-    app.state.jobs = JobRegistry()
-    # One render at a time, whatever the job cap says: `app.state.engine` is
-    # a single MediaEngine tracking a single child process, and two renders
-    # on one machine would contend for the same cores anyway.
-    app.state.render_lease = threading.Lock()
+    # A single background thread at a time - MediaEngine itself only ever
+    # tracks one child process (see its docstring), so a second render
+    # starting while one is alive would silently overwrite that handle and
+    # leave `cancel()` unable to reach the first one. Slice 1 renders one
+    # project at a time; this is what enforces that instead of assuming it.
+    app.state.render_thread = None
+    app.state.rendering_project_id = None
+    # Set only while a `POST /api/projects`-started full pipeline is
+    # running (never by `/render`'s MediaEngine path) - `/cancel` below
+    # pokes this in addition to `engine.cancel()` so "Cancel" works no
+    # matter which of the two job kinds is currently occupying
+    # `render_thread`.
+    app.state.pipeline_cancel_token = None
 
     # Imported exactly once, here, at construction time - not per-request,
     # and not behind an ASGI lifespan/startup event: TestClient only runs
@@ -491,13 +479,6 @@ def create_app(
         card it belongs to exists.
         """
         try:
-            # Imported here, not at module scope: `avg.config.legacy_import`
-            # transitively pulls `avg.pipeline.registry` and so every phase,
-            # provider and media module - ~0.50s measured with `-X importtime`.
-            # This scan already runs on a background thread, so that cost belongs
-            # on the thread, not on the path to the first window.
-            from avg.config.legacy_import import import_all  # noqa: PLC0415
-
             report = import_all(output_root)
             app.state.projects = {p.id: p for p in report.imported}
         except Exception:
@@ -583,15 +564,6 @@ def create_app(
         # take's files. The render one answers "base video only" versus
         # "overlays and captions baked in too" - see
         # `avg.pipeline.phases.render.render_substate`.
-        # Queue position, 1-indexed, for any project currently queued behind
-        # the job cap (Slice 16) - first started, first served, matching
-        # `avg.core.jobs.start_next_queued`'s own order. Without this the
-        # frontend has no way to distinguish "queued, waiting its turn" from
-        # "not running at all"; `GET /api/projects` is the one place already
-        # polled for every project's live state, so it is where this lives
-        # rather than a new route.
-        queue_order = [j.project_id for j in app.state.jobs.queued()]
-
         projects = []
         for project in app.state.projects.values():
             # `take_root`, not `take_folder`: take 1 of a project created
@@ -603,13 +575,11 @@ def create_app(
                 if project.current_take_id is not None
                 else Path(project.folder)
             )
-            queue_position = queue_order.index(project.id) + 1 if project.id in queue_order else None
             projects.append(
                 {
                     **project.model_dump(mode="json"),
                     "script_substate": script_substate(root / "script"),
                     "render_substate": render_substate(root),
-                    "queue_position": queue_position,
                 }
             )
         return {
@@ -661,12 +631,12 @@ def create_app(
         log's lifetime, the failure recording, the take's `master_output`
         hand-off, and the `finally` that frees the job slot.
 
-        The caller has already checked `app.state.jobs.is_running(project.id)`
-        and answered 409 for that project; this does not re-check, because
-        both callers hold the event loop between that check and here, so
-        nothing else can take that project's slot in between.
+        The caller has already checked `app.state.render_thread` and answered
+        409; this does not re-check, because both callers hold the event loop
+        between that check and here, so nothing else can take the slot.
         """
         cancel_token = CancellationToken()
+        app.state.pipeline_cancel_token = cancel_token
 
         # One run log for this job, on the take the run belongs to. Built here
         # rather than inside the worker so the route can fail loudly if the
@@ -749,7 +719,6 @@ def create_app(
                     on_phase_change=lambda: save_project(project),
                     log=take_log,
                     errors=app.state.error_store,
-                    render_lease=app.state.render_lease,
                 ):
                     _log(event)
                     _emit(event)
@@ -784,23 +753,14 @@ def create_app(
                     take.master_output = project.master_output
                 with suppress(Exception):
                     save_project(project)
-                app.state.jobs.remove(project.id)
-                start_next_queued(app.state)
+                app.state.render_thread = None
+                app.state.rendering_project_id = None
+                app.state.pipeline_cancel_token = None
 
-        cap = max_parallel_jobs(app.state.settings_path)
-        at_capacity = app.state.jobs.count_running() >= cap
+        app.state.rendering_project_id = project.id
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-pipeline-{project.id}")
-        app.state.jobs.add(
-            Job(
-                project_id=project.id,
-                kind="pipeline",
-                thread=thread,
-                cancel_token=cancel_token,
-                queued=at_capacity,
-            )
-        )
-        if not at_capacity:
-            thread.start()
+        app.state.render_thread = thread
+        thread.start()
 
     @app.post("/api/projects", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_token)])
     async def create_project(body: ProjectCreate) -> ProjectDoc:
@@ -864,9 +824,15 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-        # No same-project guard here: `project` does not exist yet, so it can
-        # never already be running. Capacity is handled inside
-        # `_start_pipeline_job` below, which queues rather than refuses.
+        # The same one-job-at-a-time guard `start_render` enforces below -
+        # a full pipeline run and a `/render` MediaEngine run share the one
+        # `render_thread` slot, never a second job mechanism.
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"a pipeline is already running for project {app.state.rendering_project_id!r}",
+            )
+
         project = new_project(topic, effective_channel, app.state.output_root)
         app.state.projects[project.id] = project
 
@@ -914,10 +880,10 @@ def create_app(
                 detail=f"unknown phase {body.from_phase!r}",
             )
 
-        if app.state.jobs.is_running(project.id):
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"project {project.id!r} is already running",
+                detail=f"a job is already running for project {app.state.rendering_project_id!r}",
             )
 
         # Resolved the same way `POST /api/projects` does it - id first, then
@@ -977,8 +943,6 @@ def create_app(
         # create_app does at startup - so "Start" works immediately and
         # never requires relaunching the app to see the chosen library.
         app.state.output_root = root
-        from avg.config.legacy_import import import_all  # noqa: PLC0415 - see the scan worker
-
         report = import_all(root)
         app.state.projects = {p.id: p for p in report.imported}
         app.state.storage_bytes = _library_bytes(app.state.projects.values())
@@ -993,8 +957,6 @@ def create_app(
         # path that doesn't exist yet (import_all does) rather than 404ing,
         # since a not-yet-created folder is a perfectly valid choice (it
         # will be created on accept, see POST /api/settings above).
-        from avg.config.legacy_import import import_all  # noqa: PLC0415 - see the scan worker
-
         count = len(import_all(Path(path).expanduser()).imported)
         return {"project_count": count}
 
@@ -1008,10 +970,10 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
-        if app.state.jobs.is_running(project.id):
+        if app.state.render_thread is not None and app.state.render_thread.is_alive():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"project {project.id!r} is already running",
+                detail=f"a render is already running for project {app.state.rendering_project_id!r}",
             )
 
         # The active channel's render_threads, when a channel is active -
@@ -1085,8 +1047,8 @@ def create_app(
                 take_log.info("job finished")
                 take_log.close()
                 transport_mod.CURRENT_TAKE_LOG = None
-                app.state.jobs.remove(project_id)
-                start_next_queued(app.state)
+                app.state.render_thread = None
+                app.state.rendering_project_id = None
 
         def _log_stderr(text: str) -> None:
             """The vendored engine's own diagnosis, straight onto the log.
@@ -1105,51 +1067,33 @@ def create_app(
             # when it ends in PhaseFailed or RenderCancelled rather than
             # RenderFinished. Nobody else consumes this generator, so if this
             # loop stopped early the child would never be joined.
-            #
-            # One render at a time. Everything before Render overlaps
-            # freely (Slice 16's job cap); here the jobs line up. Held
-            # across the WHOLE drain, never released early - releasing it
-            # before the generator finishes is how a second child would be
-            # spawned while the first was still being joined.
-            if app.state.render_lease.locked():
+            for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
                 with suppress(Exception):
-                    take_log.event(
-                        ProgressEvent(
-                            project_id=project_id, percent=0, message="Waiting for another render to finish..."
-                        ).model_dump(mode="json")
-                    )
-            with app.state.render_lease:
-                for event in app.state.engine.render(req, project_id, on_stderr=_log_stderr):
+                    take_log.event(event.model_dump(mode="json"))
+                if isinstance(event, PhaseFailed):
                     with suppress(Exception):
-                        take_log.event(event.model_dump(mode="json"))
-                    if isinstance(event, PhaseFailed):
-                        with suppress(Exception):
-                            app.state.error_store.record(
-                                # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()`
-                                # gives "ErrorKind.bug" and `classify` matches none of its
-                                # names - which silently filed every failure as `low`.
-                                severity=classify(kind=event.kind.value, status=None, source="pipeline"),
-                                source="pipeline",
-                                summary=f"render failed: {event.message}",
-                                detail=event.detail or "",
-                                context={"project_id": project_id, "phase": "render"},
-                            )
-                    # Both the broadcast and the cached-project update are
-                    # suppressed: neither may abort this `for` loop early, because
-                    # that would skip the rest of the drain and leave the child
-                    # process unjoined.
-                    _emit(event)
-                    with suppress(Exception):
-                        _apply_terminal_event(app.state.projects.get(project_id), event)
+                        app.state.error_store.record(
+                            # `.value`, not `str()`: ErrorKind is a str-Enum, so `str()` gives
+                        # "ErrorKind.bug" and `classify` matches none of its
+                        # names - which silently filed every failure as `low`.
+                        severity=classify(kind=event.kind.value, status=None, source="pipeline"),
+                            source="pipeline",
+                            summary=f"render failed: {event.message}",
+                            detail=event.detail or "",
+                            context={"project_id": project_id, "phase": "render"},
+                        )
+                # Both the broadcast and the cached-project update are
+                # suppressed: neither may abort this `for` loop early, because
+                # that would skip the rest of the drain and leave the child
+                # process unjoined.
+                _emit(event)
+                with suppress(Exception):
+                    _apply_terminal_event(app.state.projects.get(project_id), event)
 
-        cap = max_parallel_jobs(app.state.settings_path)
-        at_capacity = app.state.jobs.count_running() >= cap
+        app.state.rendering_project_id = project_id
         thread = threading.Thread(target=_worker, daemon=True, name=f"avg-render-{project_id}")
-        app.state.jobs.add(
-            Job(project_id=project_id, kind="render", thread=thread, cancel_token=None, queued=at_capacity)
-        )
-        if not at_capacity:
-            thread.start()
+        app.state.render_thread = thread
+        thread.start()
         return {"started": True}
 
     @app.post("/api/projects/{project_id}/cancel", dependencies=[Depends(require_token)])
@@ -1157,14 +1101,13 @@ def create_app(
         if project_id not in _library():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
         app.state.engine.cancel()
-        # Best-effort for a full-pipeline run too - a no-op if this project's
-        # job is currently a `/render` MediaEngine job instead (which has no
-        # cancel token of its own), or nothing at all. The runner only checks
-        # this BETWEEN phases (see `avg.pipeline.runner.run`'s docstring), so
-        # this stops the run at the next phase boundary, not mid-phase.
-        job = app.state.jobs.get(project_id)
-        if job is not None and job.cancel_token is not None:
-            job.cancel_token.cancel()
+        # Best-effort for a full-pipeline run too - a no-op if `render_thread`
+        # is currently a `/render` MediaEngine job instead (or nothing at
+        # all). The runner only checks this BETWEEN phases (see
+        # `avg.pipeline.runner.run`'s docstring), so this stops the run at
+        # the next phase boundary, not mid-phase.
+        if app.state.pipeline_cancel_token is not None:
+            app.state.pipeline_cancel_token.cancel()
         return {"cancelled": True}
 
     @app.get("/api/projects/{project_id}/thumbnail", dependencies=[Depends(require_token)])
@@ -1283,10 +1226,6 @@ def create_app(
     # The takes surface (Slice 5, Task 3) - same reasoning as settings_router
     # above: a separate router kept thin, included before the static mount.
     app.include_router(takes_router)
-
-    # Preview routes (Slice 14) - same reasoning: a separate router kept
-    # thin, included before the static mount.
-    app.include_router(preview_router)
 
     # Serves the built UI. Mounted last and at "/" deliberately: FastAPI
     # matches routes in registration order, so the exact-path routes above

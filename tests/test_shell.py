@@ -43,23 +43,3 @@ def test_the_shell_does_not_import_the_server_at_module_scope():
     assert not hasattr(shell, "create_app")
     assert not hasattr(shell, "load_settings")
     assert "avg.shell" in sys.modules
-
-
-def test_startup_check_defaults_to_on_and_can_be_turned_off():
-    """A setting the UI saves and nothing reads is the mistake
-    `settings_schema.py` records three of. This is the reader."""
-    from avg.shell import should_check_at_startup
-
-    assert should_check_at_startup({}) is True
-    assert should_check_at_startup({"startup_check": True}) is True
-    assert should_check_at_startup({"startup_check": False}) is False
-    # A junk value is not a reason to skip a health check.
-    assert should_check_at_startup({"startup_check": "yes please"}) is True
-
-
-def test_reading_the_setting_needs_no_server_and_no_app():
-    """Same property the splash has: this runs on the boot path before the
-    server exists, so it must not need one."""
-    from avg.shell import should_check_at_startup
-
-    assert should_check_at_startup({"startup_check": False}) is False

@@ -143,13 +143,6 @@ class _SceneResult:
     ok: bool
     file: str | None = None
     error: str = ""
-    #: The classification the provider's own error already carried. Kept
-    #: beside the message because the message alone cannot tell a 403 from
-    #: a timeout, and the phase-level failure is built from these - see
-    #: `_dominant_kind`. `None` means the failure never reached the error
-    #: taxonomy at all (a provider raising something that is not an
-    #: `AvgError`), which is the one case that really is a bug.
-    kind: ErrorKind | None = None
 
 
 def _generate_one(
@@ -167,50 +160,9 @@ def _generate_one(
         out_path.write_bytes(data)
         return _SceneResult(scene=scene, ok=True, file=out_path.name)
     except AvgError as exc:
-        return _SceneResult(scene=scene, ok=False, error=exc.message, kind=exc.kind)
+        return _SceneResult(scene=scene, ok=False, error=exc.message)
     except Exception as exc:  # noqa: BLE001 - a provider bug must not sink the whole phase
-        return _SceneResult(scene=scene, ok=False, error=str(exc), kind=None)
-
-
-def _dominant_kind(results: dict[int, _SceneResult]) -> ErrorKind:
-    """The classification that best explains why nothing was produced.
-
-    Most frequent wins. Ties break by `avg.providers.errors._CHECK_ORDER`,
-    which already encodes which classification is the more actionable claim
-    when a failure could be read two ways - no second ordering is invented
-    here. Falls back to `bug` when nothing was classified at all, which is
-    the one case where "bug" is the honest answer.
-    """
-    from avg.providers.errors import _CHECK_ORDER  # noqa: PLC0415 - avoids an import cycle
-
-    counts: dict[ErrorKind, int] = {}
-    for result in results.values():
-        if result.ok or result.kind is None:
-            continue
-        counts[result.kind] = counts.get(result.kind, 0) + 1
-    if not counts:
-        return ErrorKind.bug
-
-    def rank(kind: ErrorKind) -> int:
-        return _CHECK_ORDER.index(kind) if kind in _CHECK_ORDER else len(_CHECK_ORDER)
-
-    return min(counts, key=lambda kind: (-counts[kind], rank(kind)))
-
-
-def _should_fall_back(kind: ErrorKind) -> bool:
-    """Whether a different provider could plausibly survive this failure.
-
-    Consults `POLICY` and nothing else - no status code, no error string -
-    exactly as `avg/providers/text/router.py` does for text. A kind marked
-    `on_exhausted="fail"` (content_filter, bug, dependency) would fail the
-    same way on any provider, so falling back would spend money for nothing.
-    """
-    from avg.providers.errors import POLICY  # noqa: PLC0415 - avoids an import cycle
-
-    rule = POLICY.get(kind)
-    if rule is None:
-        return False
-    return rule.on_exhausted in {"switch_key", "switch_provider", "switch_model"}
+        return _SceneResult(scene=scene, ok=False, error=str(exc))
 
 
 def index_entries(results: dict[int, _SceneResult], total: int) -> list[str]:
@@ -253,9 +205,6 @@ class VisualsPhase:
     id: int = 3
     key: str = "visuals"
     name: str = "Visuals"
-    description: str = (
-        "Generates one image per scene with the configured image provider. Writes images/ and images/manifest.json."
-    )
 
     def inputs_ready(self, ctx: PhaseContext) -> bool:
         return _scenes_json_path(ctx).exists()
@@ -292,62 +241,30 @@ class VisualsPhase:
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {total} image(s)..."))
 
-        def _generate_all(prov: ImageProvider, prov_name: str, mdl: str) -> dict[int, _SceneResult]:
-            """One full pass over every scene with one provider."""
-            out: dict[int, _SceneResult] = {}
-            done = 0
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(_generate_one, prov, prompt, aspect_ratio, mdl, i, images_dir / f"{i:03d}.png"): i
-                    for i, prompt in jobs
-                }
-                for future in as_completed(futures):
-                    result = future.result()
-                    out[result.scene] = result
-                    done += 1
-                    percent = int(done / total * 100)
-                    status = "ok" if result.ok else f"failed ({result.error})"
-                    ctx.emit(
-                        ProgressEvent(
-                            project_id=ctx.project.id,
-                            percent=percent,
-                            message=f"Scene {result.scene}/{total}: {status}",
-                        )
-                    )
-            return out
-
-        results = _generate_all(provider, provider_name, model)
-
-        if not any(r.ok for r in results.values()):
-            # Exactly once, never chained - the same rule the text router
-            # inherited from the legacy `$triedFallback` flag.
-            backup_provider = str(settings.get("image_provider_backup") or "")
-            backup_model = str(settings.get("image_model_backup") or "")
-            on_failure = str(settings.get("image_on_failure") or "stop")
-            kind = _dominant_kind(results)
-            if on_failure == "fall_back" and backup_provider and backup_model and _should_fall_back(kind):
+        results: dict[int, _SceneResult] = {}
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_generate_one, provider, prompt, aspect_ratio, model, i, images_dir / f"{i:03d}.png"): i
+                for i, prompt in jobs
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                results[result.scene] = result
+                done += 1
+                percent = int(done / total * 100)
+                status = "ok" if result.ok else f"failed ({result.error})"
                 ctx.emit(
                     ProgressEvent(
                         project_id=ctx.project.id,
-                        percent=0,
-                        message=f"Falling back to {backup_provider}/{backup_model}...",
+                        percent=percent,
+                        message=f"Scene {result.scene}/{total}: {status}",
                     )
                 )
-                provider_name, model = backup_provider, backup_model
-                results = _generate_all(_build_provider(backup_provider, transport), backup_provider, backup_model)
 
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
-            # The reasons were on every `_SceneResult` all along; raising a
-            # bare `bug` here is what threw them away and left the take log
-            # reading `kind=bug detail=` for a plain missing API key.
-            kind = _dominant_kind(results)
-            reasons = sorted({r.error for r in results.values() if not r.ok and r.error})
-            detail = reasons[0] if reasons else "no reason reported"
-            raise AvgError(
-                kind,
-                f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}",
-            )
+            raise AvgError(ErrorKind.bug, "visuals phase: every scene failed to generate an image")
         if ok_count < total:
             # A partial set of images is a finished phase with a worse video:
             # the missing scenes repeat their neighbour's image (see
