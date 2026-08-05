@@ -90,7 +90,15 @@ catches it.
 ### Config scopes (no merge layer)
 
 - `scope="app"` settings live in `SettingsDoc.values` (`%APPDATA%/AVG Studio/settings.json`).
-- `scope="channel"` settings live in the **active channel's** document, full stop. No global copy, no apply/capture step, no absent-means-inherit. Three bugs in the legacy app came from the copy mechanism this deletes.
+- `scope="channel"` settings live in the **active channel's** document, or —
+  when that channel's `settings_source` is `"global"` — in the app-wide
+  `channel_defaults.json`, **whole**. Never both: no field is ever resolved
+  by looking in one and falling back to the other, and there is no
+  absent-means-inherit. Three bugs in the legacy app came from per-field
+  implicit inheritance, which this shape has no room for. `settings_source`
+  itself is always read from the channel's own document. Porting a channel's
+  values into the defaults is one explicit, user-pressed snapshot
+  (`POST /api/settings/port-to-global`), never a live copy.
 - `type="secret"` values never travel through the **settings surface**: `/api/settings/values` refuses them, `SettingsDoc.values` never holds one, and `GET /api/keys` reports only *whether* a provider has a key. `avg/config/secrets.py` is the only module that encrypts, decrypts or persists them (DPAPI, `CryptProtectData`).
   This is a boundary on the *config and API surface*, not a ban on reading a key. `get_key()` is `secrets.py`'s public API and exists precisely so a provider can sign its request — every backend under `avg/providers/` calls it, by design. What must never happen is a key reaching a log line, an exception message, a `repr()`, a settings response, or a recorded HTTP fixture (`transport.py` scrubs those before writing).
 

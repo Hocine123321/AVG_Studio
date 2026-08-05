@@ -20,6 +20,7 @@ def paths(tmp_path):
         "secrets_path": tmp_path / "secrets.dat",
         "output_root": tmp_path / "output",
         "thumb_cache_dir": tmp_path / "thumbs",
+        "channel_defaults_path": tmp_path / "channel_defaults.json",
     }
 
 
@@ -32,6 +33,7 @@ def client(paths):
         settings_path=paths["settings_path"],
         channels_dir=paths["channels_dir"],
         secrets_path=paths["secrets_path"],
+        channel_defaults_path=paths["channel_defaults_path"],
     )
     return TestClient(app)
 
@@ -473,3 +475,99 @@ def test_every_phase_describes_itself(client):
 
 def test_the_phases_route_requires_a_token(client):
     assert client.get("/api/phases").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# settings_source: a channel reads its own document, or the app-wide one
+#
+# The rule this whole block guards: `settings_source` is itself ALWAYS read
+# from the channel's own document (or a channel switched to "global" could
+# never switch back), and it governs where every OTHER channel-scope
+# setting is read from - a field absent from whichever document is selected
+# resolves to the SettingSpec's own default and never to the other document.
+# That is what keeps this from becoming the per-field, implicit-inheritance
+# mechanism CLAUDE.md's Config scopes rule deletes.
+
+
+def _make_channel(client, label="Docs"):
+    created = client.post("/api/channels", json={"label": label}, headers=AUTH).json()
+    client.post(f"/api/channels/{created['id']}/activate", headers=AUTH)
+    return created["id"]
+
+
+def test_a_channel_reads_its_own_document_by_default(client):
+    _make_channel(client)
+    client.post("/api/settings/values", json={"values": {"length_preset": "30s"}}, headers=AUTH)
+    body = client.get("/api/settings/values", headers=AUTH).json()
+    assert body["channel"]["length_preset"] == "30s"
+    assert body["channel"]["settings_source"] == "channel"
+
+
+def test_switching_to_global_reads_the_defaults_document(client):
+    from avg.config.channel_defaults import save_defaults
+
+    _make_channel(client)
+    client.post("/api/settings/values", json={"values": {"length_preset": "30s"}}, headers=AUTH)
+    save_defaults({"length_preset": "90s"}, client.app.state.channel_defaults_path)
+
+    client.post("/api/settings/values", json={"values": {"settings_source": "global"}}, headers=AUTH)
+
+    body = client.get("/api/settings/values", headers=AUTH).json()
+    assert body["channel"]["length_preset"] == "90s"
+    # The switch itself is ALWAYS read from the channel's own document -
+    # otherwise a channel on "global" could never be switched back.
+    assert body["channel"]["settings_source"] == "global"
+
+
+def test_switching_back_returns_the_channels_own_value_unchanged(client):
+    """The round trip must not write through. A channel's own value has to
+    survive a visit to the global document untouched."""
+    from avg.config.channel_defaults import save_defaults
+
+    _make_channel(client)
+    client.post("/api/settings/values", json={"values": {"length_preset": "30s"}}, headers=AUTH)
+    save_defaults({"length_preset": "90s"}, client.app.state.channel_defaults_path)
+
+    client.post("/api/settings/values", json={"values": {"settings_source": "global"}}, headers=AUTH)
+    client.post("/api/settings/values", json={"values": {"settings_source": "channel"}}, headers=AUTH)
+
+    assert client.get("/api/settings/values", headers=AUTH).json()["channel"]["length_preset"] == "30s"
+
+
+def test_a_field_absent_from_the_selected_document_never_falls_back(client):
+    """The one assertion that guards CLAUDE.md's deleted mechanism. On
+    `global`, a field the defaults document does not hold resolves to the
+    SettingSpec default - NOT to the channel's own value."""
+    from avg.config.channel_defaults import save_defaults
+    from avg.core.settings_schema import BY_ID
+
+    _make_channel(client)
+    client.post("/api/settings/values", json={"values": {"length_preset": "30s"}}, headers=AUTH)
+    save_defaults({}, client.app.state.channel_defaults_path)
+    client.post("/api/settings/values", json={"values": {"settings_source": "global"}}, headers=AUTH)
+
+    resolved = client.get("/api/settings/values", headers=AUTH).json()["channel"]["length_preset"]
+    assert resolved == BY_ID["length_preset"].default
+    assert resolved != "30s"
+
+
+def test_porting_copies_channel_values_and_no_secret(client):
+    from avg.config.channel_defaults import load_defaults
+
+    _make_channel(client)
+    client.post("/api/settings/values", json={"values": {"length_preset": "30s"}}, headers=AUTH)
+    client.post("/api/keys/groq", json={"key": "sk-should-never-be-copied"}, headers=AUTH)
+
+    res = client.post("/api/settings/port-to-global", headers=AUTH)
+    assert res.status_code == 200
+
+    stored = load_defaults(client.app.state.channel_defaults_path)
+    assert stored["length_preset"] == "30s"
+    assert "groq" not in stored
+    assert "sk-should-never-be-copied" not in str(stored)
+    # App-scope settings belong to the app, not to a channel snapshot.
+    assert "theme" not in stored
+
+
+def test_porting_without_an_active_channel_is_refused(client):
+    assert client.post("/api/settings/port-to-global", headers=AUTH).status_code == 400
