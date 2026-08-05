@@ -37,6 +37,20 @@ const PROVIDER_FIELD: Record<LiveKind, string | null> = {
   voice: "voice_provider",
 };
 
+/** Per-setting-id override for `PROVIDER_FIELD`, consulted first.
+ *
+ * `image_model_backup` is not a model for `image_provider` - it is a model
+ * for `image_provider_backup`. Falling through to `PROVIDER_FIELD["image"]`
+ * (the only entry that map has) filtered the backup model picker by the
+ * PRIMARY provider, so the only case `image_model_backup` exists to serve -
+ * a backup on a different provider than the primary - offered the wrong
+ * list and captioned the "nothing ticked" fallback with the wrong provider
+ * name too.
+ */
+const PROVIDER_FIELD_BY_ID: Record<string, string> = {
+  image_model_backup: "image_provider_backup",
+};
+
 function kindOf(source: string | null | undefined): LiveKind {
   if (source === "live_list:image") return "image";
   if (source === "live_list:voice") return "voice";
@@ -56,7 +70,7 @@ export default function ModelPicker({ spec, ctx, disabled }: FieldProps) {
   }, []);
 
   const kind = kindOf(spec.source);
-  const providerField = PROVIDER_FIELD[kind];
+  const providerField = PROVIDER_FIELD_BY_ID[spec.id] ?? PROVIDER_FIELD[kind];
   const provider = providerField ? ctx.valueById(providerField) : null;
 
   const entries: LiveEntry[] = (live?.[kind] ?? []).filter((entry) => {

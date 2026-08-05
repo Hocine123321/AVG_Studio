@@ -47,6 +47,27 @@ function sourceClass(source: LiveEntry["source"]): string {
   return "chip";
 }
 
+// `Intl.DisplayNames` ships in WebView2 (Chromium-based), so this needs no
+// dependency. Falls back to the raw subtag on any failure - an unfamiliar
+// or malformed code (this app never controls what Edge/ElevenLabs advertise)
+// is still a usable filter option, just an unfriendly one, rather than a
+// crash on this screen.
+const languageDisplayNames = (() => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" });
+  } catch {
+    return null;
+  }
+})();
+
+function languageLabel(subtag: string): string {
+  try {
+    return languageDisplayNames?.of(subtag) ?? subtag;
+  } catch {
+    return subtag;
+  }
+}
+
 export default function LiveList({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<LiveListResponse | null>(null);
   const [kind, setKind] = useState<LiveKind>("text");
@@ -255,7 +276,7 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
               <Select
                 value={locale}
                 ariaLabel="Filter by language"
-                options={locales.map((l) => ({ value: l, label: l === "all" ? "Any" : l }))}
+                options={locales.map((l) => ({ value: l, label: l === "all" ? "Any" : languageLabel(l) }))}
                 onChange={setLocale}
               />
             </div>

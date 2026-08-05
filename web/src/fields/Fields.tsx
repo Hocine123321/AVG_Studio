@@ -49,10 +49,18 @@ export function BoolField({ spec, ctx, disabled }: FieldProps) {
  * warm, rounded interface. See `Select.tsx`. */
 export function ChoiceField({ spec, ctx, disabled }: FieldProps) {
   const value = String(ctx.getValue(spec) ?? "");
+  // A bare "" in `choices` (e.g. `image_provider_backup`'s "leave unset to
+  // never fall back") is `Select`'s only empty-string option in the whole
+  // catalogue. Left as a raw string it normalises to an unlabelled blank
+  // row and a blank closed trigger - "no backup" reads as a broken control,
+  // not a deliberate choice. `ModelPicker.tsx` already labels its own ""
+  // entry "Not set"; give every choice field the same treatment here rather
+  // than changing the schema.
+  const options = (spec.choices ?? []).map((choice) => (choice === "" ? { value: "", label: "Not set" } : choice));
   return (
     <Select
       value={value}
-      options={spec.choices ?? []}
+      options={options}
       disabled={disabled}
       ariaLabel={spec.label}
       onChange={(next) => ctx.onCommit(spec, next)}
