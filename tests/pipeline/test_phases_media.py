@@ -761,3 +761,109 @@ def test_a_failure_a_second_provider_would_repeat_never_falls_back():
     assert _should_fall_back(ErrorKind.content_filter) is False
     assert _should_fall_back(ErrorKind.bug) is False
     assert _should_fall_back(ErrorKind.dependency) is False
+
+
+# ── the cross-provider fallback actually wired into run() ──────────────────
+#
+# `_should_fall_back`'s own unit tests above only prove the four-line
+# `POLICY` lookup. Nothing until here exercises the behaviour Slice 11 §3.2
+# is named for: that `run()` actually calls the backup when every scene
+# fails on the primary, that it does so exactly once - never chained into a
+# third pass - and that the raised error and the written manifest both name
+# the provider that actually produced (or failed to produce) the images.
+
+
+def _fallback_settings(**overrides: Any) -> dict[str, Any]:
+    settings: dict[str, Any] = {
+        "image_provider": "primary",
+        "image_model": "primary-model",
+        "image_provider_backup": "backup",
+        "image_model_backup": "backup-model",
+        "image_on_failure": "fall_back",
+    }
+    settings.update(overrides)
+    return settings
+
+
+def test_the_backup_runs_once_when_the_primary_fails_every_scene(tmp_path, monkeypatch):
+    primary = _FakeImageProvider(fail_prompts=frozenset({"prompt one", "prompt two"}))
+    backup = _FakeImageProvider()
+    providers = {"primary": primary, "backup": backup}
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda name, transport: providers[name],
+    )
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel(_fallback_settings()))
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    VisualsPhase().run(ctx)  # must NOT raise - the backup produced everything
+
+    # Every scene was attempted on both providers - one full pass each,
+    # never a third.
+    assert len(primary.calls) == 2
+    assert len(backup.calls) == 2
+
+    images_dir = project.folder / "images"
+    assert (images_dir / "001.png").exists()
+    assert (images_dir / "002.png").exists()
+
+    manifest = read_json(images_dir / "manifest.json")
+    assert manifest["provider"] == "backup"
+    assert manifest["model"] == "backup-model"
+    assert all(s["status"] == "ok" for s in manifest["scenes"])
+
+
+def test_the_backup_is_never_chained_when_it_also_fails(tmp_path, monkeypatch):
+    primary = _FakeImageProvider(fail_prompts=frozenset({"prompt one", "prompt two"}))
+    backup = _FakeImageProvider(fail_prompts=frozenset({"prompt one", "prompt two"}))
+    providers = {"primary": primary, "backup": backup}
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda name, transport: providers[name],
+    )
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel(_fallback_settings()))
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    with pytest.raises(AvgError) as excinfo:
+        VisualsPhase().run(ctx)
+
+    # Exactly two passes total - one per provider - never a third attempt
+    # on either one. This is the money-safety property: a bug that re-tried
+    # the backup, or bounced back to the primary, would double the spend on
+    # a run that was always going to fail.
+    assert len(primary.calls) == 2
+    assert len(backup.calls) == 2
+
+    # The raised detail names the provider that produced the FINAL result
+    # (the backup) and still records that the primary failed too, so the
+    # take log does not lose the first failure's reason just because a
+    # second one happened.
+    assert "backup" in excinfo.value.message
+    assert "primary" in excinfo.value.message
+    assert not (project.folder / "images" / "manifest.json").exists()
+
+
+def test_the_fallback_is_skipped_when_the_backup_names_the_same_provider(tmp_path, monkeypatch):
+    """A backup configured identically to the primary would spend a whole
+    second pass to fail (or succeed) the same way. The guard treats that
+    configuration the same as no backup at all."""
+    primary = _FakeImageProvider(fail_prompts=frozenset({"prompt one"}))
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda name, transport: primary,
+    )
+
+    project = _project(tmp_path)
+    settings = _fallback_settings(image_provider_backup="primary", image_model_backup="primary-model")
+    ctx, _events = _ctx(project, channel=_channel(settings))
+    _write_scenes(ctx, ["prompt one"])
+
+    with pytest.raises(AvgError):
+        VisualsPhase().run(ctx)
+
+    # Only the one pass over the one scene - no second attempt at all.
+    assert len(primary.calls) == 1

@@ -297,7 +297,7 @@ class VisualsPhase:
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {total} image(s)..."))
 
-        def _generate_all(prov: ImageProvider, prov_name: str, mdl: str) -> dict[int, _SceneResult]:
+        def _generate_all(prov: ImageProvider, mdl: str) -> dict[int, _SceneResult]:
             """One full pass over every scene with one provider."""
             out: dict[int, _SceneResult] = {}
             done = 0
@@ -321,8 +321,11 @@ class VisualsPhase:
                     )
             return out
 
-        results = _generate_all(provider, provider_name, model)
+        results = _generate_all(provider, model)
 
+        primary_provider_name = provider_name
+        primary_kind_label = ""
+        fell_back = False
         if not any(r.ok for r in results.values()):
             # Exactly once, never chained - the same rule the text router
             # inherited from the legacy `$triedFallback` flag.
@@ -330,7 +333,13 @@ class VisualsPhase:
             backup_model = str(settings.get("image_model_backup") or "")
             on_failure = str(settings.get("image_on_failure") or "stop")
             kind = _dominant_kind(results)
-            if on_failure == "fall_back" and backup_provider and backup_model and _should_fall_back(kind):
+            if (
+                on_failure == "fall_back"
+                and backup_provider
+                and backup_model
+                and backup_provider != provider_name
+                and _should_fall_back(kind)
+            ):
                 ctx.emit(
                     ProgressEvent(
                         project_id=ctx.project.id,
@@ -338,8 +347,10 @@ class VisualsPhase:
                         message=f"Falling back to {backup_provider}/{backup_model}...",
                     )
                 )
+                primary_kind_label = kind.value
+                fell_back = True
                 provider_name, model = backup_provider, backup_model
-                results = _generate_all(_build_provider(backup_provider, transport), backup_provider, backup_model)
+                results = _generate_all(_build_provider(backup_provider, transport), backup_model)
 
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
@@ -349,10 +360,16 @@ class VisualsPhase:
             kind = _dominant_kind(results)
             reasons = sorted({r.error for r in results.values() if not r.ok and r.error})
             detail = reasons[0] if reasons else "no reason reported"
-            raise AvgError(
-                kind,
-                f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}",
-            )
+            message = f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}"
+            if fell_back:
+                # The primary's own reason would otherwise survive only in
+                # `ProgressEvent`s - visible while the run is live, gone from
+                # the take log the moment it finishes. A slice whose whole
+                # point is a truthful failure message cannot let the record
+                # of the FIRST failure disappear just because a second one
+                # also happened.
+                message += f" (primary {primary_provider_name} also failed - {primary_kind_label})"
+            raise AvgError(kind, message)
         if ok_count < total:
             # A partial set of images is a finished phase with a worse video:
             # the missing scenes repeat their neighbour's image (see
