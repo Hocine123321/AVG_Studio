@@ -734,12 +734,15 @@ async def delete_live_entry(kind: str, entry_id: str, request: Request) -> dict:
 
 
 @router.get("/api/health/report")
-async def get_health_report(request: Request, refresh: bool = False) -> dict:
-    """The three-stage startup report behind the App Health screen.
+async def get_health_report(request: Request, refresh: bool = False, deep: bool = False) -> dict:
+    """The startup report behind the App Health screen: three stages always,
+    a fourth ("deep") only when `deep=true` is passed.
 
     Dependency check -> App warmup -> Safeguards, in that order, because
     each stage assumes the one before it passed and "which stage failed" is
-    the whole diagnosis when a launch goes wrong.
+    the whole diagnosis when a launch goes wrong. Deep Check is opt-in
+    because it spends real disk and an ffmpeg subprocess - it must never run
+    merely because the App Health screen was opened.
 
     Paths come from `app.state`, never resolved inside `avg.core.health`, so
     a test's isolated tmp_path is what gets checked rather than the real
@@ -751,6 +754,7 @@ async def get_health_report(request: Request, refresh: bool = False) -> dict:
         settings_path=app_state.settings_path,
         channels_dir=app_state.channels_dir,
         output_root=app_state.output_root,
+        deep=deep,
     )
     return {
         "ok": all(stage.ok for stage in stages),

@@ -360,19 +360,107 @@ def _safeguard_checks(output_root: Path | None) -> list[Component]:
     return checks
 
 
+def _deep_checks(*, settings_path: Path | None, output_root: Path | None) -> list[Component]:
+    """Stage 4: does it actually work, rather than is it merely present.
+
+    Every check here DOES the thing and undoes it. This is deliberately not
+    the pytest suite: `tools/build.py` ships neither `tests/` nor pytest, so
+    a check defined as "run the suite" would be absent from every installed
+    copy - which is exactly where a user most needs a diagnostic. These run
+    identically in a dev checkout and a packaged build.
+
+    No provider is called and nothing is generated, so this costs nothing
+    and cannot spend money. Every failure is a red row, never an exception.
+    """
+    checks: list[Component] = []
+
+    # Settings round-trip: write, reload, compare, discard. Uses a temp file
+    # rather than the real document - a diagnostic must not be able to
+    # corrupt the thing it is diagnosing.
+    try:
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / "settings.json"
+            probe.write_text(json.dumps({"schema_version": 1, "values": {"theme": "day"}}), encoding="utf-8")
+            reloaded = json.loads(probe.read_text(encoding="utf-8"))
+        ok = reloaded["values"]["theme"] == "day"
+        checks.append(Component(name="Settings round-trip", ok=ok, detail="written and read back"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Component(name="Settings round-trip", ok=False, detail=str(exc)))
+
+    # Secret round-trip: DPAPI encrypt then decrypt a throwaway string.
+    # Never touches a stored key, and the value below is not a credential.
+    try:
+        from avg.config.secrets import _protect, _unprotect  # noqa: PLC0415
+
+        # `_protect`/`_unprotect` take and return BYTES and each return None
+        # on a DPAPI failure rather than raising - so the None checks below
+        # are the real failure path, not defensive padding.
+        sealed = _protect(b"avg-deep-check")
+        opened = _unprotect(sealed) if sealed is not None else None
+        ok = opened == b"avg-deep-check"
+        detail = "DPAPI sealed and opened a throwaway value" if ok else "DPAPI did not round-trip"
+        checks.append(Component(name="Secret round-trip", ok=ok, detail=detail))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Component(name="Secret round-trip", ok=False, detail=str(exc)))
+
+    # Output folder: create and delete a real file where renders land.
+    if output_root is not None:
+        try:
+            output_root.mkdir(parents=True, exist_ok=True)
+            probe_file = output_root / ".avg-deep-check"
+            probe_file.write_text("ok", encoding="utf-8")
+            probe_file.unlink()
+            checks.append(Component(name="Output folder write", ok=True, detail=str(output_root)))
+        except Exception as exc:  # noqa: BLE001
+            checks.append(Component(name="Output folder write", ok=False, detail=str(exc)))
+
+    # FFmpeg encode: a one-second colour clip, produced and thrown away.
+    # This is the only check that costs real time, and it is the one that
+    # proves the render path rather than describing it.
+    try:
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "probe.mp4"
+            result = subprocess.run(
+                [
+                    ffmpeg_exe(), "-y", "-f", "lavfi",
+                    "-i", "color=c=black:s=128x128:d=1",
+                    "-pix_fmt", "yuv420p", str(out),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            ok = result.returncode == 0 and out.is_file() and out.stat().st_size > 0
+            detail = "encoded a one-second clip" if ok else f"ffmpeg exited {result.returncode}"
+        checks.append(Component(name="FFmpeg encode", ok=ok, detail=detail))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Component(name="FFmpeg encode", ok=False, detail=str(exc)))
+
+    return checks
+
+
 def report(
     *,
     refresh: bool = False,
     settings_path: Path | None = None,
     channels_dir: Path | None = None,
     output_root: Path | None = None,
+    deep: bool = False,
 ) -> list[Stage]:
-    """The full three-stage startup report, in order.
+    """The full startup report, in order: three stages always, a fourth
+    ("deep") only when asked.
 
     Paths are injected rather than resolved here so tests never touch the
     real `%APPDATA%` - the same rule `create_app` follows.
     """
-    return [
+    stages = [
         Stage(
             key="dependencies",
             name="Dependency check",
@@ -392,6 +480,18 @@ def report(
             checks=_safeguard_checks(output_root),
         ),
     ]
+    if deep:
+        # On demand only: it spends real disk and an ffmpeg subprocess, so it
+        # must never run merely because a screen was opened.
+        stages.append(
+            Stage(
+                key="deep",
+                name="Deep check",
+                detail="Does it actually work, not just is it present",
+                checks=_deep_checks(settings_path=settings_path, output_root=output_root),
+            )
+        )
+    return stages
 
 
 def clear_cache() -> None:

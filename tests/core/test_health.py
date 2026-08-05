@@ -189,3 +189,66 @@ def test_a_missing_optional_component_does_not_fail_the_stage():
 
     stage.checks[0] = health.Component(name="FFmpeg", ok=False, required=True)
     assert stage.ok is False
+
+
+def test_deep_checks_exercise_things_and_clean_up(tmp_path):
+    """The three existing stages ask "is it present and does it parse".
+    This one does the thing and undoes it."""
+    from avg.core.health import _deep_checks
+
+    output_root = tmp_path / "library"
+    output_root.mkdir()
+    checks = _deep_checks(settings_path=tmp_path / "settings.json", output_root=output_root)
+
+    names = {c.name for c in checks}
+    assert "Settings round-trip" in names
+    assert "Output folder write" in names
+    # Nothing may be left behind.
+    assert list(output_root.iterdir()) == []
+
+
+def test_deep_checks_report_a_failure_rather_than_raising(tmp_path):
+    """A check that cannot run is a red row, never an exception - the same
+    contract the other three stages already keep.
+
+    A merely-nonexistent, writable path is not enough to provoke a failure -
+    `mkdir(parents=True)` happily creates any depth of new directories under
+    a writable tmp_path, on every platform this suite runs on. What
+    genuinely cannot be turned into a directory is a path that already names
+    a FILE: `mkdir` on a child of a file raises rather than creating it.
+    """
+    from avg.core.health import _deep_checks
+
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+
+    checks = _deep_checks(
+        settings_path=tmp_path / "settings.json",
+        output_root=blocked / "cannot",
+    )
+    assert any(c.ok is False for c in checks)
+
+
+def test_the_report_has_four_stages_only_when_asked(tmp_path):
+    from avg.core.health import report
+
+    shallow = report(settings_path=tmp_path / "s.json", channels_dir=tmp_path / "c", output_root=tmp_path)
+    assert [s.key for s in shallow] == ["dependencies", "warmup", "safeguards"]
+
+    deep = report(
+        settings_path=tmp_path / "s.json",
+        channels_dir=tmp_path / "c",
+        output_root=tmp_path,
+        deep=True,
+    )
+    assert [s.key for s in deep] == ["dependencies", "warmup", "safeguards", "deep"]
+
+
+def test_no_secret_value_appears_in_a_deep_check(tmp_path):
+    """The secret round-trip proves DPAPI works on a throwaway string. It
+    must never touch, or echo, a stored key."""
+    from avg.core.health import _deep_checks
+
+    checks = _deep_checks(settings_path=tmp_path / "settings.json", output_root=tmp_path)
+    blob = " ".join(f"{c.name} {c.detail} {c.version}" for c in checks)
+    assert "sk-" not in blob
