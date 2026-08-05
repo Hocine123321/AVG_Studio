@@ -72,7 +72,7 @@ catches it.
 
 **`create_app(token, output_root, ...)` is the only construction entry point.** No module-level globals; every test builds a fully isolated instance, and the optional `thumb_cache_dir` / `settings_path` / `channels_dir` / `secrets_path` overrides exist so tests never touch the real `%APPDATA%` / `%LOCALAPPDATA%`.
 
-**Several jobs, one render.** `app.state.jobs` (`avg/core/jobs.py`) holds every in-flight job, keyed by project id, and `max_parallel_jobs` caps how many run at once (default 2; set it to 1 for this app's original behaviour). A second start for the **same project** is still a 409 — two runs would fight over one folder and one `project.json`. A start beyond the cap is **queued**, not refused. Renders serialise regardless, behind `app.state.render_lease`: `app.state.engine` is one `MediaEngine` tracking one child process.
+**One job at a time.** `app.state.render_thread` is a single slot shared by full-pipeline runs and `/render` jobs; a second start gets a 409.
 
 ### Key single-sources-of-truth
 
@@ -90,15 +90,7 @@ catches it.
 ### Config scopes (no merge layer)
 
 - `scope="app"` settings live in `SettingsDoc.values` (`%APPDATA%/AVG Studio/settings.json`).
-- `scope="channel"` settings live in the **active channel's** document, or —
-  when that channel's `settings_source` is `"global"` — in the app-wide
-  `channel_defaults.json`, **whole**. Never both: no field is ever resolved
-  by looking in one and falling back to the other, and there is no
-  absent-means-inherit. Three bugs in the legacy app came from per-field
-  implicit inheritance, which this shape has no room for. `settings_source`
-  itself is always read from the channel's own document. Porting a channel's
-  values into the defaults is one explicit, user-pressed snapshot
-  (`POST /api/settings/port-to-global`), never a live copy.
+- `scope="channel"` settings live in the **active channel's** document, full stop. No global copy, no apply/capture step, no absent-means-inherit. Three bugs in the legacy app came from the copy mechanism this deletes.
 - `type="secret"` values never travel through the **settings surface**: `/api/settings/values` refuses them, `SettingsDoc.values` never holds one, and `GET /api/keys` reports only *whether* a provider has a key. `avg/config/secrets.py` is the only module that encrypts, decrypts or persists them (DPAPI, `CryptProtectData`).
   This is a boundary on the *config and API surface*, not a ban on reading a key. `get_key()` is `secrets.py`'s public API and exists precisely so a provider can sign its request — every backend under `avg/providers/` calls it, by design. What must never happen is a key reaching a log line, an exception message, a `repr()`, a settings response, or a recorded HTTP fixture (`transport.py` scrubs those before writing).
 
@@ -119,7 +111,8 @@ Each of these has caused a real defect at least once.
 - **One terracotta (`#e08a4e`) *primary action* per screen** — `.btn--primary`, the filled one. Terracotta itself is the brand accent and appears freely as identity (links, `:focus-visible` rings, `::selection`, chips); what is scarce is the filled call-to-action. Sage `#aebf92` means settled/finished, and the pulsing halo — never colour alone — marks the live phase. `web/src/tokens.css`'s header is the authority here and says so explicitly ("Amber-means-one-thing is relaxed here on purpose… the accent carries identity as well as 'happening right now'"); the older, stricter "terracotta means happening right now and nothing else" wording in `docs/superpowers/specs/project handoff.md` predates the Organic Night theme and is superseded. Four tasks have had to fix over-use of the filled action.
 - **Never use a native form control.** No `<select>`, no `<input type="checkbox">`, no `<input type="radio">`, no native `<button>` styling left at browser defaults. Windows draws all of them itself — OS grey, square corners, OS font — and they are the only things capable of ignoring the theme entirely. Use what already exists: `web/src/Select.tsx` for any choice (it is portalled, so no ancestor can clip it, and it keeps keyboard, type-ahead and ARIA), `.switch` for any boolean (see `BoolField`), `.select-dot` for multi-select on a card. A checkbox that must exist for state or keyboard focus is `position: absolute; opacity: 0` behind a styled element, never visible — `.select-dot input` is the pattern. This has been fixed on three separate controls across two screens; grep for `<select` and `type="checkbox"` in `web/src/` before shipping any screen.
 - **Reuse the design language's own values.** Radii, spacing, colour: take them from `web/src/tokens.css` or from the nearest existing control doing the same job, never from a fresh guess. Two controls performing the same gesture with different corner radii is the same defect as an unthemed control, just quieter.
-- **Look at the screen before calling a UI task done.** `preview_start` with the dev-server URL opens the Browser pane, and `computer{action:"screenshot"}` only works once that pane is displayed — a screenshot attempt without it fails with "the page is not compositing frames". Computed styles and geometry are not a substitute: they confirmed a native `<select>` was "themed" because the wrapper was, and they cannot see a placeholder repeating 345 times down a page.
+- **Look at the screen once per slice, at the end — not per task.** A UI task is done when it builds, lints, and its DOM/computed-style checks pass; screenshots are the *slice's* final verification, run once against the finished set of screens. Per-task screenshotting was tried across Slice 10's twelve tasks and was pure cost: the Browser pane often cannot composite at all (one agent burned ~70 tool calls discovering that), and re-shooting the same screen after every task found nothing that the end-of-slice pass did not.
+  When you do run that final pass: `preview_start` with the dev-server URL opens the Browser pane, and `computer{action:"screenshot"}` only works once that pane is displayed — an attempt without it fails with "the page is not compositing frames". **If the pane will not composite, say so and defer the visual pass rather than faking it**; record it as pending in `.superpowers/sdd/progress.md`. Computed styles and geometry are a *substitute for iteration, never for the final look*: they confirmed a native `<select>` was "themed" because the wrapper was, and they cannot see a placeholder repeating 345 times down a page.
 - **Never add a Google Fonts `@import`.** Caprasimo and Figtree are self-hosted in `web/public/fonts` so the app works offline and does not ping Google on launch.
 - **Every `SettingSpec` must declare `invalidates`** — a required field with no default, so omitting it fails at import. A test enforces completeness.
 - Tests must not write to the real `%APPDATA%/AVG Studio` — pass the `create_app` path overrides.

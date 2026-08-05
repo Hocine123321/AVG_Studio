@@ -1,0 +1,227 @@
+AVG STUDIO - HANDOFF NOTE
+Written 2026-07-31, at the end of the previous chat session.
+Read this before touching anything.
+
+================================================================
+1. READ THIS FIRST - THE REPO IS IN A SPLIT STATE
+================================================================
+
+The committed history and the working tree DISAGREE, on purpose or not,
+and you must decide which one is wanted before you do anything else.
+
+  HEAD          = 71c320d  (branch: main, local only, never pushed)
+                  Contains slices 11-16 IMPLEMENTED and committed.
+
+  WORKING TREE  = reverted to roughly the pre-Slice-11 state.
+                  Verified 2026-07-31: it imports fine and
+                  `pytest tests -q` reports 769 passed,
+                  which is exactly the Slice 10 baseline.
+
+So the working tree is NOT broken. It is an older, coherent state,
+with uncommitted deletions of every module slices 12-16 added:
+
+    avg/api/routes_preview.py         (Slice 14)
+    avg/media/preview.py              (Slice 14)
+    web/src/PreviewPanel.tsx          (Slice 14)
+    tests/api/test_preview_routes.py
+    tests/media/test_preview.py
+    avg/config/channel_defaults.py    (Slice 12)
+    tests/config/test_channel_defaults.py
+    avg/providers/recommend.py        (Slice 15)
+    tests/providers/test_recommend.py
+    avg/core/jobs.py                  (Slice 16)
+    tests/core/test_jobs.py
+
+plus modifications to app.py, routes_settings.py, visuals.py,
+runner.py, registry.py, phase.py, settings_schema.py, shell.py,
+health.py, model_prefs.py and several test files.
+
+  *** DANGER ***
+  `git add -A && git commit` right now would DELETE slices 11-16
+  from the codebase. `git checkout -- .` would throw away whatever
+  the working tree currently represents. BOTH are destructive.
+  Ask the user which state they want BEFORE running either.
+
+  To inspect what HEAD has that the tree does not:
+      git diff --stat
+      git diff --name-only --diff-filter=D
+
+================================================================
+2. WHAT THIS PROJECT IS
+================================================================
+
+AVG Studio - a Windows desktop app turning a topic into a short-form
+(9:16) or long-form (16:9) video. AI writes a brief and script,
+generates one image per scene, synthesises narration, plans motion
+and captions, renders an mp4.
+
+One process: Python engine + FastAPI on 127.0.0.1 with a per-session
+token + React 19 UI in WebView2 via pywebview. Rendering runs in a
+spawned child process against a vendored copy of an older engine.
+
+CLAUDE.md is the authority on rules and architecture. Read it fully.
+docs/APP_CODING_GUIDE.md is the map of where everything lives.
+
+Interpreter for EVERYTHING is .venv-build/Scripts/python.exe
+System `python` lacks the dependencies. `.venv` is also wrong.
+
+    .venv-build/Scripts/python.exe -m pytest tests -q
+    .venv-build/Scripts/python.exe -m mypy
+    cd web && npm run build && npm run lint
+
+Baselines as of 2026-07-31:
+    tests  769 passing in the working tree (Slice 10 baseline)
+    mypy   "Found 688 errors in 22 files" - it does NOT pass clean,
+           and this is expected. The bar is that a change adds
+           nothing to that count. Verify by stashing if unsure.
+
+================================================================
+3. WHAT WAS DONE IN THE PREVIOUS SESSION
+================================================================
+
+Slice 10 (UI truth and startup) was executed to completion earlier:
+12 tasks, subagent-driven, all reviewed. Then six new slices were
+designed and planned from a 15-item backlog the user supplied.
+
+SPECS - all committed, all in docs/superpowers/specs/
+    2026-07-31-slice-11-truth-in-failure-design.md
+    2026-07-31-slice-12-settings-architecture-design.md
+    2026-07-31-slice-13-motion-and-startup-design.md
+    2026-07-31-slice-14-live-preview-design.md
+    2026-07-31-slice-15-smart-model-picker-design.md
+    2026-07-31-slice-16-parallel-pipelines-design.md
+
+PLANS - all committed, all in docs/superpowers/plans/
+    2026-07-31-slice-11-truth-in-failure.md          (7 tasks)
+    2026-07-31-slice-12-settings-architecture.md     (6 tasks)
+    2026-07-31-slice-13-motion-and-startup.md        (4 tasks)
+    2026-07-31-slice-14-live-preview.md              (5 tasks)
+    2026-07-31-slice-15-smart-model-picker.md        (4 tasks)
+    2026-07-31-slice-16-parallel-pipelines.md        (5 tasks)
+
+Then, per the git log, all six slices appear to have been EXECUTED
+on top of those plans - commits from "fix: a failed Visuals phase
+reports why" through "feat: Home and the Transport bar show several
+jobs", ending at HEAD 71c320d. See section 1: the working tree does
+not currently reflect that.
+
+================================================================
+4. WHAT EACH SLICE IS FOR (one line each)
+================================================================
+
+11 TRUTH IN FAILURE - the app currently cannot make a video and does
+   not say why. visuals.py raised ErrorKind.bug with an empty detail
+   while the real reason (HTTP 403, no API key) sat one field away.
+   Also: image fallback to a backup provider, re-run cascading to
+   downstream phases, GET /api/phases, phase panels that describe
+   themselves, Live List staleness, language filter collapse.
+
+12 SETTINGS ARCHITECTURE - a new "App" settings group, Live List
+   moves from App Health into Settings, a channel-vs-global switch,
+   and a "Deep Check" self-test stage on App Health.
+
+13 MOTION AND STARTUP - status pill becomes a drawn check when idle
+   and a ring whenever busy, a loading bar until the library arrives,
+   and one deferred import worth ~0.5s of startup.
+
+14 LIVE PREVIEW - see what captions, overlays, a voice or an image
+   model will actually produce, rendered by the real code.
+
+15 SMART MODEL PICKER - ask an AI which of 566 catalogue entries are
+   worth shortlisting, labelled "Suggested" so it never reads as a
+   measurement.
+
+16 PARALLEL PIPELINES - several videos at once behind a configurable
+   cap (default 2); renders still serialise behind one MediaEngine.
+
+Recommended order if re-running any: 11 -> 12 -> 13, then 14 and 15
+(both depend on 12), then 16 last (it inverts an invariant).
+
+================================================================
+5. FACTS ESTABLISHED BY MEASUREMENT - DO NOT RE-DERIVE
+================================================================
+
+* "Google models are missing from the Live List" was NOT a bug.
+  One free catalogue refresh took __text__gemini from absent to 33,
+  groq to 10, huggingface to 20, and __voice__edge from 0 to 322.
+  The real defect was that a stale catalogue was invisible.
+
+* Videos fail at Visuals because there is NO WORKING IMAGE PROVIDER
+  on this account: pollinations times out (WinError 10060, ~129s)
+  and stablehorde returns HTTP 403 because it has no key.
+  Getting a key is the user's to do; slice 11 only makes the app
+  SAY so.
+
+* "Reachable" != usable. Stable Horde's catalogue is a public GET,
+  so it reports reachable and then 403s on the first real image.
+
+* The app holds NO per-model pricing. avg/core/costs.py LEAF_COST is
+  per-PHASE. Any AI cost tier is opinion, not measurement.
+
+* The packaged build (AVG APP/_internal, 76 entries) ships NEITHER
+  the test suite NOR pytest. Anything "run the tests" in-app cannot
+  work there.
+
+* performance_mode and run_as_admin exist in settings.json but were
+  DELETED from the schema on 2026-07-28 as switches nothing read.
+  Do not revive them.
+
+* The settings schema declares NINE groups (runtime, creative, video,
+  models, captions, voice, images, render, keys). There is no
+  "paths" group - a stale condition on one meant the Components
+  table had silently never rendered on Settings until it was fixed.
+
+* Startup: import avg.shell is ~0.76s. The boot path costs ~3.0s
+  total, of which fastapi is 2.06s and uvicorn 1.21s - unavoidable
+  while using them. avg.config.legacy_import is ~0.5s and IS ours.
+
+================================================================
+6. HOW WORK IS RUN HERE
+================================================================
+
+Every slice: brainstorm -> spec -> plan -> subagent-driven execution,
+using the `superpowers` skills. One fresh subagent per task,
+review between tasks, one commit per task.
+
+The user's standing preferences, learned over the previous session:
+
+  * LOCAL ONLY. Work goes straight to local `main`. No push, no PR,
+    no GitHub interaction of any kind. Do not offer to.
+  * Subagents on Sonnet, caveman-terse reports. Code, comments and
+    commit messages are written NORMALLY, in full prose - this
+    repo's comments explain WHY a thing exists and must not be
+    compressed.
+  * Token efficiency matters to them. Combine small independent
+    tasks into one dispatch where review granularity survives.
+  * Screenshots: see CLAUDE.md - the rule was changed on 2026-07-31
+    so the visual pass happens ONCE at the end of a slice, not per
+    task. Per-task screenshotting was measured as pure cost.
+
+.superpowers/sdd/progress.md is the durable ledger and is GITIGNORED
+- it cannot be recovered from git. Trust it plus `git log` over
+recollection after any compaction.
+
+================================================================
+7. SUGGESTED FIRST MOVES IN THE NEW CHAT
+================================================================
+
+1. Run `git status --short` and `git log --oneline -12` yourself.
+   Do not trust this file over what you see.
+2. Ask the user which state they want: HEAD (slices 11-16 present)
+   or the working tree (Slice 10 baseline). Do not guess - both
+   directions are destructive to the other.
+3. Once resolved, run the suite and mypy to establish the real
+   baseline before changing anything.
+4. Then either execute a plan from docs/superpowers/plans/ or take
+   whatever new direction the user gives.
+
+Open and unfinished, regardless of which state wins:
+  * Toasts and the device-frame player (Slice 6C leftovers).
+  * The card-background timing defect in avg/media/overlays.py
+    (Slice 9 left it open deliberately).
+  * web/src/phases.ts still hand-mirrors REGISTRY. Slice 11 adds the
+    GET /api/phases route that closing it needs, but phases.ts also
+    owns nested sub-step display REGISTRY does not model.
+  * --cardmin / card height on Home: removing the thumbnail height
+    cap was correct (it was cropping 16:9 into portrait) but makes
+    9:16 cards ~428px tall at 900x700. Needs eyes, not a guess.
