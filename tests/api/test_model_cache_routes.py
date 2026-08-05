@@ -223,4 +223,37 @@ def test_refresh_lists_advertised_text_models_so_they_can_be_ticked(client, monk
     assert client.post("/api/live-list/refresh", headers=AUTH).status_code == 200
 
     rows = client.get("/api/live-list", headers=AUTH).json()["text"]
+
     assert [(r["id"], r["source"]) for r in rows] == [("groq/llama-3.1-8b", "catalogue")]
+
+
+# ── Reachable is not usable ─────────────────────────────────────────────────
+
+def test_a_keyless_provider_is_reported_as_needing_a_key(client, monkeypatch):
+    """Stable Horde's catalogue is public, so it reads reachable while a
+    real generation 403s. The card must be able to say so."""
+    monkeypatch.setattr(
+        "avg.api.routes_settings.secrets_config.get_key",
+        lambda provider: None,
+    )
+    body = client.get("/api/models/cache", headers=AUTH).json()
+    assert body["needs_key"]["image/stablehorde"] is True
+    # Edge needs no key at all, so it is never flagged.
+    assert body["needs_key"].get("voice/edge") is not True
+
+
+def test_a_keyed_provider_is_not_flagged(client, monkeypatch):
+    monkeypatch.setattr(
+        "avg.api.routes_settings.secrets_config.get_key",
+        lambda provider: "a-key",
+    )
+    body = client.get("/api/models/cache", headers=AUTH).json()
+    assert body["needs_key"].get("image/stablehorde") is not True
+
+
+def test_no_key_value_ever_appears_in_the_response(client, monkeypatch):
+    monkeypatch.setattr(
+        "avg.api.routes_settings.secrets_config.get_key",
+        lambda provider: "sk-secret-value",
+    )
+    assert "sk-secret-value" not in client.get("/api/models/cache", headers=AUTH).text

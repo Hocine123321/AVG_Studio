@@ -481,6 +481,10 @@ export interface ModelCacheResponse {
   providers: Record<string, string[]>;
   text: Record<string, Record<string, boolean>>;
   reachable: Record<string, boolean>;
+  /** Providers that cannot generate without a key and have none, keyed
+   * `kind/provider`. A provider can be reachable — its catalogue is a
+   * public GET — and still be unable to produce anything. */
+  needs_key: Record<string, boolean>;
   building: boolean;
 }
 

@@ -88,15 +88,18 @@ export default function ModelCacheCard() {
     }
   }
   for (const [key, ok] of Object.entries(cache?.reachable ?? {})) {
+    const keyless = Boolean(cache?.needs_key?.[key]);
     rows.push({
       key: `reach:${key}`,
       label: key,
       verdict: ok ? "reachable" : "unreachable",
-      // Stated, never implied: this is the whole reason the two words are
-      // different. Nothing was generated and nothing was synthesised.
-      detail: ok
-        ? "the provider answered its catalogue — this entry itself is unproven"
-        : "the provider's catalogue did not answer",
+      // Stated, never implied: a public catalogue proves the endpoint
+      // answers, not that this provider can generate anything.
+      detail: !ok
+        ? "the provider's catalogue did not answer"
+        : keyless
+          ? "answered its catalogue, but has no key — it cannot generate"
+          : "the provider answered its catalogue — this entry itself is unproven",
     });
   }
   const building = Boolean(cache?.building);

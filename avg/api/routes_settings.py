@@ -310,6 +310,20 @@ async def clear_errors(request: Request) -> dict:
     return {"cleared": True}
 
 
+#: Providers that cannot generate without a key, by `kind/provider`. Edge
+#: needs none (it is the free voice provider) and Pollinations needs none,
+#: so neither appears. Stable Horde's CATALOGUE is public while its
+#: generation endpoint is not - which is exactly the trap this exists to
+#: close: it reads "Reachable" and then 403s on the first real image.
+_NEEDS_KEY: tuple[str, ...] = (
+    "image/stablehorde",
+    "image/openai",
+    "image/gemini",
+    "image/huggingface",
+    "voice/elevenlabs",
+)
+
+
 @router.get("/api/models/cache")
 async def get_model_cache(request: Request) -> dict:
     """What the last provider test proved, in the three states it can prove.
@@ -335,6 +349,11 @@ async def get_model_cache(request: Request) -> dict:
             p: cache.verdicts(p) for p in cache.providers() if not p.startswith("__")
         },
         "reachable": cache.reach(),
+        "needs_key": {
+            entry: True
+            for entry in _NEEDS_KEY
+            if not secrets_config.get_key(entry.split("/", 1)[1])
+        },
         "building": _probe_running(request.app.state),
     }
 
