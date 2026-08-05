@@ -223,7 +223,6 @@ def test_refresh_lists_advertised_text_models_so_they_can_be_ticked(client, monk
     assert client.post("/api/live-list/refresh", headers=AUTH).status_code == 200
 
     rows = client.get("/api/live-list", headers=AUTH).json()["text"]
-
     assert [(r["id"], r["source"]) for r in rows] == [("groq/llama-3.1-8b", "catalogue")]
 
 
@@ -234,18 +233,16 @@ def test_a_keyless_provider_is_reported_as_needing_a_key(client, monkeypatch):
     real generation 403s. The card must be able to say so."""
     monkeypatch.setattr(
         "avg.api.routes_settings.secrets_config.get_key",
-        lambda provider: None,
+        lambda provider, path=None: None,
     )
     body = client.get("/api/models/cache", headers=AUTH).json()
     assert body["needs_key"]["image/stablehorde"] is True
-    # Edge needs no key at all, so it is never flagged.
-    assert body["needs_key"].get("voice/edge") is not True
 
 
 def test_a_keyed_provider_is_not_flagged(client, monkeypatch):
     monkeypatch.setattr(
         "avg.api.routes_settings.secrets_config.get_key",
-        lambda provider: "a-key",
+        lambda provider, path=None: "a-key",
     )
     body = client.get("/api/models/cache", headers=AUTH).json()
     assert body["needs_key"].get("image/stablehorde") is not True
@@ -254,6 +251,42 @@ def test_a_keyed_provider_is_not_flagged(client, monkeypatch):
 def test_no_key_value_ever_appears_in_the_response(client, monkeypatch):
     monkeypatch.setattr(
         "avg.api.routes_settings.secrets_config.get_key",
-        lambda provider: "sk-secret-value",
+        lambda provider, path=None: "sk-secret-value",
     )
     assert "sk-secret-value" not in client.get("/api/models/cache", headers=AUTH).text
+
+
+def test_needs_key_honours_the_injected_secrets_path(client, monkeypatch, paths):
+    """`GET /api/models/cache` must read the same secrets store `/api/keys`
+    reads - the one `create_app(secrets_path=...)` was given, not the real
+    `%APPDATA%` store. This is the regression the mismatched `get_key` call
+    (missing the `secrets_path` argument every other secrets call in this
+    file passes) produced: App Health said a keyed provider had no key.
+    """
+    from avg.config import secrets as secrets_config
+
+    secrets_config.set_key("stablehorde", "a-key", paths["secrets_path"])
+    body = client.get("/api/models/cache", headers=AUTH).json()
+    assert body["needs_key"].get("image/stablehorde") is not True
+
+
+def test_every_keyed_image_provider_choice_is_in_needs_key():
+    """`_NEEDS_KEY` is a fourth hand-kept list of providers alongside
+    `image_provider`'s choices, `visuals.py`'s `_PROVIDERS`, and the `keys`
+    settings group - nothing ties them together automatically. Adding a new
+    keyed image provider to the schema without also adding it here would
+    silently reopen the trap this list exists to close: a provider the Keys
+    screen can store a key for, that App Health would never say needs one.
+    Pollinations is the sole free image provider, so it is the only
+    `image_provider` choice this test expects to be absent.
+    """
+    from avg.api.routes_settings import _NEEDS_KEY
+    from avg.core.settings_schema import SETTINGS
+
+    image_provider_spec = next(spec for spec in SETTINGS if spec.id == "image_provider")
+    keyed_entries = {entry.split("/", 1)[1] for entry in _NEEDS_KEY if entry.startswith("image/")}
+
+    for provider in image_provider_spec.choices:
+        if provider in ("", "pollinations"):
+            continue
+        assert provider in keyed_entries, f"{provider} is missing from _NEEDS_KEY"

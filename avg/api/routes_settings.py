@@ -352,7 +352,7 @@ async def get_model_cache(request: Request) -> dict:
         "needs_key": {
             entry: True
             for entry in _NEEDS_KEY
-            if not secrets_config.get_key(entry.split("/", 1)[1])
+            if not secrets_config.has_key(entry.split("/", 1)[1], request.app.state.secrets_path)
         },
         "building": _probe_running(request.app.state),
     }
