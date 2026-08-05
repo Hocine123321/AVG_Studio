@@ -495,6 +495,29 @@ def test_starting_partway_marks_the_later_phases_pending():
     assert project.phases["visuals"].status == "done"
 
 
+def test_the_sweep_does_not_call_on_phase_change_when_nothing_was_reset():
+    """The sweep runs on every `only is None` call, even a `start_from=0`
+    first run where every phase is still `pending` and there is nothing to
+    reset. Firing `on_phase_change` anyway would cost an extra
+    `project.json` write for a no-op - this asserts the guard only fires it
+    when the sweep actually changed a record."""
+    from avg.pipeline import runner
+
+    project = _project()  # every phase starts `pending` - nothing to sweep
+    calls: list[None] = []
+
+    list(
+        runner.run(
+            project,
+            channel=_channel(),
+            phases=[],  # no phases to run either, so ANY call proves the sweep fired for nothing
+            on_phase_change=lambda: calls.append(None),
+        )
+    )
+
+    assert calls == []
+
+
 def test_an_only_run_resets_nothing_else():
     """`only=` is the fast per-phase iteration loop and deliberately ignores
     `start_from`; it must not sweep the rest of the pipeline."""
@@ -516,13 +539,20 @@ def test_a_partial_rerun_that_never_reaches_a_phase_leaves_it_pending():
     """The actual defect: Script restarted, the run dies at Script, and
     Render still reads `done` from the previous run. The reset has to happen
     when the run STARTS, not when each phase is reached."""
+    from datetime import datetime, timezone
+
     from avg.core.models import PhaseRecord
     from avg.pipeline import runner
     from avg.pipeline.registry import REGISTRY
 
     project = _project()
     for phase in REGISTRY:
-        project.phases[phase.key] = PhaseRecord(name=phase.name, status="done")
+        project.phases[phase.key] = PhaseRecord(
+            name=phase.name,
+            status="done",
+            finished=datetime.now(timezone.utc),
+            duration_ms=4200,
+        )
 
     # Fails at index 1 of the selected set, so ids 3-4 run and 5-7 are never
     # reached at all.
@@ -537,3 +567,9 @@ def test_a_partial_rerun_that_never_reaches_a_phase_leaves_it_pending():
 
     for key in ("director2", "screen_text", "render"):
         assert project.phases[key].status == "pending", key
+        # The reset clears `finished`/`duration_ms` alongside `status` and
+        # `error` - otherwise a swept phase keeps last run's elapsed time,
+        # and the UI still sums it into the take's total duration for work
+        # the record now says never happened.
+        assert project.phases[key].finished is None, key
+        assert project.phases[key].duration_ms is None, key

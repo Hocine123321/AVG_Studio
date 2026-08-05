@@ -123,10 +123,14 @@ def run(
     Stops the run - without raising - the first time:
       - a phase raises (an `AvgError` or anything else): that phase's record
         is marked `'failed'` with the error message, a `PhaseFailed` event is
-        yielded, and the generator returns. Every phase's record that was
-        already `'done'` before this call is untouched, so the project stays
-        valid and resumable from exactly where it stopped (this task's
-        invariant #5).
+        yielded, and the generator returns. Every phase's record BEFORE
+        `start_from` is untouched, so the project stays valid and resumable
+        from exactly where it stopped (this task's invariant #5). Records
+        from `start_from` onward do not get this guarantee: the sweep above
+        (`only is None`) already reset any of them that were `'done'` back to
+        `'pending'` before the loop below ever ran, precisely because their
+        output belongs to the run being replaced - see that block's own
+        comment.
       - `cancel_token.cancelled` is true when about to start the next phase:
         a `PipelineCancelled` event is yielded (naming the phase that would
         have run next) and the generator returns. Cancellation is checked
@@ -148,13 +152,26 @@ def run(
     # cloned take. `only=` is exempt because it is the deliberate
     # single-phase iteration loop and sweeps nothing.
     if only is None:
+        swept = False
         for phase in phases:
             if phase.id >= start_from:
                 record = project.phases.get(phase.key)
                 if record is not None and record.status == "done":
                     record.status = "pending"
                     record.error = None
-        if on_phase_change is not None:
+                    # `started`/`finished`/`duration_ms` are the same three
+                    # fields a phase that actually starts resets at :171-173
+                    # below. Leaving them here would let a swept phase keep
+                    # last run's finish timestamp and elapsed time - the UI
+                    # reads `duration_ms` for every non-live row regardless
+                    # of status (`web/src/Studio.tsx`'s phase table) and
+                    # sums it across all phases for the take's total
+                    # (`Studio.tsx`, `TakeStrip.tsx`), so a stale value here
+                    # keeps counting work the record now says never happened.
+                    record.finished = None
+                    record.duration_ms = None
+                    swept = True
+        if swept and on_phase_change is not None:
             on_phase_change()
 
     for phase in to_run:
