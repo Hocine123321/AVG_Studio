@@ -321,13 +321,13 @@ a:hover {
 
 @media (prefers-reduced-motion: no-preference) {
   .pulse {
-    animation: avg-pulse 1.9s ease-in-out infinite;
+    animation: avg-pulse calc(1.9s * var(--motion-scale)) ease-in-out infinite;
   }
   .halo {
-    animation: avg-halo 2.2s ease-out infinite;
+    animation: avg-halo calc(2.2s * var(--motion-scale)) ease-out infinite;
   }
   .drift {
-    animation: avg-drift 22s ease-in-out infinite;
+    animation: avg-drift calc(22s * var(--motion-scale)) ease-in-out infinite;
   }
 }
 
@@ -2869,11 +2869,11 @@ a:hover {
 .take-panel,
 .modal,
 .popup {
-  animation: rise-in 0.16s ease-out;
+  animation: rise-in calc(0.16s * var(--motion-scale)) ease-out;
 }
 
 .studio__banner {
-  animation: fade-in 0.16s ease-out;
+  animation: fade-in calc(0.16s * var(--motion-scale)) ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {

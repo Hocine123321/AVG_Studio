@@ -54,6 +54,19 @@ export function useTheme(): { theme: Theme; setTheme: (t: Theme) => void; toggle
       .then((values) => {
         const stored = values.app.theme;
         if (isTheme(stored)) setThemeState(stored);
+        // `motion_scale` rides the same boot-time fetch as theme, for the
+        // same reason: Settings' own effect (see Settings.tsx) only applies
+        // it once the user opens that screen, which left every other
+        // screen — Home included — running at full motion regardless of
+        // what the user chose, from launch until they happened to visit
+        // preferences. Settings' effect stays too, as the live-preview
+        // writer while the user is on that screen; this is what covers
+        // every screen before that ever happens.
+        const scale = String(values.app.motion_scale ?? "full");
+        document.documentElement.style.setProperty(
+          "--motion-scale",
+          scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1",
+        );
       })
       .catch(() => {
         /* Offline, or before onboarding has written a settings file: the
