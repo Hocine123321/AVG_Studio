@@ -38,6 +38,17 @@ this module imported the whole chain here, two lines below where
 `avg.config.legacy_import` was deferred for the same reason - which
 made that earlier deferral cost nothing, since this module dragged the
 identical chain back in immediately after.
+
+One name on that list needs a caveat, so nobody reads more into it than
+is true: `avg.providers.text.router` is deferred *here*, but it still
+ends up in `sys.modules` anyway, because `avg.api.routes_settings`
+imports `avg.providers.probe` at its own top level for the Live List,
+and `probe` imports the router and the transport eagerly. Deferring
+those is a separate, larger job - `probe`'s functions are monkeypatched
+in several tests - and it is worth doing on its own terms rather than
+smuggled into this one. What the measured 133ms refers to, and what the
+test actually pins, is the registry/media/runner/phase chain above;
+none of that chain is reachable from `probe`.
 """
 
 from __future__ import annotations
