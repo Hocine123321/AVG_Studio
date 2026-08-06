@@ -5,6 +5,7 @@ import {
   patchLiveEntry,
   refreshLiveList,
   removeLiveEntry,
+  suggestLiveList,
   type LiveEntry,
   type LiveKind,
   type LiveListResponse,
@@ -39,13 +40,28 @@ const SOURCE_LABEL: Record<LiveEntry["source"], string> = {
   probed: "Verified",
   catalogue: "Listed",
   manual: "Added by you",
+  suggested: "Suggested",
 };
 
 function sourceClass(source: LiveEntry["source"]): string {
   if (source === "probed") return "chip chip--ok";
   if (source === "manual") return "chip chip--amber";
+  // Deliberately not chip--ok: a suggestion is an opinion, and must not
+  // wear the same colour as something a probe proved.
+  if (source === "suggested") return "chip chip--accent";
   return "chip";
 }
+
+// Knowledge leads opinion: the backend already sorts favourites first
+// within this order, so this just extends the same idea across kinds of
+// authority - a probe or a listing is something the app itself did, a
+// suggestion is only ever the model's word for it.
+const RANK: Record<LiveEntry["source"], number> = {
+  probed: 0,
+  catalogue: 1,
+  manual: 2,
+  suggested: 3,
+};
 
 // `Intl.DisplayNames` ships in WebView2 (Chromium-based), so this needs no
 // dependency. Falls back to the raw subtag on any failure - an unfamiliar
@@ -104,6 +120,26 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The run itself is a background thread (one text call, own slot on
+   * the backend) - the POST returns before it finishes. There is no event
+   * for it on `/ws/events`, so this polls the Live List for a while
+   * afterwards, the same way `ModelCacheCard` polls a running probe. */
+  async function suggest(target: "models" | "voices") {
+    setBusy(true);
+    setError(null);
+    try {
+      await suggestLiveList(target);
+      for (let i = 0; i < 12; i++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        await load();
+      }
+    } catch (err) {
+      setError(extractDetail(err instanceof Error ? err.message : String(err)));
     } finally {
       setBusy(false);
     }
@@ -184,6 +220,14 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     if (gender !== "all" && (info?.gender ?? "").toLowerCase() !== gender) return false;
     return true;
   });
+  // Favourites still lead - that is the user's own choice and outranks
+  // any provenance. Within a favourite/non-favourite group, provenance
+  // breaks the tie; Array.prototype.sort is stable, so the backend's own
+  // alphabetical order survives as the final tiebreaker.
+  visible.sort((a, b) => {
+    if (a.favourite !== b.favourite) return a.favourite ? -1 : 1;
+    return RANK[a.source] - RANK[b.source];
+  });
 
   const selectedCount = rows.filter((r) => r.selected).length;
 
@@ -203,6 +247,12 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         <button type="button" className="btn" onClick={onBack}>
           Back to App health
         </button>
+        <button type="button" className="btn" onClick={() => void suggest("models")} disabled={busy}>
+          Suggest models
+        </button>
+        <button type="button" className="btn" onClick={() => void suggest("voices")} disabled={busy}>
+          Suggest voices
+        </button>
         <button type="button" className="btn btn--primary" onClick={() => void refresh()} disabled={busy}>
           {busy ? "Listing…" : "Refresh catalogues"}
         </button>
@@ -217,6 +267,12 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         {data?.updated
           ? `Catalogues last listed ${new Date(data.updated).toLocaleString()}.`
           : "Catalogues have never been listed — press Refresh catalogues to see what each provider offers."}
+      </p>
+
+      <p className="channels__note">
+        Suggestions come from an AI reading these catalogues. The cost tiers and reasons are its
+        opinion — this app holds no pricing and has not checked them. Only “Verified” means a real
+        call succeeded.
       </p>
 
       {error && <p className="settings__save-error">{error}</p>}
@@ -358,9 +414,11 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
                     {[info.locale, info.gender].filter(Boolean).join(" · ")}
                   </span>
                 )}
+                {entry.reason && <span className="livelist__reason">“{entry.reason}”</span>}
               </div>
 
               <span className={sourceClass(entry.source)}>{SOURCE_LABEL[entry.source]}</span>
+              {entry.tier && <span className="livelist__tier">{entry.tier}</span>}
 
               <div className="livelist__note">
                 <DeferredInput

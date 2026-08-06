@@ -248,6 +248,16 @@ a:hover {
   color: var(--bad);
 }
 
+/* An AI's opinion, not a measurement or the user's own action - so it gets
+   neither `chip--ok`'s "proven" fill nor `chip--amber`'s "you did this"
+   fill. The accent as identity, on an outline, per `tokens.css`'s own
+   header: present, but visibly the lightest-weight of the four. */
+.chip--accent {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: transparent;
+  color: var(--accent-soft);
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -4019,6 +4029,26 @@ a:hover {
 .livelist__meta {
   font-size: 11px;
   color: var(--dim);
+}
+
+/* The model's claimed cost tier - "cheap", "balanced", "high", "ultra".
+   Deliberately not a `.chip`: a filled pill beside the provenance chip
+   would read as a second verdict, when this app never measured a price. A
+   plain outlined word is the whole distinction. */
+.livelist__tier {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.livelist__reason {
+  font-size: 11px;
+  color: var(--dim);
+  font-style: italic;
 }
 
 .livelist__note {

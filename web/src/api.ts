@@ -434,18 +434,26 @@ export function artifactFileUrl(projectId: string, takeId: number, key: string, 
 // ---- Live List ----
 
 export type LiveKind = "text" | "image" | "voice";
-export type LiveSource = "probed" | "catalogue" | "manual";
+export type LiveSource = "probed" | "catalogue" | "manual" | "suggested";
 
 /** One row of the Live List: what the app knows about an entry, plus what
  * the user has said about it. `source` is how it got here - `probed` (a
- * real call succeeded), `catalogue` (the provider advertises it), or
- * `manual` (the user typed it), which never reads as verified. */
+ * real call succeeded), `catalogue` (the provider advertises it), `manual`
+ * (the user typed it), or `suggested` (an AI recommended it) - and a
+ * suggestion never reads as verified: a probe that later proves the same
+ * entry outranks it. */
 export interface LiveEntry {
   id: string;
   source: LiveSource;
   selected: boolean;
   favourite: boolean;
   note: string;
+  /** The model's claimed cost tier, or null. An OPINION — the app holds no
+   * per-model pricing, so this was never measured. Absent for voices, which
+   * have no cost axis. */
+  tier: string | null;
+  /** One line of the model's reasoning. Also an opinion. */
+  reason: string;
 }
 
 export interface LiveListResponse {
@@ -489,6 +497,12 @@ export function addLiveEntry(kind: LiveKind, entryId: string): Promise<{ added: 
 
 export function removeLiveEntry(kind: LiveKind, entryId: string): Promise<{ removed: string }> {
   return apiDelete<{ removed: string }>(`/api/live-list/${kind}/${encodeURIComponent(entryId)}`);
+}
+
+/** Ask a text model which entries are worth shortlisting. Costs one text
+ * call. Results are recommendations, never measurements. */
+export function suggestLiveList(kind: "models" | "voices"): Promise<{ started: boolean }> {
+  return apiPost<{ started: boolean }>("/api/live-list/suggest", { kind });
 }
 
 // ---- working-models cache ----
