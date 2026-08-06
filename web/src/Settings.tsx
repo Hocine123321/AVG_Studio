@@ -71,7 +71,7 @@ function extractDetail(message: string): string {
  *    `SecretField`'s own transient input does, for as long as one request
  *    takes (see that file).
  */
-export default function Settings() {
+export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => void }) {
   const [schema, setSchema] = useState<SettingSpec[] | null>(null);
   const [appValues, setAppValues] = useState<Record<string, unknown>>({});
   const [channelValues, setChannelValues] = useState<Record<string, unknown>>({});
@@ -109,6 +109,17 @@ export default function Settings() {
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, []);
+
+  useEffect(() => {
+    const scale = String(appValues["motion_scale"] ?? "full");
+    // One custom property drives every duration in tokens.css, rather than
+    // this being read at dozens of call sites. `prefers-reduced-motion`
+    // still wins - see that block in tokens.css, which is unchanged.
+    document.documentElement.style.setProperty(
+      "--motion-scale",
+      scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1",
+    );
+  }, [appValues]);
 
   const channelLabel = useMemo(() => {
     if (!activeChannelId) return null;
@@ -387,6 +398,23 @@ export default function Settings() {
                     valueOf={valueById}
                     lengthPreset={valueById("length_preset") || "60s"}
                   />
+                )}
+                {g.group === "models" && !searching && onOpenLiveList && (
+                  <section className="models-panel" aria-label="Live List">
+                    <div className="spend-card">
+                      <div>
+                        <p className="lbl">Live List</p>
+                        <b>Which models these pickers may offer</b>
+                      </div>
+                      <span className="spend-card__note">
+                        Tick the models and voices you want offered, mark favourites, and note what
+                        each one is good for.
+                      </span>
+                      <button type="button" className="btn" onClick={onOpenLiveList}>
+                        Open Live List
+                      </button>
+                    </div>
+                  </section>
                 )}
                 <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />
               </div>
