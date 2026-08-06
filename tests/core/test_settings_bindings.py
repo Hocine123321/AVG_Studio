@@ -70,15 +70,6 @@ def _mentioned_in_backend(setting_id: str) -> bool:
 #                              wires the frontend consumer; no backend
 #                              mention will ever exist for this one, and
 #                              that is expected, not a gap to close.
-#   startup_check             - declared here (Slice 12 Task 2) with
-#                              `avg/shell.py` named as its future reader,
-#                              but not wired yet: `avg/shell.py`'s own
-#                              reason for existing is keeping the window's
-#                              first paint off the critical path, and an
-#                              automatic startup check has to be designed
-#                              to respect that rather than bolted on in a
-#                              hurry. Left for Slice 13, which is the slice
-#                              that touches startup.
 #
 # Shrink this list. Never grow it without a reason as specific as the ones
 # above.
@@ -90,7 +81,6 @@ KNOWN_UNWIRED = {
     "image_quality",
     "auto_style_lock",
     "motion_scale",
-    "startup_check",
 }
 
 

@@ -151,10 +151,11 @@ SETTINGS: list[SettingSpec] = [
         group="app",
         label="Check components at startup",
         help=(
-            "Run the dependency check while the library loads. Declared here "
-            "ahead of the check itself, which Slice 13 adds - this switch has "
-            "no effect until that lands. Turning it off starts marginally "
-            "faster and tells you nothing until you open App health."
+            "Warm the component check on the boot thread while the library "
+            "loads, so App health answers instantly the first time you open "
+            "it. Turning it off starts marginally faster; the check still "
+            "runs, just later - the first time you open App health after "
+            "launch, rather than during startup."
         ),
         type="bool",
         default=True,
