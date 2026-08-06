@@ -25,6 +25,10 @@ async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: str
   // flight - and so no screen has to remember to report its own.
   // A write outranks a read in the status bar: "Saving" must not be
   // replaced by a background "Loading" that happens to still be in flight.
+  //
+  // EXCEPTION: `blobUrl` below (the preview routes' own fetch) deliberately
+  // does NOT go through this wrapper, so it never lights the status bar -
+  // see its own comment for why.
   const endActivity = beginActivity(labelForRequest(method, path), method === "GET" ? "low" : "medium");
   let res: Response;
   try {
@@ -759,6 +763,14 @@ export async function previewImage(body: {
   return blobUrl("/api/preview/image", body);
 }
 
+// Deliberately NOT built on `request()` above, and so deliberately NOT
+// registered with `beginActivity` - a caption/voice/image preview fires on
+// every debounced settings change, and lighting the global "Loading"/
+// "Saving" status bar on every keystroke would be noise, not signal, the
+// same way a background poll never registers there either. This is a
+// silent, intentional exception to `request()`'s own "the ONE wrapper
+// every call goes through" claim - noted at both ends so the two comments
+// can't drift apart again (Slice 14 review, Minors).
 async function blobUrl(path: string, body: unknown): Promise<string> {
   const res = await fetch(path, {
     method: "POST",
