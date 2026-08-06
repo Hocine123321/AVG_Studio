@@ -3024,6 +3024,14 @@ a:hover {
      it is not a control. */
   pointer-events: none;
   max-width: 320px;
+  /* The pill changes size as its contents change; without this it jumps.
+     `--motion-scale` (Slice 12) and the reduced-motion block below both
+     govern it, so the whole pill's motion is decided in two places, not
+     twelve. */
+  transition:
+    border-color calc(0.2s * var(--motion-scale)) ease-out,
+    background-color calc(0.2s * var(--motion-scale)) ease-out,
+    color calc(0.2s * var(--motion-scale)) ease-out;
 }
 
 .statuspill--ready {
@@ -3049,6 +3057,18 @@ a:hover {
 .statuspill--busy .statuspill__dot,
 .statuspill--error .statuspill__dot {
   animation: avg-pulse 1.4s ease-in-out infinite;
+}
+
+/* The resting mark. Same optical weight as the dot it replaces, sage
+   because sage means settled everywhere else in this app. */
+.statuspill__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--sage);
 }
 
 /* An indeterminate ring while a job runs: one arc rotating, the shape a
@@ -3104,6 +3124,10 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .statuspill {
+    transition: none;
+  }
+
   .statuspill__dot,
   .statuspill__ring,
   .statuspill__label {
