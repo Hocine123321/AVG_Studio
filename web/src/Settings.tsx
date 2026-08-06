@@ -13,6 +13,7 @@ import {
 } from "./api";
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
+import PreviewPanel from "./PreviewPanel";
 import SettingsGroup from "./SettingsGroup";
 import { applyMotionScale } from "./theme";
 import type { SettingsCtx } from "./fields/types";
@@ -500,6 +501,9 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                     </div>
                   </section>
                 )}
+                {g.group === "captions" && !searching && <PreviewPanel kind="caption" valueOf={valueById} />}
+                {g.group === "images" && !searching && <PreviewPanel kind="image" valueOf={valueById} />}
+                {g.group === "voice" && !searching && <PreviewPanel kind="voice" valueOf={valueById} />}
                 <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />
               </div>
             ))

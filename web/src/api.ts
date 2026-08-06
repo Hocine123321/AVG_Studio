@@ -724,3 +724,50 @@ export function selectTake(projectId: string, takeId: number): Promise<{ current
 export function renameTake(projectId: string, takeId: number, label: string): Promise<Take> {
   return apiPatch<Take>(`/api/projects/${encodeURIComponent(projectId)}/takes/${takeId}`, { label });
 }
+
+// ---- previews (Slice 14) ----
+// Mirrors `avg.api.routes_preview` - see that module's docstring for the
+// full contract (single slot, 409 on a second start, which two of these
+// spend real money). `PreviewPanel.tsx` is the only caller.
+
+/** Free previews — safe to call whenever a setting changes. Each returns a
+ * blob URL the caller must revoke when it is replaced. */
+export async function previewCaption(body: {
+  width: number; height: number; font_name: string; font_size: number; position: string;
+}): Promise<string> {
+  return blobUrl("/api/preview/caption", body);
+}
+
+export async function previewOverlay(body: {
+  spec: Record<string, unknown>; width: number; height: number;
+}): Promise<string> {
+  return blobUrl("/api/preview/overlay", body);
+}
+
+/** PAID on ElevenLabs. `confirm_paid` must come from an explicit press —
+ * never from a settings change. The backend refuses it either way. */
+export async function previewVoice(body: {
+  provider: string; voice_id: string; confirm_paid?: boolean;
+}): Promise<string> {
+  return blobUrl("/api/preview/voice", body);
+}
+
+/** PAID, always. Same rule. */
+export async function previewImage(body: {
+  provider: string; model: string; aspect_ratio: string; confirm_paid: boolean;
+}): Promise<string> {
+  return blobUrl("/api/preview/image", body);
+}
+
+async function blobUrl(path: string, body: unknown): Promise<string> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AVG-Token": TOKEN },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `${path} failed: ${res.status}`);
+  }
+  return URL.createObjectURL(await res.blob());
+}
