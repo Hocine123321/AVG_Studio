@@ -3011,7 +3011,6 @@ a:hover {
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 9px;
   padding: 7px 16px 7px 12px;
   border-radius: 999px;
   border: 1.5px solid var(--pill);
@@ -3023,11 +3022,17 @@ a:hover {
   /* Never intercept a click meant for the content behind it - it reports,
      it is not a control. */
   pointer-events: none;
+  /* Backstop for a label wide enough to make `.statuspill__expand`'s own
+     max-width (below) not the tightest constraint in play. The pill's
+     actual growing and shrinking is `.statuspill__expand`'s job, not this
+     rule's - `width: auto` cannot be transitioned directly, which is why
+     that element uses `max-width` as an animatable stand-in for it, with
+     the contents crossfading via `.statuspill__icon` and
+     `.statuspill__expand`'s own opacity below. `--motion-scale`
+     (Slice 12) and the reduced-motion block further down both govern every
+     animation this file adds, so the whole pill's motion is decided in two
+     places, not a dozen. */
   max-width: 320px;
-  /* The pill changes size as its contents change; without this it jumps.
-     `--motion-scale` (Slice 12) and the reduced-motion block below both
-     govern it, so the whole pill's motion is decided in two places, not
-     twelve. */
   transition:
     border-color calc(0.2s * var(--motion-scale)) ease-out,
     background-color calc(0.2s * var(--motion-scale)) ease-out,
@@ -3069,7 +3074,7 @@ a:hover {
   height: 100%;
   border-radius: inherit;
   background: var(--pill);
-  animation: statusbar-sweep calc(1.3s / max(var(--motion-scale, 1), 0.01)) ease-in-out infinite;
+  animation: statusbar-sweep calc(1.3s / max(var(--motion-scale), 0.01)) ease-in-out infinite;
 }
 
 @keyframes statusbar-sweep {
@@ -3081,41 +3086,102 @@ a:hover {
   }
 }
 
+/* `motion_scale: "none"` maps `--motion-scale` to `0`, which the division
+   above turns into a 130 second animation rather than no animation at all -
+   correct for the ring, which stays visibly a ring while frozen, but wrong
+   here: the fill starts translated outside its own `overflow: hidden`
+   track, so freezing it there leaves an empty-looking bar for roughly the
+   first 37 seconds. `theme.ts` and `Settings.tsx` both stamp this attribute
+   (through the shared `applyMotionScale`) precisely so this rule can opt
+   out of the arithmetic and land the fill in its finished position instead,
+   the same outcome `prefers-reduced-motion` already gets below. */
+[data-motion="none"] .statusbar-load__fill {
+  animation: none;
+  width: 100%;
+}
+
+/* The pill's icon slot: check, dot and ring are all mounted at once, one
+   stacked on the others via `position: absolute` inside this 13px box, and
+   only `opacity` + `transform` say which one is currently showing. The
+   previous approach mounted exactly one of the three - the outgoing element
+   had no way to animate anything, because it was simply gone on the frame
+   the state changed, which is the "pop" this slice exists to remove. */
+.statuspill__icon {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.statuspill__check,
+.statuspill__dot,
+.statuspill__ring {
+  opacity: 0;
+  transition:
+    opacity calc(0.16s * var(--motion-scale)) ease-out,
+    transform calc(0.16s * var(--motion-scale)) ease-out;
+}
+
+.statuspill__check.is-active,
+.statuspill__dot.is-active,
+.statuspill__ring.is-active {
+  opacity: 1;
+}
+
 .statuspill__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   width: 7px;
   height: 7px;
-  flex-shrink: 0;
   border-radius: 50%;
   background: var(--pill);
+  transform: translate(-50%, -50%) scale(0.82);
 }
 
-.statuspill--busy .statuspill__dot,
-.statuspill--error .statuspill__dot {
-  animation: avg-pulse 1.4s ease-in-out infinite;
+.statuspill__dot.is-active {
+  transform: translate(-50%, -50%) scale(1);
 }
 
-/* The resting mark. Same optical weight as the dot it replaces, sage
-   because sage means settled everywhere else in this app. */
+.statuspill--busy .statuspill__dot.is-active,
+.statuspill--error .statuspill__dot.is-active {
+  animation: avg-pulse calc(1.4s * var(--motion-scale)) ease-in-out infinite;
+}
+
+/* The resting mark. Same optical weight as the dot it replaces, coloured
+   through `--pill` (the custom property each `.statuspill--*` state sets
+   above) rather than a hardcoded `--sage` - `.statuspill--ready` already
+   points `--pill` at sage, so hardcoding it here was a second source for
+   one colour, the quiet version of the theming defect this file otherwise
+   argues against. */
 .statuspill__check {
+  position: absolute;
+  inset: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-  color: var(--sage);
+  color: var(--pill);
+  transform: scale(0.82);
+}
+
+.statuspill__check.is-active {
+  transform: scale(1);
 }
 
 /* An indeterminate ring while a job runs: one arc rotating, the shape a
-   user already reads as "working". Same 7px optical weight as the dot it
-   replaces, grown to 13px so the arc is legible. */
+   user already reads as "working". Same 13px optical weight as the check
+   it replaces. */
 .statuspill__ring {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--pill) 26%, transparent);
   border-top-color: var(--pill);
+  transform: scale(0.82);
+}
+
+.statuspill__ring.is-active {
+  transform: scale(1);
   /* `max()` guards against a scale of 0 producing a zero-duration infinite
      animation, which would spin the browser rather than stop the ring. */
   animation: avg-spin calc(0.9s / max(var(--motion-scale), 0.01)) linear infinite;
@@ -3146,6 +3212,36 @@ a:hover {
   }
 }
 
+/* The part of the pill that grows and shrinks: the label, the clock, and
+   the "+N" overflow count. `max-width` is the animatable stand-in for
+   `width: auto`, which cannot be transitioned directly - collapsed this is
+   zero-width and clipped by `overflow: hidden`, expanded it is wide enough
+   for anything the pill will realistically show, with `.statuspill`'s own
+   `max-width: 320px` above as the backstop beyond that. `margin-left`
+   grows alongside the width rather than the pill using a flex `gap`. A
+   `gap` does not collapse to zero along with the width, so it would leave
+   a fixed gap between the icon and nothing while the pill is collapsed. */
+.statuspill__expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    max-width calc(0.22s * var(--motion-scale)) ease-out,
+    margin-left calc(0.22s * var(--motion-scale)) ease-out,
+    opacity calc(0.16s * var(--motion-scale)) ease-out;
+}
+
+.statuspill__expand.is-expanded {
+  max-width: 270px;
+  margin-left: 9px;
+  opacity: 1;
+}
+
 .statuspill__label {
   white-space: nowrap;
   overflow: hidden;
@@ -3163,9 +3259,12 @@ a:hover {
     transition: none;
   }
 
+  .statuspill__check,
   .statuspill__dot,
   .statuspill__ring,
+  .statuspill__expand,
   .statuspill__label {
+    transition: none;
     animation: none;
   }
 

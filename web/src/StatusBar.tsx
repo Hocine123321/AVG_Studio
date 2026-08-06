@@ -58,20 +58,59 @@ export default function StatusBar({ connected, loading = false }: { connected: b
       setSettled(false);
       return;
     }
+    // A new lead - even one that starts in the same tick a previous one
+    // finishes - must repeat the quiet period rather than inherit
+    // `settled === true` from whatever just ended. Without this reset, a
+    // fast request beginning back-to-back with a slow one skipped the gate
+    // entirely and rang immediately.
+    setSettled(false);
     const id = window.setTimeout(() => setSettled(true), RING_DELAY_MS);
     return () => window.clearTimeout(id);
+    // `lead` is a fresh object every render; only its identity (`lead.id`)
+    // should restart this timer, so it is deliberately left out of the
+    // dependency array rather than satisfied by re-running on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lead?.id]);
 
-  const kind = !connected ? "error" : lead !== null ? "busy" : "ready";
-  const working = lead !== null && settled;
-  const label = kind === "error" ? "Reconnecting" : lead !== null ? lead.label : "";
+  // Everything the pill shows about an activity - not just the ring - waits
+  // for the same quiet period. Gating the ring alone (as this first read)
+  // still let a 40ms request swap the resting check for a dot, pop a label
+  // and a 00:00 clock into existence, and collapse again a frame later:
+  // exactly the "label that snaps between words" this slice exists to
+  // remove, just relocated from the label to the whole pill. `activeLead`
+  // is `lead` once it has been in flight for `RING_DELAY_MS`, `null` before
+  // that, so nothing downstream needs its own timing logic.
+  const activeLead = settled ? lead : null;
+  const kind = !connected ? "error" : activeLead !== null ? "busy" : "ready";
+  const working = activeLead !== null;
+  const label = kind === "error" ? "Reconnecting" : activeLead !== null ? activeLead.label : "";
 
   // Until the library has ever answered, the pill has nothing true to say -
   // the server is up, so it would read "ready" while the screen is still
   // empty. A bar in the pill's own slot says "still counting" instead.
   // `avg/shell.py`'s splash covers the earlier moment, before the server
   // exists at all; this is the one after it.
+  //
+  // This wait obeys the same quiet period as an activity's ring: Task 2's
+  // whole argument is that an indicator in flight under `RING_DELAY_MS` is
+  // noise, and the first version of this bar broke that rule against
+  // itself, appearing and disappearing within 24ms on the machine it was
+  // measured on. Reusing the constant here, rather than declaring a second
+  // one, keeps the two indicators speaking the same vocabulary.
+  const [loadingSettled, setLoadingSettled] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setLoadingSettled(false);
+      return;
+    }
+    const id = window.setTimeout(() => setLoadingSettled(true), RING_DELAY_MS);
+    return () => window.clearTimeout(id);
+  }, [loading]);
+
   if (loading) {
+    // Still within the quiet period: render nothing rather than a bar that
+    // would only flash and vanish.
+    if (!loadingSettled) return null;
     return (
       <div
         className="statuspill statuspill--loading"
@@ -86,6 +125,11 @@ export default function StatusBar({ connected, loading = false }: { connected: b
     );
   }
 
+  // The part that grows and shrinks: the label, the clock, and the "+N"
+  // overflow count. Computed once so the JSX below and the width-animating
+  // wrapper agree about when there is anything in it to show.
+  const expanded = label !== "" || activeLead !== null;
+
   return (
     <div
       className={`statuspill statuspill--${kind}`}
@@ -96,28 +140,37 @@ export default function StatusBar({ connected, loading = false }: { connected: b
       // reader at rest. The visible text carries it in every other state.
       aria-label={kind === "ready" && !working ? "Ready" : undefined}
     >
-      {working ? (
-        <span className="statuspill__ring" aria-hidden="true" />
-      ) : kind === "ready" ? (
-        // A drawn mark, never the ✅ character: an emoji is rendered by the
-        // OS in its own font and colours and is incapable of obeying the
-        // theme - the same objection that bans the native <select>.
-        <span className="statuspill__check" aria-hidden="true">
-          <IconCheck size={12} />
+      {/* Check, dot and ring are all mounted together, stacked in one slot,
+          and only opacity/transform say which one is showing. Conditionally
+          mounting just one of them (the previous approach) has no way to
+          animate the outgoing element - it is simply gone on the frame the
+          state changes, which is the "pop" this slice exists to remove. */}
+      <span className="statuspill__icon" aria-hidden="true">
+        <span className={`statuspill__check${!working && kind === "ready" ? " is-active" : ""}`}>
+          {/* No explicit `size`: the component's default (13) is also the
+              box's own size and the ring's optical weight, so there is one
+              number instead of two that happen to agree. */}
+          <IconCheck />
         </span>
-      ) : (
-        <span className="statuspill__dot" aria-hidden="true" />
-      )}
-      {label !== "" && (
-        // Keyed so the label replays its entry each time the pill changes
-        // between resting and working, rather than swapping text in place.
-        <span className="statuspill__label" key={working ? "working" : "resting"}>
-          {label}
-          {lead !== null && "…"}
-        </span>
-      )}
-      {lead !== null && <span className="statuspill__clock mono">{elapsedClock(lead.startedAt, now)}</span>}
-      {activities.length > 1 && <span className="statuspill__more">+{activities.length - 1}</span>}
+        <span className={`statuspill__dot${!working && kind !== "ready" ? " is-active" : ""}`} />
+        <span className={`statuspill__ring${working ? " is-active" : ""}`} />
+      </span>
+      <span className={`statuspill__expand${expanded ? " is-expanded" : ""}`}>
+        {label !== "" && (
+          // Keyed so the label replays its entry each time the pill changes
+          // between resting and working, rather than swapping text in place.
+          <span className="statuspill__label" key={working ? "working" : "resting"}>
+            {label}
+            {activeLead !== null && "…"}
+          </span>
+        )}
+        {activeLead !== null && (
+          <span className="statuspill__clock mono">{elapsedClock(activeLead.startedAt, now)}</span>
+        )}
+        {activeLead !== null && activities.length > 1 && (
+          <span className="statuspill__more">+{activities.length - 1}</span>
+        )}
+      </span>
     </div>
   );
 }
