@@ -744,8 +744,20 @@ export async function previewCaption(body: {
 
 export async function previewOverlay(body: {
   spec: Record<string, unknown>; width: number; height: number;
+  font?: string; accent1?: string; accent2?: string; highlight?: string;
 }): Promise<string> {
   return blobUrl("/api/preview/overlay", body);
+}
+
+/** Free, same as `previewOverlay` - a takeover card is drawn by the same
+ * `render_overlay` call with a different spec, so it takes the same brand
+ * fields. Added for symmetry with the route, which has existed since Task
+ * 4 with no caller (Slice 14 review, Important 4). */
+export async function previewTakeover(body: {
+  headline: string; sub: string; width: number; height: number;
+  font?: string; accent1?: string; accent2?: string; highlight?: string;
+}): Promise<string> {
+  return blobUrl("/api/preview/takeover", body);
 }
 
 /** PAID on ElevenLabs. `confirm_paid` must come from an explicit press —

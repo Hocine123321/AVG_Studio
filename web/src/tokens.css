@@ -2043,6 +2043,22 @@ a:hover {
   overflow: hidden;
 }
 
+/* The overlay panel draws two cards (a focused/explainer card and a
+   takeover card) side by side rather than stacked, so both are visible
+   without scrolling the moment a brand colour changes. Wraps below that on
+   a narrow settings column instead of squeezing two frames unreadably
+   thin. */
+.preview-panel__frames {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+}
+
+.preview-panel__frames .preview-frame {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
 .preview-frame img {
   display: block;
   width: 100%;

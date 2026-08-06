@@ -26,6 +26,7 @@ const GROUP_LABELS: Record<string, string> = {
   app: "App & components",
   video: "Video format",
   captions: "Captions",
+  overlay: "Overlay & cards",
   voice: "Voice",
   images: "Images",
   render: "Render",
@@ -502,6 +503,7 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                   </section>
                 )}
                 {g.group === "captions" && !searching && <PreviewPanel kind="caption" valueOf={valueById} />}
+                {g.group === "overlay" && !searching && <PreviewPanel kind="overlay" valueOf={valueById} />}
                 {g.group === "images" && !searching && <PreviewPanel kind="image" valueOf={valueById} />}
                 {g.group === "voice" && !searching && <PreviewPanel kind="voice" valueOf={valueById} />}
                 <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />

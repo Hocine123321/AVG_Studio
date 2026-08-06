@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { previewCaption, previewImage, previewVoice } from "./api";
+import { previewCaption, previewImage, previewOverlay, previewTakeover, previewVoice } from "./api";
 
 /** How long a settings change waits before it fires a free preview request -
  * long enough that dragging a slider or holding a key down settles before
@@ -17,7 +17,7 @@ const DEBOUNCE_MS = 350;
  * large and a free provider (Edge) is stuck behind an unnecessary button. */
 const PAID_VOICE_PROVIDERS = new Set(["elevenlabs"]);
 
-export type PreviewKind = "caption" | "voice" | "image";
+export type PreviewKind = "caption" | "overlay" | "voice" | "image";
 
 interface Props {
   kind: PreviewKind;
@@ -79,6 +79,7 @@ function captionFrameSize(aspectRatio: string): { width: number; height: number 
  * markup, all defined once above/below rather than per kind. */
 export default function PreviewPanel({ kind, valueOf }: Props) {
   if (kind === "caption") return <CaptionPreview valueOf={valueOf} />;
+  if (kind === "overlay") return <OverlayPreview valueOf={valueOf} />;
   if (kind === "voice") return <VoicePreview valueOf={valueOf} />;
   return <ImagePreview valueOf={valueOf} />;
 }
@@ -149,6 +150,108 @@ function CaptionPreview({ valueOf }: { valueOf: (id: string) => string }) {
         style={{ aspectRatio: aspectRatioCss(aspectRatio) }}
       >
         {url && <img src={url} alt="Sample caption, burned by the render's own libass pass" />}
+      </div>
+      {error && <p className="field-row__blocked">{error}</p>}
+    </section>
+  );
+}
+
+/** Both cards this panel draws, requested together on every debounced
+ * settings change. `Promise.allSettled` rather than `Promise.all`: a
+ * failure drawing one card (an unknown element, which cannot actually
+ * happen here since both specs are fixed) must not blank the other. */
+function OverlayPreview({ valueOf }: { valueOf: (id: string) => string }) {
+  // RAW values, same rule as `CaptionPreview` above: `overlay_png`/
+  // `takeover_png` resolve a blank value through
+  // `avg.media.overlays.resolve_brand`, the same function a real render
+  // calls, so there is no fallback to invent here either.
+  const font = valueOf("font_family");
+  const accent1 = valueOf("overlay_accent1");
+  const accent2 = valueOf("overlay_accent2");
+  const highlight = valueOf("overlay_highlight");
+  const aspectRatio = valueOf("aspect_ratio") || "9:16";
+  const { width, height } = captionFrameSize(aspectRatio);
+
+  const [cardUrl, setCardUrl] = useState<string | null>(null);
+  const [takeoverUrl, setTakeoverUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cardUrlRef = useRef<string | null>(null);
+  const takeoverUrlRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    const generation = ++generationRef.current;
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      setError(null);
+      const brand = { font, accent1, accent2, highlight };
+      Promise.allSettled([
+        // "accent2" is named explicitly - a card with no accent of its own
+        // defaults to accent1 (see `overlay_design.py`), which the takeover
+        // card below already exercises, so this frame is what proves
+        // accent2 actually reaches the drawing.
+        previewOverlay({
+          spec: { element: "explainer", headline: "A card, drawn by the render's own code", accent: "accent2" },
+          width,
+          height,
+          ...brand,
+        }),
+        previewTakeover({ headline: "Chapter One", sub: "The turning point", width, height, ...brand }),
+      ]).then(([cardResult, takeoverResult]) => {
+        if (generation !== generationRef.current) {
+          if (cardResult.status === "fulfilled") URL.revokeObjectURL(cardResult.value);
+          if (takeoverResult.status === "fulfilled") URL.revokeObjectURL(takeoverResult.value);
+          return;
+        }
+        if (cardResult.status === "fulfilled") {
+          if (cardUrlRef.current) URL.revokeObjectURL(cardUrlRef.current);
+          cardUrlRef.current = cardResult.value;
+          setCardUrl(cardResult.value);
+        } else {
+          setError(errorMessage(cardResult.reason));
+        }
+        if (takeoverResult.status === "fulfilled") {
+          if (takeoverUrlRef.current) URL.revokeObjectURL(takeoverUrlRef.current);
+          takeoverUrlRef.current = takeoverResult.value;
+          setTakeoverUrl(takeoverResult.value);
+        } else {
+          setError(errorMessage(takeoverResult.reason));
+        }
+        setBusy(false);
+      });
+    }, DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [width, height, font, accent1, accent2, highlight]);
+
+  useEffect(
+    () => () => {
+      if (cardUrlRef.current) URL.revokeObjectURL(cardUrlRef.current);
+      if (takeoverUrlRef.current) URL.revokeObjectURL(takeoverUrlRef.current);
+    },
+    [],
+  );
+
+  return (
+    <section className="preview-panel" aria-label="Overlay preview">
+      <p className="lbl">Live preview</p>
+      <p className="preview-panel__empty">
+        A card (Accent 2) and a takeover card (Accent 1), both drawn by the render&rsquo;s own
+        overlay code. &ldquo;Highlight&rdquo; applies to cards whose own plan asks for it.
+      </p>
+      <div className="preview-panel__frames">
+        <div
+          className={`preview-frame${busy ? " preview-frame--busy" : ""}`}
+          style={{ aspectRatio: aspectRatioCss(aspectRatio) }}
+        >
+          {cardUrl && <img src={cardUrl} alt="Sample overlay card, drawn by the render's own code" />}
+        </div>
+        <div
+          className={`preview-frame${busy ? " preview-frame--busy" : ""}`}
+          style={{ aspectRatio: aspectRatioCss(aspectRatio) }}
+        >
+          {takeoverUrl && <img src={takeoverUrl} alt="Sample takeover card, drawn by the render's own code" />}
+        </div>
       </div>
       {error && <p className="field-row__blocked">{error}</p>}
     </section>
