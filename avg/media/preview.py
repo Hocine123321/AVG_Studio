@@ -25,6 +25,17 @@ from typing import Any
 #: says the same thing and the panel can quote it back to the user.
 SAMPLE_SENTENCE = "Hello, this is my voice I'll be using in a new video! Do you like it?"
 
+#: Voice providers whose synthesis costs money. Edge is free and is
+#: therefore allowed to preview live; ElevenLabs spends characters on every
+#: press, which is why `avg/api/routes_preview.py` requires an explicit
+#: confirmation for it. Named here, once, so the route and the UI cannot
+#: disagree about which is which.
+PAID_VOICE_PROVIDERS: frozenset[str] = frozenset({"elevenlabs"})
+
+#: The prompt an image sample is generated from. Fixed, so the panel can say
+#: plainly that this is a sample rather than a scene from the user's video.
+SAMPLE_IMAGE_PROMPT = "A calm wide landscape at golden hour, cinematic lighting"
+
 
 def _brand() -> dict[str, Any]:
     from avg.media.vendor import overlay_design as od  # noqa: PLC0415
@@ -120,3 +131,37 @@ def caption_png(ass_text: str, width: int, height: int) -> bytes:
         if result.returncode != 0 or not out_path.is_file():
             return b""
         return out_path.read_bytes()
+
+
+def _voice_backend(provider: str) -> Any:
+    """The voice backend for `provider`, or `None`.
+
+    Imported lazily: `avg.providers.voice.providers` pulls in `edge_tts`,
+    which costs about two seconds of startup, and Slice 7 moved that import
+    off the launch path deliberately.
+    """
+    from avg.providers.voice.providers import (  # noqa: PLC0415
+        EdgeVoiceProvider,
+        ElevenLabsVoiceProvider,
+    )
+
+    backends = {"edge": EdgeVoiceProvider, "elevenlabs": ElevenLabsVoiceProvider}
+    backend_cls = backends.get(provider)
+    return backend_cls() if backend_cls is not None else None
+
+
+def voice_sample(provider: str, voice_id: str) -> bytes:
+    """`SAMPLE_SENTENCE`, spoken by `voice_id`. Audio bytes, or `b""`.
+
+    **Costs money on ElevenLabs** - see `PAID_VOICE_PROVIDERS`. Free on Edge.
+    Whether this is allowed to run at all is the route's decision, not this
+    function's.
+    """
+    backend = _voice_backend(provider)
+    if backend is None:
+        return b""
+    try:
+        data = backend.synthesize(SAMPLE_SENTENCE, voice_id=voice_id, model="")
+    except Exception:  # noqa: BLE001 - a preview panel states the failure
+        return b""
+    return bytes(data)
