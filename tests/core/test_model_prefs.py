@@ -29,6 +29,57 @@ def test_setting_one_field_leaves_the_others_alone(tmp_path):
     assert (entry.selected, entry.favourite, entry.note) == (True, True, "narration default")
 
 
+def test_suggestions_live_beside_the_ticks_and_replace_wholesale(tmp_path):
+    from avg.core.model_prefs import ModelPrefs
+
+    prefs = ModelPrefs(tmp_path / "model_prefs.json")
+    prefs.set("text", "groq/a", selected=True, note="mine")
+
+    prefs.set_suggestions([
+        {"entry_id": "groq/a", "kind": "text", "tier": "cheap", "reason": "fast"},
+        {"entry_id": "groq/b", "kind": "text", "tier": "high", "reason": "better"},
+    ])
+    assert set(prefs.suggestions()) == {"groq/a", "groq/b"}
+
+    # A second run replaces, never merges - a stale suggestion must be able
+    # to disappear, exactly as a stale probe verdict can.
+    prefs.set_suggestions([{"entry_id": "groq/c", "kind": "text", "tier": None, "reason": "x"}])
+    assert set(prefs.suggestions()) == {"groq/c"}
+
+
+def test_a_suggestion_run_never_disturbs_what_the_user_wrote(tmp_path):
+    """The one thing in this document that cannot be regenerated."""
+    from avg.core.model_prefs import ModelPrefs
+
+    prefs = ModelPrefs(tmp_path / "model_prefs.json")
+    prefs.set("text", "groq/a", selected=True, favourite=True, note="warm, good for narration")
+
+    prefs.set_suggestions([{"entry_id": "groq/a", "kind": "text", "tier": "cheap", "reason": "fast"}])
+
+    entry = prefs.all("text")["groq/a"]
+    assert entry.selected is True
+    assert entry.favourite is True
+    assert entry.note == "warm, good for narration"
+
+
+def test_suggestions_are_empty_before_any_run(tmp_path):
+    from avg.core.model_prefs import ModelPrefs
+
+    assert ModelPrefs(tmp_path / "model_prefs.json").suggestions() == {}
+
+
+def test_ticking_after_a_suggestion_run_does_not_erase_the_suggestions(tmp_path):
+    """The symmetric case: `_save` (used by `set`) must preserve the
+    `suggested` section the same way `set_suggestions` preserves `entries`."""
+    from avg.core.model_prefs import ModelPrefs
+
+    prefs = ModelPrefs(tmp_path / "model_prefs.json")
+    prefs.set_suggestions([{"entry_id": "groq/a", "kind": "text", "tier": "cheap", "reason": "fast"}])
+    prefs.set("text", "groq/a", selected=True)
+
+    assert set(prefs.suggestions()) == {"groq/a"}
+
+
 def test_kinds_do_not_collide(tmp_path):
     prefs = ModelPrefs(tmp_path / "model_prefs.json")
     prefs.set("text", "a/b", selected=True)

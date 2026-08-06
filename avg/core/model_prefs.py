@@ -27,7 +27,7 @@ import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 #: The three things the Live List curates. A kind is part of the document
 #: shape, so an unknown one is rejected rather than silently written into a
@@ -83,14 +83,81 @@ class ModelPrefs:
             return {}
         return {k: v for k, v in entries.items() if k in KINDS and isinstance(v, dict)}
 
+    def _load_document(self) -> dict[str, Any]:
+        """The whole document, not just `entries`.
+
+        `_load` deliberately returns only the entry sections; suggestions are
+        a sibling of those, so reading and writing them needs the document
+        itself.
+        """
+        if not self.path.is_file():
+            return {}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - a broken file means "nothing curated yet"
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def _save(self, entries: dict[str, dict[str, dict]]) -> None:
         """Write atomically - temp file then `os.replace` - matching
-        `avg.pipeline.create.save_project` and `avg.config.settings`."""
+        `avg.pipeline.create.save_project` and `avg.config.settings`.
+
+        Reads the document first and rewrites only `entries`, so a tick
+        never wipes a `suggested` section a prior recommendation run wrote -
+        the same "touch nothing else" rule `set_suggestions` follows in the
+        other direction.
+        """
+        document = self._load_document()
+        document["schema_version"] = SCHEMA_VERSION
+        document["entries"] = entries
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"schema_version": SCHEMA_VERSION, "entries": entries}, f, indent=2, sort_keys=True)
+                json.dump(document, f, indent=2, sort_keys=True)
+            os.replace(tmp_name, self.path)
+        except BaseException:
+            with suppress(OSError):
+                os.remove(tmp_name)
+            raise
+
+    def suggestions(self) -> dict[str, dict[str, Any]]:
+        """What an AI last recommended, by entry id.
+
+        An OPINION, stored here rather than in `working_models.json` because
+        that document records what was MEASURED and is replaced wholesale by
+        every probe. See `avg.providers.recommend`.
+        """
+        raw = self._load_document().get("suggested")
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+
+    def set_suggestions(self, rows: list[dict[str, Any]]) -> None:
+        """Replace every suggestion with `rows`, touching nothing else.
+
+        Wholesale, like a probe sweep: a suggestion that is no longer made
+        has to be able to disappear. The user's ticks, favourites and notes
+        live in `entries` and are rewritten untouched - they are the one
+        thing in this document that cannot be regenerated.
+        """
+        document = self._load_document()
+        document["schema_version"] = SCHEMA_VERSION
+        document.setdefault("entries", {})
+        document["suggested"] = {
+            str(row["entry_id"]): {
+                "kind": str(row.get("kind", "")),
+                "tier": row.get("tier"),
+                "reason": str(row.get("reason", "")),
+            }
+            for row in rows
+            if row.get("entry_id")
+        }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(document, handle, indent=2, sort_keys=True)
             os.replace(tmp_name, self.path)
         except BaseException:
             with suppress(OSError):
