@@ -6,6 +6,7 @@ flake waiting to happen. What is asserted here is the SEAM that makes the
 window able to open first.
 """
 
+import subprocess
 import sys
 
 from avg.shell import make_token, pick_port, splash_html
@@ -59,7 +60,34 @@ def test_startup_check_defaults_to_on_and_can_be_turned_off():
 
 def test_reading_the_setting_needs_no_server_and_no_app():
     """Same property the splash has: this runs on the boot path before the
-    server exists, so it must not need one."""
-    from avg.shell import should_check_at_startup
+    server exists, so CALLING it must not drag the server/app modules in.
 
-    assert should_check_at_startup({"startup_check": False}) is False
+    A prior version of this test only re-asserted
+    `should_check_at_startup({"startup_check": False}) is False` - already
+    covered three lines above in
+    `test_startup_check_defaults_to_on_and_can_be_turned_off`, and no
+    evidence at all about import isolation despite the name and docstring
+    both claiming it. This subprocess-imports `avg.shell`, calls
+    `should_check_at_startup`, and checks that doing so did not pull in
+    `fastapi`, `uvicorn`, or `avg.api.app` - the actual "no server, no app"
+    property the two prior tests already establish for `avg.shell` itself
+    (`test_the_shell_does_not_import_the_server_at_module_scope`) and for
+    the splash (`test_the_splash_needs_no_server_no_app_and_no_settings`).
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from avg.shell import should_check_at_startup; "
+            "should_check_at_startup({'startup_check': False}); "
+            "print('fastapi' in sys.modules, 'uvicorn' in sys.modules, "
+            "'avg.api.app' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "False False False", (
+        "calling should_check_at_startup pulled in the server/app modules "
+        f"it is meant to run ahead of: {result.stdout!r}"
+    )
