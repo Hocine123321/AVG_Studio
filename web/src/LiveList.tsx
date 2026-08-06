@@ -88,6 +88,11 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<LiveListResponse | null>(null);
   const [kind, setKind] = useState<LiveKind>("text");
   const [busy, setBusy] = useState(false);
+  // Separate from `busy`: `busy` is Refresh catalogues' own state (the
+  // screen's one filled `.btn--primary`), and a suggest run reusing it made
+  // that button relabel itself "Listing…" for 24s while nothing was being
+  // listed. `suggesting` names which button is running, or null.
+  const [suggesting, setSuggesting] = useState<"models" | "voices" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState("");
   // Edge alone advertises 322 voices. A shortlist is what this screen is
@@ -128,20 +133,32 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   /** The run itself is a background thread (one text call, own slot on
    * the backend) - the POST returns before it finishes. There is no event
    * for it on `/ws/events`, so this polls the Live List for a while
-   * afterwards, the same way `ModelCacheCard` polls a running probe. */
+   * afterwards, the same way `ModelCacheCard` polls a running probe - but
+   * it stops as soon as the backend's own `suggest_status` leaves
+   * `"running"`, rather than always waiting out the full 24s. A `"error"`
+   * status is surfaced through `suggest_error`, the same way a rejected
+   * POST is - a failed text call is the ordinary outcome on this account
+   * (only Groq reliably works), so it has to read as a specific reason,
+   * never as nothing having happened. */
   async function suggest(target: "models" | "voices") {
-    setBusy(true);
+    setSuggesting(target);
     setError(null);
     try {
       await suggestLiveList(target);
+      let latest: LiveListResponse | null = null;
       for (let i = 0; i < 12; i++) {
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
-        await load();
+        latest = await getLiveList();
+        setData(latest);
+        if (latest.suggest_status !== "running") break;
+      }
+      if (latest?.suggest_status === "error" && latest.suggest_error) {
+        setError(latest.suggest_error);
       }
     } catch (err) {
       setError(extractDetail(err instanceof Error ? err.message : String(err)));
     } finally {
-      setBusy(false);
+      setSuggesting(null);
     }
   }
 
@@ -230,6 +247,14 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   });
 
   const selectedCount = rows.filter((r) => r.selected).length;
+  // Gates the "Suggestions come from an AI…" disclaimer: it was an
+  // always-visible third note above the tabs, shown even on a fresh
+  // install before a suggestion has ever been made.
+  const hasSuggestions = data
+    ? data.text.some((r) => r.source === "suggested") ||
+      data.image.some((r) => r.source === "suggested") ||
+      data.voice.some((r) => r.source === "suggested")
+    : false;
 
   return (
     <div className="settings">
@@ -247,13 +272,28 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         <button type="button" className="btn" onClick={onBack}>
           Back to App health
         </button>
-        <button type="button" className="btn" onClick={() => void suggest("models")} disabled={busy}>
-          Suggest models
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void suggest("models")}
+          disabled={busy || suggesting !== null}
+        >
+          {suggesting === "models" ? "Suggesting…" : "Suggest models"}
         </button>
-        <button type="button" className="btn" onClick={() => void suggest("voices")} disabled={busy}>
-          Suggest voices
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void suggest("voices")}
+          disabled={busy || suggesting !== null}
+        >
+          {suggesting === "voices" ? "Suggesting…" : "Suggest voices"}
         </button>
-        <button type="button" className="btn btn--primary" onClick={() => void refresh()} disabled={busy}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => void refresh()}
+          disabled={busy || suggesting !== null}
+        >
           {busy ? "Listing…" : "Refresh catalogues"}
         </button>
       </header>
@@ -269,11 +309,13 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
           : "Catalogues have never been listed — press Refresh catalogues to see what each provider offers."}
       </p>
 
-      <p className="channels__note">
-        Suggestions come from an AI reading these catalogues. The cost tiers and reasons are its
-        opinion — this app holds no pricing and has not checked them. Only “Verified” means a real
-        call succeeded.
-      </p>
+      {hasSuggestions && (
+        <p className="channels__note">
+          Suggestions come from an AI reading these catalogues. The cost tiers and reasons are its
+          opinion — this app holds no pricing and has not checked them. Only “Verified” means a real
+          call succeeded.
+        </p>
+      )}
 
       {error && <p className="settings__save-error">{error}</p>}
 
@@ -418,7 +460,11 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
               </div>
 
               <span className={sourceClass(entry.source)}>{SOURCE_LABEL[entry.source]}</span>
-              {entry.tier && <span className="livelist__tier">{entry.tier}</span>}
+              {entry.tier && (
+                <span className="livelist__tier" title="The model's own claim — never a measured price.">
+                  {entry.tier}
+                </span>
+              )}
 
               <div className="livelist__note">
                 <DeferredInput

@@ -469,6 +469,13 @@ export interface LiveListResponse {
    * A single Gemini model looks identical whether the catalogue holds one
    * model or was simply never listed - this is what tells the two apart. */
   updated: string | null;
+  /** The last (or in-flight) suggestion run's own outcome. `"idle"` before
+   * any run. A failed text call is the ordinary case on this account (only
+   * Groq reliably works) so this exists to make that visible instead of
+   * silent - see LiveList's `suggest()`. */
+  suggest_status: "idle" | "running" | "ok" | "error";
+  /** One sentence explaining an `"error"` status, or `null` otherwise. */
+  suggest_error: string | null;
 }
 
 export function getLiveList(): Promise<LiveListResponse> {
