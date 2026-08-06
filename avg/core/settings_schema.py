@@ -396,6 +396,53 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="screen_text",
     ),
+    # --- overlay cards (Director II's focused/explainer cards and takeover
+    # cards) - three brand colours, read by `avg.media.overlays.resolve_brand`,
+    # the one function both a real render (`render_layers`, called from
+    # `avg.pipeline.phases.director._draw_overlay_assets`) and the free
+    # overlay/takeover preview (`avg.media.preview._draw_to_png`) call, so a
+    # change here draws the same way in both (Slice 14 review, Important 4).
+    # `font_family` is deliberately NOT repeated here: it already lives in
+    # the captions group and its own help text already says it is shared
+    # with takeover cards - a second copy would be the per-field-inheritance
+    # bug CLAUDE.md's config-scopes section warns about, restated as two
+    # settings instead of one.
+    SettingSpec(
+        id="overlay_accent1",
+        group="overlay",
+        label="Accent 1",
+        help=(
+            "Primary card accent colour, '#RRGGBB'. Used by most focused/explainer cards. "
+            "Empty uses the drawing library's own default."
+        ),
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="director2",
+    ),
+    SettingSpec(
+        id="overlay_accent2",
+        group="overlay",
+        label="Accent 2",
+        help="Secondary card accent colour, '#RRGGBB'. Empty uses the drawing library's own default.",
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="director2",
+    ),
+    SettingSpec(
+        id="overlay_highlight",
+        group="overlay",
+        label="Highlight",
+        help=(
+            "Card highlight colour, '#RRGGBB', for cards whose plan entry asks for it. "
+            "Empty uses the drawing library's own default."
+        ),
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="director2",
+    ),
     # --- voice provider and options ---
     SettingSpec(
         id="voice_provider",

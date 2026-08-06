@@ -49,6 +49,37 @@ def test_a_caption_preview_is_free_and_needs_no_confirmation(client):
     assert res.status_code in (200, 503)
 
 
+def test_an_overlay_preview_is_free_and_reflects_a_brand_setting(client):
+    """No confirmation needed (it is free, like the caption route above),
+    and the raw `accent1` value in the body must reach
+    `avg.media.overlays.resolve_brand` and change the drawn pixels - proof
+    that the route is actually wired to the settings-driven brand rather
+    than to a hardcoded default (Slice 14 review, Important 4)."""
+    spec = {"element": "explainer", "headline": "Hello"}
+    default_res = client.post(
+        "/api/preview/overlay",
+        json={"spec": spec, "width": 320, "height": 180},
+        headers=AUTH,
+    )
+    red_res = client.post(
+        "/api/preview/overlay",
+        json={"spec": spec, "width": 320, "height": 180, "accent1": "#FF0000"},
+        headers=AUTH,
+    )
+    assert default_res.status_code == 200
+    assert red_res.status_code == 200
+    assert default_res.content != red_res.content
+
+
+def test_a_takeover_preview_is_free_and_needs_no_confirmation(client):
+    res = client.post(
+        "/api/preview/takeover",
+        json={"headline": "A headline", "sub": "and a sub", "width": 320, "height": 180},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+
+
 def test_an_elevenlabs_voice_preview_refuses_without_confirmation(client, monkeypatch):
     """The rule that keeps a keystroke from costing money. Enforced on the
     BACKEND, so it holds regardless of what the frontend does.

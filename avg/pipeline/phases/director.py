@@ -533,6 +533,7 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
 
     try:
         width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)  # type: ignore[no-untyped-call]
+        settings = ctx.channel.settings
         return write_layers(
             Path(ctx.project.folder),
             edit_plan,
@@ -540,6 +541,9 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
             int(width),
             int(height),
             resolve_font_family(ctx),
+            str(settings.get("overlay_accent1") or ""),
+            str(settings.get("overlay_accent2") or ""),
+            str(settings.get("overlay_highlight") or ""),
         )
     except Exception as exc:  # noqa: BLE001 - see docstring
         message = f"Overlay assets could not be drawn ({exc}); the render will composite without cards."

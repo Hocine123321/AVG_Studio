@@ -85,6 +85,45 @@ def _vendor_spec(entry: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def resolve_brand(font: str = "", accent1: str = "", accent2: str = "", highlight: str = "") -> dict[str, Any]:
+    """The ONE brand resolver, shared by a real render (`render_layers`
+    below, via Director II) and a settings preview
+    (`avg.media.preview._draw_to_png`) - so an overlay setting changes the
+    frame the same way in both places, which is the entire point of Slice
+    14 review's Important 4: `avg.media.preview._brand()` used to hardcode
+    `DEFAULT_BRAND` regardless of what the channel's settings said, so no
+    overlay setting could ever change the preview it was supposedly
+    driving.
+
+    Takes raw setting VALUES rather than a `PhaseContext`, same shape as
+    `avg.pipeline.phases._common.resolve_font_family_value`: `avg/media/`
+    may not import `avg/pipeline/`, so the pipeline layer resolves its own
+    settings and hands plain strings in here, and a preview route (which
+    has no channel to read from beyond the request body) can call this
+    with exactly the same values a debounced settings change carries.
+
+    Every argument left blank keeps the library's own `DEFAULT_BRAND`
+    value - a setting that has never been touched must draw exactly as it
+    did before this function existed.
+    """
+    from avg.media.vendor import overlay_design as od
+
+    brand: dict[str, Any] = dict(od.DEFAULT_BRAND)
+    if font:
+        # The brand carries font PATHS, not family names; a family name is
+        # all this app's settings have, so it is only useful when it happens
+        # to be a path. Anything else leaves the library's own default.
+        if Path(font).suffix.lower() in (".ttf", ".otf"):
+            brand["font_path"] = font
+    if accent1:
+        brand["accent1"] = accent1
+    if accent2:
+        brand["accent2"] = accent2
+    if highlight:
+        brand["highlight"] = highlight
+    return brand
+
+
 def render_layers(
     project_folder: Path,
     edit_plan: dict[str, Any],
@@ -92,6 +131,9 @@ def render_layers(
     width: int,
     height: int,
     font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
 ) -> list[dict[str, Any]]:
     """One `{png, start, end}` row per drawable layer.
 
@@ -103,13 +145,7 @@ def render_layers(
     """
     from avg.media.vendor import overlay_design as od
 
-    brand: dict[str, Any] = dict(od.DEFAULT_BRAND)
-    if font:
-        # The brand carries font PATHS, not family names; a family name is
-        # all this app's settings have, so it is only useful when it happens
-        # to be a path. Anything else leaves the library's own default.
-        if Path(font).suffix.lower() in (".ttf", ".otf"):
-            brand["font_path"] = font
+    brand = resolve_brand(font, accent1, accent2, highlight)
 
     overlays_dir = Path(project_folder) / "overlays"
     overlays_dir.mkdir(parents=True, exist_ok=True)
@@ -172,6 +208,9 @@ def write_layers(
     width: int,
     height: int,
     font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
 ) -> int:
     """Render the layers and write `render/_final_layers.json`.
 
@@ -180,7 +219,9 @@ def write_layers(
     the same encode, so an empty list would send the render down the
     combined path with nothing to combine.
     """
-    layers = render_layers(project_folder, edit_plan, scene_timings, width, height, font)
+    layers = render_layers(
+        project_folder, edit_plan, scene_timings, width, height, font, accent1, accent2, highlight
+    )
     if not layers:
         return 0
     render_folder = Path(project_folder) / "render"

@@ -116,6 +116,16 @@ class OverlayPreview(BaseModel):
     spec: dict[str, Any]
     width: int = 1080
     height: int = 1920
+    #: RAW setting values (`avg.core.settings_schema`: `font_family=""`,
+    #: `overlay_accent1`/`overlay_accent2`/`overlay_highlight` all default
+    #: `""`), resolved by `avg.media.overlays.resolve_brand` - the same
+    #: function a real render calls - rather than by a fallback invented
+    #: here. Same shape as `CaptionPreview`'s `font_name`/`font_size` above,
+    #: and for the same reason (Important 1's fix, applied to Important 4).
+    font: str = ""
+    accent1: str = ""
+    accent2: str = ""
+    highlight: str = ""
 
 
 class TakeoverPreview(BaseModel):
@@ -123,6 +133,10 @@ class TakeoverPreview(BaseModel):
     sub: str = ""
     width: int = 1080
     height: int = 1920
+    font: str = ""
+    accent1: str = ""
+    accent2: str = ""
+    highlight: str = ""
 
 
 class VoicePreview(BaseModel):
@@ -327,17 +341,31 @@ async def preview_caption(body: CaptionPreview, request: Request) -> Response:
 @router.post("/api/preview/overlay")
 async def preview_overlay(body: OverlayPreview, request: Request) -> Response:
     """Free: one PIL draw by the render's own overlay code. No lock - see
-    the module docstring."""
-    data = await asyncio.to_thread(overlay_png, body.spec, body.width, body.height)
+    the module docstring.
+
+    `font`/`accent1`/`accent2`/`highlight` are raw setting values, resolved
+    inside `overlay_png` -> `avg.media.overlays.resolve_brand`, the same
+    function a real render calls (Slice 14 review, Important 4)."""
+    data = await asyncio.to_thread(
+        overlay_png, body.spec, body.width, body.height, body.font, body.accent1, body.accent2, body.highlight
+    )
     return _png_or_503(data)
 
 
 @router.post("/api/preview/takeover")
 async def preview_takeover(body: TakeoverPreview, request: Request) -> Response:
     """Free: one PIL draw by the render's own overlay code. No lock - see
-    the module docstring."""
+    the module docstring. Same brand resolution as `preview_overlay` above."""
     data = await asyncio.to_thread(
-        takeover_png, body.headline, body.sub, body.width, body.height
+        takeover_png,
+        body.headline,
+        body.sub,
+        body.width,
+        body.height,
+        body.font,
+        body.accent1,
+        body.accent2,
+        body.highlight,
     )
     return _png_or_503(data)
 

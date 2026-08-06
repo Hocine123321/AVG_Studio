@@ -28,6 +28,57 @@ def test_an_element_the_drawer_does_not_know_returns_no_bytes():
     assert overlay_png({"element": "not-a-real-element"}, 1080, 1920) == b""
 
 
+def test_changing_an_overlay_accent_setting_changes_the_preview_bytes():
+    """Slice 14 review, Important 4: before the fix `_brand()` hardcoded
+    `DEFAULT_BRAND`, so no overlay setting could ever change a single pixel
+    of this preview. `accent1` is the colour `render_overlay` looks up for
+    a `focused`/`explainer` card with no `accent` of its own
+    (`overlay_design.py`: `brand[spec.get("accent", "accent1")]`), so a
+    default-brand render and a red-accent render of the SAME spec must
+    produce different bytes."""
+    spec = {"element": "explainer", "headline": "Hello"}
+    default = overlay_png(spec, 1080, 1920)
+    red = overlay_png(spec, 1080, 1920, accent1="#FF0000")
+    assert default[:8] == b"\x89PNG\r\n\x1a\n"
+    assert red[:8] == b"\x89PNG\r\n\x1a\n"
+    assert default != red
+
+
+def test_changing_an_overlay_accent_setting_changes_a_takeover_card_too():
+    """Same brand resolver drives both drawable kinds - a takeover card must
+    react to `accent1` exactly as an overlay card does, since both go
+    through `avg.media.overlays.resolve_brand`."""
+    default = takeover_png("A headline", "and a sub", 1080, 1920)
+    red = takeover_png("A headline", "and a sub", 1080, 1920, accent1="#FF0000")
+    assert default != red
+
+
+def test_the_preview_and_a_real_render_resolve_the_brand_through_one_function():
+    """`avg.media.preview._draw_to_png` and `avg.media.overlays.render_layers`
+    (called from Director II) must both build their brand dict by calling
+    `avg.media.overlays.resolve_brand` - not by each hardcoding or
+    re-deriving their own version of it. Walks the AST of both call sites
+    rather than trusting a docstring's claim, since a docstring claiming
+    something the code does not do is exactly the defect this slice exists
+    to catch."""
+    import ast
+    import inspect
+
+    from avg.media import overlays, preview
+
+    def _calls_resolve_brand(func) -> bool:
+        tree = ast.parse(inspect.getsource(func))
+        return any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "resolve_brand"
+            for node in ast.walk(tree)
+        )
+
+    assert _calls_resolve_brand(preview._draw_to_png)
+    assert _calls_resolve_brand(overlays.render_layers)
+
+
 def test_the_sample_sentence_is_fixed_and_shared():
     """One constant, so the voice preview always says the same thing and
     the panel can quote it."""

@@ -51,25 +51,38 @@ PAID_VOICE_PROVIDERS: frozenset[str] = frozenset({"elevenlabs"})
 SAMPLE_IMAGE_PROMPT = "A calm wide landscape at golden hour, cinematic lighting"
 
 
-def _brand() -> dict[str, Any]:
-    from avg.media.vendor import overlay_design as od  # noqa: PLC0415
-
-    return dict(od.DEFAULT_BRAND)
-
-
-def _draw_to_png(spec: dict[str, Any], width: int, height: int) -> bytes:
+def _draw_to_png(
+    spec: dict[str, Any],
+    width: int,
+    height: int,
+    font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
+) -> bytes:
     """One drawn layer as PNG bytes, or `b""`.
+
+    The brand comes from `avg.media.overlays.resolve_brand` - the same
+    function `avg.media.overlays.render_layers` calls for a real render
+    (Slice 14 review, Important 4). `_brand()` used to hardcode
+    `DEFAULT_BRAND` here, so no overlay setting could ever change what this
+    preview drew; `resolve_brand` is imported rather than reimplemented so
+    the two can never drift apart again. Importing `avg.media.overlays` is
+    still within this module's own layering rule - it is another module
+    under `avg/media/`, not `avg/pipeline/` or `avg/providers/`.
 
     Never raises: `render_overlay` raises on an element it does not know and
     returns `None` for a card with no text. Both mean "there is nothing to
     show", which a preview panel can state - an exception reaching the route
     could not be.
     """
+    from avg.media.overlays import resolve_brand  # noqa: PLC0415
     from avg.media.vendor import overlay_design as od  # noqa: PLC0415
 
     try:
-        image = od.render_overlay(spec, width, height, _brand())  # type: ignore[no-untyped-call]
-    except Exception:  # noqa: BLE001 - an unknown element is "nothing to show"
+        brand = resolve_brand(font, accent1, accent2, highlight)
+        image = od.render_overlay(spec, width, height, brand)  # type: ignore[no-untyped-call]
+    except Exception:  # noqa: BLE001 - an unknown element, or a bad colour, is "nothing to show"
         return b""
     if image is None:
         return b""
@@ -78,12 +91,29 @@ def _draw_to_png(spec: dict[str, Any], width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
-def overlay_png(spec: dict[str, Any], width: int, height: int) -> bytes:
+def overlay_png(
+    spec: dict[str, Any],
+    width: int,
+    height: int,
+    font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
+) -> bytes:
     """One overlay, drawn exactly as the render would draw it."""
-    return _draw_to_png(spec, width, height)
+    return _draw_to_png(spec, width, height, font, accent1, accent2, highlight)
 
 
-def takeover_png(headline: str, sub: str, width: int, height: int) -> bytes:
+def takeover_png(
+    headline: str,
+    sub: str,
+    width: int,
+    height: int,
+    font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
+) -> bytes:
     """One takeover card, drawn exactly as the render would draw it.
 
     The element name matches what `avg.media.overlays.render_layers` builds
@@ -93,6 +123,10 @@ def takeover_png(headline: str, sub: str, width: int, height: int) -> bytes:
         {"element": "chapters_takeover_cards", "headline": headline, "sub": sub},
         width,
         height,
+        font,
+        accent1,
+        accent2,
+        highlight,
     )
 
 
