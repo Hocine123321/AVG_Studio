@@ -43,6 +43,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
+from avg.config.channel_defaults import default_channel_defaults_path
 from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
@@ -401,9 +402,17 @@ def create_app(
     )
     # The app-wide defaults a channel can read instead of its own document
     # (`settings_source`). Its own file, beside settings.json, for the same
-    # reason the error log and the model cache have theirs.
+    # reason the error log and the model cache have theirs - and resolved to
+    # a concrete path here, exactly like those two, rather than left `None`
+    # for `avg.config.channel_defaults` to default internally. Left `None`
+    # was the Slice 12 review's Important 5: `app.state.channel_defaults_path`
+    # was useless to any reader that isn't `getattr`-defensive about it, and
+    # a test client built without the override would fall through to
+    # `default_channel_defaults_path()`'s real `%APPDATA%` - silently, on
+    # the first future test that exercises `port-to-global` or
+    # `settings_source="global"` without knowing to pass this one.
     app.state.channel_defaults_path = (
-        Path(channel_defaults_path) if channel_defaults_path is not None else None
+        Path(channel_defaults_path) if channel_defaults_path is not None else default_channel_defaults_path()
     )
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.

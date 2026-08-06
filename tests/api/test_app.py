@@ -27,6 +27,20 @@ def test_render_of_an_unknown_project_is_404(client):
     r = client.post("/api/projects/nope/render", headers={"X-AVG-Token": "t0k"})
     assert r.status_code == 404
 
+def test_channel_defaults_path_resolves_when_the_override_is_omitted(client):
+    """Slice 12 review, Important 5: `channel_defaults_path` used to be the
+    one path `create_app` left as bare `None` when a caller (a test, most
+    dangerously) did not pass an override - every other document
+    (`settings_path` aside, which the config layer itself defaults) gets
+    resolved here. A `None` slot is useless to any future reader and, worse,
+    is exactly what `avg.config.channel_defaults.load_defaults`/`save_defaults`
+    would have silently defaulted to the REAL `%APPDATA%` for. This only
+    checks the resolved path, never touches the filesystem, so it stays
+    honest under the no-real-profile-writes rule."""
+    from avg.config.channel_defaults import default_channel_defaults_path
+
+    assert client.app.state.channel_defaults_path == default_channel_defaults_path()
+
 def test_websocket_streams_events(client):
     with client.websocket_connect("/ws/events?token=t0k") as ws:
         assert ws.receive_json()["type"] == "hello"
