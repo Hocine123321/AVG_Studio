@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from avg.api.app import create_app
+from avg.core.errors import AvgError, ErrorKind
 
 TOKEN = "t0k"
 AUTH = {"X-AVG-Token": TOKEN}
@@ -133,3 +134,178 @@ def test_a_second_preview_while_one_runs_is_refused(client, monkeypatch):
 
     # The render slot must be untouched by any preview.
     assert client.app.state.render_thread is None
+
+
+# ── Important 5: both money-spending functions live in this module ────────
+
+
+def test_voice_sample_speaks_the_shared_sentence(monkeypatch):
+    """Moved here from `avg.media.preview` (Slice 14 review, Important 5) -
+    never invents its own text, one constant, so every provider says the
+    same thing and the panel can quote it."""
+    from avg.api import routes_preview
+    from avg.media.preview import SAMPLE_SENTENCE
+
+    spoken: list[str] = []
+
+    class _Fake:
+        def synthesize(self, text, *, voice_id, model):
+            spoken.append(text)
+            return b"ID3fake-audio"
+
+    monkeypatch.setattr(routes_preview, "_voice_backend", lambda provider: _Fake())
+    data = routes_preview.voice_sample("edge", "en-GB-RyanNeural")
+
+    assert data == b"ID3fake-audio"
+    assert spoken == [SAMPLE_SENTENCE]
+
+
+def test_voice_sample_raises_for_an_unknown_provider():
+    """No longer degrades to `b""` - Important 2 requires a real `AvgError`
+    so the route can say what actually happened."""
+    from avg.api.routes_preview import voice_sample
+
+    with pytest.raises(AvgError) as excinfo:
+        voice_sample("not-a-provider", "x")
+    assert excinfo.value.kind == ErrorKind.model_missing
+
+
+def test_voice_sample_lets_a_backend_failure_propagate(monkeypatch):
+    """A provider's own `AvgError` must reach the route, not be swallowed
+    into `b""` - that swallowing is exactly what made every voice failure
+    look identical (Slice 14 review, Important 2)."""
+    from avg.api import routes_preview
+
+    class _Boom:
+        def synthesize(self, text, *, voice_id, model):
+            raise AvgError(ErrorKind.auth, "ElevenLabs API key is not set")
+
+    monkeypatch.setattr(routes_preview, "_voice_backend", lambda provider: _Boom())
+    with pytest.raises(AvgError) as excinfo:
+        routes_preview.voice_sample("elevenlabs", "x")
+    assert excinfo.value.kind == ErrorKind.auth
+
+
+def test_image_sample_raises_for_an_unknown_provider_rather_than_falling_back(monkeypatch):
+    """Minor: `_build_provider` itself falls back to the catalogue default
+    for an unrecognised name (a real render needs something runnable even
+    from a stale channel document), but a PRESSED preview must never spend
+    on a provider the user did not choose. `_build_provider` must never
+    even be reached for an unknown name here."""
+    from avg.api.routes_preview import image_sample
+
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda *a, **k: pytest.fail("must not fall back to a different provider"),
+    )
+    with pytest.raises(AvgError) as excinfo:
+        image_sample("not-a-real-provider", "flux", "9:16")
+    assert excinfo.value.kind == ErrorKind.model_missing
+
+
+# ── Important 2: a preview failure reports what actually happened ─────────
+
+
+def test_a_voice_preview_failure_reports_the_real_reason(client, monkeypatch):
+    """A 401 from the provider must reach the panel as a 401 that says the
+    key was rejected - not a generic 'check its key' sentence indistinguishable
+    from every other failure, and never the provider's raw response body
+    (which could carry account-identifying text)."""
+    monkeypatch.setattr(
+        "avg.api.routes_preview.voice_sample",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AvgError(ErrorKind.auth, "boom", detail="raw-provider-body-do-not-leak")
+        ),
+    )
+    res = client.post(
+        "/api/preview/voice",
+        json={"provider": "edge", "voice_id": "x"},
+        headers=AUTH,
+    )
+    assert res.status_code == 401
+    detail = res.json()["detail"]
+    assert "raw-provider-body-do-not-leak" not in detail
+    assert "key" in detail.lower()
+
+
+def test_an_image_preview_failure_never_blames_ffmpeg(client, monkeypatch):
+    """The pre-fix behaviour: every image failure collapsed to `b""` and
+    the route named FFmpeg, which is never involved in an image generation.
+    A quota failure must say so, at a 429, without FFmpeg anywhere in it."""
+    monkeypatch.setattr(
+        "avg.api.routes_preview.image_sample",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AvgError(ErrorKind.quota, "boom", detail="raw-provider-body-do-not-leak")
+        ),
+    )
+    res = client.post(
+        "/api/preview/image",
+        json={
+            "provider": "pollinations",
+            "model": "flux",
+            "aspect_ratio": "9:16",
+            "confirm_paid": True,
+        },
+        headers=AUTH,
+    )
+    assert res.status_code == 429
+    detail = res.json()["detail"]
+    assert "ffmpeg" not in detail.lower()
+    assert "raw-provider-body-do-not-leak" not in detail
+
+
+def test_an_image_preview_refuses_an_unknown_provider_at_the_route(client, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda *a, **k: pytest.fail("must not build a fallback provider for an unrecognised name"),
+    )
+    res = client.post(
+        "/api/preview/image",
+        json={
+            "provider": "not-a-real-provider",
+            "model": "x",
+            "aspect_ratio": "9:16",
+            "confirm_paid": True,
+        },
+        headers=AUTH,
+    )
+    assert res.status_code == 404
+
+
+# ── Minor: the image route's Content-Type must match the actual bytes ─────
+
+
+def test_an_image_preview_reports_the_content_type_it_actually_sends(client, monkeypatch):
+    """A provider can return JPEG or WebP, not only PNG (Gemini's own
+    `outputMimeType` can ask for JPEG) - the route must not claim
+    `image/png` unconditionally, a claim it could not back."""
+    jpeg_bytes = b"\xff\xd8\xff\xe0rest-of-a-jpeg"
+    monkeypatch.setattr("avg.api.routes_preview.image_sample", lambda *a, **k: jpeg_bytes)
+    res = client.post(
+        "/api/preview/image",
+        json={"provider": "pollinations", "model": "flux", "aspect_ratio": "9:16", "confirm_paid": True},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/jpeg"
+    assert res.content == jpeg_bytes
+
+
+def test_an_image_preview_falls_back_to_octet_stream_for_unrecognised_bytes(client, monkeypatch):
+    monkeypatch.setattr("avg.api.routes_preview.image_sample", lambda *a, **k: b"not-a-real-image-format")
+    res = client.post(
+        "/api/preview/image",
+        json={"provider": "pollinations", "model": "flux", "aspect_ratio": "9:16", "confirm_paid": True},
+        headers=AUTH,
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/octet-stream"
+
+
+def test_sniff_image_media_type_recognises_png_jpeg_and_webp():
+    from avg.api.routes_preview import _sniff_image_media_type
+
+    assert _sniff_image_media_type(b"\x89PNG\r\n\x1a\n\x00\x00") == "image/png"
+    assert _sniff_image_media_type(b"\xff\xd8\xff\xe0\x00\x00") == "image/jpeg"
+    assert _sniff_image_media_type(b"RIFF\x00\x00\x00\x00WEBP") == "image/webp"
+    assert _sniff_image_media_type(b"nonsense") == "application/octet-stream"

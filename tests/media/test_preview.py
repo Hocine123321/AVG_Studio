@@ -59,14 +59,49 @@ def test_a_caption_frame_renders_from_ass_text():
     assert data == b"" or data[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-def test_a_caption_preview_leaves_nothing_behind(tmp_path, monkeypatch):
+def test_a_caption_preview_leaves_nothing_behind(monkeypatch):
     """Every intermediate lands in a temp directory that is removed before
-    the function returns. A preview must leave the library byte-identical."""
+    the function returns - on both the success path and the failure path,
+    since a preview must leave the library byte-identical either way.
+
+    The previous version of this test chdir'd into `tmp_path` and asserted
+    THAT stayed empty - but `caption_png` never writes there: it opens its
+    own `tempfile.TemporaryDirectory()` under `%TEMP%` and chdirs the
+    ffmpeg subprocess into THAT folder (see the function's own docstring),
+    so `tmp_path` was never a candidate location and the assertion could
+    not have failed for the reason it named (Slice 14 review, Minors).
+    This tracks the real temp folder `caption_png` creates and asserts IT
+    is gone afterwards, once on a call that runs to completion and once on
+    a call forced down the `except` branch by pointing `ffmpeg_exe` at
+    something that cannot run at all.
+    """
+    import tempfile
+    from pathlib import Path
+
     from avg.media.preview import caption_png
 
-    monkeypatch.chdir(tmp_path)
+    created: list[Path] = []
+    real_cls = tempfile.TemporaryDirectory
+
+    class _Tracking(real_cls):  # type: ignore[misc]
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            path = Path(super().__enter__())
+            created.append(path)
+            return str(path)
+
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", _Tracking)
+
     caption_png("[Script Info]\n", 320, 180)
-    assert list(tmp_path.iterdir()) == []
+    assert created, "caption_png must build its work inside a tempfile.TemporaryDirectory"
+    assert not created[0].exists()
+
+    monkeypatch.setattr(
+        "avg.media.environment.ffmpeg_exe",
+        lambda: str(created[0] / "does-not-exist.exe"),
+    )
+    caption_png("[Script Info]\n", 320, 180)
+    assert len(created) == 2
+    assert not created[1].exists()
 
 
 def test_paid_voice_providers_are_named_in_one_place():
@@ -78,37 +113,32 @@ def test_paid_voice_providers_are_named_in_one_place():
     assert "edge" not in PAID_VOICE_PROVIDERS
 
 
-def test_a_voice_sample_speaks_the_shared_sentence(monkeypatch):
-    """Never invents its own text - one constant, so every provider says the
-    same thing and the panel can quote it."""
+def test_this_module_has_no_provider_or_pipeline_dependency():
+    """Slice 14 review, Important 5: `voice_sample`/`_voice_backend` (and
+    `image_sample`, which never lived here) moved to
+    `avg.api.routes_preview`, leaving this module pure rendering - the same
+    layer rule `avg/media/` already enforces everywhere else
+    (`avg/media/` must not import `avg/pipeline/`, and after this move it
+    imports nothing under `avg/providers/` either). Walks the AST rather
+    than grepping the raw source text, since the module's own docstring
+    names both packages in prose while explaining why it must not import
+    them."""
+    import ast
+    import inspect
+
     from avg.media import preview
 
-    spoken: list[str] = []
+    tree = ast.parse(inspect.getsource(preview))
+    imported_roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_roots.update(alias.name.split(".")[0] + "." + alias.name.split(".")[1] for alias in node.names if "." in alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            parts = node.module.split(".")
+            if len(parts) >= 2:
+                imported_roots.add(f"{parts[0]}.{parts[1]}")
 
-    class _Fake:
-        def synthesize(self, text, *, voice_id, model):
-            spoken.append(text)
-            return b"ID3fake-audio"
-
-    monkeypatch.setattr(preview, "_voice_backend", lambda provider: _Fake())
-    data = preview.voice_sample("edge", "en-GB-RyanNeural")
-
-    assert data == b"ID3fake-audio"
-    assert spoken == [preview.SAMPLE_SENTENCE]
-
-
-def test_an_unknown_voice_provider_returns_nothing(monkeypatch):
-    from avg.media import preview
-
-    assert preview.voice_sample("not-a-provider", "x") == b""
-
-
-def test_a_failing_synthesis_returns_nothing_rather_than_raising(monkeypatch):
-    from avg.media import preview
-
-    class _Boom:
-        def synthesize(self, text, *, voice_id, model):
-            raise RuntimeError("provider down")
-
-    monkeypatch.setattr(preview, "_voice_backend", lambda provider: _Boom())
-    assert preview.voice_sample("edge", "x") == b""
+    assert "avg.providers" not in imported_roots
+    assert "avg.pipeline" not in imported_roots
+    assert not hasattr(preview, "voice_sample")
+    assert not hasattr(preview, "_voice_backend")

@@ -12,6 +12,14 @@ free to drift, and a preview that lies is worse than no preview.
 the caption phase's own. The API layer builds the text there and hands it
 here. That keeps one construction of the styling rather than two.
 
+This module is pure rendering with no provider dependency - it never
+imports `avg.providers` or `avg.pipeline`. The two money-spending preview
+functions, `voice_sample` and `image_sample`, both live in
+`avg.api.routes_preview` instead (Slice 14 review, Important 5): the point
+of splitting them out of this module is that "where can this app spend
+money" has exactly one place to look, in the API layer, rather than one
+function here and one function there.
+
 Nothing here writes into a project folder. Every intermediate lands in a
 temp directory that is removed before the function returns.
 """
@@ -22,14 +30,20 @@ import io
 from typing import Any
 
 #: What a voice preview says. Fixed, and in one place, so every provider
-#: says the same thing and the panel can quote it back to the user.
+#: says the same thing and the panel can quote it back to the user. Stays
+#: here rather than moving beside `voice_sample` in `avg.api.routes_preview`
+#: because it is plain text, not a provider dependency - no reason to make
+#: the API layer own a fact this module's own docstring already promises
+#: ("the code that will produce the real thing" - a voice preview panel
+#: reads this constant to quote what it is about to say).
 SAMPLE_SENTENCE = "Hello, this is my voice I'll be using in a new video! Do you like it?"
 
 #: Voice providers whose synthesis costs money. Edge is free and is
 #: therefore allowed to preview live; ElevenLabs spends characters on every
 #: press, which is why `avg/api/routes_preview.py` requires an explicit
 #: confirmation for it. Named here, once, so the route and the UI cannot
-#: disagree about which is which.
+#: disagree about which is which - same reasoning as `SAMPLE_SENTENCE`
+#: above for why this stays here rather than moving with `voice_sample`.
 PAID_VOICE_PROVIDERS: frozenset[str] = frozenset({"elevenlabs"})
 
 #: The prompt an image sample is generated from. Fixed, so the panel can say
@@ -131,37 +145,3 @@ def caption_png(ass_text: str, width: int, height: int) -> bytes:
         if result.returncode != 0 or not out_path.is_file():
             return b""
         return out_path.read_bytes()
-
-
-def _voice_backend(provider: str) -> Any:
-    """The voice backend for `provider`, or `None`.
-
-    Imported lazily: `avg.providers.voice.providers` pulls in `edge_tts`,
-    which costs about two seconds of startup, and Slice 7 moved that import
-    off the launch path deliberately.
-    """
-    from avg.providers.voice.providers import (  # noqa: PLC0415
-        EdgeVoiceProvider,
-        ElevenLabsVoiceProvider,
-    )
-
-    backends = {"edge": EdgeVoiceProvider, "elevenlabs": ElevenLabsVoiceProvider}
-    backend_cls = backends.get(provider)
-    return backend_cls() if backend_cls is not None else None
-
-
-def voice_sample(provider: str, voice_id: str) -> bytes:
-    """`SAMPLE_SENTENCE`, spoken by `voice_id`. Audio bytes, or `b""`.
-
-    **Costs money on ElevenLabs** - see `PAID_VOICE_PROVIDERS`. Free on Edge.
-    Whether this is allowed to run at all is the route's decision, not this
-    function's.
-    """
-    backend = _voice_backend(provider)
-    if backend is None:
-        return b""
-    try:
-        data = backend.synthesize(SAMPLE_SENTENCE, voice_id=voice_id, model="")
-    except Exception:  # noqa: BLE001 - a preview panel states the failure
-        return b""
-    return bytes(data)
