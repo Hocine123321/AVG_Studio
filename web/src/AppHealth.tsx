@@ -26,18 +26,24 @@ import ModelCacheCard from "./ModelCacheCard";
  */
 export default function AppHealth() {
   const [report, setReport] = useState<HealthReport | null>(null);
-  const [busy, setBusy] = useState(false);
+  // WHICH action is running, not just whether one is - a single shared
+  // `busy` flag was the Slice 12 review's Minor: pressing "Re-run
+  // everything" flipped the OTHER button's label to "Checking…" too,
+  // implying a Deep Check was running when it never started. Both buttons
+  // still disable together (they hit the same in-flight request), but each
+  // only claims its own label.
+  const [busyAction, setBusyAction] = useState<"rerun" | "deep" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (refresh: boolean, deep = false) => {
-    setBusy(true);
+    setBusyAction(deep ? "deep" : "rerun");
     setError(null);
     try {
       setReport(await getHealthReport(refresh, deep));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }, []);
 
@@ -60,11 +66,21 @@ export default function AppHealth() {
             {report.ok ? "All clear" : `${failing.length} stage${failing.length === 1 ? "" : "s"} need attention`}
           </span>
         )}
-        <button type="button" className="btn btn--primary" onClick={() => void load(true)} disabled={busy}>
-          {busy ? "Running…" : "Re-run everything"}
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => void load(true)}
+          disabled={busyAction !== null}
+        >
+          {busyAction === "rerun" ? "Running…" : "Re-run everything"}
         </button>
-        <button type="button" className="btn" onClick={() => void load(true, true)} disabled={busy}>
-          {busy ? "Checking…" : "Deep check"}
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void load(true, true)}
+          disabled={busyAction !== null}
+        >
+          {busyAction === "deep" ? "Checking…" : "Deep check"}
         </button>
       </header>
 
