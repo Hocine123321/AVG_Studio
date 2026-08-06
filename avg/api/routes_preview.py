@@ -56,8 +56,13 @@ router = APIRouter(dependencies=[Depends(require_token)])
 class CaptionPreview(BaseModel):
     width: int = 1080
     height: int = 1920
-    font_name: str = "Figtree"
-    font_size: int = 64
+    #: RAW setting values, matching the schema's own defaults
+    #: (`avg.core.settings_schema`: `font_family=""`, `captions_font_size=0`)
+    #: - not a guessed-at "Figtree"/`64`. `sample_ass` is the one place that
+    #: resolves a blank/zero value into what the render would actually use;
+    #: see its docstring and Important 1 of the Slice 14 review.
+    font_name: str = ""
+    font_size: int = 0
     position: str = "bottom"
 
 

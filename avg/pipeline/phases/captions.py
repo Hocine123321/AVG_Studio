@@ -71,6 +71,7 @@ from avg.pipeline.phases._common import (
     read_json,
     render_dir,
     resolve_font_family,
+    resolve_font_family_value,
     script_dir,
     strip_delivery_markers,
     write_json,
@@ -392,8 +393,20 @@ def sample_ass(width: int, height: int, font_name: str, font_size: int, position
     fields would be a second implementation, free to drift from what libass
     actually burns, and that is precisely the lie the preview exists to
     prevent.
+
+    `font_name`/`font_size` are the RAW setting values - a blank font, a
+    `.ttf`/`.otf` path, a size of `0` for "auto" - exactly as
+    `avg.api.routes_preview` reads them off the request body, not
+    pre-resolved. Resolving them here, with the identical rule `run()`
+    below applies (`resolve_font_family_value`, `or _DEFAULT_FONT_SIZE`),
+    is what makes this the ONE resolver: a caller one layer up guessing at
+    its own default (a hardcoded `"Figtree"`/`64`, or worse, doing nothing
+    and letting a blank family reach libass, which then draws nothing) is
+    the exact bug this function exists to prevent. See Slice 14's review.
     """
-    header = _ass_header(width, height, font_name, font_size, position)
+    resolved_name = resolve_font_family_value(font_name)
+    resolved_size = int(font_size or 0) or _DEFAULT_FONT_SIZE
+    header = _ass_header(width, height, resolved_name, resolved_size, position)
     line = (
         f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(2.0)},Default,,0,0,0,,"
         f"{_ass_escape(SAMPLE_CAPTION_TEXT)}\n"

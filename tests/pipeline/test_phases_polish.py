@@ -736,3 +736,35 @@ def test_the_sample_ass_respects_position():
     bottom = sample_ass(1080, 1920, "Figtree", 64, "bottom")
     top = sample_ass(1080, 1920, "Figtree", 64, "top")
     assert bottom != top
+
+
+def test_the_sample_ass_resolves_a_blank_font_and_zero_size_like_the_real_phase(tmp_path, monkeypatch):
+    """Slice 14 review, Important 1: the shipped defaults are
+    `font_family=""`/`captions_font_size=0` (`avg.core.settings_schema`).
+    Before this fix, the preview sent those raw values straight to libass's
+    `Style:` line, which drew nothing - a blank frame on a fresh install,
+    the exact lie the libass-not-CSS decision exists to prevent. `sample_ass`
+    must resolve a blank/zero value exactly the way `ScreenTextPhase.run`
+    does, so the two `Style:` lines match field-for-field."""
+    from avg.pipeline.phases.captions import _ass_header, sample_ass
+
+    # What the preview now produces for the blank/zero defaults.
+    preview_text = sample_ass(1080, 1920, "", 0, "bottom")
+    preview_style = next(line for line in preview_text.splitlines() if line.startswith("Style:"))
+    assert preview_style == "Style: Default,Arial,60,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3.00,0,2,10,10,40,1"
+
+    # What the real phase produces for the same blank/zero settings.
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({"font_family": "", "captions_font_size": 0}))
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+    ScreenTextPhase().run(ctx)
+    real_content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+    real_style = next(line for line in real_content.splitlines() if line.startswith("Style:"))
+
+    assert preview_style == real_style
+    # And it matches `_ass_header` built from the resolved values directly -
+    # the same construction both paths share.
+    assert preview_text.startswith(_ass_header(1080, 1920, "Arial", 60, "bottom"))

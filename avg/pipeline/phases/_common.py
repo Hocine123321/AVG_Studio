@@ -211,18 +211,20 @@ def audio_duration_seconds(path: Path) -> float:
     return len(AudioSegment.from_file(str(path), format="mp3")) / 1000.0
 
 
-def resolve_font_family(ctx: PhaseContext) -> str:
-    """The ONE font resolver shared by captions and takeover cards (the
-    channel's `font_family` setting - `avg.core.settings_schema`), so the
-    two never drift the way the legacy PowerShell/Python resolvers did
-    (see this repo's `global-font` memory note: `config.edit.font` had to
-    reach both the caption `.ass` Style line AND the card renderer, and a
-    B2.19.3 release existed solely to fix the half that was missed).
+def resolve_font_family_value(font: str) -> str:
+    """The pure resolution rule behind `resolve_font_family` below, taking
+    the raw setting VALUE rather than a `PhaseContext` - split out so a
+    caller that only has the raw string (a preview request body, before any
+    channel exists to read it from) can apply the exact same rule instead
+    of restating it. `avg.pipeline.phases.captions.sample_ass` is that
+    caller: see this module's `resolve_font_family` docstring for why one
+    resolver, used by both the real phase and the preview, is the entire
+    point.
 
     An unset/blank setting degrades to `"Arial"` - a safe, near-universal
     family name - rather than raising or emitting an empty `Fontname`,
     which libass would otherwise refuse to match against anything."""
-    font = str(ctx.channel.settings.get("font_family") or "").strip()
+    font = str(font or "").strip()
     if not font:
         return "Arial"
     # A path (family name OR a .ttf/.otf file) - libass's Style line wants
@@ -233,6 +235,16 @@ def resolve_font_family(ctx: PhaseContext) -> str:
     if font.lower().endswith((".ttf", ".otf")):
         return Path(font).stem
     return font
+
+
+def resolve_font_family(ctx: PhaseContext) -> str:
+    """The ONE font resolver shared by captions and takeover cards (the
+    channel's `font_family` setting - `avg.core.settings_schema`), so the
+    two never drift the way the legacy PowerShell/Python resolvers did
+    (see this repo's `global-font` memory note: `config.edit.font` had to
+    reach both the caption `.ass` Style line AND the card renderer, and a
+    B2.19.3 release existed solely to fix the half that was missed)."""
+    return resolve_font_family_value(str(ctx.channel.settings.get("font_family") or ""))
 
 
 # Delivery-cue markers a narration/scene text may carry (script.py's own

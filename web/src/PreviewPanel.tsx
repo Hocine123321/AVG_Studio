@@ -84,8 +84,15 @@ export default function PreviewPanel({ kind, valueOf }: Props) {
 }
 
 function CaptionPreview({ valueOf }: { valueOf: (id: string) => string }) {
-  const fontName = valueOf("font_family") || "Figtree";
-  const fontSize = Number(valueOf("captions_font_size")) || 0;
+  // RAW values, straight off the setting - no invented fallback here. The
+  // backend's `sample_ass` (avg.pipeline.phases.captions) is the one
+  // resolver: a blank font or a size of 0 reaches it exactly as the real
+  // phase would see it, and it resolves both the same way the render does.
+  // Guessing a fallback here was Slice 14's Important 1: it produced a
+  // THIRD resolver that disagreed with the render and rendered a blank
+  // frame on a fresh install.
+  const fontName = valueOf("font_family");
+  const fontSize = Number(valueOf("captions_font_size"));
   const position = valueOf("captions_position") || "bottom";
   const aspectRatio = valueOf("aspect_ratio") || "9:16";
   const { width, height } = captionFrameSize(aspectRatio);
