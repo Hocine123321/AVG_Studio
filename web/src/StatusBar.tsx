@@ -31,7 +31,7 @@ import { IconCheck } from "./Icons";
  * showing one makes the pill cry wolf. */
 const RING_DELAY_MS = 150;
 
-export default function StatusBar({ connected }: { connected: boolean }) {
+export default function StatusBar({ connected, loading = false }: { connected: boolean; loading?: boolean }) {
   const activities = useActivities();
   const [now, setNow] = useState(() => Date.now());
 
@@ -65,6 +65,26 @@ export default function StatusBar({ connected }: { connected: boolean }) {
   const kind = !connected ? "error" : lead !== null ? "busy" : "ready";
   const working = lead !== null && settled;
   const label = kind === "error" ? "Reconnecting" : lead !== null ? lead.label : "";
+
+  // Until the library has ever answered, the pill has nothing true to say -
+  // the server is up, so it would read "ready" while the screen is still
+  // empty. A bar in the pill's own slot says "still counting" instead.
+  // `avg/shell.py`'s splash covers the earlier moment, before the server
+  // exists at all; this is the one after it.
+  if (loading) {
+    return (
+      <div
+        className="statuspill statuspill--loading"
+        role="status"
+        aria-live="polite"
+        aria-label="Loading your library"
+      >
+        <span className="statusbar-load" aria-hidden="true">
+          <span className="statusbar-load__fill" />
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div
