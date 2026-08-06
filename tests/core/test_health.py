@@ -198,13 +198,29 @@ def test_deep_checks_exercise_things_and_clean_up(tmp_path):
 
     output_root = tmp_path / "library"
     output_root.mkdir()
-    checks = _deep_checks(settings_path=tmp_path / "settings.json", output_root=output_root)
+    checks = _deep_checks(output_root=output_root)
 
     names = {c.name for c in checks}
     assert "Settings round-trip" in names
     assert "Output folder write" in names
     # Nothing may be left behind.
     assert list(output_root.iterdir()) == []
+
+
+def test_deep_checks_output_folder_removes_a_folder_it_created(tmp_path):
+    """Slice 12 review Minor: `mkdir(parents=True, exist_ok=True)` happily
+    creates a whole chain of missing ancestors, and the check used to leave
+    every one of them behind when `output_root` itself did not exist yet -
+    the common case for a fresh install being diagnosed before its library
+    folder has ever been chosen or written to."""
+    from avg.core.health import _deep_checks
+
+    missing_root = tmp_path / "not" / "yet" / "created" / "library"
+    assert not missing_root.parent.exists()
+
+    _deep_checks(output_root=missing_root)
+
+    assert not missing_root.parent.parent.parent.exists(), "the whole chain this check made must be gone"
 
 
 def test_deep_checks_report_a_failure_rather_than_raising(tmp_path):
@@ -216,17 +232,22 @@ def test_deep_checks_report_a_failure_rather_than_raising(tmp_path):
     a writable tmp_path, on every platform this suite runs on. What
     genuinely cannot be turned into a directory is a path that already names
     a FILE: `mkdir` on a child of a file raises rather than creating it.
+
+    Asserts the SPECIFIC row rather than "any row failed" (the Slice 12
+    review's Minor): `any(...)` passes for the wrong reason on a machine
+    whose FFmpeg is genuinely broken, since `_deep_checks` also runs an
+    FFmpeg encode - which would make this test green even if the Output
+    folder write check this scenario is actually provoking silently started
+    passing (or raising) instead.
     """
     from avg.core.health import _deep_checks
 
     blocked = tmp_path / "blocked"
     blocked.write_text("not a directory", encoding="utf-8")
 
-    checks = _deep_checks(
-        settings_path=tmp_path / "settings.json",
-        output_root=blocked / "cannot",
-    )
-    assert any(c.ok is False for c in checks)
+    checks = _deep_checks(output_root=blocked / "cannot")
+    by_name = {c.name: c for c in checks}
+    assert by_name["Output folder write"].ok is False
 
 
 def test_the_report_has_four_stages_only_when_asked(tmp_path):
@@ -246,9 +267,23 @@ def test_the_report_has_four_stages_only_when_asked(tmp_path):
 
 def test_no_secret_value_appears_in_a_deep_check(tmp_path):
     """The secret round-trip proves DPAPI works on a throwaway string. It
-    must never touch, or echo, a stored key."""
+    must never touch, or echo, a stored key.
+
+    Slice 12 review Minor: `"sk-" not in blob` against code that never reads
+    a key cannot fail for the reason its name claims - `_deep_checks` has no
+    parameter through which a real key could even reach it. Made meaningful
+    by actually storing one first, through `avg.config.secrets` (the only
+    module allowed to touch a key at all) into this test's own throwaway
+    `secrets_path`, so the assertion is proving something rather than
+    describing an impossibility.
+    """
+    from avg.config import secrets as secrets_config
     from avg.core.health import _deep_checks
 
-    checks = _deep_checks(settings_path=tmp_path / "settings.json", output_root=tmp_path)
+    real_key = "sk-do-not-leak-this-value-into-a-deep-check"
+    secrets_config.set_key("groq", real_key, tmp_path / "secrets.dat")
+
+    checks = _deep_checks(output_root=tmp_path)
     blob = " ".join(f"{c.name} {c.detail} {c.version}" for c in checks)
+    assert real_key not in blob
     assert "sk-" not in blob

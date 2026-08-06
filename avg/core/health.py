@@ -35,7 +35,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
@@ -360,7 +362,7 @@ def _safeguard_checks(output_root: Path | None) -> list[Component]:
     return checks
 
 
-def _deep_checks(*, settings_path: Path | None, output_root: Path | None) -> list[Component]:
+def _deep_checks(*, output_root: Path | None) -> list[Component]:
     """Stage 4: does it actually work, rather than is it merely present.
 
     Every check here DOES the thing and undoes it. This is deliberately not
@@ -374,19 +376,31 @@ def _deep_checks(*, settings_path: Path | None, output_root: Path | None) -> lis
     """
     checks: list[Component] = []
 
-    # Settings round-trip: write, reload, compare, discard. Uses a temp file
-    # rather than the real document - a diagnostic must not be able to
-    # corrupt the thing it is diagnosing.
+    # Settings round-trip: write, reload, compare, discard, through the REAL
+    # `save_settings`/`load_settings` this time - the Slice 12 review's
+    # Important 6. The row used to `json.dumps` a hand-written dict into a
+    # temp file and read it back with the standard library, which proved
+    # only that `json` works; it never called the functions it was named
+    # after, never built a `SettingsDoc`, and never exercised anything a
+    # broken install could actually have broken (a bad schema migration, a
+    # write that silently changed shape). A temp path stands in for the real
+    # document, exactly as before - a diagnostic must not be able to corrupt
+    # the thing it is diagnosing.
     try:
-        import json
-        import tempfile
+        from avg.config.settings import SettingsDoc, load_settings, save_settings  # noqa: PLC0415
 
         with tempfile.TemporaryDirectory() as tmp:
-            probe = Path(tmp) / "settings.json"
-            probe.write_text(json.dumps({"schema_version": 1, "values": {"theme": "day"}}), encoding="utf-8")
-            reloaded = json.loads(probe.read_text(encoding="utf-8"))
-        ok = reloaded["values"]["theme"] == "day"
-        checks.append(Component(name="Settings round-trip", ok=ok, detail="written and read back"))
+            probe_path = Path(tmp) / "settings.json"
+            save_settings(SettingsDoc(schema_version=1, values={"theme": "day"}), probe_path)
+            reloaded = load_settings(probe_path)
+        ok = reloaded.values.get("theme") == "day"
+        checks.append(
+            Component(
+                name="Settings round-trip",
+                ok=ok,
+                detail="written and read back through save_settings/load_settings",
+            )
+        )
     except Exception as exc:  # noqa: BLE001
         checks.append(Component(name="Settings round-trip", ok=False, detail=str(exc)))
 
@@ -407,7 +421,24 @@ def _deep_checks(*, settings_path: Path | None, output_root: Path | None) -> lis
         checks.append(Component(name="Secret round-trip", ok=False, detail=str(exc)))
 
     # Output folder: create and delete a real file where renders land.
+    #
+    # `output_root.mkdir(parents=True, exist_ok=True)` can create more than
+    # just `output_root` itself when a fresh install's library folder does
+    # not exist yet - every missing ancestor along the way. Recorded here,
+    # deepest first, and removed again afterwards: a Deep Check must leave
+    # the filesystem exactly as it found it, not litter a folder tree behind
+    # for a machine that was only ever being checked, not set up.
+    # `Path.rmdir` refuses a non-empty directory, so this only ever removes
+    # what this check itself created.
     if output_root is not None:
+        created: list[Path] = []
+        probe_dir = output_root
+        while not probe_dir.exists():
+            created.append(probe_dir)
+            parent = probe_dir.parent
+            if parent == probe_dir:
+                break
+            probe_dir = parent
         try:
             output_root.mkdir(parents=True, exist_ok=True)
             probe_file = output_root / ".avg-deep-check"
@@ -416,14 +447,15 @@ def _deep_checks(*, settings_path: Path | None, output_root: Path | None) -> lis
             checks.append(Component(name="Output folder write", ok=True, detail=str(output_root)))
         except Exception as exc:  # noqa: BLE001
             checks.append(Component(name="Output folder write", ok=False, detail=str(exc)))
+        finally:
+            for made in created:
+                with suppress(OSError):
+                    made.rmdir()
 
     # FFmpeg encode: a one-second colour clip, produced and thrown away.
     # This is the only check that costs real time, and it is the one that
     # proves the render path rather than describing it.
     try:
-        import subprocess
-        import tempfile
-
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "probe.mp4"
             result = subprocess.run(
@@ -488,7 +520,7 @@ def report(
                 key="deep",
                 name="Deep check",
                 detail="Does it actually work, not just is it present",
-                checks=_deep_checks(settings_path=settings_path, output_root=output_root),
+                checks=_deep_checks(output_root=output_root),
             )
         )
     return stages
