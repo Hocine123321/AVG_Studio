@@ -44,7 +44,6 @@ from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
 from avg.config.channel_defaults import default_channel_defaults_path
-from avg.config.legacy_import import import_all
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
@@ -495,6 +494,13 @@ def create_app(
         card it belongs to exists.
         """
         try:
+            # Imported here, not at module scope: `avg.config.legacy_import`
+            # transitively pulls `avg.pipeline.registry` and so every phase,
+            # provider and media module - ~0.50s measured with `-X importtime`.
+            # This scan already runs on a background thread, so that cost belongs
+            # on the thread, not on the path to the first window.
+            from avg.config.legacy_import import import_all  # noqa: PLC0415
+
             report = import_all(output_root)
             app.state.projects = {p.id: p for p in report.imported}
         except Exception:
@@ -959,6 +965,8 @@ def create_app(
         # create_app does at startup - so "Start" works immediately and
         # never requires relaunching the app to see the chosen library.
         app.state.output_root = root
+        from avg.config.legacy_import import import_all  # noqa: PLC0415 - see the scan worker
+
         report = import_all(root)
         app.state.projects = {p.id: p for p in report.imported}
         app.state.storage_bytes = _library_bytes(app.state.projects.values())
@@ -973,6 +981,8 @@ def create_app(
         # path that doesn't exist yet (import_all does) rather than 404ing,
         # since a not-yet-created folder is a perfectly valid choice (it
         # will be created on accept, see POST /api/settings above).
+        from avg.config.legacy_import import import_all  # noqa: PLC0415 - see the scan worker
+
         count = len(import_all(Path(path).expanduser()).imported)
         return {"project_count": count}
 
