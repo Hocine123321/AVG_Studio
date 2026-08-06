@@ -78,7 +78,6 @@ from pydantic import BaseModel, Field
 from avg.config import channels as channels_config
 from avg.core.artifacts import ARTIFACTS, available, resolve, spec_for
 from avg.core.events import PhaseFailed, PipelineCancelled
-from avg.core.invalidation import first_invalid_phase
 from avg.core.models import ProjectDoc, Take
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.take_log import log_path_for
@@ -86,13 +85,53 @@ from avg.core.takes import clone_take, delete_take as _delete_take, estimate_sec
 from avg.export.capcut import export_take
 from avg.pipeline.create import save_project
 from avg.pipeline.phase import CancellationToken
-from avg.pipeline.registry import BY_KEY, REGISTRY
-from avg.pipeline.runner import run as run_pipeline
-from avg.providers.text.router import config_from_settings
 
 from .deps import require_token
 
 router = APIRouter(dependencies=[Depends(require_token)])
+
+
+def _default_run_pipeline(
+    project: ProjectDoc,
+    *,
+    channel: Any,
+    router: Any = None,
+    start_from: int = 0,
+    only: str | None = None,
+    cancel_token: Any = None,
+    on_phase_change: Any = None,
+    log: Any = None,
+    errors: Any = None,
+) -> Any:
+    """The real `avg.pipeline.runner.run`, wrapped for the same reason
+    `avg.api.app._default_run_pipeline` is: `tests/api/test_routes_takes.py`
+    monkeypatches `avg.api.routes_takes.run_pipeline` directly to stub the
+    pipeline out, which only works if `run_pipeline` stays a genuine
+    module-level attribute that `create_take`'s worker looks up fresh on
+    every call - a local `from ... import` inside that worker would shadow
+    the name instead of being patchable. Assigning `run_pipeline =
+    _default_run_pipeline` below keeps that attribute real while keeping
+    `avg.pipeline.runner` (and the registry chain it pulls in - see `avg.
+    api.app`'s module docstring) out of this module's own import; the heavy
+    import only happens the first time this wrapper is actually called,
+    which monkeypatched tests never do.
+    """
+    from avg.pipeline.runner import run  # noqa: PLC0415
+
+    return run(
+        project,
+        channel=channel,
+        router=router,
+        start_from=start_from,
+        only=only,
+        cancel_token=cancel_token,
+        on_phase_change=on_phase_change,
+        log=log,
+        errors=errors,
+    )
+
+
+run_pipeline = _default_run_pipeline
 
 
 class TakeRequest(BaseModel):
@@ -213,6 +252,16 @@ def _build_plan(changed_ids: list[str], reroll_from: str | None) -> _Plan:
     invalidates something, so an empty `changed_ids` is the only way
     `override_phase_id` comes back `None`.
     """
+    # Imported here, not at module scope - see `avg.api.app`'s module
+    # docstring for why the registry chain stays out of every API module's
+    # own import. `avg.core.invalidation` itself imports `avg.pipeline.
+    # registry` at ITS module scope (a pure-data module reaching up into
+    # the pipeline layer, pre-existing and out of this fix's scope to
+    # unwind) - so deferring its import here is what actually keeps the
+    # registry chain out of `avg.api.routes_takes`'s own import too.
+    from avg.core.invalidation import first_invalid_phase  # noqa: PLC0415
+    from avg.pipeline.registry import BY_KEY, REGISTRY  # noqa: PLC0415
+
     if not changed_ids and reroll_from is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -249,6 +298,11 @@ def _build_plan(changed_ids: list[str], reroll_from: str | None) -> _Plan:
 
 
 def _phase_id_of_setting(setting_id: str) -> int:
+    # Imported here, not at module scope - see `avg.api.app`'s module
+    # docstring for why the registry chain stays out of every API module's
+    # own import.
+    from avg.pipeline.registry import BY_KEY  # noqa: PLC0415
+
     spec = get_spec(setting_id)
     assert spec is not None and spec.invalidates is not None  # validated by _validate_override_ids
     return BY_KEY[spec.invalidates].id
@@ -268,6 +322,11 @@ def _auto_label(new_id: int, changed_ids: list[str], reroll_from: str | None, pl
     module's `rename_take`.
     """
     if plan.reroll_is_dominant:
+        # Imported here, not at module scope - see `avg.api.app`'s module
+        # docstring for why the registry chain stays out of every API
+        # module's own import.
+        from avg.pipeline.registry import BY_KEY  # noqa: PLC0415
+
         assert reroll_from is not None
         phase = BY_KEY[reroll_from]
         return f"Take {new_id} · re-roll {phase.name.lower()}"
@@ -437,6 +496,11 @@ async def preview_take(project_id: str, body: TakeRequest, request: Request) -> 
 
 @router.post("/api/projects/{project_id}/takes", status_code=status.HTTP_201_CREATED)
 async def create_take(project_id: str, body: TakeRequest, request: Request) -> Take:
+    # Imported here, not at module scope - see `avg.api.app`'s module
+    # docstring for why the registry/provider chain stays out of every API
+    # module's own import.
+    from avg.providers.text.router import config_from_settings  # noqa: PLC0415
+
     app_state = request.app.state
     project = _get_project(app_state, project_id)
 

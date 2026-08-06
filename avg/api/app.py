@@ -23,6 +23,21 @@ Routes (see the task-7 and task-10.5 briefs for the exact contract):
 Construction goes exclusively through `create_app(token, output_root)` so
 tests (and `avg.shell`) can each build a fully isolated instance - no
 module-level globals, no shared state between instances.
+
+**The registry/media/provider chain is never imported at this module's
+top level.** `avg.pipeline.registry`, `avg.media.engine`,
+`avg.pipeline.runner`, `avg.pipeline.phases.render`,
+`avg.pipeline.phases.writing` and `avg.providers.text.router` pull in
+every phase, every provider backend and the vendored render engine -
+about 133ms measured with `-X importtime`, all of it work nothing does
+until a project is actually created, rendered or listed. Each stays a
+local import inside the route or helper that needs it (`tests/core/
+test_startup_cost.py` asserts `avg.pipeline.registry` is absent from
+`sys.modules` right after `import avg.api.app`). An earlier version of
+this module imported the whole chain here, two lines below where
+`avg.config.legacy_import` was deferred for the same reason - which
+made that earlier deferral cost nothing, since this module dragged the
+identical chain back in immediately after.
 """
 
 from __future__ import annotations
@@ -34,7 +49,7 @@ import threading
 import traceback
 from contextlib import suppress
 from pathlib import Path
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
@@ -54,24 +69,62 @@ from avg.core.events import JobStarted, JobStep, PhaseFailed, ProgressEvent, Ren
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
 from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
 from avg.core.takes import take_folder, take_root
-from avg.media.engine import MediaEngine
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
-from avg.pipeline.registry import BY_KEY
 from avg.pipeline.phase import CancellationToken
-from avg.pipeline.phases.render import _render_kwargs
-from avg.pipeline.phases.render import render_substate
-from avg.pipeline.phases.writing import script_substate
-from avg.pipeline.runner import run as run_pipeline
-from avg.providers import transport as transport_mod
-from avg.providers.text.router import config_from_settings
 
 from .deps import require_token
 from .routes_settings import router as settings_router
 from .routes_takes import router as takes_router
 
 Event = ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished
+
+
+def _default_run_pipeline(
+    project: ProjectDoc,
+    *,
+    channel: Any,
+    router: Any = None,
+    start_from: int = 0,
+    only: str | None = None,
+    cancel_token: Any = None,
+    on_phase_change: Any = None,
+    log: Any = None,
+    errors: Any = None,
+) -> Iterator[Any]:
+    """The real `avg.pipeline.runner.run`, behind one more level of
+    indirection than every other deferred import in this module.
+
+    Everywhere else, moving an import into the function that needs it is
+    the whole fix (see the module docstring). This one cannot be a plain
+    local import inside `_start_pipeline_job`'s `_worker`, because
+    `tests/api/test_app.py` and `tests/api/test_projects_create.py`
+    monkeypatch `avg.api.app.run_pipeline` directly to stub the pipeline out
+    - that only works if `run_pipeline` is a genuine module-level attribute
+    `_worker` looks up fresh on every call, not a name a local `from ...
+    import` statement would shadow. Assigning `run_pipeline =
+    _default_run_pipeline` below keeps that attribute real while keeping
+    `avg.pipeline.runner` (and the registry chain it pulls in) out of this
+    module's own import - the heavy import only happens the first time this
+    wrapper is actually called, which monkeypatched tests never do.
+    """
+    from avg.pipeline.runner import run  # noqa: PLC0415
+
+    return run(
+        project,
+        channel=channel,
+        router=router,
+        start_from=start_from,
+        only=only,
+        cancel_token=cancel_token,
+        on_phase_change=on_phase_change,
+        log=log,
+        errors=errors,
+    )
+
+
+run_pipeline = _default_run_pipeline
 
 
 class SettingsUpdate(BaseModel):
@@ -205,6 +258,12 @@ def _build_render_request(
     own defaults plus what the imported project doc already knows (aspect
     ratio, short edge).
     """
+    # Imported here, not at module scope: `avg.pipeline.phases.render`
+    # pulls in `avg.media.engine`, which this route does not need merely to
+    # build a request object - see the module docstring's note on why the
+    # registry/media chain stays off `avg.api.app`'s own import.
+    from avg.pipeline.phases.render import _render_kwargs  # noqa: PLC0415
+
     config_path = output_root.parent / "config" / "config.json"
     try:
         settings = load_render_settings(config_path, _total_ram_gb())
@@ -365,6 +424,14 @@ def create_app(
     """
     output_root = Path(output_root)
     app = FastAPI()
+
+    # Imported here, not at module scope - see the module docstring's note
+    # on why the registry/media/provider chain stays out of `avg.api.app`'s
+    # own import. `MediaEngine` only ever tracks one child process (see its
+    # own docstring), so building it once at construction - rather than
+    # lazily on first render - keeps `/cancel` able to call `.cancel()`
+    # safely no matter whether a render has ever actually started.
+    from avg.media.engine import MediaEngine  # noqa: PLC0415
 
     app.state.token = token
     app.state.output_root = output_root
@@ -586,6 +653,14 @@ def create_app(
         # take's files. The render one answers "base video only" versus
         # "overlays and captions baked in too" - see
         # `avg.pipeline.phases.render.render_substate`.
+        #
+        # Imported here, not at module scope - see the module docstring's
+        # note on why the registry/media/provider chain stays out of
+        # `avg.api.app`'s own import. This route pays it on the first list
+        # request, well after the window is already showing something real.
+        from avg.pipeline.phases.render import render_substate  # noqa: PLC0415
+        from avg.pipeline.phases.writing import script_substate  # noqa: PLC0415
+
         projects = []
         for project in app.state.projects.values():
             # `take_root`, not `take_folder`: take 1 of a project created
@@ -709,6 +784,21 @@ def create_app(
                     )
 
         def _worker() -> None:
+            # Imported here, not at module scope - see the module docstring's
+            # note on why the registry/media/provider chain stays out of
+            # `avg.api.app`'s own import. This runs on the background job
+            # thread, after the route has already returned its 201/202, so
+            # nothing waiting on the response pays for it.
+            #
+            # `run_pipeline` itself is NOT imported here: it is looked up as
+            # a module global below (`avg.pipeline.runner.run` via the
+            # `_default_run_pipeline` wrapper near the top of this module),
+            # because `tests/api/test_app.py` and `tests/api/
+            # test_projects_create.py` monkeypatch `avg.api.app.run_pipeline`
+            # directly - a local import here would shadow that name and the
+            # patch would silently stop taking effect.
+            from avg.providers import transport as transport_mod  # noqa: PLC0415
+
             # Every outbound provider call this run makes lands on this log -
             # see `avg.providers.transport.CURRENT_TAKE_LOG` for why the handle
             # is module-level rather than threaded through every provider.
@@ -796,6 +886,11 @@ def create_app(
         itself finishes, so the caller can navigate to Studio and watch it
         run over `/ws/events`.
         """
+        # Imported here, not at module scope - see the module docstring's
+        # note on why the registry/media/provider chain stays out of
+        # `avg.api.app`'s own import.
+        from avg.providers.text.router import config_from_settings  # noqa: PLC0415
+
         topic = body.topic.strip()
         if not topic:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="topic must not be empty")
@@ -888,6 +983,12 @@ def create_app(
         Takes the same single job slot as `POST /api/projects` and `/render`,
         so a second press while one runs is a 409.
         """
+        # Imported here, not at module scope - see the module docstring's
+        # note on why the registry/media/provider chain stays out of
+        # `avg.api.app`'s own import.
+        from avg.pipeline.registry import BY_KEY  # noqa: PLC0415
+        from avg.providers.text.router import config_from_settings  # noqa: PLC0415
+
         project = _library().get(project_id)
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no such project")
@@ -1036,6 +1137,12 @@ def create_app(
         )
 
         def _worker() -> None:
+            # Imported here, not at module scope - see the module docstring's
+            # note on why the registry/media/provider chain stays out of
+            # `avg.api.app`'s own import. This runs on the background job
+            # thread, after the route has already returned its 202.
+            from avg.providers import transport as transport_mod  # noqa: PLC0415
+
             transport_mod.CURRENT_TAKE_LOG = take_log
             try:
                 # Announced before a single file is touched: preparing the
