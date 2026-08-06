@@ -189,6 +189,13 @@ export default function NewTakePanel({
     onCommit,
     activeChannelId,
     channelLabel,
+    // This panel edits per-take OVERRIDES, never the channel document
+    // itself - it has nothing to do with `settings_source`, which only
+    // governs where Settings reads a channel's own values from. Always
+    // `false` here rather than wired up: disabling a field on this screen
+    // because the channel happens to be following the app-wide defaults
+    // would be applying Settings' own rule to a control that isn't Settings.
+    followingGlobal: false,
     // No `scope="channel"` setting is ever `type="secret"` (see
     // `avg.core.settings_schema`), so `Field`/`SecretField` never actually
     // reaches these - present only to satisfy `SettingsCtx`'s shape.

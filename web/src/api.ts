@@ -622,6 +622,15 @@ export function saveSettingsValues(values: Record<string, unknown>): Promise<Set
   return apiPost<SettingsValuesResponse>("/api/settings/values", { values });
 }
 
+/** `POST /api/settings/port-to-global` - one explicit, user-pressed
+ * snapshot: copies the active channel's channel-scope values (secrets and
+ * `settings_source` itself excluded) into the app-wide defaults document,
+ * overwriting it whole. Never automatic - see that route's docstring for
+ * why this is the one write CLAUDE.md's "no merge layer" rule allows. */
+export function portToGlobal(): Promise<{ ported: number }> {
+  return apiPost<{ ported: number }>("/api/settings/port-to-global");
+}
+
 export function getChannels(): Promise<ChannelsResponse> {
   return apiGet<ChannelsResponse>("/api/channels");
 }

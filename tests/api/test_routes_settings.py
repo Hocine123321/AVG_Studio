@@ -567,6 +567,10 @@ def test_porting_copies_channel_values_and_no_secret(client):
     assert "sk-should-never-be-copied" not in str(stored)
     # App-scope settings belong to the app, not to a channel snapshot.
     assert "theme" not in stored
+    # Slice 12 review Minor: `settings_source` is the channel's own switch,
+    # always read from its own document (see `_channel_values`) - never from
+    # here, so copying it into the snapshot was harmless but pointless.
+    assert "settings_source" not in stored
 
 
 def test_porting_without_an_active_channel_is_refused(client):

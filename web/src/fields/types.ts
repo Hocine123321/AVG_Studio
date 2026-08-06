@@ -31,6 +31,16 @@ export interface SettingsCtx {
    * than silently failing on save. */
   activeChannelId: string | null;
   channelLabel: string | null;
+  /** True while the active channel's `settings_source` reads `"global"`.
+   * `avg/api/routes_settings.py`'s `_channel_values` reads the app-wide
+   * defaults document whole in that state and `post_settings_values` still
+   * write-through to the channel's own document underneath it - a value the
+   * screen would show saved but never actually apply. `settings_source`
+   * itself stays enabled regardless (see `SettingsGroup.tsx`); it is the
+   * only way back. Everything else edits by porting (`POST
+   * /api/settings/port-to-global`), never by editing a value this screen
+   * cannot show landing anywhere. */
+  followingGlobal: boolean;
 
   keys: Record<string, boolean>;
   keyBusy: Record<string, boolean>;

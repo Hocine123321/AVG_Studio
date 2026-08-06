@@ -885,7 +885,14 @@ async def port_to_global(request: Request) -> dict[str, Any]:
     ported = {
         spec.id: channel.settings[spec.id]
         for spec in SETTINGS
-        if spec.scope == "channel" and spec.type != "secret" and spec.id in channel.settings
+        if spec.scope == "channel"
+        and spec.type != "secret"
+        # `settings_source` is the channel's own switch, always read from its
+        # own document (see `_channel_values`) - copying it into the
+        # defaults document would never be read back from there, so it
+        # would just be dead weight sitting in the snapshot.
+        and spec.id != "settings_source"
+        and spec.id in channel.settings
     }
     channel_defaults_config.save_defaults(
         ported, getattr(app_state, "channel_defaults_path", None)

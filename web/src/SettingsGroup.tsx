@@ -18,6 +18,16 @@ export interface SettingsGroupProps {
  * which channel a channel-scoped field will land on (or that none is
  * active, in which case the control is disabled rather than silently
  * failing later), and whether the row has an unsaved edit.
+ *
+ * A third disabled state sits beside "no active channel": the active
+ * channel's `settings_source` reading `"global"`. The route still write-
+ * throughs an edit to the channel's own document in that state (see
+ * `avg.api.routes_settings.post_settings_values` and its docstring on why
+ * that is intentional), but `_channel_values` is reading the defaults
+ * document while it is on, so the screen would show the save land and then
+ * never show it applied - the exact silent no-op Important 4 of the Slice
+ * 12 review found. `settings_source` itself is exempted: it is how the user
+ * gets back, and disabling it would strand them.
  */
 export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps) {
   return (
@@ -30,6 +40,8 @@ export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps)
           // comment) so they are never "blocked" by channel state - only
           // the six ordinary channel-scoped types can be.
           const channelBlocked = spec.scope === "channel" && spec.type !== "secret" && !ctx.activeChannelId;
+          const followingGlobal =
+            spec.scope === "channel" && spec.id !== "settings_source" && ctx.followingGlobal;
 
           return (
             <div key={spec.id} className={`field-row${dirty ? " field-row--dirty" : ""}`}>
@@ -51,7 +63,7 @@ export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps)
                 )}
               </div>
               <div className="field-row__control">
-                <Field spec={spec} ctx={ctx} disabled={channelBlocked} />
+                <Field spec={spec} ctx={ctx} disabled={channelBlocked || followingGlobal} />
               </div>
             </div>
           );

@@ -5,6 +5,7 @@ import {
   getKeys,
   getSettingsSchema,
   getSettingsValues,
+  portToGlobal,
   saveSettingsValues,
   setProviderKey,
   type ChannelDoc,
@@ -87,6 +88,10 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
   const [keyBusy, setKeyBusy] = useState<Record<string, boolean>>({});
   const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
 
+  const [porting, setPorting] = useState(false);
+  const [portError, setPortError] = useState<string | null>(null);
+  const [portResult, setPortResult] = useState<number | null>(null);
+
   const [search, setSearch] = useState("");
   /** Which group is currently in view. Derived from an IntersectionObserver
    * while the user scrolls, and set outright by a click - see `jumpTo`,
@@ -145,6 +150,14 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
     return Object.prototype.hasOwnProperty.call(draft, id);
   }
 
+  // True while the active channel reads its channel-scope settings from the
+  // app-wide defaults document rather than its own - see `SettingsCtx`'s
+  // `followingGlobal` for what this gates. Read via `valueById` rather than
+  // `channelValues.settings_source` directly, so an unsaved edit to the
+  // switch itself (still in `draft`, not yet round-tripped through Save)
+  // takes effect on this screen the moment it is made, not after a save.
+  const followingGlobal = valueById("settings_source") === "global";
+
   function onCommit(spec: SettingSpec, value: unknown) {
     setSaveError(null);
     setDraft((d) => ({ ...d, [spec.id]: value }));
@@ -174,6 +187,33 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
   function handleDiscard() {
     setDraft({});
     setSaveError(null);
+  }
+
+  /** Port to global (Important 3 of the Slice 12 review): the route existed
+   * with no button in front of it, so a channel switched to "global" landed
+   * on an empty defaults document and every value read back as the
+   * catalogue default - the feature's first-run experience was "all my
+   * settings reset". A confirm sits in front of it because the route
+   * overwrites the defaults document wholly, not merges into it. */
+  async function handlePortToGlobal() {
+    if (!activeChannelId) return;
+    const ok = window.confirm(
+      "Copy this channel's current settings into the app-wide defaults? " +
+        "This replaces the defaults document completely - any channel already " +
+        "following it will pick up these values immediately.",
+    );
+    if (!ok) return;
+    setPorting(true);
+    setPortError(null);
+    setPortResult(null);
+    try {
+      const res = await portToGlobal();
+      setPortResult(res.ported);
+    } catch (err) {
+      setPortError(extractDetail(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setPorting(false);
+    }
   }
 
   async function handleSetKey(provider: string, key: string) {
@@ -215,6 +255,7 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
     onCommit,
     activeChannelId,
     channelLabel,
+    followingGlobal,
     keys,
     keyBusy,
     keyErrors,
@@ -337,6 +378,21 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
         )}
       </header>
 
+      {followingGlobal && (
+        // One note, shown once, rather than repeating it on every disabled
+        // row below (Important 4 of the Slice 12 review). Every
+        // `scope="channel"` field except this switch itself renders
+        // disabled while it is on - see `SettingsGroup.tsx`.
+        <div className="studio__banner studio__banner--muted">
+          <p>
+            This channel is following the app-wide defaults right now, so every channel-scoped
+            setting below is shown disabled. Its own values are unchanged and come back the
+            moment you switch &ldquo;This channel&rsquo;s settings&rdquo; back to its own
+            document. To change the defaults themselves, use Port to global in the App group.
+          </p>
+        </div>
+      )}
+
       <div className="settings__layout">
         <nav className="settings__nav" aria-label="Setting categories">
           <input
@@ -383,15 +439,45 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                     own behaviour rather than a video's.
 
                     It was keyed to a `paths` group until 2026-07-30, and
-                    `avg.core.settings_schema.SETTINGS` has no such group -
-                    it declares nine (runtime, creative, video, models,
-                    captions, voice, images, render, keys), so this panel
-                    had silently never rendered. Slice 12 renamed `runtime`
-                    to `app` (a channel-scoped group would be the wrong home
-                    for "does this machine have ffmpeg"); this panel follows
-                    the group's new name rather than being left keyed to a
-                    group that no longer exists. */}
+                    `avg.core.settings_schema.SETTINGS` had no such group at
+                    the time - it declared nine (runtime, creative, video,
+                    models, captions, voice, images, render, keys), so this
+                    panel had silently never rendered. Slice 12 renamed
+                    `runtime` to `app` (a channel-scoped group would be the
+                    wrong home for "does this machine have ffmpeg");
+                    `creative` is untouched and still its own group.
+                    `test_the_app_group_replaces_runtime` is what now asserts
+                    `runtime` is gone; this panel follows the group's current
+                    name rather than being left keyed to one that no longer
+                    exists. */}
                 {g.group === "app" && !searching && <HealthPanel />}
+                {g.group === "app" && !searching && (
+                  <section className="models-panel" aria-label="Port to global">
+                    <div className="spend-card">
+                      <div>
+                        <p className="lbl">Port to global</p>
+                        <b>Copy this channel&rsquo;s settings into the app-wide defaults</b>
+                      </div>
+                      <span className="spend-card__note">
+                        Overwrites the app-wide defaults document with this channel&rsquo;s
+                        current channel-scope values, whole. Any channel following the app-wide
+                        defaults picks these up immediately.
+                      </span>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={handlePortToGlobal}
+                        disabled={!activeChannelId || porting}
+                      >
+                        {porting ? "Porting…" : "Port to global"}
+                      </button>
+                      {portError && <p className="field-row__blocked">{portError}</p>}
+                      {portResult !== null && !portError && (
+                        <p className="spend-card__note">Ported {portResult} setting{portResult === 1 ? "" : "s"}.</p>
+                      )}
+                    </div>
+                  </section>
+                )}
                 {g.group === "models" && !searching && (
                   <ModelsPanel
                     specs={g.specs}
