@@ -717,3 +717,22 @@ def test_screen_text_seeds_the_cache_and_records_the_provider(tmp_path, monkeypa
     assert len(cached) == 1
     words = json.loads(cached[0].read_text(encoding="utf-8"))
     assert words and all(isinstance(w["start"], int) and isinstance(w["end"], int) for w in words)
+
+
+def test_the_sample_ass_uses_the_real_header():
+    """A preview that builds its own style block is a second implementation
+    of caption styling, free to drift from what libass actually burns."""
+    from avg.pipeline.phases.captions import _ass_header, sample_ass
+
+    text = sample_ass(1080, 1920, "Figtree", 64, "bottom")
+    assert _ass_header(1080, 1920, "Figtree", 64, "bottom") in text
+    assert "[Events]" in text
+    assert "Dialogue:" in text
+
+
+def test_the_sample_ass_respects_position():
+    from avg.pipeline.phases.captions import sample_ass
+
+    bottom = sample_ass(1080, 1920, "Figtree", 64, "bottom")
+    top = sample_ass(1080, 1920, "Figtree", 64, "top")
+    assert bottom != top
