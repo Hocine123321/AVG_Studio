@@ -4,8 +4,6 @@ text response rather than generating one.
 
 from __future__ import annotations
 
-import pytest
-
 from avg.providers import recommend
 
 
@@ -49,9 +47,13 @@ def test_an_entry_that_was_not_in_the_catalogue_is_dropped(monkeypatch):
     assert [s.entry_id for s in out] == ["groq/real"]
 
 
-def test_a_reply_that_is_not_json_yields_nothing(monkeypatch):
+def test_a_reply_that_is_not_json_yields_none_not_an_empty_list(monkeypatch):
+    """`None` means "the reply was not usable" - distinct from `[]`, which
+    means the reply parsed fine and the model chose nothing. The caller
+    (`avg.api.routes_settings`) leans on that distinction to leave a prior
+    good run's suggestions alone when a later run's reply is prose."""
     _reply(monkeypatch, "Sure! Here are my picks: use Llama, it's great.")
-    assert recommend.suggest_models({"text": ["groq/real"], "image": []}, config=None) == []
+    assert recommend.suggest_models({"text": ["groq/real"], "image": []}, config=None) is None
 
 
 def test_voices_carry_no_tier(monkeypatch):
@@ -76,3 +78,32 @@ def test_an_unknown_tier_becomes_none_rather_than_being_invented(monkeypatch):
     )
     out = recommend.suggest_models({"text": ["groq/real"], "image": []}, config=None)
     assert out[0].tier is None
+
+
+def test_a_reply_omitting_kind_from_suggest_voices_still_yields_voice(monkeypatch):
+    """Important 2 of the slice review: the model's own `kind` field is
+    never trusted. `suggest_voices` already knows every id it asked about
+    is a voice, so an omitted (or wrong) `kind` in the reply must not stop
+    the suggestion from landing on the Voices tab."""
+    _reply(
+        monkeypatch,
+        '[{"entry_id": "edge/en-GB-RyanNeural", "reason": "warm narration voice"}]',
+    )
+    out = recommend.suggest_voices(["edge/en-GB-RyanNeural"], config=None)
+
+    assert len(out) == 1
+    assert out[0].kind == "voice"
+
+
+def test_a_reply_with_the_wrong_kind_is_still_placed_by_which_list_it_came_from(monkeypatch):
+    """A model claiming `"kind": "Text"` (wrong case, or simply wrong) for
+    an id drawn from the IMAGE list must still report `kind == "image"` -
+    the reply's `kind` is decorative, never load-bearing."""
+    _reply(
+        monkeypatch,
+        '[{"entry_id": "pollinations/flux", "kind": "Text", "tier": "cheap", "reason": "x"}]',
+    )
+    out = recommend.suggest_models({"text": [], "image": ["pollinations/flux"]}, config=None)
+
+    assert len(out) == 1
+    assert out[0].kind == "image"

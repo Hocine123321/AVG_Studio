@@ -35,7 +35,12 @@ TIERS: tuple[str, ...] = ("cheap", "balanced", "high", "ultra")
 class Suggestion:
     """One recommendation. `tier` is `None` for voices, and for any tier the
     model returned that is not one of `TIERS` - an unrecognised tier is
-    dropped rather than passed through as though it meant something."""
+    dropped rather than passed through as though it meant something.
+
+    `kind` is never the model's own claim - see `_parse`. It is always the
+    kind the id was actually sent under, because a model that omits `kind`
+    or returns one that matches no tab would otherwise land a voice on the
+    Text models tab, or vanish a suggestion from every screen."""
 
     entry_id: str
     kind: str
@@ -51,23 +56,36 @@ def _generate(prompt: str, config: Any) -> Any:
     return router.generate(prompt, "brief", config=config)
 
 
-def _parse(raw: str, allowed: set[str], *, tiers_allowed: bool) -> list[Suggestion]:
+def _parse(raw: str, kind_by_id: dict[str, str], *, tiers_allowed: bool) -> list[Suggestion] | None:
     """Validated suggestions out of a model's reply.
 
-    Anything not parseable yields nothing rather than raising: a malformed
-    reply is a suggestion run that produced nothing, which the screen can
-    state, and never an exception reaching the route.
+    Returns `None` when the reply itself was not usable - no JSON array
+    found, or one that failed to parse - as opposed to `[]`, which means
+    the reply parsed fine and the model simply picked nothing. The two are
+    different outcomes for the caller: a bad reply must leave whatever
+    suggestions are already stored alone, while a real "no picks" answer is
+    a legitimate result to store. Collapsing them into one `[]` was the
+    review's Important 1 finding - a failed run could silently erase the
+    last good one.
+
+    `kind_by_id` maps every id the model was shown to the kind it actually
+    is (`provider/model` -> `"text"` / `"image"` / `"voice"`). The model's
+    own `"kind"` field in its reply is never read: the caller already knows
+    which list each id came from, so trusting the model's restatement of
+    that fact only gives a wrong or missing value somewhere to land instead
+    of nowhere at all - see Important 2 of the slice review and the module
+    docstring's grounding rule.
     """
     text = raw.strip()
     start, end = text.find("["), text.rfind("]")
     if start == -1 or end == -1 or end < start:
-        return []
+        return None
     try:
         parsed = json.loads(text[start : end + 1])
-    except Exception:  # noqa: BLE001 - an unparseable reply is simply no suggestions
-        return []
+    except Exception:  # noqa: BLE001 - an unparseable reply is simply not usable
+        return None
     if not isinstance(parsed, list):
-        return []
+        return None
 
     out: list[Suggestion] = []
     for item in parsed:
@@ -77,14 +95,14 @@ def _parse(raw: str, allowed: set[str], *, tiers_allowed: bool) -> list[Suggesti
         # The guard that matters: a model may only recommend what it was
         # shown. An invented id would otherwise reach the Live List looking
         # exactly like a real one.
-        if entry_id not in allowed:
+        if entry_id not in kind_by_id:
             continue
         raw_tier = str(item.get("tier", "")).strip().lower()
         tier = raw_tier if (tiers_allowed and raw_tier in TIERS) else None
         out.append(
             Suggestion(
                 entry_id=entry_id,
-                kind=str(item.get("kind", "")).strip() or "text",
+                kind=kind_by_id[entry_id],
                 tier=tier,
                 reason=str(item.get("reason", "")).strip(),
             )
@@ -92,15 +110,18 @@ def _parse(raw: str, allowed: set[str], *, tiers_allowed: bool) -> list[Suggesti
     return out
 
 
-def suggest_models(catalogue: dict[str, list[str]], *, config: Any) -> list[Suggestion]:
+def suggest_models(catalogue: dict[str, list[str]], *, config: Any) -> list[Suggestion] | None:
     """Text and image models, in one call - they share a cost axis.
 
     `catalogue` is `{"text": [...], "image": [...]}` of `provider/model` ids.
+    Returns `None` if the reply could not be read as suggestions at all -
+    see `_parse`.
     """
     text_ids = list(catalogue.get("text", []))
     image_ids = list(catalogue.get("image", []))
-    allowed = set(text_ids) | set(image_ids)
-    if not allowed:
+    kind_by_id = {entry_id: "text" for entry_id in text_ids}
+    kind_by_id.update({entry_id: "image" for entry_id in image_ids})
+    if not kind_by_id:
         return []
 
     prompt = (
@@ -116,22 +137,25 @@ def suggest_models(catalogue: dict[str, list[str]], *, config: Any) -> list[Sugg
         f'"tier": one of {list(TIERS)}, '
         '"reason": "<one short sentence>"}'
     )
-    return _parse(_generate(prompt, config).text, allowed, tiers_allowed=True)
+    return _parse(_generate(prompt, config).text, kind_by_id, tiers_allowed=True)
 
 
-def suggest_voices(catalogue: list[str], *, config: Any) -> list[Suggestion]:
-    """Voices, in their own call. No cost axis, so no tier is asked for."""
-    allowed = set(catalogue)
-    if not allowed:
+def suggest_voices(catalogue: list[str], *, config: Any) -> list[Suggestion] | None:
+    """Voices, in their own call. No cost axis, so no tier is asked for.
+    Returns `None` if the reply could not be read as suggestions at all -
+    see `_parse`.
+    """
+    kind_by_id = {entry_id: "voice" for entry_id in catalogue}
+    if not kind_by_id:
         return []
 
     prompt = (
         "You are helping choose narration voices for a short-form video generator.\n"
         "Pick at most four voices from the list below - the best for clear, "
         "engaging narration.\n\n"
-        f"VOICES:\n{chr(10).join(sorted(allowed))}\n\n"
+        f"VOICES:\n{chr(10).join(sorted(kind_by_id))}\n\n"
         "Reply with ONLY a JSON array, no prose. Each element: "
         '{"entry_id": "<exactly one id from the list above>", '
         '"kind": "voice", "reason": "<one short sentence>"}'
     )
-    return _parse(_generate(prompt, config).text, allowed, tiers_allowed=False)
+    return _parse(_generate(prompt, config).text, kind_by_id, tiers_allowed=False)
