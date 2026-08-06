@@ -51,6 +51,7 @@ from avg.config import channels as channels_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
+from avg.core.errors import AvgError
 from avg.core.settings_schema import (
     KEY_PROVIDER_IDS,
     SETTINGS,
@@ -60,6 +61,7 @@ from avg.core.settings_schema import (
 )
 from avg.core.model_prefs import KINDS, ModelPrefs
 from avg.providers import catalogues, probe, recommend
+from avg.providers.errors import POLICY
 
 from .deps import require_token
 
@@ -489,6 +491,38 @@ def _suggest_running(app_state: Any) -> bool:
     return thread is not None and thread.is_alive()
 
 
+# The kinds each `SuggestRequest.kind` actually covers, for the scoped
+# replace `ModelPrefs.set_suggestions` does - "models" asks about text and
+# image together (they share a cost axis), "voices" asks about voices
+# alone, and neither run's write may touch the other's rows. See Important
+# 4 of the slice review and `set_suggestions`'s own docstring.
+_SUGGEST_KINDS: dict[str, set[str]] = {"models": {"text", "image"}, "voices": {"voice"}}
+
+# One sentence per `POLICY[kind].on_exhausted` outcome, built the same way
+# `routes_preview._preview_failure` builds its detail: from `POLICY`, never
+# from `AvgError.detail` (a raw provider response body - the one place a
+# key could leak; see CLAUDE.md's key rule). Kept as this route's own copy
+# rather than importing `routes_preview`'s private dict - the two describe
+# different operations ("this request failed" vs "the shortlist run
+# failed") and a shared string would have to serve both without being more
+# specific than either.
+_SUGGEST_FAILURE_DETAIL: dict[str, str] = {
+    "switch_key": "no working API key for the configured text model",
+    "switch_provider": "the text provider could not fulfil the request",
+    "switch_model": "the configured text model is not available",
+    "fail": "the text call failed",
+}
+
+
+def _suggest_failure_message(exc: AvgError) -> str:
+    """One user-facing sentence for a failed suggestion run's provider
+    error, routed through `POLICY` rather than a hand-written mapping of
+    `exc`'s own text."""
+    rule = POLICY.get(exc.kind)
+    on_exhausted = rule.on_exhausted if rule is not None else "fail"
+    return _SUGGEST_FAILURE_DETAIL.get(on_exhausted, _SUGGEST_FAILURE_DETAIL["fail"])
+
+
 @router.post("/api/live-list/suggest", status_code=status.HTTP_202_ACCEPTED)
 async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str, Any]:
     """Ask a text model which entries are worth shortlisting.
@@ -498,7 +532,13 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
     `working_models.json`, which records what a probe measured. The Live List
     chips them `Suggested`, and a probe that later proves one outranks it.
 
-    Own slot, 409 on a second start, deliberately not the render slot.
+    Own slot, 409 on a second start, deliberately not the render slot. Only
+    Groq reliably generates text on this account (Gemini has one working
+    model, HuggingFace and Pollinations effectively none), so a failed text
+    call is the ordinary outcome here, not the exotic one - `app.state.
+    suggest_status` / `suggest_error` (surfaced on `GET /api/live-list`)
+    exist so that outcome is visible instead of silent. See Important 1 of
+    the slice review.
     """
     if body.kind not in ("models", "voices"):
         raise HTTPException(
@@ -518,7 +558,6 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
             detail="a suggestion run is already going",
         )
 
-    prefs, _scope = _prefs_for_scope(app_state)
     values = _channel_values(app_state)
     try:
         router_config = config_from_settings(
@@ -534,8 +573,6 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
     voice_ids = sorted(_known_from_catalogue(app_state, "voice"))
 
     def _run() -> None:
-        # Never raises out of the thread: a failed run leaves the previous
-        # suggestions in place, which is more useful than none.
         try:
             if body.kind == "models":
                 rows = recommend.suggest_models(
@@ -543,15 +580,47 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
                 )
             else:
                 rows = recommend.suggest_voices(voice_ids, config=router_config)
-            prefs.set_suggestions(
-                [
-                    {"entry_id": s.entry_id, "kind": s.kind, "tier": s.tier, "reason": s.reason}
-                    for s in rows
-                ]
-            )
+        except AvgError as exc:
+            # The normal case on this account: no key, a down provider, or
+            # a model this account cannot reach. Recorded, never silent.
+            app_state.suggest_status = "error"
+            app_state.suggest_error = _suggest_failure_message(exc)
+            return
         except Exception:
-            pass
+            # Anything else (a bug in this module, not a provider failure)
+            # still has to reach the user rather than vanish.
+            app_state.suggest_status = "error"
+            app_state.suggest_error = "the suggestion run failed unexpectedly"
+            return
 
+        if rows is None:
+            # A well-formed reply never arrived (prose, truncation, an empty
+            # body). Leaving the previous suggestions in place and only
+            # changing the status is the whole point of `rows is None` vs
+            # `rows == []` - see `recommend._parse`.
+            app_state.suggest_status = "error"
+            app_state.suggest_error = "the model's reply could not be read as suggestions"
+            return
+
+        # Resolved here, at write time, rather than captured before the
+        # text call: the active channel can change while a suggestion run
+        # is in flight, and the result belongs in whichever channel is
+        # active when it actually lands, not the one that was active when
+        # the button was pressed. See the slice review's note on
+        # `routes_settings.py:134`.
+        prefs, _scope = _prefs_for_scope(app_state)
+        prefs.set_suggestions(
+            [
+                {"entry_id": s.entry_id, "kind": s.kind, "tier": s.tier, "reason": s.reason}
+                for s in rows
+            ],
+            kinds=_SUGGEST_KINDS[body.kind],
+        )
+        app_state.suggest_status = "ok"
+        app_state.suggest_error = None
+
+    app_state.suggest_status = "running"
+    app_state.suggest_error = None
     thread = threading.Thread(target=_run, name="live-list-suggest", daemon=True)
     app_state.suggest_thread = thread
     thread.start()
@@ -714,6 +783,12 @@ async def get_live_list(request: Request) -> dict:
             if app_state.model_cache.updated_at() is not None
             else None
         ),
+        # The last (or in-flight) suggestion run's own outcome - "idle" until
+        # the first run, "running" while the worker is going, then "ok" or
+        # "error". The frontend polls this instead of guessing from a timer;
+        # see Important 1 and Important 5 of the slice review.
+        "suggest_status": getattr(app_state, "suggest_status", "idle"),
+        "suggest_error": getattr(app_state, "suggest_error", None),
     }
 
 

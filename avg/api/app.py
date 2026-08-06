@@ -499,6 +499,13 @@ def create_app(
     # The suggestion run's own single slot - one text call, and two at once
     # would just overwrite each other.
     app.state.suggest_thread = None
+    # The last (or in-flight) suggestion run's outcome, surfaced on
+    # `GET /api/live-list` - "idle" until the first run. A failed text call
+    # is the ordinary case on this account (see CLAUDE.md), and before this
+    # was added it was also a silent one. See Important 1 of the 2026-08-06
+    # slice-15 review.
+    app.state.suggest_status = "idle"
+    app.state.suggest_error = None
 
     # One MONEY-SPENDING preview at a time. Its own lock, deliberately not
     # the render slot: a preview must never block a render, or be blocked by

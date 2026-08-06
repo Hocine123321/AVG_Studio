@@ -57,6 +57,8 @@ def test_an_empty_install_lists_nothing_rather_than_guessing(client):
         "voice": [],
         "voice_meta": {},
         "updated": None,
+        "suggest_status": "idle",
+        "suggest_error": None,
     }
 
 
@@ -281,3 +283,79 @@ def test_a_second_suggest_while_one_runs_is_refused(client, monkeypatch):
 def test_an_unknown_suggest_kind_is_refused(client):
     res = client.post("/api/live-list/suggest", json={"kind": "everything"}, headers=AUTH)
     assert res.status_code == 400
+
+
+def test_a_failed_text_call_is_reported_not_silent(client, monkeypatch):
+    """Important 1 of the slice review. Only Groq reliably generates text on
+    this account, so a provider failure here is the ordinary case, not the
+    exotic one - and before this fix it vanished with no error and no
+    change, distinguishable from "the model had no picks" only by staring
+    at the network."""
+    from avg.core.errors import AvgError, ErrorKind
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: (_ for _ in ()).throw(
+            AvgError(ErrorKind.auth, "Groq API key is not set")
+        ),
+    )
+    assert client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH).status_code == 202
+    client.app.state.suggest_thread.join(timeout=5)
+
+    body = client.get("/api/live-list", headers=AUTH).json()
+    assert body["suggest_status"] == "error"
+    assert body["suggest_error"]
+    # Never the raw provider text - that is where a key would leak.
+    assert "Groq API key is not set" not in body["suggest_error"]
+
+
+def test_an_unusable_reply_leaves_prior_suggestions_in_place(client, monkeypatch):
+    """A run whose reply cannot be read as suggestions at all (prose,
+    truncated JSON) must not erase a previous good run's rows - that is
+    exactly the silent-erasure Important 1 exists to stop."""
+    from avg.providers.recommend import Suggestion
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [
+            Suggestion(entry_id="groq/a", kind="text", tier="cheap", reason="fast")
+        ],
+    )
+    client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+    assert any(r["id"] == "groq/a" for r in client.get("/api/live-list", headers=AUTH).json()["text"])
+
+    monkeypatch.setattr("avg.api.routes_settings.recommend.suggest_models", lambda catalogue, *, config: None)
+    client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+
+    body = client.get("/api/live-list", headers=AUTH).json()
+    assert body["suggest_status"] == "error"
+    assert any(r["id"] == "groq/a" and r["source"] == "suggested" for r in body["text"])
+
+
+def test_suggesting_voices_leaves_model_suggestions_intact(client, monkeypatch):
+    """Important 4 of the slice review: the two suggest buttons must not
+    overwrite each other, now that Important 2 makes a stored row's `kind`
+    trustworthy enough to filter a scoped replace by."""
+    from avg.providers.recommend import Suggestion
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [
+            Suggestion(entry_id="groq/a", kind="text", tier="cheap", reason="fast")
+        ],
+    )
+    client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_voices",
+        lambda catalogue, *, config: [Suggestion(entry_id="edge/en-GB-RyanNeural", kind="voice", tier=None, reason="warm")],
+    )
+    client.post("/api/live-list/suggest", json={"kind": "voices"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+
+    body = client.get("/api/live-list", headers=AUTH).json()
+    assert any(r["id"] == "groq/a" and r["source"] == "suggested" for r in body["text"])
+    assert any(r["id"] == "edge/en-GB-RyanNeural" and r["source"] == "suggested" for r in body["voice"])
