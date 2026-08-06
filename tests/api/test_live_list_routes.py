@@ -192,3 +192,92 @@ def test_the_live_list_says_when_it_was_last_listed(client):
     body = client.get("/api/live-list", headers=AUTH).json()
     assert "updated" in body
     assert body["updated"] is None  # nothing has ever been listed here
+
+
+def test_a_suggestion_run_stores_rows_and_reports_them(client, monkeypatch):
+    from avg.providers.recommend import Suggestion
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [
+            Suggestion(entry_id="groq/a", kind="text", tier="cheap", reason="fast")
+        ],
+    )
+    assert client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH).status_code == 202
+    client.app.state.suggest_thread.join(timeout=5)
+
+    rows = client.get("/api/live-list", headers=AUTH).json()["text"]
+    row = next(r for r in rows if r["id"] == "groq/a")
+    assert row["source"] == "suggested"
+    assert row["tier"] == "cheap"
+    assert row["reason"] == "fast"
+
+
+def test_a_measurement_outranks_an_opinion(client, monkeypatch):
+    """Suggested and Verified are not exclusive - but once a probe proves a
+    model, the chip must say so."""
+    from avg.providers.recommend import Suggestion
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.probe.probe_models",
+        lambda selection, **k: {"groq": {"a": True}},
+    )
+    monkeypatch.setattr("avg.api.routes_settings.probe.check_reachable", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [
+            Suggestion(entry_id="groq/a", kind="text", tier="cheap", reason="fast")
+        ],
+    )
+    client.patch("/api/live-list/text/groq/a", json={"selected": True}, headers=AUTH)
+    client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+    client.post("/api/models/cache/build", headers=AUTH)
+    client.app.state.probe_thread.join(timeout=5)
+
+    rows = client.get("/api/live-list", headers=AUTH).json()["text"]
+    assert next(r for r in rows if r["id"] == "groq/a")["source"] == "probed"
+
+
+def test_a_suggestion_run_leaves_the_probe_cache_untouched(client, monkeypatch):
+    from avg.providers.recommend import Suggestion
+
+    before = client.app.state.model_cache.path.read_bytes() if client.app.state.model_cache.path.is_file() else b""
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [Suggestion(entry_id="groq/a", kind="text", tier=None, reason="x")],
+    )
+    client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+    client.app.state.suggest_thread.join(timeout=5)
+
+    after = client.app.state.model_cache.path.read_bytes() if client.app.state.model_cache.path.is_file() else b""
+    assert after == before
+
+
+def test_a_second_suggest_while_one_runs_is_refused(client, monkeypatch):
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow(*_a, **_k):
+        started.set()
+        release.wait(timeout=5)
+        return []
+
+    monkeypatch.setattr("avg.api.routes_settings.recommend.suggest_models", slow)
+    try:
+        assert client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH).status_code == 202
+        assert started.wait(timeout=5)
+        assert client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH).status_code == 409
+    finally:
+        release.set()
+        client.app.state.suggest_thread.join(timeout=5)
+
+    # Its own slot, never the render slot.
+    assert client.app.state.render_thread is None
+
+
+def test_an_unknown_suggest_kind_is_refused(client):
+    res = client.post("/api/live-list/suggest", json={"kind": "everything"}, headers=AUTH)
+    assert res.status_code == 400

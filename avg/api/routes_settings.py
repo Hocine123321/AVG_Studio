@@ -59,7 +59,7 @@ from avg.core.settings_schema import (
     validate_value,
 )
 from avg.core.model_prefs import KINDS, ModelPrefs
-from avg.providers import catalogues, probe
+from avg.providers import catalogues, probe, recommend
 
 from .deps import require_token
 
@@ -474,6 +474,90 @@ async def build_model_cache(request: Request) -> dict:
     return {"started": True}
 
 
+class SuggestRequest(BaseModel):
+    """`POST /api/live-list/suggest` - which call to spend.
+
+    Two calls, not one: text and image share a cost axis and are chosen
+    together; voices have no cost axis at all. The user picks which to run.
+    """
+
+    kind: str
+
+
+def _suggest_running(app_state: Any) -> bool:
+    thread = getattr(app_state, "suggest_thread", None)
+    return thread is not None and thread.is_alive()
+
+
+@router.post("/api/live-list/suggest", status_code=status.HTTP_202_ACCEPTED)
+async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str, Any]:
+    """Ask a text model which entries are worth shortlisting.
+
+    The suggestions are an OPINION and are stored as one - in
+    `model_prefs.json` beside the user's ticks, never in
+    `working_models.json`, which records what a probe measured. The Live List
+    chips them `Suggested`, and a probe that later proves one outranks it.
+
+    Own slot, 409 on a second start, deliberately not the render slot.
+    """
+    if body.kind not in ("models", "voices"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown kind {body.kind!r} - expected 'models' or 'voices'",
+        )
+
+    # Imported here, not at module scope - see `avg.api.app`'s module
+    # docstring for why the registry/provider chain stays out of every API
+    # module's own import.
+    from avg.providers.text.router import config_from_settings  # noqa: PLC0415
+
+    app_state = request.app.state
+    if _suggest_running(app_state):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="a suggestion run is already going",
+        )
+
+    prefs, _scope = _prefs_for_scope(app_state)
+    values = _channel_values(app_state)
+    try:
+        router_config = config_from_settings(
+            values, fallback_default=str(get_spec("text_model_default").default)  # type: ignore[union-attr]
+        )
+    except ValueError as exc:
+        # No text model configured at all: say so, rather than failing inside
+        # the worker where the user cannot see it.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    text_ids = sorted(_known_text(app_state))
+    image_ids = sorted(_known_from_catalogue(app_state, "image"))
+    voice_ids = sorted(_known_from_catalogue(app_state, "voice"))
+
+    def _run() -> None:
+        # Never raises out of the thread: a failed run leaves the previous
+        # suggestions in place, which is more useful than none.
+        try:
+            if body.kind == "models":
+                rows = recommend.suggest_models(
+                    {"text": text_ids, "image": image_ids}, config=router_config
+                )
+            else:
+                rows = recommend.suggest_voices(voice_ids, config=router_config)
+            prefs.set_suggestions(
+                [
+                    {"entry_id": s.entry_id, "kind": s.kind, "tier": s.tier, "reason": s.reason}
+                    for s in rows
+                ]
+            )
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_run, name="live-list-suggest", daemon=True)
+    app_state.suggest_thread = thread
+    thread.start()
+    return {"started": True}
+
+
 # ── Live List ──────────────────────────────────────────────
 
 class LiveEntryUpdate(BaseModel):
@@ -530,18 +614,38 @@ def _entry_rows(prefs: ModelPrefs, kind: str, known: dict[str, str]) -> list[dic
     than silently dropped: a model can vanish from a catalogue between
     refreshes, and losing the note attached to it would be worse than
     showing an entry that no longer resolves.
+
+    A suggestion is a fourth provenance and the WEAKEST: it is an opinion,
+    so anything the app has actually measured or listed outranks it. An
+    entry that is both suggested and probed reports `probed`, because a
+    measurement beats a recommendation. Suggestions are filtered to this
+    `kind` - `recommend.suggest_models` returns both text and image rows in
+    one call, and a text suggestion has no business turning up on the image
+    or voice tab.
     """
     saved = prefs.all(kind)
+    suggested = {
+        entry_id: hint for entry_id, hint in prefs.suggestions().items() if hint.get("kind") == kind
+    }
     rows: list[dict] = []
-    for entry_id in sorted(set(known) | set(saved)):
+    for entry_id in sorted(set(known) | set(saved) | set(suggested)):
         entry = saved.get(entry_id)
+        hint = suggested.get(entry_id)
+        if entry_id in known:
+            source = known[entry_id]
+        elif entry_id in suggested:
+            source = "suggested"
+        else:
+            source = "manual"
         rows.append(
             {
                 "id": entry_id,
-                "source": known.get(entry_id, "manual"),
+                "source": source,
                 "selected": bool(entry.selected) if entry else False,
                 "favourite": bool(entry.favourite) if entry else False,
                 "note": entry.note if entry else "",
+                "tier": (hint or {}).get("tier"),
+                "reason": str((hint or {}).get("reason", "")),
             }
         )
     rows.sort(key=lambda r: (not r["favourite"], r["id"].lower()))
