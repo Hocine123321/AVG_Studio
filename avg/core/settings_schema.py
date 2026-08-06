@@ -151,9 +151,10 @@ SETTINGS: list[SettingSpec] = [
         group="app",
         label="Check components at startup",
         help=(
-            "Run the dependency check while the library loads. Read by "
-            "`avg/shell.py`. Turning it off starts marginally faster and tells "
-            "you nothing until you open App health."
+            "Run the dependency check while the library loads. Declared here "
+            "ahead of the check itself, which Slice 13 adds - this switch has "
+            "no effect until that lands. Turning it off starts marginally "
+            "faster and tells you nothing until you open App health."
         ),
         type="bool",
         default=True,
