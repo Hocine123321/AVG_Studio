@@ -9,6 +9,33 @@ function isTheme(value: unknown): value is Theme {
   return value === "night" || value === "day";
 }
 
+/**
+ * Applies a `motion_scale` setting value to the document: the numeric
+ * `--motion-scale` custom property every duration in `tokens.css` multiplies
+ * by, and a `data-motion` attribute for the handful of rules that cannot be
+ * expressed as a duration at all - `motion_scale: "none"` mapping to `0`
+ * turns a division like `1.3s / max(var(--motion-scale), 0.01)` into a
+ * 130 second animation rather than no animation, which for a fill that
+ * starts translated outside its own clipped track means the user who asked
+ * for the least motion sees nothing move into place at all. `data-motion`
+ * lets a rule opt out of the arithmetic entirely and just freeze in its
+ * resting position.
+ *
+ * Shared by `useTheme` (the boot-time application, covering every screen
+ * from launch) and `Settings.tsx` (the live-preview write while the user is
+ * on that screen) so the mapping is defined once.
+ */
+export function applyMotionScale(rawScale: unknown): void {
+  const scale = String(rawScale ?? "full");
+  const numeric = scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1";
+  document.documentElement.style.setProperty("--motion-scale", numeric);
+  if (scale === "none") {
+    document.documentElement.setAttribute("data-motion", "none");
+  } else {
+    document.documentElement.removeAttribute("data-motion");
+  }
+}
+
 function initial(): Theme {
   const stored = localStorage.getItem(KEY);
   if (isTheme(stored)) return stored;
@@ -62,11 +89,7 @@ export function useTheme(): { theme: Theme; setTheme: (t: Theme) => void; toggle
         // preferences. Settings' effect stays too, as the live-preview
         // writer while the user is on that screen; this is what covers
         // every screen before that ever happens.
-        const scale = String(values.app.motion_scale ?? "full");
-        document.documentElement.style.setProperty(
-          "--motion-scale",
-          scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1",
-        );
+        applyMotionScale(values.app.motion_scale);
       })
       .catch(() => {
         /* Offline, or before onboarding has written a settings file: the

@@ -14,6 +14,7 @@ import {
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
 import SettingsGroup from "./SettingsGroup";
+import { applyMotionScale } from "./theme";
 import type { SettingsCtx } from "./fields/types";
 
 /** Nicer display names for the schema's raw `group` strings. Anything not
@@ -116,14 +117,11 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
   }, []);
 
   useEffect(() => {
-    const scale = String(appValues["motion_scale"] ?? "full");
-    // One custom property drives every duration in tokens.css, rather than
-    // this being read at dozens of call sites. `prefers-reduced-motion`
-    // still wins - see that block in tokens.css, which is unchanged.
-    document.documentElement.style.setProperty(
-      "--motion-scale",
-      scale === "none" ? "0" : scale === "reduced" ? "0.5" : "1",
-    );
+    // One shared function (`theme.ts`) drives both the numeric custom
+    // property and the `data-motion="none"` attribute, rather than this
+    // effect re-deriving the mapping. `prefers-reduced-motion` still wins -
+    // see that block in tokens.css, which is unchanged.
+    applyMotionScale(appValues["motion_scale"]);
   }, [appValues]);
 
   const channelLabel = useMemo(() => {
