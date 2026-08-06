@@ -44,6 +44,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -348,15 +349,42 @@ def main() -> None:
 
         window.load_url(f"http://{HOST}:{port}/?token={token}")
 
-        from avg.config.settings import load_settings  # noqa: PLC0415
+        def _warm_component_cache() -> None:
+            """Best-effort App-health warm-up - a failure here is never
+            worth surfacing, since the window has already loaded the real
+            app by the time this runs.
 
-        if should_check_at_startup(load_settings().values):
-            # Warms the five-minute component cache on the boot thread so
-            # App health answers instantly the first time it is opened.
-            # Never blocks the window: this runs after `load_url`.
-            from avg.core.health import check_all  # noqa: PLC0415
+            Wrapped in its own `suppress(Exception)` rather than living
+            inside `_boot`'s own `try`: that `try` ends at
+            `_wait_until_ready` above, specifically so a warm-up failure
+            can never turn into "Could not start" on a splash the app has
+            already moved past. Before this existed, an exception here had
+            nowhere to go but straight out of `_boot` unhandled - the
+            opposite of "never worth surfacing".
 
-            check_all()
+            Runs on its own `daemon=True` thread rather than pywebview's own
+            worker (the thread `_boot` itself executes on): `check_all()`
+            imports moviepy/PIL/numpy/edge_tts and shells out to `ffmpeg
+            -version` with a 10s timeout, so it can run for several seconds
+            after `_boot` used to be finished microseconds after `load_url`.
+            `webview.start`'s worker is non-daemon, and `main()` below joins
+            only the uvicorn server thread - closing the window while a
+            warm-up was still running on that worker used to keep this
+            process alive after the window was gone. A daemon thread lets
+            the process exit with the window regardless of how far the
+            warm-up has gotten.
+            """
+            with suppress(Exception):
+                from avg.config.settings import load_settings  # noqa: PLC0415
+
+                if should_check_at_startup(load_settings().values):
+                    from avg.core.health import check_all  # noqa: PLC0415
+
+                    check_all()
+
+        threading.Thread(
+            target=_warm_component_cache, daemon=True, name="avg-startup-check"
+        ).start()
 
     webview.start(_boot, private_mode=False)
 
