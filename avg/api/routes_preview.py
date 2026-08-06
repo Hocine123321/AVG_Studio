@@ -16,19 +16,37 @@ means paying for an image and probing an ElevenLabs voice costs characters.
 A preview is user-initiated, which is why it may exist at all - but the same
 money is spent, so it may never happen as a side effect of typing.
 
-One preview at a time, in its own slot with a 409 on a second start -
-matching `probe_thread`'s "one job, one slot, 409 on a second start" shape,
-and deliberately NOT the render slot, so a preview can never block or be
-blocked by a real render. That slot is claimed and released around an
-`await asyncio.to_thread(...)` call, not around the underlying worker
-thread itself: if the request is cancelled (the user navigates away
-mid-preview) the `finally` below still runs and releases the lock, but the
-`to_thread` worker keeps running to completion in the background - "one at
-a time" bounds how many previews can be STARTED at once, not how many
-worker threads can briefly be alive. No extra spend results (a cancelled
-request already paid for its own press, same as a completed one), but the
+One MONEY-SPENDING preview at a time, in its own slot with a 409 on a
+second start - matching `probe_thread`'s "one job, one slot, 409 on a
+second start" shape, and deliberately NOT the render slot, so a preview
+can never block or be blocked by a real render. That slot,
+`app.state.preview_lock_paid`, is claimed only by `preview_voice` on a
+provider in `PAID_VOICE_PROVIDERS` and by `preview_image` - the two
+functions that spend real money - and released around an `await
+asyncio.to_thread(...)` call, not around the underlying worker thread
+itself: if the request is cancelled (the user navigates away mid-preview)
+the `finally` below still runs and releases the lock, but the `to_thread`
+worker keeps running to completion in the background - "one at a time"
+bounds how many PAID previews can be STARTED at once, not how many worker
+threads can briefly be alive. No extra spend results (a cancelled request
+already paid for its own press, same as a completed one), but the
 guarantee is narrower than "one in flight" and this comment says so rather
 than the previous, over-precise wording.
+
+The three free routes (`preview_caption`, `preview_overlay`,
+`preview_takeover`) and `preview_voice` on Edge claim NO lock at all
+(Slice 14 review, Important 3). They used to share the same strict slot as
+the paid routes, and Settings.tsx mounts every settings group - including
+Captions and Voice - on one scrolling page, so their debounced effects
+fire in the same 350ms tick; the non-blocking lock meant one of the two
+requests deterministically got a 409, and the panel that lost printed "a
+preview is already running" forever, since neither panel retries. A free
+preview is cheap (one ffmpeg frame, one PIL draw) and idempotent (calling
+it twice concurrently produces the same bytes each time), so nothing is
+protected by serialising them - the slot exists to bound SPEND, not
+compute, and a free preview spends nothing. **The paid routes are
+untouched: they still refuse `confirm_paid=False` before the lock and
+before any provider is constructed, and still share one strict slot.**
 
 Both money-spending functions - `image_sample` below and `voice_sample`
 below - live in THIS module, not in `avg.media.preview`. `image_sample`
@@ -196,9 +214,13 @@ def voice_sample(provider: str, voice_id: str) -> bytes:
     return bytes(data)
 
 
-def _claim(app_state: Any) -> None:
-    """Take the single preview slot, or 409."""
-    lock: threading.Lock = app_state.preview_lock
+def _claim_paid(app_state: Any) -> None:
+    """Take the single PAID-preview slot, or 409.
+
+    Only `preview_voice` (on a provider in `PAID_VOICE_PROVIDERS`) and
+    `preview_image` call this - see the module docstring for why the free
+    routes claim nothing at all."""
+    lock: threading.Lock = app_state.preview_lock_paid
     if not lock.acquire(blocking=False):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -290,50 +312,48 @@ def _preview_failure(kind_label: str, provider: str, exc: AvgError) -> HTTPExcep
 
 @router.post("/api/preview/caption")
 async def preview_caption(body: CaptionPreview, request: Request) -> Response:
-    """Free: one frame, burned by the same libass the renderer uses."""
+    """Free: one frame, burned by the same libass the renderer uses.
+
+    Claims no lock (Slice 14 review, Important 3) - see the module
+    docstring for why free previews are not serialised against each other.
+    """
     from avg.pipeline.phases.captions import sample_ass  # noqa: PLC0415
 
-    app_state = request.app.state
-    _claim(app_state)
-    try:
-        ass = sample_ass(body.width, body.height, body.font_name, body.font_size, body.position)
-        data = await asyncio.to_thread(caption_png, ass, body.width, body.height)
-    finally:
-        app_state.preview_lock.release()
+    ass = sample_ass(body.width, body.height, body.font_name, body.font_size, body.position)
+    data = await asyncio.to_thread(caption_png, ass, body.width, body.height)
     return _png_or_503(data)
 
 
 @router.post("/api/preview/overlay")
 async def preview_overlay(body: OverlayPreview, request: Request) -> Response:
-    """Free: one PIL draw by the render's own overlay code."""
-    app_state = request.app.state
-    _claim(app_state)
-    try:
-        data = await asyncio.to_thread(overlay_png, body.spec, body.width, body.height)
-    finally:
-        app_state.preview_lock.release()
+    """Free: one PIL draw by the render's own overlay code. No lock - see
+    the module docstring."""
+    data = await asyncio.to_thread(overlay_png, body.spec, body.width, body.height)
     return _png_or_503(data)
 
 
 @router.post("/api/preview/takeover")
 async def preview_takeover(body: TakeoverPreview, request: Request) -> Response:
-    """Free: one PIL draw by the render's own overlay code."""
-    app_state = request.app.state
-    _claim(app_state)
-    try:
-        data = await asyncio.to_thread(
-            takeover_png, body.headline, body.sub, body.width, body.height
-        )
-    finally:
-        app_state.preview_lock.release()
+    """Free: one PIL draw by the render's own overlay code. No lock - see
+    the module docstring."""
+    data = await asyncio.to_thread(
+        takeover_png, body.headline, body.sub, body.width, body.height
+    )
     return _png_or_503(data)
 
 
 @router.post("/api/preview/voice")
 async def preview_voice(body: VoicePreview, request: Request) -> Response:
     """Free on Edge. **Spends ElevenLabs characters** and refuses without
-    `confirm_paid`, so typing in a voice field can never cost money."""
-    if body.provider in PAID_VOICE_PROVIDERS and not body.confirm_paid:
+    `confirm_paid`, so typing in a voice field can never cost money.
+
+    Only the paid branch claims `preview_lock_paid` - the free branch (Edge)
+    runs unlocked, same as the other three free routes (Slice 14 review,
+    Important 3). `paid` is computed once, before the confirmation check,
+    so the same boolean gates both the refusal and the lock.
+    """
+    paid = body.provider in PAID_VOICE_PROVIDERS
+    if paid and not body.confirm_paid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
@@ -341,13 +361,15 @@ async def preview_voice(body: VoicePreview, request: Request) -> Response:
             ),
         )
     app_state = request.app.state
-    _claim(app_state)
+    if paid:
+        _claim_paid(app_state)
     try:
         data = await asyncio.to_thread(voice_sample, body.provider, body.voice_id)
     except AvgError as exc:
         raise _preview_failure("voice", body.provider, exc) from exc
     finally:
-        app_state.preview_lock.release()
+        if paid:
+            app_state.preview_lock_paid.release()
     if not data:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -358,14 +380,15 @@ async def preview_voice(body: VoicePreview, request: Request) -> Response:
 
 @router.post("/api/preview/image")
 async def preview_image(body: ImagePreview, request: Request) -> Response:
-    """**Always spends money.** Refused without `confirm_paid`."""
+    """**Always spends money.** Refused without `confirm_paid`. Always
+    claims `preview_lock_paid` - there is no free branch for images."""
     if not body.confirm_paid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="generating a sample image costs money - confirm before generating one",
         )
     app_state = request.app.state
-    _claim(app_state)
+    _claim_paid(app_state)
     try:
         data = await asyncio.to_thread(
             image_sample, body.provider, body.model, body.aspect_ratio
@@ -373,7 +396,7 @@ async def preview_image(body: ImagePreview, request: Request) -> Response:
     except AvgError as exc:
         raise _preview_failure("image", body.provider, exc) from exc
     finally:
-        app_state.preview_lock.release()
+        app_state.preview_lock_paid.release()
     if not data:
         # A provider is expected to raise `AvgError` on any failure (see
         # `image_sample`'s own docstring) - this is the defensive case of a

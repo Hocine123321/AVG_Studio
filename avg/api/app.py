@@ -496,9 +496,16 @@ def create_app(
     # provider, and two at once would double that for nothing.
     app.state.probe_thread = None
 
-    # One preview at a time. Its own lock, deliberately not the render slot:
-    # a preview must never block a render, or be blocked by one.
-    app.state.preview_lock = threading.Lock()
+    # One MONEY-SPENDING preview at a time. Its own lock, deliberately not
+    # the render slot: a preview must never block a render, or be blocked by
+    # one. Only `preview_voice` (on a paid provider) and `preview_image`
+    # claim this - the free routes (`preview_caption`, `preview_overlay`,
+    # `preview_takeover`, and `preview_voice` on Edge) claim nothing at all,
+    # since they are cheap, idempotent, and routinely fire in the same tick
+    # when two settings panels debounce together (Slice 14 review,
+    # Important 3: serialising every preview behind one slot made a second
+    # free request 409 permanently, because neither panel retries).
+    app.state.preview_lock_paid = threading.Lock()
 
     @app.middleware("http")
     async def _record_unhandled(request: Request, call_next):

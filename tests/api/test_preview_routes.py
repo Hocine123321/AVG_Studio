@@ -101,8 +101,11 @@ def test_an_image_preview_always_refuses_without_confirmation(client, monkeypatc
     assert res.status_code == 400
 
 
-def test_a_second_preview_while_one_runs_is_refused(client, monkeypatch):
-    """One preview at a time, in its own slot - never the render slot."""
+def test_a_second_paid_preview_while_one_runs_is_refused(client, monkeypatch):
+    """The strict slot still applies to the PAID path (Slice 14 review,
+    Important 3): only `preview_voice` on a paid provider and `preview_image`
+    claim `preview_lock_paid`, so this exercises `elevenlabs`, not `edge` -
+    Edge claims no lock at all and would not 409 here."""
     import threading
 
     started = threading.Event()
@@ -118,14 +121,16 @@ def test_a_second_preview_while_one_runs_is_refused(client, monkeypatch):
         worker = threading.Thread(
             target=lambda: client.post(
                 "/api/preview/voice",
-                json={"provider": "edge", "voice_id": "x"},
+                json={"provider": "elevenlabs", "voice_id": "x", "confirm_paid": True},
                 headers=AUTH,
             )
         )
         worker.start()
         assert started.wait(timeout=5)
         second = client.post(
-            "/api/preview/voice", json={"provider": "edge", "voice_id": "y"}, headers=AUTH
+            "/api/preview/voice",
+            json={"provider": "elevenlabs", "voice_id": "y", "confirm_paid": True},
+            headers=AUTH,
         )
         assert second.status_code == 409
     finally:
@@ -134,6 +139,60 @@ def test_a_second_preview_while_one_runs_is_refused(client, monkeypatch):
 
     # The render slot must be untouched by any preview.
     assert client.app.state.render_thread is None
+
+
+def test_two_free_previews_requested_together_both_succeed(client, monkeypatch):
+    """Reproduces the exact failure Important 3 fixed: Settings.tsx mounts
+    the Caption and Voice panels together, so their debounced effects can
+    fire in the same tick. Before the fix, both routes shared the single
+    strict slot and one deterministically 409'd; now free routes claim no
+    lock at all, so both a caption preview and an Edge voice preview
+    in flight at once must both succeed."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_voice(*_a, **_k):
+        started.set()
+        release.wait(timeout=5)
+        return b"ID3audio"
+
+    monkeypatch.setattr("avg.api.routes_preview.voice_sample", slow_voice)
+    try:
+        results: dict[str, int] = {}
+
+        def run_voice():
+            res = client.post(
+                "/api/preview/voice",
+                json={"provider": "edge", "voice_id": "x"},
+                headers=AUTH,
+            )
+            results["voice"] = res.status_code
+
+        worker = threading.Thread(target=run_voice)
+        worker.start()
+        assert started.wait(timeout=5)
+
+        caption_res = client.post(
+            "/api/preview/caption",
+            json={
+                "width": 640,
+                "height": 360,
+                "font_name": "Arial",
+                "font_size": 40,
+                "position": "bottom",
+            },
+            headers=AUTH,
+        )
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    # The caption preview must not have been refused while the voice
+    # preview was still in flight - never a 409, since neither claims a lock.
+    assert caption_res.status_code in (200, 503)
+    assert results["voice"] == 200
 
 
 # ── Important 5: both money-spending functions live in this module ────────
