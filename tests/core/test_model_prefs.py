@@ -7,6 +7,10 @@ live somewhere that refresh cannot touch.
 
 from __future__ import annotations
 
+import threading
+import time
+
+from avg.core import model_prefs as model_prefs_module
 from avg.core.model_prefs import ModelPrefs
 
 
@@ -78,6 +82,85 @@ def test_ticking_after_a_suggestion_run_does_not_erase_the_suggestions(tmp_path)
     prefs.set("text", "groq/a", selected=True)
 
     assert set(prefs.suggestions()) == {"groq/a"}
+
+
+def test_suggesting_one_kind_leaves_another_kinds_suggestions_intact(tmp_path):
+    """Important 4 of the slice review: "Suggest voices" must not erase
+    what "Suggest models" already found, and vice versa - the two runs
+    never overlap in which kinds they cover, so neither should be able to
+    delete the other's rows."""
+    prefs = ModelPrefs(tmp_path / "model_prefs.json")
+    prefs.set_suggestions(
+        [{"entry_id": "groq/a", "kind": "text", "tier": "cheap", "reason": "fast"}],
+        kinds={"text", "image"},
+    )
+    prefs.set_suggestions(
+        [{"entry_id": "edge/x", "kind": "voice", "reason": "warm"}],
+        kinds={"voice"},
+    )
+
+    assert set(prefs.suggestions()) == {"groq/a", "edge/x"}
+
+    # A second "Suggest voices" run still only touches "voice" rows.
+    prefs.set_suggestions(
+        [{"entry_id": "edge/y", "kind": "voice", "reason": "clear"}],
+        kinds={"voice"},
+    )
+    assert set(prefs.suggestions()) == {"groq/a", "edge/y"}
+
+
+def test_a_tick_during_a_suggest_run_is_not_lost(tmp_path, monkeypatch):
+    """Reproduces the race Important 3 fixes. Two different `ModelPrefs`
+    instances point at the same file - exactly the shape `_prefs_for_scope`
+    produces for a worker thread and a PATCH request. Without a lock keyed
+    by path, the worker's read (taken before the tick's write) would still
+    be the document its own write is based on, and the write would revert
+    the tick. With the lock, the tick's `_save` simply waits its turn and
+    neither write is lost.
+    """
+    path = tmp_path / "model_prefs.json"
+    worker_prefs = ModelPrefs(path)
+    ui_prefs = ModelPrefs(path)
+
+    worker_reading = threading.Event()
+    release_worker = threading.Event()
+    original_load_document = model_prefs_module.ModelPrefs._load_document
+
+    def slow_load_document(self):
+        data = original_load_document(self)
+        if self is worker_prefs:
+            worker_reading.set()
+            release_worker.wait(timeout=2)
+        return data
+
+    monkeypatch.setattr(model_prefs_module.ModelPrefs, "_load_document", slow_load_document)
+
+    worker_thread = threading.Thread(
+        target=lambda: worker_prefs.set_suggestions(
+            [{"entry_id": "groq/a", "kind": "text", "tier": "cheap", "reason": "fast"}],
+            kinds={"text", "image"},
+        )
+    )
+    ui_thread = threading.Thread(target=lambda: ui_prefs.set("text", "groq/a", selected=True))
+
+    worker_thread.start()
+    assert worker_reading.wait(timeout=2), "worker never reached its read"
+    ui_thread.start()
+    # Give the UI thread time to reach (and block on) the same lock before
+    # the worker is allowed to finish - proving the two cannot interleave.
+    time.sleep(0.05)
+    release_worker.set()
+
+    worker_thread.join(timeout=2)
+    ui_thread.join(timeout=2)
+    assert not worker_thread.is_alive()
+    assert not ui_thread.is_alive()
+
+    fresh = ModelPrefs(path)
+    entry = fresh.all("text").get("groq/a")
+    assert entry is not None
+    assert entry.selected is True
+    assert set(fresh.suggestions()) == {"groq/a"}
 
 
 def test_kinds_do_not_collide(tmp_path):

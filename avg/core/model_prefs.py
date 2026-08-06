@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,31 @@ class Entry:
     selected: bool = False
     favourite: bool = False
     note: str = ""
+
+
+#: Serialises every `_save` / `set_suggestions` read-modify-write against
+#: every other one that targets the same file, keyed by resolved path
+#: rather than held on a `ModelPrefs` instance. An instance lock would not
+#: do it: `routes_settings._prefs_for_scope` constructs a brand new
+#: `ModelPrefs` per request for the channel-scoped case, so the suggest
+#: worker's `ModelPrefs` and a PATCH request's `ModelPrefs` are two
+#: different objects that happen to point at the same file - the only
+#: thing they share is the path, so that is what the lock has to be keyed
+#: on. Without this, a worker that reads the document, then a user's tick
+#: that reads-modifies-writes it, then the worker's own stale write, loses
+#: the tick - see Important 3 of the 2026-08-06 slice-15 review.
+_path_locks_guard = threading.Lock()
+_path_locks: dict[str, threading.Lock] = {}
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    key = str(Path(path).resolve())
+    with _path_locks_guard:
+        lock = _path_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _path_locks[key] = lock
+        return lock
 
 
 def default_prefs_path() -> Path:
@@ -106,20 +132,27 @@ class ModelPrefs:
         never wipes a `suggested` section a prior recommendation run wrote -
         the same "touch nothing else" rule `set_suggestions` follows in the
         other direction.
+
+        The read and the write happen under `_lock_for(self.path)`, held for
+        the whole read-modify-write: without it, this read could happen
+        before a concurrent `set_suggestions` call's write and this write
+        could land after it, silently reverting the suggestion run it just
+        stored (or the reverse). See the module-level lock's docstring.
         """
-        document = self._load_document()
-        document["schema_version"] = SCHEMA_VERSION
-        document["entries"] = entries
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(document, f, indent=2, sort_keys=True)
-            os.replace(tmp_name, self.path)
-        except BaseException:
-            with suppress(OSError):
-                os.remove(tmp_name)
-            raise
+        with _lock_for(self.path):
+            document = self._load_document()
+            document["schema_version"] = SCHEMA_VERSION
+            document["entries"] = entries
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(document, f, indent=2, sort_keys=True)
+                os.replace(tmp_name, self.path)
+            except BaseException:
+                with suppress(OSError):
+                    os.remove(tmp_name)
+                raise
 
     def suggestions(self) -> dict[str, dict[str, Any]]:
         """What an AI last recommended, by entry id.
@@ -133,36 +166,59 @@ class ModelPrefs:
             return {}
         return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
 
-    def set_suggestions(self, rows: list[dict[str, Any]]) -> None:
-        """Replace every suggestion with `rows`, touching nothing else.
+    def set_suggestions(self, rows: list[dict[str, Any]], *, kinds: set[str] | None = None) -> None:
+        """Replace the suggestions for `kinds` with `rows`, touching nothing
+        else - not the other kinds' suggestions, and not `entries`.
 
-        Wholesale, like a probe sweep: a suggestion that is no longer made
-        has to be able to disappear. The user's ticks, favourites and notes
-        live in `entries` and are rewritten untouched - they are the one
-        thing in this document that cannot be regenerated.
+        `kinds=None` (the default) replaces every suggestion wholesale, like
+        a probe sweep: the original behaviour, and still correct for a run
+        that actually covers everything. A caller that only asked about one
+        slice of the catalogue - `routes_settings.suggest_live_list`'s
+        "Suggest voices", which never touches text or image ids - must pass
+        `kinds={"voice"}` so that call cannot delete what "Suggest models"
+        found. Without this, pressing the second button always cleared the
+        first button's rows even though the two runs share nothing: see
+        Important 4 of the 2026-08-06 slice-15 review, and Important 2's
+        `kind`-trust fix, which is what makes a stored row's `kind` reliable
+        enough to filter by here.
+
+        The user's ticks, favourites and notes live in `entries` and are
+        rewritten untouched - they are the one thing in this document that
+        cannot be regenerated. Locked the same way `_save` is, for the same
+        reason: see `_lock_for`'s docstring.
         """
-        document = self._load_document()
-        document["schema_version"] = SCHEMA_VERSION
-        document.setdefault("entries", {})
-        document["suggested"] = {
-            str(row["entry_id"]): {
-                "kind": str(row.get("kind", "")),
-                "tier": row.get("tier"),
-                "reason": str(row.get("reason", "")),
+        scope = set(KINDS) if kinds is None else set(kinds)
+        with _lock_for(self.path):
+            document = self._load_document()
+            document["schema_version"] = SCHEMA_VERSION
+            document.setdefault("entries", {})
+            existing = document.get("suggested")
+            existing = existing if isinstance(existing, dict) else {}
+            kept = {
+                entry_id: hint
+                for entry_id, hint in existing.items()
+                if isinstance(hint, dict) and hint.get("kind") not in scope
             }
-            for row in rows
-            if row.get("entry_id")
-        }
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(document, handle, indent=2, sort_keys=True)
-            os.replace(tmp_name, self.path)
-        except BaseException:
-            with suppress(OSError):
-                os.remove(tmp_name)
-            raise
+            new = {
+                str(row["entry_id"]): {
+                    "kind": str(row.get("kind", "")),
+                    "tier": row.get("tier"),
+                    "reason": str(row.get("reason", "")),
+                }
+                for row in rows
+                if row.get("entry_id")
+            }
+            document["suggested"] = {**kept, **new}
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=self.path.parent, prefix=".model_prefs-", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(document, handle, indent=2, sort_keys=True)
+                os.replace(tmp_name, self.path)
+            except BaseException:
+                with suppress(OSError):
+                    os.remove(tmp_name)
+                raise
 
     @staticmethod
     def _check_kind(kind: str) -> None:
