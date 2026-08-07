@@ -71,7 +71,10 @@ the app-wide defaults document, otherwise `SettingSpec.default`.**
 That must live in exactly one function, and **every reader must go through it**.
 This is the whole risk of the change: a fallback chain is only safe while there
 is one copy of it. Two copies diverge, and a setting then means different things
-depending on which route asked — which is not a hypothetical, as §5.2 shows.
+depending on which route asked. The codebase already has a mild case of this —
+`create_project` and the Settings screen read from different documents when a
+channel follows global (§5.2) — and that is before any fallback existed to get
+wrong.
 
 ### 2.4 What Addition 5 becomes
 
