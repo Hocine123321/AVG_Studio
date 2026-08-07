@@ -207,8 +207,20 @@ class JobRegistry:
             return True
 
     def is_running(self, project_id: str) -> bool:
-        job = self.get(project_id)
-        return job is not None and not job.queued and self._alive(job)
+        """Whether this project's job counts as running right now.
+
+        Uses the same `_counts_as_running` predicate `running()` and
+        `promote_next()` do, which matters because of `_reserved`: between
+        `promote_next` returning a job and the caller actually calling
+        `thread.start()`, the job is neither queued nor alive. Asking a
+        narrower question here would report `False` in that window, and the
+        409 guards built on it would let a same-project resubmission through
+        to overwrite the just-promoted entry - a narrower recurrence of
+        exactly the defect `has_job` was added to prevent.
+        """
+        with self._lock:
+            job = self._jobs.get(project_id)
+            return job is not None and self._counts_as_running(job)
 
     def is_queued(self, project_id: str) -> bool:
         job = self.get(project_id)

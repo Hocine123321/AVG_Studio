@@ -808,3 +808,49 @@ def test_a_second_submission_cannot_destroy_a_queued_job(tmp_path, monkeypatch):
     finally:
         release.set()
         _wait_until_gone(client, b_id)
+
+
+def test_cancelling_a_waiting_render_does_not_kill_the_active_one(tmp_path, monkeypatch):
+    """At the default cap two `/render` jobs can exist at once, one encoding
+    and one blocked on the lease. Cancelling the waiting one used to call
+    `engine.cancel()` anyway and terminate the ACTIVE project's ffmpeg child -
+    deterministically, not as a race."""
+    release = threading.Event()
+
+    def run(project, **kwargs):
+        release.wait(timeout=5)
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, run)
+    from avg.core.jobs import Job
+
+    class _Thread:
+        def is_alive(self) -> bool:
+            return True
+
+    # Two real projects, so the route's own existence check passes.
+    ids = []
+    for topic in ("A", "B"):
+        created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": topic})
+        assert created.status_code == 201
+        ids.append(created.json()["id"])
+    release.set()
+    for pid in ids:
+        _wait_until_gone(client, pid)
+    active, waiting = ids
+
+    cancels = {"n": 0}
+    monkeypatch.setattr(client.app.state.engine, "cancel", lambda: cancels.__setitem__("n", cancels["n"] + 1))
+
+    # "active" owns the engine; "waiting" is a render job blocked on the lease.
+    client.app.state.engine_project_id = active
+    client.app.state.jobs.add(Job(project_id=active, kind="render", thread=_Thread(), cancel_token=None))
+    client.app.state.jobs.add(Job(project_id=waiting, kind="render", thread=_Thread(), cancel_token=None))
+
+    r = client.post(f"/api/projects/{waiting}/cancel", headers={"X-AVG-Token": "t0k"})
+    assert r.status_code == 200
+    assert cancels["n"] == 0, "cancelling the waiting render killed the active one's child"
+
+    r = client.post(f"/api/projects/{active}/cancel", headers={"X-AVG-Token": "t0k"})
+    assert r.status_code == 200
+    assert cancels["n"] == 1, "cancelling the active render did not reach the engine"

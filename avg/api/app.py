@@ -598,6 +598,10 @@ def create_app(
     # a single MediaEngine tracking a single child process, and two renders
     # on one machine would contend for the same cores anyway.
     app.state.render_lease = threading.Lock()
+    # The project id whose render currently owns `app.state.engine`, or None.
+    # See the cancel route for why the engine's own lack of project identity
+    # makes this necessary.
+    app.state.engine_project_id = None
 
     # Imported exactly once, here, at construction time - not per-request,
     # and not behind an ASGI lifespan/startup event: TestClient only runs
@@ -1322,7 +1326,19 @@ def create_app(
                     )
                 )
             with app.state.render_lease:
-                _drain_render(req)
+                # Whose render the shared engine is actually driving right
+                # now. `MediaEngine` tracks a child process but no project
+                # identity, so without this the cancel route below cannot
+                # tell "this project's render is the one encoding" from
+                # "this project's render is still waiting its turn" - and it
+                # would terminate the wrong project's ffmpeg child. Set only
+                # inside the lease, cleared in a `finally`, so it is never
+                # left naming a render that has finished.
+                app.state.engine_project_id = project_id
+                try:
+                    _drain_render(req)
+                finally:
+                    app.state.engine_project_id = None
 
         def _drain_render(req: RenderRequest) -> None:
             # A plain `for` loop that is never broken out of early - this is
@@ -1400,7 +1416,12 @@ def create_app(
         # child of a completely different project than the one this request
         # named - or a project whose own job was a pipeline run that hadn't
         # even reached the render phase yet.
-        if job.kind == "render":
+        # ...and only when THIS project's render is the one the shared engine
+        # is currently driving. At the default cap of two, a second `/render`
+        # job registers as running while it blocks on the lease; cancelling
+        # that waiting job used to call `.cancel()` anyway and kill the
+        # actively-encoding first project's child. Deterministic, not a race.
+        if job.kind == "render" and getattr(app.state, "engine_project_id", None) == project_id:
             app.state.engine.cancel()
 
         # Best-effort for a full-pipeline run - a no-op for a `/render` job,
