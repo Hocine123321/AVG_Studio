@@ -679,3 +679,27 @@ def test_a_failed_job_frees_its_slot(tmp_path, monkeypatch):
     # whichever later test happened to be executing when the background
     # thread actually finished.
     _join_job(client, again.json()["id"])
+
+
+def test_the_jobs_route_shows_running_and_queued_work(client):
+    """A queued job emits no events of its own, so without this route the
+    screen cannot show it at all - and 'queued' is an ordinary state now that
+    work over the cap waits instead of being refused."""
+    from avg.core.jobs import Job
+
+    class _Thread:
+        def is_alive(self) -> bool:
+            return True
+
+    client.app.state.jobs.add(Job(project_id="a", kind="pipeline", thread=_Thread(), cancel_token=None))
+    client.app.state.jobs.add(Job(project_id="b", kind="pipeline", thread=None, cancel_token=None, queued=True))
+
+    r = client.get("/api/jobs", headers={"X-AVG-Token": "t0k"})
+    assert r.status_code == 200
+    rows = {row["project_id"]: row for row in r.json()["jobs"]}
+    assert rows["a"]["queued"] is False and rows["a"]["position"] is None
+    assert rows["b"]["queued"] is True and rows["b"]["position"] == 1
+
+
+def test_the_jobs_route_needs_the_token(client):
+    assert client.get("/api/jobs").status_code == 401

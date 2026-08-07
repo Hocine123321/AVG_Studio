@@ -704,6 +704,23 @@ def create_app(
         app.state.library_loaded.wait(_LIBRARY_WAIT_S)
         return app.state.projects
 
+    @app.get("/api/jobs", dependencies=[Depends(require_token)])
+    async def list_jobs() -> dict[str, Any]:
+        """Every in-flight job, running or queued.
+
+        A running job announces itself over `/ws/events` as it works, but a
+        queued one holds no thread yet and so emits nothing at all - which
+        left the screen unable to tell "waiting for a free slot" from "never
+        started". Both are ordinary states now that a job over the cap is
+        queued rather than refused, so both have to be visible.
+
+        A poll rather than an event because it is a snapshot of a set, not a
+        thing that happened: a client that connects late, reloads, or misses a
+        broadcast still needs the whole picture, and re-deriving it from a
+        stream of deltas is how a UI ends up disagreeing with the backend.
+        """
+        return {"jobs": app.state.jobs.snapshot()}
+
     @app.get("/api/projects", dependencies=[Depends(require_token)])
     async def list_projects() -> dict:
         # Waits for the first scan, but only here - a REQUEST may block on

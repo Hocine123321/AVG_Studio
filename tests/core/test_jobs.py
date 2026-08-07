@@ -67,3 +67,29 @@ def test_removing_something_absent_is_not_an_error():
     """Teardown runs in a `finally`; it must not raise on a job that already
     removed itself."""
     JobRegistry().remove("never-existed")
+
+
+def test_a_snapshot_numbers_the_queue_and_leaves_running_jobs_unnumbered():
+    """The screen has to tell "waiting for a slot" from "running", and say
+    which place in the queue - a queued job emits no events of its own, so a
+    snapshot is the only way it can be shown at all."""
+    registry = JobRegistry()
+    registry.add(Job(project_id="running", kind="pipeline", thread=_Thread(True), cancel_token=None))
+    registry.add(Job(project_id="first", kind="pipeline", thread=None, cancel_token=None, queued=True))
+    registry.add(Job(project_id="second", kind="pipeline", thread=None, cancel_token=None, queued=True))
+
+    rows = {row["project_id"]: row for row in registry.snapshot()}
+
+    assert rows["running"]["queued"] is False
+    assert rows["running"]["position"] is None
+    assert rows["first"]["position"] == 1
+    assert rows["second"]["position"] == 2
+
+
+def test_a_snapshot_omits_a_job_whose_thread_has_died():
+    """A finished job that has not been cleaned up yet is not in flight, and
+    showing it would leave a phantom on screen after the work was done."""
+    registry = JobRegistry()
+    registry.add(Job(project_id="done", kind="pipeline", thread=_Thread(False), cancel_token=None))
+
+    assert registry.snapshot() == []

@@ -76,6 +76,40 @@ class JobRegistry:
     def count_running(self) -> int:
         return len(self.running())
 
+    def snapshot(self) -> list[dict[str, Any]]:
+        """Every job as plain data, for the API layer to serve.
+
+        The screen has to distinguish three states that used to be one - a job
+        running, a job waiting for a free slot, and (emitted separately, by the
+        Render phase) a job waiting for the render lease. Without this the
+        first two are indistinguishable from each other and from a job that
+        never started, because a queued job holds no thread and so emits no
+        events at all until it is promoted.
+
+        `position` is 1-based within the queue and is `None` for a running job.
+        It is derived here rather than stored on `Job`, because a position is a
+        fact about the queue at a moment, not a property of the job - storing
+        it would mean rewriting every later entry each time one is promoted,
+        which is exactly the kind of bookkeeping that drifts.
+
+        Taken under the one lock, so the running set and the queue cannot be
+        read from either side of a promotion and disagree.
+        """
+        with self._lock:
+            jobs = list(self._jobs.values())
+            queue = [j for j in jobs if j.queued]
+            positions = {job.project_id: index for index, job in enumerate(queue, start=1)}
+            return [
+                {
+                    "project_id": job.project_id,
+                    "kind": job.kind,
+                    "queued": job.queued,
+                    "position": positions.get(job.project_id),
+                }
+                for job in jobs
+                if job.queued or self._alive(job)
+            ]
+
     def is_running(self, project_id: str) -> bool:
         job = self.get(project_id)
         return job is not None and not job.queued and self._alive(job)
