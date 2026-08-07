@@ -56,6 +56,11 @@ export interface RenderFinishedEvent {
   size_bytes: number;
 }
 
+export interface PipelineFinishedEvent {
+  type: "pipeline_finished";
+  project_id: string;
+}
+
 export interface JobStartedEvent {
   type: "job_started";
   project_id: string;
@@ -77,6 +82,7 @@ export type EngineEvent =
   | PipelineCancelledEvent
   | RenderCancelledEvent
   | RenderFinishedEvent
+  | PipelineFinishedEvent
   | JobStartedEvent
   | JobStepEvent;
 
@@ -113,6 +119,17 @@ export interface EventsState {
    * The single-job fields above are derived from this and stay for
    * consumers that genuinely only care about one project (Studio). */
   byProject: Record<string, ProgressEvent>;
+  /** Every project with a failure that has not since been superseded by that
+   * SAME project starting again, keyed by project id. `failure` below is the
+   * single last-event field every other branch shares, so a different
+   * project's continuous progress ticks reset it to `null` within a
+   * fraction of a second of it being set - Transport's `lead` branch would
+   * never see it before it was gone. This accumulates instead, so a second
+   * job's failure stays visible while a different job still leads the bar
+   * (Important 7 of the Slice 16 review). Cleared per-project on
+   * `job_started` for that same project - a fresh run has no business
+   * showing a stale failure from last time. */
+  failedProjects: Record<string, PhaseFailedEvent>;
   /** False while the socket is down and a reconnect is pending - surfaced
    * so a dropped connection is something the user can see (Transport),
    * never something that fails silently. */
@@ -143,6 +160,7 @@ const INITIAL_STATE: EventsState = {
   jobStarted: null,
   jobStep: null,
   byProject: {},
+  failedProjects: {},
   connected: false,
   phases: {},
 };
@@ -227,8 +245,44 @@ function foldByProject(
     payload.type === "render_finished" ||
     payload.type === "render_cancelled" ||
     payload.type === "pipeline_cancelled" ||
-    payload.type === "phase_failed"
+    payload.type === "phase_failed" ||
+    // The genuine end of a successful full-pipeline run. `render_finished`
+    // above fires from INSIDE the render phase, before its own composite
+    // pass - whose progress events then recreate this project's entry a
+    // moment later, which is why the Transport bar used to stick at
+    // "Rendering... 100%" forever after every successful run. This is the
+    // one event that cannot be followed by more progress for the same job.
+    payload.type === "pipeline_finished"
   ) {
+    if (!(id in previous)) return previous;
+    const next = { ...previous };
+    delete next[id];
+    return next;
+  }
+  return previous;
+}
+
+/**
+ * Fold one event into the accumulated per-project failure map.
+ *
+ * A `phase_failed` writes (or overwrites) that project's entry - it never
+ * gets erased by an unrelated project's events the way the single last-event
+ * `failure` field does, which is the whole reason this exists (see
+ * `EventsState.failedProjects`'s own docstring). Cleared on `job_started`
+ * for the SAME project: that project trying again has nothing to do with
+ * whatever failed last time.
+ */
+function foldFailedProjects(
+  previous: EventsState["failedProjects"],
+  payload: { type: string } & Record<string, unknown>,
+): EventsState["failedProjects"] {
+  const id = typeof payload.project_id === "string" ? payload.project_id : null;
+  if (id === null) return previous;
+
+  if (payload.type === "phase_failed") {
+    return { ...previous, [id]: payload as unknown as PhaseFailedEvent };
+  }
+  if (payload.type === "job_started") {
     if (!(id in previous)) return previous;
     const next = { ...previous };
     delete next[id];
@@ -250,7 +304,8 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
     payload.type === "render_finished" ||
     payload.type === "render_cancelled" ||
     payload.type === "pipeline_cancelled" ||
-    payload.type === "phase_failed"
+    payload.type === "phase_failed" ||
+    payload.type === "pipeline_finished"
   ) {
     const id = payload.project_id;
     if (typeof id === "string") clearRenderClock(id);
@@ -268,7 +323,8 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
     payload.type === "render_finished" ||
     payload.type === "render_cancelled" ||
     payload.type === "pipeline_cancelled" ||
-    payload.type === "phase_failed";
+    payload.type === "phase_failed" ||
+    payload.type === "pipeline_finished";
   const jobStarted =
     payload.type === "job_started"
       ? (payload as unknown as JobStartedEvent)
@@ -278,7 +334,8 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
   const jobStep =
     payload.type === "job_step" ? (payload as unknown as JobStepEvent) : terminal ? null : previous.jobStep;
   const byProject = foldByProject(previous.byProject, payload);
-  const carried = { phases, jobStarted, jobStep, byProject, connected: true };
+  const failedProjects = foldFailedProjects(previous.failedProjects, payload);
+  const carried = { phases, jobStarted, jobStep, byProject, failedProjects, connected: true };
 
   switch (payload.type) {
     case "phase_started":

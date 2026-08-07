@@ -28,7 +28,7 @@ from typing import Any
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled
+from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished
 from avg.core.models import PhaseRecord, ProjectDoc
 from avg.pipeline.phase import CancellationToken, Phase, PhaseContext
 from avg.pipeline.registry import REGISTRY
@@ -36,9 +36,9 @@ from avg.pipeline.registry import REGISTRY
 # The events THIS module emits itself. A phase's own `ctx.emit(...)` calls
 # (see `PhaseContext`) can surface any event type it chooses - e.g. a
 # `ProgressEvent` mid-phase - so `run()`'s actual yield type is wider than
-# this; this alias exists to name the runner's own four events at their
+# this; this alias exists to name the runner's own five events at their
 # call sites below, not to bound the generator's declared return type.
-RunnerEvent = PhaseStarted | PhaseFinished | PhaseFailed | PipelineCancelled
+RunnerEvent = PhaseStarted | PhaseFinished | PhaseFailed | PipelineCancelled | PipelineFinished
 
 
 class UnknownPhaseError(ValueError):
@@ -241,3 +241,10 @@ def run(
             on_phase_change()
         yield from buffered
         yield PhaseFinished(project_id=project.id, phase=phase.key, duration_ms=record.duration_ms)
+
+    # Every phase in `to_run` was attempted and none failed or was cancelled
+    # (both of those paths `return` above, before ever reaching here) - the
+    # one unambiguous "this run is over, successfully" signal. See
+    # `PipelineFinished`'s own docstring for why nothing else already means
+    # this.
+    yield PipelineFinished(project_id=project.id)

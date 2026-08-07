@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ProjectDoc } from "./api";
+import type { JobInfo, ProjectDoc } from "./api";
 import { thumbnailUrl } from "./api";
 import type { EventsState } from "./useEvents";
 import { IconStop } from "./Icons";
@@ -11,6 +11,10 @@ function titleFor(projects: ProjectDoc[], id: string): string {
 export interface TransportProps {
   events: EventsState;
   projects: ProjectDoc[];
+  /** Every in-flight job, running or queued (`GET /api/jobs`) - needed here
+   * only to count queued jobs into "+N more", since a queued job holds no
+   * thread and so never appears in `events.byProject`. */
+  jobs: JobInfo[];
   onCancel: (projectId: string) => void;
   onOpen: (projectId: string) => void;
 }
@@ -37,8 +41,8 @@ function TransportThumb({ projectId }: { projectId: string }) {
  *
  * Purely presentational; every action is a callback prop.
  */
-export default function Transport({ events, projects, onCancel, onOpen }: TransportProps) {
-  const { progress, failure, cancelled, finished, connected, jobStarted, jobStep } = events;
+export default function Transport({ events, projects, jobs, onCancel, onOpen }: TransportProps) {
+  const { progress, failure, cancelled, finished, connected, jobStarted, jobStep, failedProjects } = events;
 
   if (!connected) {
     return (
@@ -62,7 +66,18 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
   const lead = live[0] ?? progress;
   if (lead) {
     const title = titleFor(projects, lead.project_id);
-    const others = Math.max(live.length - 1, 0);
+    // Queued jobs hold no thread and so never appear in `byProject` at all -
+    // counting only `live.length - 1` here made a job that was running plus
+    // two more waiting behind it say nothing about the two (Important 7 of
+    // the Slice 16 review).
+    const queuedCount = jobs.filter((job) => job.queued).length;
+    const others = Math.max(live.length - 1, 0) + queuedCount;
+    // A different project's failure, still visible here even while this one
+    // leads - `failedProjects` accumulates per project rather than being the
+    // single last-event field every other branch below shares, which a
+    // leading job's own continuous progress ticks would otherwise wipe out
+    // before the user ever saw it (Important 7).
+    const otherFailures = Object.keys(failedProjects).filter((id) => id !== lead.project_id);
     return (
       <div className="transport transport--running">
         <TransportThumb projectId={lead.project_id} />
@@ -71,6 +86,15 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
           <span className="transport__label">Rendering “{title}”</span>
           <span className="transport__detail">{lead.message}</span>
         </button>
+        {otherFailures.length > 0 && (
+          <button
+            type="button"
+            className="chip chip--bad transport__failed"
+            onClick={() => onOpen(otherFailures[0])}
+          >
+            {otherFailures.length === 1 ? "1 failed" : `${otherFailures.length} failed`}
+          </button>
+        )}
         {others > 0 && (
           // Not a link and not a button: everything it would navigate to is
           // already one click away on Home, and a second control here would

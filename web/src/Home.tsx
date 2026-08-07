@@ -272,24 +272,41 @@ export default function Home({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
-  // Running rows only ever come from `byProject`, never from `jobs` alone:
-  // `jobs` says a job's thread has started, but the row needs an actual
-  // percentage and message to show, and those arrive over the socket, not
-  // the poll. The gap between "thread started" and "first tick" is the same
-  // one the single-job Hero always had (it showed nothing until the first
-  // `progress` event either) - not a new hole Slice 16 opened.
-  const runningRows = useMemo(
-    () =>
-      jobs
-        .filter((job) => !job.queued)
-        .map((job) => {
-          const project = projects.find((p) => p.id === job.project_id);
-          const progress = byProject[job.project_id];
-          return project && progress ? { project, progress } : null;
-        })
-        .filter((row): row is { project: ProjectDoc; progress: ProgressEvent } => row !== null),
-    [jobs, byProject, projects],
-  );
+  // A running row needs an actual percentage and message, which only ever
+  // arrives over the socket (`byProject`), not the poll (`jobs`) - so every
+  // row here requires a `byProject` entry regardless of source. The gap
+  // between "thread started" and "first tick" is the same one the
+  // single-job Hero always had (it showed nothing until the first `progress`
+  // event either) - not a new hole Slice 16 opened.
+  //
+  // What IS new here: this used to also require a matching `jobs` row,
+  // which meant a failed or merely-late `GET /api/jobs` poll made the whole
+  // hero disappear even while progress events were still arriving live over
+  // the socket - the poll and the socket can disagree, and the poll losing
+  // that disagreement must not hide a render that is plainly still running.
+  // So `jobs` is consulted first (it also carries which project each row
+  // belongs to, cheaply), and any `byProject` entry `jobs` doesn't yet
+  // account for is still shown - it can only mean a running job, since a
+  // queued one has no thread yet and so never ticks a progress event at all.
+  const runningRows = useMemo(() => {
+    const rows: { project: ProjectDoc; progress: ProgressEvent }[] = [];
+    const seen = new Set<string>();
+    for (const job of jobs) {
+      if (job.queued) continue;
+      const progress = byProject[job.project_id];
+      const project = progress && projects.find((p) => p.id === job.project_id);
+      if (!progress || !project) continue;
+      rows.push({ project, progress });
+      seen.add(job.project_id);
+    }
+    for (const [projectId, progress] of Object.entries(byProject)) {
+      if (seen.has(projectId)) continue;
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) continue;
+      rows.push({ project, progress });
+    }
+    return rows;
+  }, [jobs, byProject, projects]);
 
   const queuedRows = useMemo(
     () =>
@@ -305,8 +322,14 @@ export default function Home({
   );
 
   // A job in flight - running or queued - lives in the stack above, never
-  // also in the plain library grid below it.
-  const liveIds = useMemo(() => new Set(jobs.map((j) => j.project_id)), [jobs]);
+  // also in the plain library grid below it. Built from `runningRows`
+  // (which now includes the `jobs`-poll-independent `byProject` fallback
+  // above) rather than `jobs` alone, or a project shown in the hero purely
+  // through that fallback would ALSO appear in the grid below it.
+  const liveIds = useMemo(
+    () => new Set([...jobs.map((j) => j.project_id), ...runningRows.map((r) => r.project.id)]),
+    [jobs, runningRows],
+  );
 
   // The single-job hero is reserved for exactly that case: one job running,
   // nothing queued behind it. Anything else - a second running job, or one

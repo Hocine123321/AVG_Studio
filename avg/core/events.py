@@ -102,6 +102,24 @@ class PipelineCancelled(BaseModel):
     phase: str
 
 
+class PipelineFinished(BaseModel):
+    """`avg.pipeline.runner.run` reached the end of its phase list with every
+    attempted phase having succeeded.
+
+    Nothing else says this. `RenderFinished` (from the render phase itself)
+    fires before the render phase's own composite pass, whose progress events
+    then follow it - so a UI that treats `RenderFinished` as "the run is over"
+    watches the bar come back to life immediately after. `PhaseFinished` fires
+    after every phase, not just the last, so it cannot mean "done" either.
+    This is the one event a full pipeline run emits exactly once, only at the
+    very end of a successful run - a failed or cancelled run ends on
+    `PhaseFailed`/`PipelineCancelled` instead and never reaches this.
+    """
+
+    type: str = "pipeline_finished"
+    project_id: str
+
+
 class CompositeFinished(BaseModel):
     """Part 2 of a render finished, carrying what it actually managed to do.
 

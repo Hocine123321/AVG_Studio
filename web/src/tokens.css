@@ -861,6 +861,18 @@ a:hover {
   white-space: nowrap;
 }
 
+/* A different job's failure, surfaced without displacing the one leading the
+   bar - `.chip--bad` already carries the colour; this only adds the same
+   layout discipline `.transport__more` has (a fixed-width chip that never
+   gets squeezed by the bar filling the space beside it). A real `<button>`
+   (unlike `.transport__more`, a plain count) since it opens the failed
+   project. */
+.transport__failed {
+  flex: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 /* ---- the job stack ---- */
 
 /* Slice 16 lets several videos be made at once, so the single `.hero` that

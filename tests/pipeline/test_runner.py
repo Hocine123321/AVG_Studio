@@ -20,7 +20,7 @@ import pytest
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, ProgressEvent, RenderFinished
+from avg.core.events import CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished, ProgressEvent, RenderFinished
 from avg.core.models import ProjectDoc
 from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
@@ -258,6 +258,23 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     assert len(finished) == 8
     assert all(project.phases[phase.key].status == "done" for phase in REGISTRY)
 
+    # Regression for Important 3 of the Slice 16 review: `RenderFinished`
+    # fires from INSIDE the render phase, before its own composite pass -
+    # whose `ProgressEvent`s (scaled into 70-100) follow it in this very
+    # stream, proving the bug the Transport bar hit (treating
+    # `render_finished` as the end left it stuck at "Rendering... 100%"
+    # forever, because more progress arrived right after). `PipelineFinished`
+    # is the one event that is guaranteed to come after ALL of that - it must
+    # be the last event of a successful run, and there must be exactly one.
+    assert isinstance(events[-1], PipelineFinished)
+    assert sum(1 for e in events if isinstance(e, PipelineFinished)) == 1
+    render_finished_index = next(i for i, e in enumerate(events) if isinstance(e, RenderFinished))
+    composite_finished_index = next(i for i, e in enumerate(events) if isinstance(e, CompositeFinished))
+    assert composite_finished_index > render_finished_index, (
+        "the composite pass's own outcome must follow RenderFinished in this stream - that gap "
+        "is exactly what made a naive 'render_finished means done' UI go stale"
+    )
+
 
 # ── Resume ───────────────────────────────────────────────────────────────
 
@@ -318,7 +335,11 @@ def test_only_runs_exactly_one_phase():
     assert ran == ["voice"]
     assert set(project.phases.keys()) == {"voice"}
     assert project.phases["voice"].status == "done"
-    assert isinstance(events[-1], PhaseFinished) and events[-1].phase == "voice"
+    # `PipelineFinished` fires whenever the loop reaches its natural end
+    # without a failure or cancellation - true of an `only=` run too, since
+    # every phase it was asked to attempt (the one phase) did succeed.
+    assert isinstance(events[-1], PipelineFinished)
+    assert isinstance(events[-2], PhaseFinished) and events[-2].phase == "voice"
 
 
 def test_only_ignores_start_from():

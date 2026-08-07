@@ -383,7 +383,13 @@ export default function App() {
             {content}
           </div>
         </div>
-        <Transport events={events} projects={projects ?? []} onCancel={cancelRender} onOpen={openProject} />
+        <Transport
+          events={events}
+          projects={projects ?? []}
+          jobs={jobs}
+          onCancel={cancelRender}
+          onOpen={openProject}
+        />
         <StatusBar connected={events.connected} loading={projects === null} />
       </div>
     </div>
