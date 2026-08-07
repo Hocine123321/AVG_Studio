@@ -41,6 +41,10 @@ def _ctx(tmp_path: Path, token: CancellationToken | None = None):
         router=None,
         emit=emitted.append,
         cancel_token=token or CancellationToken(),
+        # `PhaseContext` declares this field with a default of `None`; the
+        # real code reads `ctx.render_lease` directly (no `getattr` fallback),
+        # so this bare `SimpleNamespace` needs the attribute too.
+        render_lease=None,
     )
     return ctx, emitted
 
@@ -331,7 +335,7 @@ def test_two_renders_never_overlap(tmp_path, monkeypatch):
     guard = threading.Lock()
     first_is_rendering = threading.Event()
     let_first_finish = threading.Event()
-    second_has_started = threading.Event()
+    emitted_by: dict[str, list] = {}
 
     def events(request, project_id):
         nonlocal concurrent, peak
@@ -356,11 +360,10 @@ def test_two_renders_never_overlap(tmp_path, monkeypatch):
 
     def _run(project_id: str, folder: Path) -> None:
         folder.mkdir(parents=True, exist_ok=True)
-        ctx, _ = _ctx(folder)
+        ctx, emitted = _ctx(folder)
         ctx.project.id = project_id
         ctx.render_lease = lease
-        if project_id == "p-second":
-            second_has_started.set()
+        emitted_by[project_id] = emitted
         render_mod.RenderPhase().run(ctx)
 
     first = threading.Thread(target=_run, args=("p-first", tmp_path / "a"))
@@ -369,9 +372,27 @@ def test_two_renders_never_overlap(tmp_path, monkeypatch):
     first.start()
     assert first_is_rendering.wait(timeout=10), "the first render never started"
     second.start()
-    # The second thread is now inside `run` and blocked on the lease - it
-    # cannot be inside `engine.render`, which is the whole claim.
-    assert second_has_started.wait(timeout=10)
+    # Proof the second thread has genuinely reached the lease wait, not just
+    # that its thread object exists: `RenderPhase.run` emits "Waiting for
+    # another render..." right before blocking on `with lease:`, and only
+    # once it has already observed the lease held - which is guaranteed here
+    # because the first thread is provably holding it (`first_is_rendering`
+    # only fires from inside `events`, which only runs inside `with lease:`).
+    # A signal set before `run` is even called (the old `second_has_started`)
+    # proves only that the thread was scheduled, not that it reached the
+    # lease - the release could beat it into `engine.render` and the test
+    # would still pass with no lease at all.
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        second_emitted = emitted_by.get("p-second") or []
+        if any(
+            isinstance(e, ProgressEvent) and "Waiting for another render" in e.message
+            for e in second_emitted
+        ):
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("the second thread never reached the lease wait")
     let_first_finish.set()
 
     first.join(timeout=10)

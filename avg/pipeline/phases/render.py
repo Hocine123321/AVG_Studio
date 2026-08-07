@@ -188,10 +188,13 @@ class RenderPhase:
         cannot collide with another; that simply means there is nothing to
         wait for.
         """
-        # `getattr`, not `ctx.render_lease`: this phase's own tests build a
-        # bare `SimpleNamespace` context with only the fields they need, the
-        # same reason `ctx.channel` is read defensively below.
-        lease = getattr(ctx, "render_lease", None)
+        # `PhaseContext` declares `render_lease` with a default of `None`, so
+        # every real context has the attribute; a `getattr` fallback here
+        # would silently disable serialisation on any typo or on a context
+        # that forgot the field, rather than raising loudly at the one call
+        # site that matters. The test module's `SimpleNamespace` contexts
+        # carry the field explicitly for the same reason.
+        lease = ctx.render_lease
         if lease is None:
             self._render(ctx)
             return
