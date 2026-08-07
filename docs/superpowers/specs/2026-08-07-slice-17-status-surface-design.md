@@ -71,6 +71,14 @@ not renders: a Live List refresh, a provider probe, a model-suggestion run.
 - `percent` — `0-100`, or `None` for work with no measurable progress
 - `state` — `running` | `done` | `failed` | `cancelled`
 - `detail` — optional; the one line the panel shows under the label
+- `sticky` — whether this event waits for acknowledgement
+
+`sticky` is a field the **emitter** sets, not something the client derives from
+`state`. Deriving it would be wrong: "a job that was queued behind another and
+has now started" is a sticky event in a `running` state, so any rule of the
+form "terminal states are sticky" would drop it on the floor. The emitter is
+also the only thing that knows the difference between a provider probe that
+passed (not sticky) and one that failed on an expired key (sticky).
 
 **Every long-running operation emits it** over the existing `/ws/events`
 stream: the pipeline runner, `MediaEngine.render`, the Live List refresh, the
@@ -86,8 +94,11 @@ built by stitching together the sources the client already happens to have.
 
 **The client folds them once** into an `activity` map keyed by `activity_id`,
 beside the existing `byProject` map in `web/src/useEvents.ts`. A terminal state
-(`done`, `failed`, `cancelled`) removes the entry from `activity` and, when the
-event is sticky, appends it to the sticky queue.
+(`done`, `failed`, `cancelled`) removes the entry from `activity`, so a
+finished operation stops occupying a row. Independently of that, **any event
+carrying `sticky: true` is appended to the sticky queue** — which is what lets
+a still-`running` "your queued job just started" wait for acknowledgement while
+the same operation continues to report progress.
 
 ### What this does not do
 
@@ -169,6 +180,9 @@ what keeps a future operation from needing to touch it.
   same class of defect as Slice 16's Transport bar sticking at 100%, which
   happened because no terminal event existed.
 - `activity_id` is stable across an operation's updates.
+- **Every event in §3's sticky list is emitted with `sticky: true`, and every
+  event in the not-sticky list with `sticky: false`.** A drift test, because
+  the two lists are the whole feature and nothing else enforces them.
 
 **Frontend** has no unit tests by convention: verified by `npm run build`,
 `npm run lint` at zero warnings, DOM and computed-style measurement against the
