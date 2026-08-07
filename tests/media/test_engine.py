@@ -18,13 +18,16 @@ def test_clean_exit_without_a_result_is_a_bug():
 
 from avg.media.engine import MediaEngine
 from avg.core.models import RenderRequest
-from avg.core.events import ProgressEvent, PhaseFailed
+from avg.core.events import ActivityEvent, ProgressEvent, PhaseFailed
 
 def test_a_crashing_child_becomes_an_event_not_an_exception(tmp_path, monkeypatch):
     monkeypatch.setenv("AVG_CHILD_CRASH", "1")     # child.py honours this in tests
     events = list(MediaEngine().render(RenderRequest(project_folder=tmp_path), "p1"))
-    assert isinstance(events[-1], PhaseFailed)
-    assert events[-1].kind in (ErrorKind.bug, ErrorKind.resource)
+    # Slice 17 appends a sticky ActivityEvent after PhaseFailed - filter it
+    # out so this keeps asserting on the domain event, as it always did.
+    non_activity = [e for e in events if not isinstance(e, ActivityEvent)]
+    assert isinstance(non_activity[-1], PhaseFailed)
+    assert non_activity[-1].kind in (ErrorKind.bug, ErrorKind.resource)
 
 def test_progress_events_reach_the_caller(tmp_path, monkeypatch):
     monkeypatch.setenv("AVG_CHILD_FAKE_PROGRESS", "1")
@@ -62,6 +65,45 @@ def test_missing_output_is_reported_as_an_error_not_a_success(tmp_path, monkeypa
     assert sent[-1][0] == "error"
     assert "missing" in sent[-1][1]
     assert not any(m[0] == "result" for m in sent)
+
+
+def test_render_always_emits_a_running_activity_event_first(tmp_path, monkeypatch):
+    """Slice 17 §2: the status pill's feed. `running` is yielded before the
+    child even starts, so the panel has something to show immediately."""
+    from avg.core.events import ActivityEvent
+
+    monkeypatch.setenv("AVG_CHILD_FAKE_PROGRESS", "1")
+    events = list(MediaEngine().render(RenderRequest(project_folder=tmp_path), "p1"))
+    activity_events = [e for e in events if isinstance(e, ActivityEvent)]
+    assert activity_events, "no ActivityEvent emitted at all"
+    assert activity_events[0].state == "running"
+    assert activity_events[0].sticky is False
+    assert all(e.activity_id == "render:p1" for e in activity_events)
+
+
+def test_render_progress_ticks_carry_percent_on_the_activity_event(tmp_path, monkeypatch):
+    from avg.core.events import ActivityEvent
+
+    monkeypatch.setenv("AVG_CHILD_FAKE_PROGRESS", "1")
+    events = list(MediaEngine().render(RenderRequest(project_folder=tmp_path), "p1"))
+    percents = [e.percent for e in events if isinstance(e, ActivityEvent) and e.state == "running"]
+    # The leading "just started" event carries no percent (None); every
+    # progress-tick event that follows does.
+    assert None in percents
+    assert [p for p in percents if p is not None] == [0, 50, 100]
+
+
+def test_a_failed_render_emits_a_sticky_activity_event(tmp_path, monkeypatch):
+    """Spec §3: "a render failure" is sticky - it must survive on the pill
+    until acknowledged, per §6's own terminal-event requirement."""
+    from avg.core.events import ActivityEvent
+
+    monkeypatch.setenv("AVG_CHILD_CRASH", "1")
+    events = list(MediaEngine().render(RenderRequest(project_folder=tmp_path), "p1"))
+    terminal = [e for e in events if isinstance(e, ActivityEvent) and e.state != "running"]
+    assert len(terminal) == 1
+    assert terminal[0].state == "failed"
+    assert terminal[0].sticky is True
 
 
 def test_cancel_is_safe_when_nothing_is_running():

@@ -20,7 +20,7 @@ import pytest
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished, ProgressEvent, RenderFinished
+from avg.core.events import ActivityEvent, CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished, ProgressEvent, RenderFinished
 from avg.core.models import ProjectDoc
 from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
@@ -102,6 +102,61 @@ def test_full_sequence_runs_every_phase_in_order():
     started_keys = [e.phase for e in events if isinstance(e, PhaseStarted)]
     assert started_keys == _KEYS
     assert not any(isinstance(e, (PhaseFailed, PipelineCancelled)) for e in events)
+
+
+# ── ActivityEvent (Slice 17 - the status pill's own feed) ─────────────────
+
+
+def test_a_successful_run_emits_exactly_one_sticky_done_activity_event():
+    project = _project()
+    phases = _phases()
+
+    events = list(run(project, channel=_channel(), phases=phases))
+    activity = [e for e in events if isinstance(e, ActivityEvent)]
+
+    assert activity, "no ActivityEvent emitted at all"
+    assert activity[0].state == "running"
+    assert activity[0].sticky is False
+    terminal = [e for e in activity if e.state != "running"]
+    assert len(terminal) == 1
+    assert terminal[0].state == "done"
+    assert terminal[0].sticky is True
+
+
+def test_every_activity_event_in_one_run_shares_one_activity_id():
+    project = _project()
+    phases = _phases()
+
+    events = list(run(project, channel=_channel(), phases=phases))
+    ids = {e.activity_id for e in events if isinstance(e, ActivityEvent)}
+
+    assert ids == {f"pipeline:{project.id}"}
+
+
+def test_a_failed_phase_emits_exactly_one_sticky_failed_activity_event():
+    project = _project()
+    phases = _phases(fail_at=2, fail_with=RuntimeError("boom"))
+
+    events = list(run(project, channel=_channel(), phases=phases))
+    terminal = [e for e in events if isinstance(e, ActivityEvent) and e.state != "running"]
+
+    assert len(terminal) == 1
+    assert terminal[0].state == "failed"
+    assert terminal[0].sticky is True
+
+
+def test_a_cancelled_run_emits_exactly_one_sticky_cancelled_activity_event():
+    token = CancellationToken()
+    project = _project()
+    phases = _phases()
+    phases[0].cancel_after = token
+
+    events = list(run(project, channel=_channel(), phases=phases, cancel_token=token))
+    terminal = [e for e in events if isinstance(e, ActivityEvent) and e.state != "running"]
+
+    assert len(terminal) == 1
+    assert terminal[0].state == "cancelled"
+    assert terminal[0].sticky is True
 
 
 def _fake_text_generator():
@@ -266,7 +321,12 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     # forever, because more progress arrived right after). `PipelineFinished`
     # is the one event that is guaranteed to come after ALL of that - it must
     # be the last event of a successful run, and there must be exactly one.
-    assert isinstance(events[-1], PipelineFinished)
+    # Slice 17 appends a sticky ActivityEvent after PipelineFinished (and
+    # interleaves running ones throughout) - filter those out here rather
+    # than asserting on raw trailing positions, so this stays "the last
+    # DOMAIN event of a successful run" exactly as it always meant.
+    non_activity = [e for e in events if not isinstance(e, ActivityEvent)]
+    assert isinstance(non_activity[-1], PipelineFinished)
     assert sum(1 for e in events if isinstance(e, PipelineFinished)) == 1
     render_finished_index = next(i for i, e in enumerate(events) if isinstance(e, RenderFinished))
     composite_finished_index = next(i for i, e in enumerate(events) if isinstance(e, CompositeFinished))
@@ -338,8 +398,12 @@ def test_only_runs_exactly_one_phase():
     # `PipelineFinished` fires whenever the loop reaches its natural end
     # without a failure or cancellation - true of an `only=` run too, since
     # every phase it was asked to attempt (the one phase) did succeed.
-    assert isinstance(events[-1], PipelineFinished)
-    assert isinstance(events[-2], PhaseFinished) and events[-2].phase == "voice"
+    # Slice 17 appends a sticky ActivityEvent after PipelineFinished - filter
+    # it out here rather than asserting on raw trailing positions, so this
+    # test keeps meaning what it always meant.
+    non_activity = [e for e in events if not isinstance(e, ActivityEvent)]
+    assert isinstance(non_activity[-1], PipelineFinished)
+    assert isinstance(non_activity[-2], PhaseFinished) and non_activity[-2].phase == "voice"
 
 
 def test_only_ignores_start_from():
@@ -460,10 +524,11 @@ def test_ctx_emit_events_surface_before_phase_finished():
     phases[0].emits = [marker]
 
     events = list(run(project, channel=_channel(), phases=phases))
+    non_activity = [e for e in events if not isinstance(e, ActivityEvent)]
 
-    assert isinstance(events[0], PhaseStarted)
-    assert events[1] is marker
-    assert isinstance(events[2], PhaseFinished)
+    assert isinstance(non_activity[0], PhaseStarted)
+    assert non_activity[1] is marker
+    assert isinstance(non_activity[2], PhaseFinished)
 
 
 def test_phase_receives_the_given_channel_and_router():

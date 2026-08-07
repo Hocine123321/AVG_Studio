@@ -25,6 +25,7 @@ from typing import Any
 
 from avg.core.errors import ErrorKind
 from avg.core.events import (
+    ActivityEvent,
     CompositeFinished,
     PhaseFailed,
     ProgressEvent,
@@ -162,7 +163,7 @@ class MediaEngine:
         project_id: str,
         *,
         on_stderr: Callable[[str], None] | None = None,
-    ) -> Iterator[ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished]:
+    ) -> Iterator[ProgressEvent | PhaseFailed | RenderCancelled | RenderFinished | ActivityEvent]:
         """Run a render in a child process, yielding events as it goes.
 
         Yields a ProgressEvent per progress message the child reports, then
@@ -170,11 +171,20 @@ class MediaEngine:
         PhaseFailed (never a raised exception) on any other outcome — a
         crashed or killed child becomes an event the caller can handle, not
         something that takes the caller down with it.
+
+        Also yields ActivityEvent (Slice 17) alongside the events above -
+        one `running` at the start and on every progress tick, one
+        sticky terminal event (`done`/`failed`/`cancelled`) matching
+        whichever of RenderFinished/PhaseFailed/RenderCancelled fires.
+        This is the status pill's own feed; it changes nothing about the
+        events above, which every other consumer already relies on.
         """
+        activity_id = f"render:{project_id}"
         q: mp.queues.Queue[Any] = _CTX.Queue()
         proc = _CTX.Process(target=run_child, args=(_request_to_kwargs(req), q), daemon=True)
         self._proc = proc
         self._cancelled = False
+        yield ActivityEvent(activity_id=activity_id, label="Rendering", state="running", sticky=False)
         with _clean_sys_path():
             proc.start()
 
@@ -218,6 +228,15 @@ class MediaEngine:
                 event = _consume(msg)
                 if event is not None:
                     yield event
+                    if isinstance(event, ProgressEvent):
+                        yield ActivityEvent(
+                            activity_id=activity_id,
+                            label="Rendering",
+                            state="running",
+                            percent=event.percent,
+                            detail=event.message,
+                            sticky=False,
+                        )
 
             # Final non-blocking drain: child.py closes and joins its queue's
             # feeder thread before exiting, so by the time is_alive() is
@@ -232,6 +251,15 @@ class MediaEngine:
                 event = _consume(msg)
                 if event is not None:
                     yield event
+                    if isinstance(event, ProgressEvent):
+                        yield ActivityEvent(
+                            activity_id=activity_id,
+                            label="Rendering",
+                            state="running",
+                            percent=event.percent,
+                            detail=event.message,
+                            sticky=False,
+                        )
         finally:
             proc.join(_JOIN_TIMEOUT)
             if proc.is_alive():
@@ -249,6 +277,10 @@ class MediaEngine:
         # difference, so it must be decided here rather than in classify_exit.
         if self._cancelled:
             yield RenderCancelled(project_id=project_id)
+            # Sticky (spec §3: "a job cancelled").
+            yield ActivityEvent(
+                activity_id=activity_id, label="Cancelled", state="cancelled", sticky=True
+            )
             return
 
         kind = classify_exit(exitcode, saw_result=result["seen"])
@@ -258,6 +290,9 @@ class MediaEngine:
                 output=Path(result["output"]),
                 size_bytes=result["size"],
             )
+            # Sticky (spec §3: "a render failure" / "a video completed
+            # successfully" - this is the success half).
+            yield ActivityEvent(activity_id=activity_id, label="Completed", state="done", sticky=True)
         else:
             yield PhaseFailed(
                 project_id=project_id,
@@ -265,6 +300,14 @@ class MediaEngine:
                 kind=kind,
                 message=result["error"] or f"render child exited with code {exitcode}",
                 detail=f"exit code {exitcode}",
+            )
+            # Sticky (spec §3: "a render failure").
+            yield ActivityEvent(
+                activity_id=activity_id,
+                label="Failed",
+                state="failed",
+                detail=result["error"] or f"exit code {exitcode}",
+                sticky=True,
             )
 
     def composite(

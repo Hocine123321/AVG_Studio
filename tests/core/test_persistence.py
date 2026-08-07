@@ -178,10 +178,18 @@ def test_killing_mid_run_keeps_the_completed_phases_on_disk(tmp_path):
     phases = _phases(2)
 
     gen = run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project))
-    # Pull events only through phase0's PhaseFinished (PhaseStarted,
-    # PhaseFinished = 2 events) then simply stop consuming - the "kill".
-    next(gen)
-    next(gen)
+    # Pull events only through phase0's PhaseFinished, then simply stop
+    # consuming - the "kill". Driven by event TYPE rather than a fixed pull
+    # count: Slice 17 interleaves ActivityEvents into this same stream, and
+    # `on_phase_change` (the write-through this test checks) always fires
+    # before PhaseFinished is yielded regardless of how many other events
+    # precede it, so stopping right after PhaseFinished is still exactly
+    # "the kill lands the instant phase0's write-through has happened".
+    from avg.core.events import PhaseFinished as _PhaseFinished
+
+    for event in gen:
+        if isinstance(event, _PhaseFinished):
+            break
     # gen is now abandoned, never advanced into phase1's on_phase_change.
 
     raw = json.loads((project.folder / "project.json").read_text(encoding="utf-8"))
@@ -244,8 +252,15 @@ def test_reread_after_restart_reflects_a_simulated_kill_mid_run(tmp_path):
     phases = _phases(2)
 
     gen = run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project))
-    next(gen)
-    next(gen)
+    # Same "kill right after phase0's write-through" simulation as
+    # test_killing_mid_run_keeps_the_completed_phases_on_disk above - see
+    # that test's comment for why this is driven by event type rather than
+    # a fixed pull count.
+    from avg.core.events import PhaseFinished as _PhaseFinished
+
+    for event in gen:
+        if isinstance(event, _PhaseFinished):
+            break
 
     reloaded = import_project(project.folder)
     assert reloaded.phases["phase0"].status == "done"

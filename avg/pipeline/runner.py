@@ -28,7 +28,14 @@ from typing import Any
 
 from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
-from avg.core.events import PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished
+from avg.core.events import (
+    ActivityEvent,
+    PhaseFailed,
+    PhaseFinished,
+    PhaseStarted,
+    PipelineCancelled,
+    PipelineFinished,
+)
 from avg.core.models import PhaseRecord, ProjectDoc
 from avg.pipeline.phase import CancellationToken, Phase, PhaseContext
 from avg.pipeline.registry import REGISTRY
@@ -145,6 +152,18 @@ def run(
     cancel_token = cancel_token or CancellationToken()
     to_run = _select(phases, start_from, only)
 
+    # One ActivityEvent identity for this whole run (Slice 17), separate
+    # from the PhaseStarted/PhaseFinished/PhaseFailed/PipelineCancelled/
+    # PipelineFinished events above, which already carry the phase-level
+    # truth the rest of the app depends on. This is purely the status
+    # pill's feed: same `activity_id` on every ActivityEvent below, so the
+    # client's `activity` map folds them onto one row instead of one per
+    # phase. Not sticky while running - only the terminal outcome is
+    # (spec §3): a phase simply starting is "routine progress", not
+    # something that needs acknowledgement.
+    activity_id = f"pipeline:{project.id}"
+    yield ActivityEvent(activity_id=activity_id, label="Running pipeline", state="running", sticky=False)
+
     # A phase after the restart point cannot still claim to be done: its
     # output was derived from the run being replaced, and leaving the record
     # alone is how a project ends up with Script `not started` next to a
@@ -178,6 +197,12 @@ def run(
     for phase in to_run:
         if cancel_token.cancelled:
             yield PipelineCancelled(project_id=project.id, phase=phase.key)
+            # Sticky (spec §3: "a job cancelled") - the user asked for this
+            # stop and is owed the confirmation that it actually happened,
+            # not just a pill that quietly goes idle.
+            yield ActivityEvent(
+                activity_id=activity_id, label="Cancelled", state="cancelled", sticky=True
+            )
             return
 
         record = project.phases.get(phase.key)
@@ -205,6 +230,17 @@ def run(
         )
 
         yield PhaseStarted(project_id=project.id, phase=phase.key)
+        # Updates the SAME activity row with which phase is running now -
+        # the detail the pill's plain "Rendering" label could never show
+        # (spec §1: "not what phase"). Still not sticky; still routine
+        # progress.
+        yield ActivityEvent(
+            activity_id=activity_id,
+            label="Running pipeline",
+            state="running",
+            detail=phase.name,
+            sticky=False,
+        )
         t0 = time.monotonic()
         try:
             phase.run(ctx)
@@ -220,6 +256,17 @@ def run(
                 message=exc.message,
                 detail=exc.detail,
             )
+            # Sticky (spec §3: "a pipeline or phase error") - the whole
+            # reason this feature exists is that a failure that happened
+            # while nobody was looking must not vanish once it stops
+            # happening.
+            yield ActivityEvent(
+                activity_id=activity_id,
+                label="Failed",
+                state="failed",
+                detail=exc.message,
+                sticky=True,
+            )
             return
         except Exception as exc:  # noqa: BLE001 - any other bug still halts cleanly
             _mark_failed(record, t0, str(exc))
@@ -231,6 +278,13 @@ def run(
                 phase=phase.key,
                 kind=ErrorKind.bug,
                 message=str(exc),
+            )
+            yield ActivityEvent(
+                activity_id=activity_id,
+                label="Failed",
+                state="failed",
+                detail=str(exc),
+                sticky=True,
             )
             return
 
@@ -248,3 +302,6 @@ def run(
     # `PipelineFinished`'s own docstring for why nothing else already means
     # this.
     yield PipelineFinished(project_id=project.id)
+    # Sticky (spec §3: "a video completed successfully") - the outcome the
+    # whole slice exists to make impossible to miss.
+    yield ActivityEvent(activity_id=activity_id, label="Completed", state="done", sticky=True)
