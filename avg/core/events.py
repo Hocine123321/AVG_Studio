@@ -120,6 +120,42 @@ class PipelineFinished(BaseModel):
     project_id: str
 
 
+class ActivityEvent(BaseModel):
+    """One row in the status pill's detail panel (Slice 17).
+
+    The single event type every long-running operation emits over
+    `/ws/events`, so a future operation appears in the panel by emitting
+    this, with no change to the pill itself. Five emitters use it today:
+    the pipeline runner (`avg.pipeline.runner`), `MediaEngine.render`
+    (`avg.media.engine`), the Live List refresh, the provider probe
+    ("Test Providers"), and the model-suggestion run - the last three in
+    `avg.api.routes_settings`.
+
+    `activity_id` is stable for the life of one operation - e.g.
+    `f"pipeline:{project_id}"` or `"live-list-refresh"` - so repeated
+    updates fold onto one row on the client rather than accumulating.
+
+    `sticky` is set by the EMITTER, never derived from `state` on the
+    client: "a job that was queued behind another and has now started" is
+    a sticky event in a `running` state, so any rule of the form "terminal
+    states are sticky" would drop it. The emitter is also the only thing
+    that knows the difference between a provider probe that passed (not
+    sticky) and one that failed on an expired key (sticky). See the design
+    spec's own list of which operations are sticky and which are not -
+    `docs/superpowers/specs/2026-08-07-slice-17-status-surface-design.md`
+    §3 - and the drift test in `tests/core/test_activity_event.py` that
+    checks every real emit site against it.
+    """
+
+    type: str = "activity"
+    activity_id: str
+    label: str
+    percent: int | None = None
+    state: Literal["running", "done", "failed", "cancelled"]
+    detail: str | None = None
+    sticky: bool
+
+
 class CompositeFinished(BaseModel):
     """Part 2 of a render finished, carrying what it actually managed to do.
 
