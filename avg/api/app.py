@@ -263,15 +263,21 @@ def _max_parallel(app_state: Any) -> int:
     """How many jobs may run at once. `1` reproduces this app's original
     single-slot behaviour exactly, which is both the escape hatch when a
     provider starts rate-limiting and the regression test for this change.
-    """
-    from avg.core.settings_schema import get_spec  # noqa: PLC0415
 
-    raw = load_settings(app_state.settings_path).values.get(
-        "max_parallel_jobs", get_spec("max_parallel_jobs").default  # type: ignore[union-attr]
-    )
+    Read fresh off disk on every call, deliberately - the same reasoning as
+    `_app_values`'s `verbose_log`: a lowered cap is meant to take effect on
+    the NEXT job, not require a restart. Every call site is a job start or a
+    job teardown, the latter on a worker thread inside a `finally` - a raise
+    here (a settings file that is missing, mid-write, or simply malformed)
+    must never abort that promotion, so a read failure falls back to the
+    single-slot default rather than propagating.
+    """
     try:
+        raw = load_settings(app_state.settings_path).values.get(
+            "max_parallel_jobs", get_spec("max_parallel_jobs").default  # type: ignore[union-attr]
+        )
         return max(1, int(str(raw)))
-    except (TypeError, ValueError):
+    except Exception:  # noqa: BLE001 - see docstring
         return 1
 
 
@@ -280,15 +286,18 @@ def _start_next_queued(app: FastAPI) -> None:
 
     Called from every teardown, so a slot freeing always moves the queue.
     First started, first served - no priority, no reordering.
+
+    The decision (is there room, which job is oldest, flip its `queued` flag)
+    happens inside `JobRegistry.promote_next`'s single lock, not here as a
+    sequence of separate calls - see that method's docstring for the race
+    three concurrent teardowns used to hit. `thread.start()` itself stays
+    out here, deliberately outside the registry lock: only one caller can
+    ever win a given job's promotion now, so there is nothing left to race,
+    and starting a thread is not registry bookkeeping.
     """
-    if app.state.jobs.count_running() >= _max_parallel(app.state):
-        return
-    pending = app.state.jobs.queued()
-    if not pending:
-        return
-    job = pending[0]
-    job.queued = False
-    job.thread.start()
+    job = app.state.jobs.promote_next(_max_parallel(app.state))
+    if job is not None:
+        job.thread.start()
 
 
 def _build_render_request(

@@ -631,8 +631,19 @@ def test_a_job_beyond_the_cap_is_queued_not_refused(tmp_path, monkeypatch):
         assert job.queued is True
 
         release.set()
-        for created in (a, b, c):
-            _join_job(client, created.json()["id"])
+        _join_job(client, a.json()["id"])
+        _join_job(client, b.json()["id"])
+        # Not `_join_job` for C: at the instant A and B's OWN joins return,
+        # one of their `finally` blocks has already run `_start_next_queued`
+        # (it runs synchronously, on that same worker thread, before the
+        # thread function returns) - but which of the two promotes C, and
+        # how soon after this test's own thread resumes from `join()` that
+        # promotion's `thread.start()` call actually happens, is scheduling,
+        # not guaranteed by anything this test controls. `_join_job` requires
+        # the thread to have been started already or raises `RuntimeError:
+        # cannot join thread before it is started` - exactly the hazard
+        # `_wait_until_gone` exists for.
+        _wait_until_gone(client, c_id)
     finally:
         release.set()
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from avg.core.jobs import Job, JobRegistry
 
 
@@ -93,3 +95,113 @@ def test_a_snapshot_omits_a_job_whose_thread_has_died():
     registry.add(Job(project_id="done", kind="pipeline", thread=_Thread(False), cancel_token=None))
 
     assert registry.snapshot() == []
+
+
+# ── promote_next ─────────────────────────────────────────────────────────
+
+
+def test_promote_next_returns_none_when_the_cap_is_already_met():
+    registry = JobRegistry()
+    registry.add(_job("running"))
+    registry.add(_job("queued", queued=True))
+    assert registry.promote_next(cap=1) is None
+    assert registry.is_queued("queued") is True
+
+
+def test_promote_next_returns_none_when_nothing_is_queued():
+    registry = JobRegistry()
+    assert registry.promote_next(cap=2) is None
+
+
+def test_promote_next_flips_the_oldest_queued_job_and_returns_it():
+    registry = JobRegistry()
+    registry.add(_job("first", queued=True))
+    registry.add(_job("second", queued=True))
+
+    job = registry.promote_next(cap=1)
+
+    assert job is not None
+    assert job.project_id == "first"
+    assert job.queued is False
+    # Not started here - see `promote_next`'s own docstring for why that is
+    # deliberately the caller's job, not this method's.
+    assert registry.is_queued("second") is True
+    assert registry.is_queued("first") is False
+
+
+def test_promote_next_under_racing_teardowns_promotes_exactly_once_and_never_raises():
+    """The regression this exists for: `avg.api.app._start_next_queued` used
+    to read `count_running()`, read `queued()`, pick `pending[0]` and flip
+    `job.queued = False` as four separate, unlocked steps, called from three
+    teardown sites on arbitrary threads. Two teardowns landing within
+    microseconds of each other could both pick the SAME queued job and both
+    call `thread.start()` on it - the second call raises `RuntimeError:
+    threads can only be started once`, out of a `finally` block. The cap
+    could also be exceeded: a thread that has been `add`ed but not yet
+    `start`ed reads as not-alive, so it is invisible to `count_running()`,
+    letting two racing teardowns each promote a DIFFERENT job and together
+    exceed the cap.
+
+    Forced with a real `threading.Barrier` so the two calls genuinely
+    overlap - two sequential calls would pass regardless of whether the
+    decision is locked, and prove nothing about the race. Real `Thread`
+    objects (not the `_Thread` test double) are used for the two queued
+    jobs so a double-`start()` bug would actually raise the real
+    `RuntimeError`, not a fake one a test double happens not to model.
+
+    With `cap=1` and two queued jobs, exactly one racer must win the single
+    slot (the cap is respected) and neither racer may raise - `promote_next`
+    folds "is there room" and "which job" into the one lock, so only one
+    caller can ever observe a given job as still queued.
+    """
+    started_first = threading.Event()
+    started_second = threading.Event()
+    real_first = threading.Thread(target=started_first.set)
+    real_second = threading.Thread(target=started_second.set)
+
+    registry = JobRegistry()
+    registry.add(Job(project_id="first", kind="pipeline", thread=real_first, cancel_token=None, queued=True))
+    registry.add(Job(project_id="second", kind="pipeline", thread=real_second, cancel_token=None, queued=True))
+
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    results: list[Job | None] = []
+    errors: list[BaseException] = []
+
+    def _teardown_race() -> None:
+        try:
+            barrier.wait(timeout=5)
+            job = registry.promote_next(cap=1)
+            if job is not None:
+                # Exactly what `_start_next_queued` does with the job
+                # `promote_next` hands back - a double-promotion bug would
+                # make this raise `RuntimeError` on the second racer.
+                job.thread.start()
+            with lock:
+                results.append(job)
+        except BaseException as exc:  # noqa: BLE001 - captured, not swallowed
+            with lock:
+                errors.append(exc)
+
+    racer_a = threading.Thread(target=_teardown_race)
+    racer_b = threading.Thread(target=_teardown_race)
+    racer_a.start()
+    racer_b.start()
+    racer_a.join(timeout=5)
+    racer_b.join(timeout=5)
+
+    assert not racer_a.is_alive() and not racer_b.is_alive()
+    assert not errors, f"a racing teardown raised: {errors!r}"
+
+    winners = [r for r in results if r is not None]
+    losers = [r for r in results if r is None]
+    assert len(winners) == 1, f"cap=1 must promote exactly one job, got {results!r}"
+    assert len(losers) == 1
+
+    # The winner actually started; the loser is still sitting in the queue,
+    # untouched, ready for the next slot to free up.
+    assert started_first.is_set() != started_second.is_set()
+    still_queued = registry.queued()
+    assert [j.project_id for j in still_queued] == [
+        "first" if not started_first.is_set() else "second"
+    ]
