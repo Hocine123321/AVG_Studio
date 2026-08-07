@@ -114,10 +114,12 @@ imports:
  &#8226;   <a href="#abc">abc</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
+ &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
  &#8226;   <a href="#codecs">codecs</a>
  &#8226;   <a href="#collections">collections</a>
  &#8226;   <a href="#collections.abc">collections.abc</a>
+ &#8226;   <a href="#contextlib">contextlib</a>
  &#8226;   <a href="#copyreg">copyreg</a>
  &#8226;   <a href="#encodings">encodings</a>
  &#8226;   <a href="#encodings.aliases">encodings.aliases</a>
@@ -3934,8 +3936,10 @@ imported by:
  &#8226;   <a href="#attr.exceptions">attr.exceptions</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
@@ -3945,6 +3949,7 @@ imported by:
  &#8226;   <a href="#avg.core.error_store">avg.core.error_store</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.core.invalidation">avg.core.invalidation</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
  &#8226;   <a href="#avg.core.model_cache">avg.core.model_cache</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.models">avg.core.models</a>
@@ -3956,6 +3961,7 @@ imported by:
  &#8226;   <a href="#avg.media.engine">avg.media.engine</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
  &#8226;   <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.thumbnails">avg.media.thumbnails</a>
  &#8226;   <a href="#avg.pipeline.create">avg.pipeline.create</a>
  &#8226;   <a href="#avg.pipeline.personality">avg.pipeline.personality</a>
@@ -3977,6 +3983,7 @@ imported by:
  &#8226;   <a href="#avg.providers.images.premium">avg.providers.images.premium</a>
  &#8226;   <a href="#avg.providers.models">avg.providers.models</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
  &#8226;   <a href="#avg.providers.text.base">avg.providers.text.base</a>
  &#8226;   <a href="#avg.providers.text.community">avg.providers.text.community</a>
  &#8226;   <a href="#avg.providers.text.gemini">avg.providers.text.gemini</a>
@@ -9193,6 +9200,7 @@ imported by:
  &#8226;   <a href="#asyncio.windows_events">asyncio.windows_events</a>
  &#8226;   <a href="#asyncio.windows_utils">asyncio.windows_utils</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.providers.voice.providers">avg.providers.voice.providers</a>
@@ -10503,6 +10511,7 @@ imports:
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
 
@@ -10519,14 +10528,17 @@ imports:
  &#8226;   <a href="#asyncio">asyncio</a>
  &#8226;   <a href="#avg.api">avg.api</a>
  &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.config">avg.config</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
  &#8226;   <a href="#avg.core.error_store">avg.core.error_store</a>
  &#8226;   <a href="#avg.core.events">avg.core.events</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
  &#8226;   <a href="#avg.core.model_cache">avg.core.model_cache</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.models">avg.core.models</a>
@@ -10582,8 +10594,40 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="avg.api.routes_preview"></a>
+  <a target="code" href="///D:/AVG_Studio/avg/api/routes_preview.py" type="text/plain"><tt>avg.api.routes_preview</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#asyncio">asyncio</a>
+ &#8226;   <a href="#avg.api">avg.api</a>
+ &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
+ &#8226;   <a href="#avg.core.errors">avg.core.errors</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
+ &#8226;   <a href="#avg.pipeline.phases.captions">avg.pipeline.phases.captions</a>
+ &#8226;   <a href="#avg.pipeline.phases.visuals">avg.pipeline.phases.visuals</a>
+ &#8226;   <a href="#avg.providers.errors">avg.providers.errors</a>
+ &#8226;   <a href="#avg.providers.voice.providers">avg.providers.voice.providers</a>
+ &#8226;   <a href="#fastapi">fastapi</a>
+ &#8226;   <a href="#fastapi.responses">fastapi.responses</a>
+ &#8226;   <a href="#pydantic">pydantic</a>
+ &#8226;   <a href="#pydantic.BaseModel">pydantic.BaseModel</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#avg.api.app">avg.api.app</a>
 
   </div>
 
@@ -10599,17 +10643,23 @@ imports:
  &#8226;   <a href="#avg.api">avg.api</a>
  &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
  &#8226;   <a href="#avg.config">avg.config</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
  &#8226;   <a href="#avg.core">avg.core</a>
  &#8226;   <a href="#avg.core.costs">avg.core.costs</a>
+ &#8226;   <a href="#avg.core.errors">avg.core.errors</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.settings_schema">avg.core.settings_schema</a>
+ &#8226;   <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
  &#8226;   <a href="#avg.providers">avg.providers</a>
  &#8226;   <a href="#avg.providers.catalogues">avg.providers.catalogues</a>
+ &#8226;   <a href="#avg.providers.errors">avg.providers.errors</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
+ &#8226;   <a href="#avg.providers.text.router">avg.providers.text.router</a>
  &#8226;   <a href="#fastapi">fastapi</a>
  &#8226;   <a href="#pathlib">pathlib</a>
  &#8226;   <a href="#pydantic">pydantic</a>
@@ -10684,11 +10734,36 @@ imported by:
     <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="avg.config.channel_defaults"></a>
+  <a target="code" href="///D:/AVG_Studio/avg/config/channel_defaults.py" type="text/plain"><tt>avg.config.channel_defaults</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#avg.config">avg.config</a>
+ &#8226;   <a href="#contextlib">contextlib</a>
+ &#8226;   <a href="#json">json</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#pathlib">pathlib</a>
+ &#8226;   <a href="#tempfile">tempfile</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
 
   </div>
 
@@ -10836,6 +10911,7 @@ imported by:
  &#8226;   <a href="#avg.core.events">avg.core.events</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.core.invalidation">avg.core.invalidation</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
  &#8226;   <a href="#avg.core.model_cache">avg.core.model_cache</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.models">avg.core.models</a>
@@ -10927,7 +11003,9 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.core.events">avg.core.events</a>
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
+ &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
+ &#8226;   <a href="#avg.core.events">avg.core.events</a>
  &#8226;   <a href="#avg.media.engine">avg.media.engine</a>
  &#8226;   <a href="#avg.pipeline.phases.captions">avg.pipeline.phases.captions</a>
  &#8226;   <a href="#avg.pipeline.phases.director">avg.pipeline.phases.director</a>
@@ -10995,12 +11073,14 @@ imports:
  &#8226;   <a href="#avg.core">avg.core</a>
  &#8226;   <a href="#avg.core.settings_schema">avg.core.settings_schema</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
+ &#8226;   <a href="#contextlib">contextlib</a>
  &#8226;   <a href="#dataclasses">dataclasses</a>
  &#8226;   <a href="#importlib">importlib</a>
  &#8226;   <a href="#importlib.metadata">importlib.metadata</a>
  &#8226;   <a href="#pathlib">pathlib</a>
  &#8226;   <a href="#shutil">shutil</a>
  &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#tempfile">tempfile</a>
  &#8226;   <a href="#time">time</a>
 
   </div>
@@ -11008,6 +11088,7 @@ imports:
 imported by:
     <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.core">avg.core</a>
+ &#8226;   <a href="#shell.py">shell.py</a>
 
   </div>
 
@@ -11028,6 +11109,26 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="avg.core.jobs"></a>
+  <a target="code" href="///D:/AVG_Studio/avg/core/jobs.py" type="text/plain"><tt>avg.core.jobs</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#avg.core">avg.core</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#threading">threading</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#avg.api.app">avg.api.app</a>
 
   </div>
 
@@ -11066,6 +11167,7 @@ imports:
  &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#pathlib">pathlib</a>
  &#8226;   <a href="#tempfile">tempfile</a>
+ &#8226;   <a href="#threading">threading</a>
  &#8226;   <a href="#typing">typing</a>
 
   </div>
@@ -11250,6 +11352,7 @@ imported by:
  &#8226;   <a href="#avg.media.engine">avg.media.engine</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
  &#8226;   <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.thumbnails">avg.media.thumbnails</a>
  &#8226;   <a href="#avg.media.vendor">avg.media.vendor</a>
 
@@ -11336,6 +11439,7 @@ imported by:
     <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.media.child">avg.media.child</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.thumbnails">avg.media.thumbnails</a>
  &#8226;   <a href="#shell.py">shell.py</a>
 
@@ -11359,7 +11463,34 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.pipeline.phases.director">avg.pipeline.phases.director</a>
+    <a href="#avg.media.preview">avg.media.preview</a>
+ &#8226;   <a href="#avg.pipeline.phases.director">avg.pipeline.phases.director</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="avg.media.preview"></a>
+  <a target="code" href="///D:/AVG_Studio/avg/media/preview.py" type="text/plain"><tt>avg.media.preview</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#avg.media">avg.media</a>
+ &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
+ &#8226;   <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.vendor">avg.media.vendor</a>
+ &#8226;   <a href="#avg.media.vendor.overlay_design">avg.media.vendor.overlay_design</a>
+ &#8226;   <a href="#io">io</a>
+ &#8226;   <a href="#pathlib">pathlib</a>
+ &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#tempfile">tempfile</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
 
   </div>
 
@@ -11400,6 +11531,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.vendor.avg">avg.media.vendor.avg</a>
  &#8226;   <a href="#avg.media.vendor.overlay_design">avg.media.vendor.overlay_design</a>
 
@@ -11469,6 +11601,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.vendor">avg.media.vendor</a>
 
   </div>
@@ -11654,7 +11787,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
+ &#8226;   <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
 
   </div>
 
@@ -11727,6 +11861,7 @@ imports:
  &#8226;   <a href="#avg.pipeline.phase">avg.pipeline.phase</a>
  &#8226;   <a href="#avg.pipeline.phases">avg.pipeline.phases</a>
  &#8226;   <a href="#avg.pipeline.phases._common">avg.pipeline.phases._common</a>
+ &#8226;   <a href="#avg.providers.errors">avg.providers.errors</a>
  &#8226;   <a href="#avg.providers.images.base">avg.providers.images.base</a>
  &#8226;   <a href="#avg.providers.images.community">avg.providers.images.community</a>
  &#8226;   <a href="#avg.providers.images.premium">avg.providers.images.premium</a>
@@ -11739,7 +11874,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
+ &#8226;   <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
 
   </div>
 
@@ -11847,6 +11983,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.core.invalidation">avg.core.invalidation</a>
@@ -11892,6 +12029,7 @@ imports:
     <a href="#avg">avg</a>
  &#8226;   <a href="#avg.providers.catalogues">avg.providers.catalogues</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
 
   </div>
   <div class="import">
@@ -11903,6 +12041,7 @@ imported by:
  &#8226;   <a href="#avg.providers.images">avg.providers.images</a>
  &#8226;   <a href="#avg.providers.models">avg.providers.models</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
  &#8226;   <a href="#avg.providers.text">avg.providers.text</a>
  &#8226;   <a href="#avg.providers.transport">avg.providers.transport</a>
  &#8226;   <a href="#avg.providers.voice">avg.providers.voice</a>
@@ -11950,7 +12089,10 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.providers.images.base">avg.providers.images.base</a>
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
+ &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
+ &#8226;   <a href="#avg.pipeline.phases.visuals">avg.pipeline.phases.visuals</a>
+ &#8226;   <a href="#avg.providers.images.base">avg.providers.images.base</a>
  &#8226;   <a href="#avg.providers.images.community">avg.providers.images.community</a>
  &#8226;   <a href="#avg.providers.images.premium">avg.providers.images.premium</a>
  &#8226;   <a href="#avg.providers.text.base">avg.providers.text.base</a>
@@ -12108,6 +12250,29 @@ imported by:
 </div>
 
 <div class="node">
+  <a name="avg.providers.recommend"></a>
+  <a target="code" href="///D:/AVG_Studio/avg/providers/recommend.py" type="text/plain"><tt>avg.providers.recommend</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#avg.providers">avg.providers</a>
+ &#8226;   <a href="#avg.providers.text">avg.providers.text</a>
+ &#8226;   <a href="#avg.providers.text.router">avg.providers.text.router</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#json">json</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
+ &#8226;   <a href="#avg.providers">avg.providers</a>
+
+  </div>
+
+</div>
+
+<div class="node">
   <a name="avg.providers.text"></a>
   <a target="code" href="///D:/AVG_Studio/avg/providers/text/__init__.py" type="text/plain"><tt>avg.providers.text</tt></a>
 <span class="moduletype">Package</span>  <div class="import">
@@ -12117,7 +12282,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.providers.text.base">avg.providers.text.base</a>
+    <a href="#avg.providers.recommend">avg.providers.recommend</a>
+ &#8226;   <a href="#avg.providers.text.base">avg.providers.text.base</a>
  &#8226;   <a href="#avg.providers.text.community">avg.providers.text.community</a>
  &#8226;   <a href="#avg.providers.text.gemini">avg.providers.text.gemini</a>
  &#8226;   <a href="#avg.providers.text.router">avg.providers.text.router</a>
@@ -12223,10 +12389,12 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.pipeline.phases.director">avg.pipeline.phases.director</a>
  &#8226;   <a href="#avg.pipeline.phases.writing">avg.pipeline.phases.writing</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
 
   </div>
 
@@ -12333,7 +12501,8 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#avg.pipeline.phases.voice">avg.pipeline.phases.voice</a>
+    <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
+ &#8226;   <a href="#avg.pipeline.phases.voice">avg.pipeline.phases.voice</a>
  &#8226;   <a href="#avg.providers.catalogues">avg.providers.catalogues</a>
 
   </div>
@@ -15212,10 +15381,12 @@ imported by:
  &#8226;   <a href="#attr.validators">attr.validators</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
  &#8226;   <a href="#avg.core.errors">avg.core.errors</a>
+ &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.take_log">avg.core.take_log</a>
  &#8226;   <a href="#avg.export.capcut">avg.export.capcut</a>
@@ -15302,6 +15473,7 @@ imported by:
  &#8226;   <a href="#setuptools.depends">setuptools.depends</a>
  &#8226;   <a href="#setuptools.msvc">setuptools.msvc</a>
  &#8226;   <a href="#setuptools.wheel">setuptools.wheel</a>
+ &#8226;   <a href="#shell.py">shell.py</a>
  &#8226;   <a href="#starlette._utils">starlette._utils</a>
  &#8226;   <a href="#starlette.routing">starlette.routing</a>
  &#8226;   <a href="#starlette.types">starlette.types</a>
@@ -15797,6 +15969,7 @@ imported by:
  &#8226;   <a href="#avg.core.artifacts">avg.core.artifacts</a>
  &#8226;   <a href="#avg.core.error_store">avg.core.error_store</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.pipeline.personality">avg.pipeline.personality</a>
  &#8226;   <a href="#avg.pipeline.phase">avg.pipeline.phase</a>
@@ -15808,6 +15981,7 @@ imported by:
  &#8226;   <a href="#avg.pipeline.prompts">avg.pipeline.prompts</a>
  &#8226;   <a href="#avg.pipeline.registry">avg.pipeline.registry</a>
  &#8226;   <a href="#avg.providers.errors">avg.providers.errors</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
  &#8226;   <a href="#avg.providers.text.router">avg.providers.text.router</a>
  &#8226;   <a href="#clr_loader.types">clr_loader.types</a>
  &#8226;   <a href="#clr_loader.util.runtime_spec">clr_loader.util.runtime_spec</a>
@@ -19798,6 +19972,7 @@ imports:
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.deps">avg.api.deps</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#fastapi._compat">fastapi._compat</a>
@@ -20517,6 +20692,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#fastapi">fastapi</a>
  &#8226;   <a href="#fastapi.openapi.utils">fastapi.openapi.utils</a>
@@ -26077,6 +26253,7 @@ imported by:
  &#8226;   <a href="#asyncio.proactor_events">asyncio.proactor_events</a>
  &#8226;   <a href="#asyncio.unix_events">asyncio.unix_events</a>
  &#8226;   <a href="#avg.media.child">avg.media.child</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#bottle">bottle</a>
  &#8226;   <a href="#bz2">bz2</a>
  &#8226;   <a href="#cffi.ffiplatform">cffi.ffiplatform</a>
@@ -26441,6 +26618,7 @@ imported by:
  &#8226;   <a href="#aiohttp.typedefs">aiohttp.typedefs</a>
  &#8226;   <a href="#aiohttp.web_response">aiohttp.web_response</a>
  &#8226;   <a href="#aiohttp.web_ws">aiohttp.web_ws</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
@@ -26456,6 +26634,7 @@ imported by:
  &#8226;   <a href="#avg.pipeline.phases._common">avg.pipeline.phases._common</a>
  &#8226;   <a href="#avg.pipeline.phases.captions">avg.pipeline.phases.captions</a>
  &#8226;   <a href="#avg.providers.models">avg.providers.models</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
  &#8226;   <a href="#avg.providers.transport">avg.providers.transport</a>
  &#8226;   <a href="#bottle">bottle</a>
  &#8226;   <a href="#clr_loader.util.runtime_spec">clr_loader.util.runtime_spec</a>
@@ -39140,6 +39319,7 @@ imported by:
  &#8226;   <a href="#asyncio.selector_events">asyncio.selector_events</a>
  &#8226;   <a href="#asyncio.unix_events">asyncio.unix_events</a>
  &#8226;   <a href="#asyncio.windows_utils">asyncio.windows_utils</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
@@ -39925,6 +40105,7 @@ imported by:
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.legacy_import">avg.config.legacy_import</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
@@ -39943,6 +40124,7 @@ imported by:
  &#8226;   <a href="#avg.media.engine">avg.media.engine</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
  &#8226;   <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.thumbnails">avg.media.thumbnails</a>
  &#8226;   <a href="#avg.pipeline.create">avg.pipeline.create</a>
  &#8226;   <a href="#avg.pipeline.personality">avg.pipeline.personality</a>
@@ -40780,6 +40962,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
@@ -40862,6 +41045,7 @@ imported by:
 <span class="moduletype">MissingModule</span>  <div class="import">
 imported by:
     <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
@@ -58219,6 +58403,7 @@ imported by:
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.media.thumbnails">avg.media.thumbnails</a>
  &#8226;   <a href="#avg.media.vendor.avg">avg.media.vendor.avg</a>
  &#8226;   <a href="#bottle">bottle</a>
@@ -58810,11 +58995,14 @@ imported by:
  &#8226;   <a href="#aiohttp.web_request">aiohttp.web_request</a>
  &#8226;   <a href="#anyio._core._tempfile">anyio._core._tempfile</a>
  &#8226;   <a href="#asyncio.windows_utils">asyncio.windows_utils</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.secrets">avg.config.secrets</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
+ &#8226;   <a href="#avg.core.health">avg.core.health</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.media.environment">avg.media.environment</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.pipeline.create">avg.pipeline.create</a>
  &#8226;   <a href="#avg.pipeline.phases.voice">avg.pipeline.phases.voice</a>
  &#8226;   <a href="#avg.providers.models">avg.providers.models</a>
@@ -58950,9 +59138,12 @@ imported by:
  &#8226;   <a href="#asyncio.unix_events">asyncio.unix_events</a>
  &#8226;   <a href="#attr._compat">attr._compat</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
  &#8226;   <a href="#avg.core.error_store">avg.core.error_store</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
+ &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.take_log">avg.core.take_log</a>
  &#8226;   <a href="#avg.pipeline.phase">avg.pipeline.phase</a>
  &#8226;   <a href="#bottle">bottle</a>
@@ -60202,8 +60393,10 @@ imported by:
  &#8226;   <a href="#attr._make">attr._make</a>
  &#8226;   <a href="#attr.converters">attr.converters</a>
  &#8226;   <a href="#avg.api.app">avg.api.app</a>
+ &#8226;   <a href="#avg.api.routes_preview">avg.api.routes_preview</a>
  &#8226;   <a href="#avg.api.routes_settings">avg.api.routes_settings</a>
  &#8226;   <a href="#avg.api.routes_takes">avg.api.routes_takes</a>
+ &#8226;   <a href="#avg.config.channel_defaults">avg.config.channel_defaults</a>
  &#8226;   <a href="#avg.config.channels">avg.config.channels</a>
  &#8226;   <a href="#avg.config.settings">avg.config.settings</a>
  &#8226;   <a href="#avg.core.artifacts">avg.core.artifacts</a>
@@ -60211,6 +60404,7 @@ imported by:
  &#8226;   <a href="#avg.core.error_store">avg.core.error_store</a>
  &#8226;   <a href="#avg.core.errors">avg.core.errors</a>
  &#8226;   <a href="#avg.core.events">avg.core.events</a>
+ &#8226;   <a href="#avg.core.jobs">avg.core.jobs</a>
  &#8226;   <a href="#avg.core.model_prefs">avg.core.model_prefs</a>
  &#8226;   <a href="#avg.core.models">avg.core.models</a>
  &#8226;   <a href="#avg.core.settings_schema">avg.core.settings_schema</a>
@@ -60218,6 +60412,7 @@ imported by:
  &#8226;   <a href="#avg.media.child">avg.media.child</a>
  &#8226;   <a href="#avg.media.engine">avg.media.engine</a>
  &#8226;   <a href="#avg.media.overlays">avg.media.overlays</a>
+ &#8226;   <a href="#avg.media.preview">avg.media.preview</a>
  &#8226;   <a href="#avg.pipeline.phase">avg.pipeline.phase</a>
  &#8226;   <a href="#avg.pipeline.phases._common">avg.pipeline.phases._common</a>
  &#8226;   <a href="#avg.pipeline.phases.captions">avg.pipeline.phases.captions</a>
@@ -60232,6 +60427,7 @@ imported by:
  &#8226;   <a href="#avg.providers.images.premium">avg.providers.images.premium</a>
  &#8226;   <a href="#avg.providers.models">avg.providers.models</a>
  &#8226;   <a href="#avg.providers.probe">avg.providers.probe</a>
+ &#8226;   <a href="#avg.providers.recommend">avg.providers.recommend</a>
  &#8226;   <a href="#avg.providers.text.base">avg.providers.text.base</a>
  &#8226;   <a href="#avg.providers.text.gemini">avg.providers.text.gemini</a>
  &#8226;   <a href="#avg.providers.text.router">avg.providers.text.router</a>
