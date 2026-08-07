@@ -317,6 +317,108 @@ def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
         release.set()
 
 
+def test_cancel_of_a_running_pipeline_never_touches_the_shared_render_engine(client, monkeypatch):
+    """Regression for Important 4 of the Slice 16 review: `app.state.engine`
+    tracks ONE child process for the whole app and used to be told to
+    `.cancel()` unconditionally by every `/cancel` call. A full-pipeline run
+    (`kind == "pipeline"`) cancels through its own `cancel_token` - its
+    Render phase spawns and cancels its OWN local `MediaEngine`, never
+    `app.state.engine` - so reaching the shared engine here would only ever
+    hit whichever DIFFERENT project's direct `/render` job happened to hold
+    the lease at that moment."""
+    calls: list[str] = []
+    monkeypatch.setattr(client.app.state.engine, "cancel", lambda: calls.append("cancel"))
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
+    _activate_channel(client)
+
+    try:
+        created = client.post("/api/projects", headers=AUTH, json={"topic": "x"}).json()
+        assert started.wait(timeout=5)
+
+        client.post(f"/api/projects/{created['id']}/cancel", headers=AUTH)
+        assert calls == [], "a pipeline job's cancel must not touch app.state.engine"
+    finally:
+        release.set()
+
+
+def test_cancel_of_an_already_finished_job_does_not_touch_the_engine(client):
+    """A project with no job in flight at all (this file's autouse stub
+    finishes every pipeline instantly) has nothing to cancel - the old
+    unconditional `app.state.engine.cancel()` would still have reached
+    whatever OTHER project's render happened to be using the shared engine
+    at that moment."""
+    calls: list[str] = []
+    import types
+
+    client.app.state.engine.cancel = types.MethodType(lambda self: calls.append("cancel"), client.app.state.engine)
+
+    _activate_channel(client)
+    created = client.post("/api/projects", headers=AUTH, json={"topic": "x"}).json()
+    _wait_for_idle(client)
+
+    r = client.post(f"/api/projects/{created['id']}/cancel", headers=AUTH)
+    assert r.status_code == 200
+    assert calls == []
+
+
+def test_cancelling_a_queued_job_drops_it_without_ever_running_it(client, monkeypatch):
+    """Regression for Important 6 of the Slice 16 review: a queued job used
+    to be uncancellable in any real sense - a queued `/render` job has no
+    `cancel_token` at all, and a queued pipeline job would still be
+    promoted and started, only stopping at its first phase boundary.
+    Cancelling a queued job must remove it from the registry outright, so
+    it never runs at all."""
+    r = client.post(
+        "/api/settings/values", headers=AUTH, json={"values": {"max_parallel_jobs": "1"}}
+    )
+    assert r.status_code == 200
+    _activate_channel(client)
+
+    started = threading.Event()
+    release = threading.Event()
+    run_calls: list[str] = []
+
+    def blocking_run(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        run_calls.append(project.id)
+        started.set()
+        release.wait(timeout=5)
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr("avg.api.app.run_pipeline", blocking_run)
+
+    try:
+        first = client.post("/api/projects", headers=AUTH, json={"topic": "First"}).json()
+        assert started.wait(timeout=5)
+
+        second = client.post("/api/projects", headers=AUTH, json={"topic": "Second"}).json()
+        job = client.app.state.jobs.get(second["id"])
+        assert job is not None and job.queued is True
+
+        r = client.post(f"/api/projects/{second['id']}/cancel", headers=AUTH)
+        assert r.status_code == 200
+        assert client.app.state.jobs.get(second["id"]) is None
+
+        release.set()
+        _wait_for_idle(client)
+
+        # The queued job was dropped before it ever got a turn - only
+        # "First" ever reached the pipeline.
+        assert run_calls == [first["id"]]
+    finally:
+        release.set()
+
+
 # ---------------------------------------------------------------------------
 # Per-phase text routing (Slice 6B)
 

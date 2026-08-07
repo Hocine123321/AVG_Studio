@@ -216,9 +216,12 @@ interface QueuedRowProps {
  * `.track` it cannot fill (a stalled-looking empty bar would read as
  * broken, not waiting). Its position in the FIFO queue
  * (`GET /api/jobs`, `avg.core.jobs.JobRegistry.snapshot`) is the one honest
- * thing to say about it instead. Cancellable like a running job - the
- * registry accepts a cancel on a job that has not started yet and simply
- * never starts it.
+ * thing to say about it instead. Cancellable like a running job, but not by
+ * the same mechanism: `POST /{id}/cancel` drops a queued job from the
+ * registry outright (`JobRegistry.drop_if_queued`) rather than setting a
+ * token on it, because a queued `/render` job has no token to set and a
+ * queued pipeline job would otherwise still be promoted and run to its
+ * first phase boundary before any token was ever checked.
  */
 function QueuedRow({ project, position, onOpen, onCancel }: QueuedRowProps) {
   return (

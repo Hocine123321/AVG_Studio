@@ -1374,17 +1374,42 @@ def create_app(
     async def cancel_render(project_id: str) -> dict:
         if project_id not in _library():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
-        app.state.engine.cancel()
-        # Best-effort for a full-pipeline run too - a no-op if this project's
-        # job has no cancel token (a `/render` MediaEngine job) or is not
-        # running at all. Looked up per-project now that several jobs can be
-        # in flight at once - `app.state.jobs.get` rather than a single
-        # process-wide token, so cancelling one project's run can never
-        # reach another's. The runner only checks this BETWEEN phases (see
-        # `avg.pipeline.runner.run`'s docstring), so this stops the run at
-        # the next phase boundary, not mid-phase.
+
+        # A queued job never started - see `JobRegistry.drop_if_queued`. This
+        # is the only thing that actually stops one: a queued `/render` job
+        # has no `cancel_token` to set, and a queued pipeline job would still
+        # be promoted and run to its first phase boundary before a token
+        # would even be checked.
+        if app.state.jobs.drop_if_queued(project_id):
+            return {"cancelled": True}
+
+        # Looked up per-project now that several jobs can be in flight at
+        # once - `app.state.jobs.get` rather than a single process-wide
+        # token, so cancelling one project's run can never reach another's.
         job = app.state.jobs.get(project_id)
-        if job is not None and job.cancel_token is not None:
+        if job is None:
+            # Already finished, or never existed - nothing to cancel.
+            return {"cancelled": True}
+
+        # `app.state.engine` tracks ONE child process for the whole app and
+        # is only ever driven by a direct `/render` job (`kind == "render"`)
+        # - a full-pipeline run's Render phase spawns and cancels its own
+        # local `MediaEngine` instance via `job.cancel_token`, never this
+        # one. Calling `.cancel()` unconditionally used to terminate
+        # whichever render currently held the lease, including the ffmpeg
+        # child of a completely different project than the one this request
+        # named - or a project whose own job was a pipeline run that hadn't
+        # even reached the render phase yet.
+        if job.kind == "render":
+            app.state.engine.cancel()
+
+        # Best-effort for a full-pipeline run - a no-op for a `/render` job,
+        # which is built with `cancel_token=None`. The runner checks this
+        # between phases (see `avg.pipeline.runner.run`'s docstring); the
+        # render phase itself also checks it per event, which is how a
+        # cancel reaches a render already in progress without waiting for
+        # the next phase boundary.
+        if job.cancel_token is not None:
             job.cancel_token.cancel()
         return {"cancelled": True}
 
