@@ -249,7 +249,7 @@ export default function App() {
       content = project ? (
         <Studio
           project={project}
-          progress={events.progress?.project_id === project.id ? events.progress : null}
+          progress={events.byProject[project.id] ?? null}
           activePhase={events.phaseStarted?.project_id === project.id ? events.phaseStarted.phase : null}
           failure={events.failure?.project_id === project.id ? events.failure : null}
           cancelled={events.cancelled?.project_id === project.id ? events.cancelled : null}
