@@ -49,22 +49,40 @@ export default function Transport({ events, projects, onCancel, onOpen }: Transp
     );
   }
 
-  if (progress) {
-    const title = titleFor(projects, progress.project_id);
+  // Several videos can be in flight at once (Slice 16), but this bar is one
+  // line on every screen, so it leads with one of them and says how many
+  // others there are. Home's job stack is where each one is shown in full.
+  //
+  // The lead is picked by project id rather than by "whichever event arrived
+  // last" - `events.progress` is last-write-wins, so with two jobs running it
+  // would swap identity on every tick and the bar would flicker between two
+  // titles, two percentages and two Cancel buttons. Sorting is arbitrary but
+  // stable, which is the property that matters.
+  const live = Object.values(events.byProject).sort((a, b) => a.project_id.localeCompare(b.project_id));
+  const lead = live[0] ?? progress;
+  if (lead) {
+    const title = titleFor(projects, lead.project_id);
+    const others = Math.max(live.length - 1, 0);
     return (
       <div className="transport transport--running">
-        <TransportThumb projectId={progress.project_id} />
+        <TransportThumb projectId={lead.project_id} />
         <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
-        <button type="button" className="transport__open" onClick={() => onOpen(progress.project_id)}>
+        <button type="button" className="transport__open" onClick={() => onOpen(lead.project_id)}>
           <span className="transport__label">Rendering “{title}”</span>
-          <span className="transport__detail">{progress.message}</span>
+          <span className="transport__detail">{lead.message}</span>
         </button>
+        {others > 0 && (
+          // Not a link and not a button: everything it would navigate to is
+          // already one click away on Home, and a second control here would
+          // compete with Cancel for the same glance.
+          <span className="chip transport__more">+{others} more</span>
+        )}
         <span className="transport__spacer" />
         <div className="transport__bar">
-          <div className="transport__bar-fill" style={{ width: `${progress.percent}%` }} />
+          <div className="transport__bar-fill" style={{ width: `${lead.percent}%` }} />
         </div>
-        <span className="transport__percent">{progress.percent}%</span>
-        <button type="button" className="btn btn--sm" onClick={() => onCancel(progress.project_id)}>
+        <span className="transport__percent">{lead.percent}%</span>
+        <button type="button" className="btn btn--sm" onClick={() => onCancel(lead.project_id)}>
           <IconStop size={12} />
           Cancel
         </button>

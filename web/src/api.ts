@@ -241,6 +241,36 @@ export interface AppError {
   context: Record<string, string>;
 }
 
+// ---- job registry (Slice 16) ----
+// Mirrors `avg.core.jobs.JobRegistry.snapshot` - see that method's docstring
+// for why `position` is derived at read time rather than stored on the job,
+// and why a running job (not `queued`) always carries `position: null`.
+
+export interface JobInfo {
+  project_id: string;
+  kind: "pipeline" | "render";
+  /** `false` while running. `true` while waiting for a free slot under
+   * `max_parallel_jobs` - a queued job holds no thread yet, so it announces
+   * nothing over `/ws/events`; this poll is the only way the screen learns
+   * it exists at all. */
+  queued: boolean;
+  /** 1-based position in the queue, `null` for a running job. */
+  position: number | null;
+}
+
+export interface JobsResponse {
+  jobs: JobInfo[];
+}
+
+/** `GET /api/jobs` - every in-flight job, running or queued, taken under the
+ * registry's own lock so the two sets can't be read either side of a
+ * promotion and disagree. A finished job's thread is already gone by the
+ * time this is called, so it is never in the list - no phantom entry to
+ * time out on the client. */
+export function getJobs(): Promise<JobsResponse> {
+  return apiGet<JobsResponse>("/api/jobs");
+}
+
 export function getErrors(): Promise<{ errors: AppError[] }> {
   return apiGet<{ errors: AppError[] }>("/api/errors");
 }

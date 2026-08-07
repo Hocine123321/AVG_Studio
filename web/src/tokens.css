@@ -853,6 +853,108 @@ a:hover {
   transition: width 0.3s linear;
 }
 
+/* The Transport bar leads with one job and counts the rest. Deliberately a
+   plain `.chip` at the bar's own muted weight: it is a count, not a state,
+   and the pulsing dot beside it already carries "something is happening". */
+.transport__more {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* ---- the job stack ---- */
+
+/* Slice 16 lets several videos be made at once, so the single `.hero` that
+   used to be "the live job" became a stack of rows. A row is deliberately a
+   quieter sibling of `.hero`, not a second hero: with three of them on screen
+   at once, three 52px percentages and three filled buttons would each be
+   shouting, and the screen would have no focal point at all. Same surface,
+   same border, same radius family - smaller type, a thin `.track` instead of
+   the big number, and a ghost button rather than a filled one. */
+.job-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: 54px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* A queued job has not started: it is waiting for a slot, which is an
+   ordinary state now that work over the cap queues instead of being refused.
+   So it recedes rather than alarms - the same surface one step back, and no
+   progress track at all, because a job with no thread has no progress to
+   report and a 0% bar would imply it had begun and stalled. */
+.job-row--queued {
+  background: var(--surface-2);
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.job-row__thumb {
+  position: relative;
+  width: 54px;
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.job-row__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.job-row__thumb--empty {
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+}
+
+/* A button, because the whole row opens the project - but it must not look
+   like one. `.btn`'s treatment here would put a third bordered control in a
+   row that already has one. */
+.job-row__open {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.job-row__title {
+  font-size: 14.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-row__open:hover .job-row__title {
+  color: var(--accent);
+}
+
+.job-row__meta {
+  gap: 10px;
+  align-items: center;
+}
+
 /* ---- library grid ---- */
 
 /* Multi-column masonry, not CSS Grid. Grid rows are never independent per

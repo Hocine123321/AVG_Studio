@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import {
   apiGet,
   apiPost,
+  getJobs,
   getSettings,
+  type JobInfo,
   type PhaseRecord,
   type ProjectDoc,
   type ProjectsResponse,
@@ -117,6 +119,13 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [startError, setStartError] = useState<string | null>(null);
   const events = useEvents();
+  // Every in-flight job, running or queued (`GET /api/jobs`). A running job
+  // already announces itself over `/ws/events`, which is why `events` alone
+  // used to be enough - but a queued one holds no thread yet and so emits
+  // nothing at all until it starts (see `avg.core.jobs.JobRegistry`'s
+  // docstring). This is the only way the screen learns a queued job exists,
+  // or where in line it is, which is why it is polled rather than pushed.
+  const [jobs, setJobs] = useState<JobInfo[]>([]);
 
   // The running job's own status-bar activity. Registered from the socket
   // rather than in `api.ts`, because a job is not a request: `POST
@@ -170,6 +179,40 @@ export default function App() {
     if (!settings?.onboarded) return;
     void reloadProjects();
   }, [settings?.onboarded, reloadProjects]);
+
+  const reloadJobs = useCallback(async () => {
+    try {
+      const res = await getJobs();
+      setJobs(res.jobs);
+    } catch {
+      // Best-effort, like every other poll in this file (see
+      // `ModelCacheCard.tsx`'s own load/poll pair) - a missed tick just
+      // tries again on the next one rather than surfacing a toast for a
+      // background refresh nobody asked for.
+    }
+  }, []);
+
+  // Self-rescheduling rather than `setInterval`, the same idiom
+  // `ModelCacheCard.tsx` already uses: a `setTimeout` chain can't pile up a
+  // second request on top of one that is still in flight the way a fixed
+  // interval can. Runs continuously once onboarded (not gated on "is
+  // anything running", unlike `ModelCacheCard`'s poll) because a queued job
+  // is invisible over the socket for as long as it stays queued - there is
+  // no event that would tell this loop to start polling.
+  useEffect(() => {
+    if (!settings?.onboarded) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function loop() {
+      await reloadJobs();
+      if (!stopped) timer = setTimeout(loop, 2000);
+    }
+    void loop();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [settings?.onboarded, reloadJobs]);
 
   async function startRender(id: string) {
     setStartError(null);
@@ -283,7 +326,8 @@ export default function App() {
       content = (
         <Home
           projects={live}
-          progress={events.progress}
+          byProject={events.byProject}
+          jobs={jobs}
           onOpen={openProject}
           onRender={openAndRender}
           onCancel={cancelRender}
