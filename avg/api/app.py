@@ -105,6 +105,7 @@ def _default_run_pipeline(
     on_phase_change: Any = None,
     log: Any = None,
     errors: Any = None,
+    render_lease: Any = None,
 ) -> Iterator[Any]:
     """The real `avg.pipeline.runner.run`, behind one more level of
     indirection than every other deferred import in this module.
@@ -134,6 +135,7 @@ def _default_run_pipeline(
         on_phase_change=on_phase_change,
         log=log,
         errors=errors,
+        render_lease=render_lease,
     )
 
 
@@ -899,6 +901,7 @@ def create_app(
                     on_phase_change=lambda: save_project(project),
                     log=take_log,
                     errors=app.state.error_store,
+                    render_lease=app.state.render_lease,
                 ):
                     _log(event)
                     _emit(event)
@@ -1272,6 +1275,30 @@ def create_app(
             take_log.error("render stderr", detail=text)
 
         def _run_render(req: RenderRequest) -> None:
+            # One render at a time, however many pipelines are in flight.
+            # `MediaEngine` spawns a child process, and two of those would
+            # contend for the same cores and the same vendored ffmpeg. The
+            # pipeline's own Render phase takes this same lease (see
+            # `avg.pipeline.phases.render`), so a `/render` job and a
+            # full-pipeline run line up against each other and not just
+            # against their own kind.
+            #
+            # Held across the WHOLE drain and released only by leaving this
+            # `with`. Releasing when the last event arrives rather than when
+            # the generator finishes would let a second child be spawned
+            # while the first was still being joined.
+            if app.state.render_lease.locked():
+                _emit(
+                    ProgressEvent(
+                        project_id=project_id,
+                        percent=0,
+                        message="Waiting for another render to finish...",
+                    )
+                )
+            with app.state.render_lease:
+                _drain_render(req)
+
+        def _drain_render(req: RenderRequest) -> None:
             # A plain `for` loop that is never broken out of early - this is
             # what guarantees MediaEngine.render's generator (and the
             # child-process join in its `finally`) runs to completion even

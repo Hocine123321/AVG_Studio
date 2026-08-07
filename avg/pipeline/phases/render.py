@@ -171,6 +171,48 @@ class RenderPhase:
         return has_images and has_audio
 
     def run(self, ctx: PhaseContext) -> None:
+        """Render this project, waiting first if another render holds the lease.
+
+        Slice 16 lets several pipelines run at once, but this phase spawns a
+        child process, and two of those would contend for the same cores and
+        the same vendored ffmpeg. So everything before Render overlaps freely
+        and the jobs line up here.
+
+        The lease is held across the WHOLE of `_render`, not just the first
+        drain. That phase does two separate pieces of child-spawning work -
+        the base encode, then the overlay/caption composite - and releasing
+        between them would let a second job spawn its child in the gap, which
+        is exactly the thing being prevented.
+
+        `ctx.render_lease` is `None` in unit contexts and in any run that
+        cannot collide with another; that simply means there is nothing to
+        wait for.
+        """
+        # `getattr`, not `ctx.render_lease`: this phase's own tests build a
+        # bare `SimpleNamespace` context with only the fields they need, the
+        # same reason `ctx.channel` is read defensively below.
+        lease = getattr(ctx, "render_lease", None)
+        if lease is None:
+            self._render(ctx)
+            return
+
+        # Said before blocking, not after: a job that sits here for several
+        # minutes with a silent progress bar reads as a hang. `locked()` can
+        # go stale between the check and the acquire, but the cost of that
+        # race is one unnecessary sentence, never a missed render.
+        if lease.locked():
+            ctx.emit(
+                ProgressEvent(
+                    project_id=ctx.project.id,
+                    percent=0,
+                    message="Waiting for another render to finish...",
+                )
+            )
+
+        with lease:
+            self._render(ctx)
+
+    def _render(self, ctx: PhaseContext) -> None:
         request = RenderRequest(
             project_folder=ctx.project.folder,
             aspect_ratio=ctx.project.aspect_ratio,

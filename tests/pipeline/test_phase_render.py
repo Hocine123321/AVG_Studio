@@ -13,6 +13,7 @@ sequence the real one does.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -309,3 +310,146 @@ def test_a_failing_part_two_fails_the_phase(tmp_path, monkeypatch):
 
     with pytest.raises(AvgError):
         render_mod.RenderPhase().run(ctx)
+
+
+def test_two_renders_never_overlap(tmp_path, monkeypatch):
+    """One child process at a time, however many pipelines are in flight.
+
+    The interleaving is forced rather than hoped for: the first render blocks
+    inside its own generator until the test releases it, and the test waits
+    until the second thread has genuinely reached `RenderPhase.run` before
+    letting go. Without the lease the second render is inside `engine.render`
+    while the first still is, and `peak` reaches 2. A test that merely started
+    two threads and asserted `peak <= 1` would pass even with no lease at all,
+    because the first would usually finish before the second began.
+    """
+    import threading
+
+    lease = threading.Lock()
+    concurrent = 0
+    peak = 0
+    guard = threading.Lock()
+    first_is_rendering = threading.Event()
+    let_first_finish = threading.Event()
+    second_has_started = threading.Event()
+
+    def events(request, project_id):
+        nonlocal concurrent, peak
+        with guard:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        try:
+            if project_id == "p-first":
+                first_is_rendering.set()
+                # Held open until the test has proved the second thread is
+                # trying to render too. If the lease is missing, that is the
+                # window in which `peak` becomes 2.
+                let_first_finish.wait(timeout=10)
+            out = request.project_folder / "master_output.mp4"
+            out.write_bytes(b"video-bytes")
+            yield RenderFinished(project_id=project_id, output=out, size_bytes=11)
+        finally:
+            with guard:
+                concurrent -= 1
+
+    monkeypatch.setattr(render_mod, "MediaEngine", lambda: _Engine(events))
+
+    def _run(project_id: str, folder: Path) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        ctx, _ = _ctx(folder)
+        ctx.project.id = project_id
+        ctx.render_lease = lease
+        if project_id == "p-second":
+            second_has_started.set()
+        render_mod.RenderPhase().run(ctx)
+
+    first = threading.Thread(target=_run, args=("p-first", tmp_path / "a"))
+    second = threading.Thread(target=_run, args=("p-second", tmp_path / "b"))
+
+    first.start()
+    assert first_is_rendering.wait(timeout=10), "the first render never started"
+    second.start()
+    # The second thread is now inside `run` and blocked on the lease - it
+    # cannot be inside `engine.render`, which is the whole claim.
+    assert second_has_started.wait(timeout=10)
+    let_first_finish.set()
+
+    first.join(timeout=10)
+    second.join(timeout=10)
+    assert not first.is_alive() and not second.is_alive()
+    assert peak <= 1, f"two renders overlapped (peak={peak})"
+
+
+def test_a_failed_render_still_releases_the_lease(tmp_path, monkeypatch):
+    """A leaked lease would stop every later render in the process, silently -
+    worse than the failure that caused it."""
+    import threading
+
+    lease = threading.Lock()
+
+    def events(request, project_id):
+        yield PhaseFailed(project_id=project_id, phase="render", kind=ErrorKind.bug, message="boom")
+
+    monkeypatch.setattr(render_mod, "MediaEngine", lambda: _Engine(events))
+    ctx, _ = _ctx(tmp_path)
+    ctx.render_lease = lease
+
+    with pytest.raises(AvgError):
+        render_mod.RenderPhase().run(ctx)
+
+    assert not lease.locked(), "the lease survived a failed render"
+
+
+def test_a_cancelled_render_still_releases_the_lease(tmp_path, monkeypatch):
+    import threading
+
+    lease = threading.Lock()
+
+    def events(request, project_id):
+        yield RenderCancelled(project_id=project_id)
+
+    monkeypatch.setattr(render_mod, "MediaEngine", lambda: _Engine(events))
+    ctx, _ = _ctx(tmp_path)
+    ctx.render_lease = lease
+
+    with pytest.raises(AvgError):
+        render_mod.RenderPhase().run(ctx)
+
+    assert not lease.locked(), "the lease survived a cancelled render"
+
+
+def test_a_render_says_it_is_waiting_for_another(tmp_path, monkeypatch):
+    """A job that sits for minutes with a silent progress bar reads as a hang."""
+    import threading
+
+    lease = threading.Lock()
+    lease.acquire()  # somebody else is rendering
+
+    def events(request, project_id):
+        out = request.project_folder / "master_output.mp4"
+        out.write_bytes(b"video-bytes")
+        yield RenderFinished(project_id=project_id, output=out, size_bytes=11)
+
+    monkeypatch.setattr(render_mod, "MediaEngine", lambda: _Engine(events))
+    ctx, emitted = _ctx(tmp_path)
+    ctx.render_lease = lease
+
+    thread = threading.Thread(target=render_mod.RenderPhase().run, args=(ctx,))
+    thread.start()
+    try:
+        # The message is emitted before blocking, so it is observable while
+        # the render is still waiting rather than only afterwards.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if any(
+                isinstance(e, ProgressEvent) and "Waiting for another render" in e.message for e in list(emitted)
+            ):
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("a waiting render never said so")
+    finally:
+        lease.release()
+        thread.join(timeout=10)
+
+    assert not thread.is_alive()

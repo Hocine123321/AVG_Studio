@@ -84,6 +84,20 @@ class PhaseContext:
     #: out worse than you asked" on the same screen as real failures without
     #: any phase reaching into `app.state`.
     errors: Any = None
+    #: The app's render lease (a `threading.Lock`), or `None` in unit contexts
+    #: and in any run that cannot collide with another.
+    #:
+    #: Slice 16 lets several pipelines run at once, but rendering still spawns
+    #: a child process per render, and two of those at a time would contend for
+    #: the same cores and the same vendored ffmpeg. The Render phase is the one
+    #: place that has to line up, so it holds this lock for the whole of its
+    #: work - see `avg.pipeline.phases.render`.
+    #:
+    #: It arrives here rather than being read from `app.state` for the same
+    #: reason `log` and `errors` do: `avg/pipeline/` is below the API layer and
+    #: must not reach up into it. `None` means "nothing to wait for", which is
+    #: what a unit test or a single-run context wants.
+    render_lease: Any = None
 
 
 @runtime_checkable
