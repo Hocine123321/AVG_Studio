@@ -103,6 +103,7 @@ def _default_run_pipeline(
     on_phase_change: Any = None,
     log: Any = None,
     errors: Any = None,
+    render_lease: Any = None,
 ) -> Any:
     """The real `avg.pipeline.runner.run`, wrapped for the same reason
     `avg.api.app._default_run_pipeline` is: `tests/api/test_routes_takes.py`
@@ -129,6 +130,7 @@ def _default_run_pipeline(
         on_phase_change=on_phase_change,
         log=log,
         errors=errors,
+        render_lease=render_lease,
     )
 
 
@@ -510,10 +512,10 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     # `app.state.jobs` registry, never a second job mechanism. Two runs of
     # one project would fight over the same folder and the same
     # `project.json`, so this stays a 409 at any cap.
-    if app_state.jobs.is_running(project_id):
+    if app_state.jobs.has_job(project_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"project {project_id!r} is already running",
+            detail=f"project {project_id!r} already has work in flight",
         )
 
     _validate_override_ids(body.overrides)
@@ -621,6 +623,10 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
                 # on `project.takes[...]` before this callback ever runs -
                 # this just needs to write the ONE real `project.json`.
                 on_phase_change=lambda: save_project(project),
+                # Without this a take run rendered with no lease at all, and
+                # a take is the "change a setting and re-run" flow - the most
+                # common way this app renders. Two children could overlap.
+                render_lease=app_state.render_lease,
             ):
                 if isinstance(event, (PhaseFailed, PipelineCancelled)):
                     success = False

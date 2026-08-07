@@ -1,5 +1,6 @@
 import json
 import threading
+from pathlib import Path
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -703,3 +704,96 @@ def test_the_jobs_route_shows_running_and_queued_work(client):
 
 def test_the_jobs_route_needs_the_token(client):
     assert client.get("/api/jobs").status_code == 401
+
+
+def test_every_render_route_hands_the_phase_the_app_s_lease():
+    """The wiring test whose absence let a whole render path go unserialised.
+
+    `tests/pipeline/test_phase_render.py` proves the lease works, but it builds
+    its own local lock and assigns `ctx.render_lease` by hand - so it passed
+    happily while `routes_takes` forwarded no lease at all and take runs, the
+    most common way this app renders, span their ffmpeg child with nothing
+    holding them back.
+
+    This asserts the connection instead of the mechanism: every module that
+    starts a pipeline must pass the app's OWN lease object down to the phase.
+    """
+    import inspect
+
+    from avg.api import app as app_mod
+    from avg.api import routes_takes
+
+    for module in (app_mod, routes_takes):
+        source = inspect.getsource(module)
+        assert "render_lease=" in source, f"{module.__name__} never passes a render lease"
+        assert "render_lease: Any = None" in source, (
+            f"{module.__name__}'s pipeline wrapper does not accept a render lease, "
+            "so anything it starts renders unserialised"
+        )
+
+
+def test_the_take_wrapper_forwards_the_lease_it_is_given():
+    """`routes_takes` has its own `_default_run_pipeline` wrapper, separate
+    from `app.py`'s. It accepted no lease and forwarded none, so every take
+    run reached `RenderPhase` with `ctx.render_lease is None` and took the
+    "nothing to wait for" branch."""
+    import threading
+
+    from avg.api import routes_takes
+    from avg.core.models import ProjectDoc
+
+    lease = threading.Lock()
+    captured: dict[str, object] = {}
+
+    def fake_run(project, **kwargs):
+        captured.update(kwargs)
+        return iter(())
+
+    import avg.pipeline.runner as runner_mod
+
+    original = runner_mod.run
+    runner_mod.run = fake_run
+    try:
+        routes_takes._default_run_pipeline(
+            ProjectDoc(id="p", title="T", folder=Path("."), created="2026-08-07T00:00:00"),
+            channel=None,
+            render_lease=lease,
+        )
+    finally:
+        runner_mod.run = original
+
+    assert captured.get("render_lease") is lease
+
+
+def test_a_second_submission_cannot_destroy_a_queued_job(tmp_path, monkeypatch):
+    """`add` is keyed by project id, so a submission for a project that was
+    merely QUEUED used to pass an `is_running` guard and overwrite the queued
+    entry - the first job's thread never started, its worker's `finally` never
+    ran, and for a take the row existed on disk having never run a phase."""
+    release = threading.Event()
+
+    def run(project, **kwargs):
+        release.wait(timeout=5)
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, run)
+    r = client.post(
+        "/api/settings/values", headers={"X-AVG-Token": "t0k"}, json={"values": {"max_parallel_jobs": "1"}}
+    )
+    assert r.status_code == 200
+
+    try:
+        client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "A"})
+        b = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "B"})
+        b_id = b.json()["id"]
+        queued = client.app.state.jobs.get(b_id)
+        assert queued is not None and queued.queued is True
+
+        again = client.post(f"/api/projects/{b_id}/resume", headers={"X-AVG-Token": "t0k"}, json={"from_phase": "render"})
+        assert again.status_code == 409
+        assert "already has work in flight" in again.json()["detail"]
+        # The queued job is still the same object, not silently replaced.
+        assert client.app.state.jobs.get(b_id) is queued
+    finally:
+        release.set()
+        _wait_until_gone(client, b_id)

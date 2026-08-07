@@ -1044,10 +1044,10 @@ def create_app(
         # different project starting concurrently is exactly what the job
         # cap (`app.state.jobs`, `max_parallel_jobs`) now allows.
         project = new_project(topic, effective_channel, app.state.output_root)
-        if app.state.jobs.is_running(project.id):
+        if app.state.jobs.has_job(project.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"project {project.id!r} is already running",
+                detail=f"project {project.id!r} already has work in flight",
             )
         app.state.projects[project.id] = project
 
@@ -1101,10 +1101,10 @@ def create_app(
                 detail=f"unknown phase {body.from_phase!r}",
             )
 
-        if app.state.jobs.is_running(project.id):
+        if app.state.jobs.has_job(project.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"project {project.id!r} is already running",
+                detail=f"project {project.id!r} already has work in flight",
             )
 
         # Resolved the same way `POST /api/projects` does it - id first, then
@@ -1195,10 +1195,10 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="unknown project")
 
-        if app.state.jobs.is_running(project_id):
+        if app.state.jobs.has_job(project_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"project {project_id!r} is already running",
+                detail=f"project {project_id!r} already has work in flight",
             )
 
         # The active channel's render_threads, when a channel is active -

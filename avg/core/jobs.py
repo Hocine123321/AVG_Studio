@@ -113,3 +113,19 @@ class JobRegistry:
     def is_running(self, project_id: str) -> bool:
         job = self.get(project_id)
         return job is not None and not job.queued and self._alive(job)
+
+    def is_queued(self, project_id: str) -> bool:
+        job = self.get(project_id)
+        return job is not None and job.queued
+
+    def has_job(self, project_id: str) -> bool:
+        """Whether this project has work in flight at all, running or waiting.
+
+        The 409 guards must ask this rather than `is_running`. `add` is keyed
+        by project id, so a second submission for a project that is merely
+        QUEUED used to pass an `is_running` guard and then overwrite the
+        queued entry - the first job's thread was never started, its worker's
+        `finally` never ran, and for a take the row existed on disk having
+        never executed a phase.
+        """
+        return self.is_running(project_id) or self.is_queued(project_id)
