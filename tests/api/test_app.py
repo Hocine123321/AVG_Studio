@@ -639,9 +639,20 @@ def test_a_job_beyond_the_cap_is_queued_not_refused(tmp_path, monkeypatch):
     assert client.app.state.jobs.get(c_id) is None
 
 
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
 def test_a_failed_job_frees_its_slot(tmp_path, monkeypatch):
     """A leaked registry entry would permanently consume a slot - the worst
-    failure this refactor could introduce."""
+    failure this refactor could introduce.
+
+    Both jobs started here are made to fail on purpose, and the worker's
+    `except BaseException: ... raise` (deliberate - it observes, it does not
+    swallow) means each one's exception really does cross the thread
+    boundary and reach pytest's thread-exception hook. That is expected
+    noise from this test's own premise, not a leak to fix in the worker -
+    the filter above says so, and both jobs are joined below so that noise
+    is attributed to this test's own window rather than surfacing while an
+    unrelated, later test happens to be running.
+    """
 
     def failing_run(project, **kwargs):
         raise RuntimeError("boom")
@@ -662,3 +673,9 @@ def test_a_failed_job_frees_its_slot(tmp_path, monkeypatch):
     assert client.app.state.jobs.get(project_id) is None
     again = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T2"})
     assert again.status_code == 201
+    # Joined too, for the same reason as the first job: a started-but-not-
+    # joined job here would still be running (and still fail) after this
+    # test function returns, and its exception would then surface inside
+    # whichever later test happened to be executing when the background
+    # thread actually finished.
+    _join_job(client, again.json()["id"])
