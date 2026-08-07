@@ -276,8 +276,8 @@ def test_a_second_suggest_while_one_runs_is_refused(client, monkeypatch):
         release.set()
         client.app.state.suggest_thread.join(timeout=5)
 
-    # Its own slot, never the render slot.
-    assert client.app.state.render_thread is None
+    # Its own slot, never the job registry.
+    assert client.app.state.jobs.running() == []
 
 
 def test_an_unknown_suggest_kind_is_refused(client):

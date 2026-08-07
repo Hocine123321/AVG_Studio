@@ -186,9 +186,9 @@ def test_a_pipeline_run_advances_the_current_takes_records(tmp_path, monkeypatch
     assert created.status_code == 201, created.text
     project_id = created.json()["id"]
 
-    thread = client.app.state.render_thread
-    if thread is not None:
-        thread.join(timeout=5)
+    job = client.app.state.jobs.get(project_id)
+    if job is not None:
+        job.thread.join(timeout=5)
 
     takes = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     current = next(t for t in takes["takes"] if t["id"] == takes["current_take_id"])
@@ -336,9 +336,9 @@ def test_a_phase_failure_is_recorded_in_the_error_store(tmp_path, monkeypatch):
 
     created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
     assert created.status_code == 201
-    thread = client.app.state.render_thread
-    if thread is not None:
-        thread.join(timeout=10)
+    job = client.app.state.jobs.get(created.json()["id"])
+    if job is not None:
+        job.thread.join(timeout=10)
 
     errors = client.get("/api/errors", headers={"X-AVG-Token": "t0k"}).json()["errors"]
     entry = next(e for e in errors if "boom" in e["summary"])
@@ -372,10 +372,29 @@ def _pipeline_client(tmp_path, monkeypatch, run):
     return client
 
 
-def _join_job(client):
-    thread = client.app.state.render_thread
-    if thread is not None:
-        thread.join(timeout=10)
+def _join_job(client, project_id):
+    job = client.app.state.jobs.get(project_id)
+    if job is not None:
+        job.thread.join(timeout=10)
+
+
+def _wait_until_gone(client, project_id, timeout=10.0):
+    """Poll until a job has been removed from the registry.
+
+    A queued job's `Job.thread` has never been started - only the promoter
+    (`_start_next_queued`) calls `.start()` on it, from another thread,
+    whenever it likes. Calling `.join()` on it before that happens raises
+    `RuntimeError: cannot join thread before it is started`, so a job that
+    might still be queued has to be waited on by polling the registry
+    instead of joining its thread directly.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if client.app.state.jobs.get(project_id) is None:
+            return
+        time.sleep(0.01)
 
 
 def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
@@ -390,7 +409,7 @@ def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client)
+    _join_job(client, project_id)
 
     before = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     res = client.post(
@@ -399,7 +418,7 @@ def test_resuming_does_not_create_a_take(tmp_path, monkeypatch):
         json={"from_phase": "visuals"},
     )
     assert res.status_code == 202
-    _join_job(client)
+    _join_job(client, project_id)
 
     after = client.get(f"/api/projects/{project_id}/takes", headers={"X-AVG-Token": "t0k"}).json()
     assert [t["id"] for t in after["takes"]] == [t["id"] for t in before["takes"]]
@@ -419,14 +438,14 @@ def test_resume_starts_from_the_phase_it_was_given(tmp_path, monkeypatch):
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client)
+    _join_job(client, project_id)
 
     client.post(
         f"/api/projects/{project_id}/resume",
         headers={"X-AVG-Token": "t0k"},
         json={"from_phase": "screen_text"},
     )
-    _join_job(client)
+    _join_job(client, project_id)
 
     assert seen == [0, 6]  # the create started at Brief, the resume at Screen Text
 
@@ -436,7 +455,7 @@ def test_resume_rejects_a_phase_that_is_not_in_the_registry(tmp_path, monkeypatc
     project_id = client.post(
         "/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"}
     ).json()["id"]
-    _join_job(client)
+    _join_job(client, project_id)
 
     res = client.post(
         f"/api/projects/{project_id}/resume",
@@ -448,8 +467,10 @@ def test_resume_rejects_a_phase_that_is_not_in_the_registry(tmp_path, monkeypatc
 
 
 def test_resume_409s_while_a_job_runs(tmp_path, monkeypatch):
-    """One job at a time is enforced by the single render_thread slot, and
-    this route must not be the exception that quietly allows two."""
+    """The same project running twice is still refused - `app.state.jobs`
+    tracks it by project id now, but two runs of ONE project would still
+    fight over the same folder and the same project.json, and this route
+    must not be the exception that quietly allows it."""
     release = threading.Event()
 
     def slow_run(project, **kwargs):
@@ -469,7 +490,7 @@ def test_resume_409s_while_a_job_runs(tmp_path, monkeypatch):
     assert res.status_code == 409
 
     release.set()
-    _join_job(client)
+    _join_job(client, project_id)
 
 
 def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
@@ -483,3 +504,161 @@ def test_resume_404s_for_an_unknown_project(tmp_path, monkeypatch):
 def test_resume_requires_a_token(tmp_path, monkeypatch):
     client = _pipeline_client(tmp_path, monkeypatch, lambda project, **kwargs: iter(()))
     assert client.post("/api/projects/x/resume", json={"from_phase": "visuals"}).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Slice 16: several jobs at once, capped, with the same project still refused
+# ---------------------------------------------------------------------------
+
+
+def test_the_same_project_twice_is_still_a_conflict(tmp_path, monkeypatch):
+    """Unchanged at any cap: two runs of one project would fight over the
+    same folder and the same project.json - that stays a 409 regardless of
+    `max_parallel_jobs`. This 409 has nothing to do with capacity; it is the
+    identity guard `app.state.jobs.is_running(project_id)` enforces on its
+    own, and it is checked from a second route (`/render`) here to show it
+    is not merely the resume-vs-resume case `test_resume_409s_while_a_job_
+    runs` already covers."""
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_run(project, **kwargs):
+        started.set()
+        release.wait(timeout=5)
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, slow_run)
+    try:
+        created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
+        assert created.status_code == 201
+        project_id = created.json()["id"]
+        assert started.wait(timeout=5)
+
+        again = client.post(f"/api/projects/{project_id}/render", headers={"X-AVG-Token": "t0k"})
+        assert again.status_code == 409
+        assert project_id in again.json()["detail"]
+    finally:
+        release.set()
+        _join_job(client, project_id)
+
+
+def test_a_cap_of_one_never_runs_two_jobs_at_once(tmp_path, monkeypatch):
+    """What `max_parallel_jobs=1` actually preserves from the old single-slot
+    behaviour is that two jobs never run AT THE SAME TIME - not the literal
+    409 status code. A second, DIFFERENT project submitted while the first
+    is still running is accepted (201) and QUEUED rather than refused, then
+    starts only once the first job's slot frees. See the report for why this
+    reads "including the 409" in the brief and does not literally do that -
+    a queued job surviving instead of a lost button press is the intended
+    trade, made explicit and resolved before this test was written."""
+    running: list[str] = []
+    max_concurrent: list[int] = []
+    release_first = threading.Event()
+    first_started = threading.Event()
+
+    def run(project, **kwargs):
+        running.append(project.id)
+        max_concurrent.append(len(running))
+        if len(running) == 1:
+            first_started.set()
+            release_first.wait(timeout=5)
+        try:
+            return iter(())
+        finally:
+            running.remove(project.id)
+
+    client = _pipeline_client(tmp_path, monkeypatch, run)
+    r = client.post(
+        "/api/settings/values", headers={"X-AVG-Token": "t0k"}, json={"values": {"max_parallel_jobs": "1"}}
+    )
+    assert r.status_code == 200
+
+    try:
+        first = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "First"})
+        assert first.status_code == 201
+        assert first_started.wait(timeout=5)
+
+        second = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "Second"})
+        # Accepted, not refused - it is queued, not started.
+        assert second.status_code == 201
+        second_id = second.json()["id"]
+        job = client.app.state.jobs.get(second_id)
+        assert job is not None
+        assert job.queued is True
+
+        release_first.set()
+        _join_job(client, first.json()["id"])
+        _join_job(client, second_id)
+    finally:
+        release_first.set()
+
+    # The two jobs were never both "running" at once, whatever order the
+    # scheduler happened to interleave them in.
+    assert max(max_concurrent) == 1
+
+
+def test_a_job_beyond_the_cap_is_queued_not_refused(tmp_path, monkeypatch):
+    """The 409 now means only "this project is already running". A third
+    project at a cap of 2 waits its turn instead of being turned away."""
+    release = threading.Event()
+    started = threading.Event()
+    start_count = {"n": 0}
+
+    def run(project, **kwargs):
+        start_count["n"] += 1
+        started.set()
+        release.wait(timeout=5)
+        return iter(())
+
+    client = _pipeline_client(tmp_path, monkeypatch, run)
+    r = client.post(
+        "/api/settings/values", headers={"X-AVG-Token": "t0k"}, json={"values": {"max_parallel_jobs": "2"}}
+    )
+    assert r.status_code == 200
+
+    try:
+        a = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "A"})
+        b = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "B"})
+        assert a.status_code == 201 and b.status_code == 201
+        assert client.app.state.jobs.count_running() == 2
+
+        c = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "C"})
+        assert c.status_code == 201
+        c_id = c.json()["id"]
+        job = client.app.state.jobs.get(c_id)
+        assert job is not None
+        assert job.queued is True
+
+        release.set()
+        for created in (a, b, c):
+            _join_job(client, created.json()["id"])
+    finally:
+        release.set()
+
+    # The third job was promoted once a slot freed, without a second request.
+    assert client.app.state.jobs.get(c_id) is None
+
+
+def test_a_failed_job_frees_its_slot(tmp_path, monkeypatch):
+    """A leaked registry entry would permanently consume a slot - the worst
+    failure this refactor could introduce."""
+
+    def failing_run(project, **kwargs):
+        raise RuntimeError("boom")
+
+    client = _pipeline_client(tmp_path, monkeypatch, failing_run)
+    r = client.post(
+        "/api/settings/values", headers={"X-AVG-Token": "t0k"}, json={"values": {"max_parallel_jobs": "1"}}
+    )
+    assert r.status_code == 200
+
+    created = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T"})
+    assert created.status_code == 201
+    project_id = created.json()["id"]
+    _join_job(client, project_id)
+
+    # The failed job's slot was freed, not leaked - a second, different
+    # project starts cleanly with no manual cleanup.
+    assert client.app.state.jobs.get(project_id) is None
+    again = client.post("/api/projects", headers={"X-AVG-Token": "t0k"}, json={"topic": "T2"})
+    assert again.status_code == 201

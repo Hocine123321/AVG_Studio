@@ -163,6 +163,25 @@ SETTINGS: list[SettingSpec] = [
         invalidates=None,
     ),
     SettingSpec(
+        id="max_parallel_jobs",
+        group="app",
+        label="Videos at once",
+        help=(
+            "How many videos may be made at the same time. Read by "
+            "`avg/api/app.py`. Renders always take turns whatever this says - "
+            "there is one render engine. Raise it only if your providers are "
+            "not rate-limiting you. Nothing is ever refused for being over "
+            "the limit: a job past it waits and starts when a slot frees, so "
+            "1 means the app makes videos one at a time, in the order you "
+            "asked for them."
+        ),
+        type="choice",
+        default="2",
+        scope="app",
+        choices=["1", "2", "3", "4"],
+        invalidates=None,
+    ),
+    SettingSpec(
         id="settings_source",
         group="app",
         label="This channel's settings",

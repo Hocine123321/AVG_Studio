@@ -72,7 +72,9 @@ catches it.
 
 **`create_app(token, output_root, ...)` is the only construction entry point.** No module-level globals; every test builds a fully isolated instance, and the optional `thumb_cache_dir` / `settings_path` / `channels_dir` / `secrets_path` overrides exist so tests never touch the real `%APPDATA%` / `%LOCALAPPDATA%`.
 
-**One job at a time.** `app.state.render_thread` is a single slot shared by full-pipeline runs and `/render` jobs; a second start gets a 409.
+**Several jobs at once, but one render.** `app.state.jobs` is a `JobRegistry` — the single slot `app.state.render_thread` used to be is gone. `max_parallel_jobs` (default 2) caps how many pipelines run concurrently; a job over the cap is **queued, never refused**, and starts when a slot frees. A cap of `1` therefore means one video at a time in the order asked for, not a 409. The 409 that remains is a different guard entirely: starting the **same** project twice, which would have two runners writing one `project.json`, and that refuses at any cap.
+
+**Renders still serialise.** `app.state.engine` is one `MediaEngine` tracking one child process, so however many pipelines are in flight, the render phase takes turns behind a lease. Two renders at once is not a goal and must not become possible. And a drain loop is still never broken out of early — that is what guarantees the child process gets joined.
 
 ### Key single-sources-of-truth
 

@@ -168,8 +168,8 @@ def test_a_second_paid_preview_while_one_runs_is_refused(client, monkeypatch):
         release.set()
         worker.join(timeout=5)
 
-    # The render slot must be untouched by any preview.
-    assert client.app.state.render_thread is None
+    # The job registry must be untouched by any preview.
+    assert client.app.state.jobs.running() == []
 
 
 def test_two_free_previews_requested_together_both_succeed(client, monkeypatch):

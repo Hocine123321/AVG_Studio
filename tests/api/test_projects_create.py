@@ -203,17 +203,16 @@ def test_create_override_never_persists_to_the_channel_document(client, paths):
 
 
 def _wait_for_idle(client: TestClient) -> None:
-    """Wait for the running pipeline job to finish.
+    """Wait for every currently running job to finish.
 
-    One job at a time is the documented rule (`app.state.render_thread`), so a
-    second create while the first is still running is a 409 BY DESIGN. Tests
-    that want two projects have to let the first job end rather than relying
-    on it happening to be quick - which is what they did until 2026-07-30,
-    when a job that took a few milliseconds longer turned them red.
+    Several jobs can be in flight at once now (`app.state.jobs`, capped by
+    `max_parallel_jobs`), not the single `render_thread` this used to join -
+    so this joins all of them. Kept for tests that just want a clean slate
+    before their next assertion, without caring whether the cap let two jobs
+    overlap.
     """
-    thread = client.app.state.render_thread
-    if thread is not None:
-        thread.join(timeout=10)
+    for job in list(client.app.state.jobs.running()):
+        job.thread.join(timeout=10)
 
 
 def test_two_creates_from_the_same_topic_get_distinct_projects(client):
@@ -259,7 +258,14 @@ def test_create_starts_the_pipeline_and_streams_its_events_over_the_socket(clien
         assert second["phase"] == "brief"
 
 
-def test_a_second_create_while_one_is_running_is_409(client, monkeypatch):
+def test_a_second_different_project_may_run_while_the_first_is_still_going(client, monkeypatch):
+    """Slice 16 deliberately inverts the old single-slot 409 for a
+    DIFFERENT project - the default cap is 2, so a second, distinct project
+    starting while the first is still running now succeeds. `POST
+    /api/projects` always creates a brand new project id, so the "same
+    project twice" conflict this route used to guard against cannot arise
+    here at all; that guard is exercised where it can - resume and /render
+    (see `tests/api/test_app.py`) - and by `avg/core/jobs.py`'s own tests."""
     started = threading.Event()
     release = threading.Event()
 
@@ -278,9 +284,11 @@ def test_a_second_create_while_one_is_running_is_409(client, monkeypatch):
         assert started.wait(timeout=5)
 
         r2 = client.post("/api/projects", headers=AUTH, json={"topic": "Second"})
-        assert r2.status_code == 409
+        assert r2.status_code == 201
+        assert r1.json()["id"] != r2.json()["id"]
     finally:
         release.set()
+        _wait_for_idle(client)
 
 
 def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
@@ -301,8 +309,10 @@ def test_cancel_route_cancels_a_running_pipelines_token(client, monkeypatch):
         assert started.wait(timeout=5)
 
         client.post(f"/api/projects/{created['id']}/cancel", headers=AUTH)
-        assert client.app.state.pipeline_cancel_token is not None
-        assert client.app.state.pipeline_cancel_token.cancelled is True
+        job = client.app.state.jobs.get(created["id"])
+        assert job is not None
+        assert job.cancel_token is not None
+        assert job.cancel_token.cancelled is True
     finally:
         release.set()
 

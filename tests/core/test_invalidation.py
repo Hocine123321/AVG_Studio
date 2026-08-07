@@ -48,12 +48,13 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     `app` group's `motion_scale`, `startup_check` and the channel-scoped
     `settings_source`, and 65 before the Slice 14 review's Important 4
     added the `overlay` group's three brand colours (`overlay_accent1`,
-    `overlay_accent2`, `overlay_highlight`). The count is kept as a
+    `overlay_accent2`, `overlay_highlight`), and Slice 16 added
+    `max_parallel_jobs`. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 65
+    assert len(SETTINGS) == 66
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 
