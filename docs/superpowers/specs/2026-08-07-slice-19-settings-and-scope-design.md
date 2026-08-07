@@ -145,28 +145,65 @@ the correct, phase-aware thing.
 that opens the new-take panel, and the header CTA, which was already made
 phase-aware and reads `Run again · <phase>`.
 
-### 5.2 Wizard settings must beat channel settings
+### 5.2 The aspect ratio follows the video form
 
-Investigated rather than assumed, and the wiring is **not** the problem: the
-wizard sends `overrides`, `api.ts` posts them, `create_project` validates each
-against the catalogue and folds them onto a throwaway `channel.model_copy`, and
-the phases read `ctx.channel.settings` — no phase re-reads the channel from
-disk.
+This was originally written up as "wizard settings are ignored, the channel
+wins". **That diagnosis was wrong**, and the user corrected it: the override
+mechanism works. The real defect is narrower and worse.
 
-**The prime suspect is a divergent base.** `create_project` folds the overrides
-onto `channel.settings` — the channel's own document — while the Settings screen
-resolves values through `_channel_values`, which since Slice 12 reads
-`channel_defaults.json` whole when the channel follows global. When those two
-differ, the wizard displays one set of values, folds the user's change onto a
-different set, and the result looks like "my choice was ignored, the channel
-won".
+`video_form` and `aspect_ratio` are two independent settings that nothing ties
+together:
 
-If that is confirmed, **§2.3 is the fix**: one resolver, used by the settings
-route and the create route alike. The bug and the architecture change are the
-same work, which is the main argument for doing them in one slice.
+- `video_form` (`shortform` | `longform`) is read in exactly one place —
+  `avg/pipeline/phases/_common.py`, which expands it into the brief and script
+  prompts. **It shapes the writing and nothing else.**
+- `aspect_ratio` (`9:16` | `16:9` | `1:1`) is read by
+  `avg/pipeline/create.py`, which sets the project's actual frame.
 
-The plan must confirm the cause with a failing test before changing anything.
-The hypothesis is strong, not proven.
+So choosing long-form produces a long-form *script* rendered into a 9:16
+*frame*, and the only way to get a wide video is to know that a second,
+separate setting also has to be changed. The form's own help text says
+"Short-form (9:16 vertical) or long-form (16:9 horizontal)" — it already claims
+to decide the ratio, and does not.
+
+**The fix: remove `aspect_ratio` from the catalogue and derive it from
+`video_form`.** `shortform → 9:16`, `longform → 16:9`. One setting, one
+meaning, and the help text becomes true.
+
+#### What this costs, deliberately
+
+**`1:1` becomes unreachable.** It is a current choice with no corresponding
+form, so deriving from the form drops it. That is a real capability removal, not
+an oversight — flagged here so it is a decision rather than a surprise. If
+square output matters, the honest shape is a third form, not a second setting.
+
+#### Three consequences to build, not discover
+
+1. **Invalidation is already correct, by luck — confirm it rather than assume
+   it.** `aspect_ratio` invalidates `visuals`; `video_form` invalidates `brief`.
+   Since `brief` is phase 0, changing the form already sweeps every later phase
+   including `visuals`, so images are not reused at the wrong ratio. A test must
+   pin this, because it is currently a coincidence of ordering rather than
+   anything the code states.
+
+2. **Old takes carry the dead key.** `avg/api/routes_takes.py` both reads
+   `take.settings_snapshot["aspect_ratio"]` when restoring a take and writes it
+   when creating one. Snapshots taken before this change will still contain it,
+   and a take must keep opening. Read it if present, stop writing it, derive it
+   when absent.
+
+3. **Existing channel documents keep an inert `aspect_ratio` key.** Harmless —
+   `_channel_values` iterates the catalogue, so a key with no spec is simply
+   never read — but worth stating so nobody removes it in a panic later.
+
+#### One observation, not a diagnosis
+
+While investigating, it emerged that `create_project` folds overrides onto
+`channel.settings` while the Settings screen resolves through `_channel_values`,
+which reads `channel_defaults.json` whole when a channel follows global. Those
+two can disagree about what the user is even looking at. **No evidence links
+this to any reported symptom**, and it is recorded only because §2.3's single
+resolver removes the divergence as a side effect.
 
 ### 5.3 "Research topic first" toggle
 
@@ -200,7 +237,10 @@ reader.
   the `PHASE_ARTIFACTS` / `artifacts.py` test that already exists, because §2.3
   is safe only while that is true.
 - The category table covers every group in the catalogue.
-- The wizard override path, per §5.2, starting with a failing test.
+- Per §5.2: a long-form channel produces a `16:9` project and a short-form one
+  a `9:16` project, straight from `new_project`; changing `video_form`
+  invalidates `visuals` and not merely `brief`; and a take snapshot still
+  carrying an `aspect_ratio` key still opens.
 
 **Frontend**: `npm run build`, `npm run lint` at zero warnings, DOM and
 computed-style measurement — no native control, one `.btn--primary`, the
