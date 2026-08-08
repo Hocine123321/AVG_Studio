@@ -40,6 +40,7 @@ import asyncio
 import subprocess
 import sys
 import threading
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -52,6 +53,7 @@ from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
 from avg.core.errors import AvgError
+from avg.core.events import ActivityEvent
 from avg.core.settings_schema import (
     KEY_PROVIDER_IDS,
     SETTINGS,
@@ -66,6 +68,22 @@ from avg.providers.errors import POLICY
 from .deps import require_token
 
 router = APIRouter(dependencies=[Depends(require_token)])
+
+
+def _emit_activity(app_state: Any, event: ActivityEvent) -> None:
+    """Broadcast one ActivityEvent (Slice 17) from a background thread.
+
+    Same pattern as `avg.api.app`'s own `_emit`: through the manager, which
+    schedules the send onto the loop that owns the socket - these three
+    routes (Live List refresh, Test Providers, model suggestions) run their
+    real work on background threads, same as the pipeline/render workers do,
+    so scheduling onto whichever loop happened to be current when the
+    request came in would drop every event the moment that request's own
+    loop closes. Never raises: a status-panel row is not worth failing the
+    underlying operation over.
+    """
+    with suppress(Exception):
+        app_state.manager.broadcast_threadsafe(event.model_dump(mode="json"))
 
 
 class ChannelCreate(BaseModel):
@@ -441,6 +459,10 @@ async def build_model_cache(request: Request) -> dict:
     prefs, _scope = _prefs_for_scope(app_state)
 
     def _sweep() -> None:
+        _emit_activity(
+            app_state,
+            ActivityEvent(activity_id="provider-probe", label="Testing providers", state="running", sticky=False),
+        )
         # Never raises out of the thread: a failed sweep leaves the
         # previous verdicts in place, which is more useful than none.
         try:
@@ -467,8 +489,34 @@ async def build_model_cache(request: Request) -> dict:
             }
             merged.update(results)
             cache.save(merged, reachable=reachable)
+
+            # Spec §3: "a provider probe where everything passed" is not
+            # sticky; a failure IS ("a provider or API-key failure: auth,
+            # quota, or rate limit"). `probe_models`/`check_reachable` don't
+            # expose a failure reason at this layer - only True/False per
+            # model/provider - so "everything passed" is read as "no model
+            # came back False and no checked provider came back
+            # unreachable"; anything less than that is treated as the
+            # sticky failure case, since this layer cannot distinguish an
+            # auth failure from any other kind, and staying silent about a
+            # failure would be the wrong default to pick.
+            all_passed = all(v for models in results.values() for v in models.values()) and all(
+                reachable.values()
+            )
+            _emit_activity(
+                app_state,
+                ActivityEvent(
+                    activity_id="provider-probe",
+                    label="Providers tested",
+                    state="done",
+                    sticky=not all_passed,
+                ),
+            )
         except Exception:
-            pass
+            _emit_activity(
+                app_state,
+                ActivityEvent(activity_id="provider-probe", label="Provider test failed", state="failed", sticky=True),
+            )
 
     thread = threading.Thread(target=_sweep, name="provider-test", daemon=True)
     app_state.probe_thread = thread
@@ -573,6 +621,10 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
     voice_ids = sorted(_known_from_catalogue(app_state, "voice"))
 
     def _run() -> None:
+        _emit_activity(
+            app_state,
+            ActivityEvent(activity_id="live-list-suggest", label="Suggesting models", state="running", sticky=False),
+        )
         try:
             if body.kind == "models":
                 rows = recommend.suggest_models(
@@ -585,12 +637,37 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
             # a model this account cannot reach. Recorded, never silent.
             app_state.suggest_status = "error"
             app_state.suggest_error = _suggest_failure_message(exc)
+            # Sticky: this failure class - no working key, a down provider,
+            # a model this account cannot reach - is exactly the "provider
+            # or API-key failure: auth, quota, or rate limit" spec §3 marks
+            # sticky, even though the operation itself is an opinion rather
+            # than a pipeline step.
+            _emit_activity(
+                app_state,
+                ActivityEvent(
+                    activity_id="live-list-suggest",
+                    label="Suggestion failed",
+                    state="failed",
+                    detail=app_state.suggest_error,
+                    sticky=True,
+                ),
+            )
             return
         except Exception:
             # Anything else (a bug in this module, not a provider failure)
             # still has to reach the user rather than vanish.
             app_state.suggest_status = "error"
             app_state.suggest_error = "the suggestion run failed unexpectedly"
+            _emit_activity(
+                app_state,
+                ActivityEvent(
+                    activity_id="live-list-suggest",
+                    label="Suggestion failed",
+                    state="failed",
+                    detail=app_state.suggest_error,
+                    sticky=True,
+                ),
+            )
             return
 
         if rows is None:
@@ -600,6 +677,16 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
             # `rows == []` - see `recommend._parse`.
             app_state.suggest_status = "error"
             app_state.suggest_error = "the model's reply could not be read as suggestions"
+            _emit_activity(
+                app_state,
+                ActivityEvent(
+                    activity_id="live-list-suggest",
+                    label="Suggestion failed",
+                    state="failed",
+                    detail=app_state.suggest_error,
+                    sticky=True,
+                ),
+            )
             return
 
         # Resolved here, at write time, rather than captured before the
@@ -618,6 +705,14 @@ async def suggest_live_list(body: SuggestRequest, request: Request) -> dict[str,
         )
         app_state.suggest_status = "ok"
         app_state.suggest_error = None
+        # Not sticky: an opinion becoming available is not one of spec §3's
+        # sticky cases - the Live List already shows a `Suggested` chip
+        # whenever the user next looks, same as a Live List refresh's own
+        # success.
+        _emit_activity(
+            app_state,
+            ActivityEvent(activity_id="live-list-suggest", label="Suggestions ready", state="done", sticky=False),
+        )
 
     app_state.suggest_status = "running"
     app_state.suggest_error = None
@@ -856,8 +951,27 @@ async def refresh_live_list(request: Request) -> dict:
                 }
         return results, meta
 
-    results, voice_meta = await asyncio.to_thread(_list_everything)
+    _emit_activity(
+        app_state,
+        ActivityEvent(activity_id="live-list-refresh", label="Refreshing model list", state="running", sticky=False),
+    )
+    try:
+        results, voice_meta = await asyncio.to_thread(_list_everything)
+    except Exception:
+        # Never sticky (spec §3: "a Live List refresh" is explicitly a
+        # not-sticky case, unqualified) - a failed refresh just means the
+        # list did not update; nothing the user did was lost, and the
+        # button is right there to try again.
+        _emit_activity(
+            app_state,
+            ActivityEvent(activity_id="live-list-refresh", label="Refresh failed", state="failed", sticky=False),
+        )
+        raise
     cache.save(results, voice_meta)
+    _emit_activity(
+        app_state,
+        ActivityEvent(activity_id="live-list-refresh", label="Refreshed", state="done", sticky=False),
+    )
     return {"refreshed": True}
 
 

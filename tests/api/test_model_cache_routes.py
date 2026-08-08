@@ -66,6 +66,53 @@ def test_a_build_stores_only_what_worked(client, monkeypatch):
     assert body["updated"] is not None
 
 
+# ── ActivityEvent (Slice 17 - the status pill's own feed) ─────────────────
+
+
+def test_a_build_with_a_failed_model_reports_a_sticky_activity_event(client, monkeypatch):
+    """Spec §3: a provider probe where NOT everything passed is sticky."""
+    monkeypatch.setattr(
+        "avg.api.routes_settings.probe.probe_models",
+        lambda *a, **k: {"groq": {"good": True, "dead": False}},
+    )
+    monkeypatch.setattr("avg.api.routes_settings.probe.check_reachable", lambda *a, **k: None)
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        client.post("/api/models/cache/build", headers=AUTH)
+        client.app.state.probe_thread.join(timeout=5)
+
+        running = ws.receive_json()
+        assert running["type"] == "activity"
+        assert running["activity_id"] == "provider-probe"
+        assert running["state"] == "running"
+        assert running["sticky"] is False
+
+        terminal = ws.receive_json()
+        assert terminal["state"] == "done"
+        assert terminal["sticky"] is True
+
+
+def test_a_build_where_everything_passed_reports_a_not_sticky_activity_event(client, monkeypatch):
+    """Spec §3: "a provider probe where everything passed" is explicitly
+    not sticky."""
+    monkeypatch.setattr(
+        "avg.api.routes_settings.probe.probe_models",
+        lambda *a, **k: {"groq": {"good": True}},
+    )
+    monkeypatch.setattr("avg.api.routes_settings.probe.check_reachable", lambda *a, **k: None)
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        ws.receive_json()  # hello
+        client.post("/api/models/cache/build", headers=AUTH)
+        client.app.state.probe_thread.join(timeout=5)
+
+        ws.receive_json()  # running
+        terminal = ws.receive_json()
+        assert terminal["state"] == "done"
+        assert terminal["sticky"] is False
+
+
 def test_build_is_refused_while_one_is_running(client, monkeypatch):
     """Probing every model of every keyed provider takes 30-90 seconds in
     the legacy app. Two at once would double the spend for nothing."""

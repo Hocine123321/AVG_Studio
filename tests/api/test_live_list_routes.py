@@ -155,6 +155,51 @@ def test_refresh_lists_and_never_generates(client, monkeypatch):
     assert calls
 
 
+# ── ActivityEvent (Slice 17 - the status pill's own feed) ─────────────────
+
+
+def test_refresh_reports_a_never_sticky_activity_event(client, monkeypatch):
+    """Spec §3: "a Live List refresh" is a not-sticky case, unqualified -
+    even a failed refresh (below) stays not-sticky."""
+    monkeypatch.setattr("avg.providers.catalogues.list_image_models", lambda *a, **k: [])
+    monkeypatch.setattr("avg.providers.catalogues.list_voices", lambda *a, **k: [])
+    monkeypatch.setattr("avg.api.routes_settings.probe.known_providers", lambda: [])
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        client.post("/api/live-list/refresh", headers=AUTH)
+
+        running = ws.receive_json()
+        assert running["type"] == "activity"
+        assert running["activity_id"] == "live-list-refresh"
+        assert running["state"] == "running"
+        assert running["sticky"] is False
+
+        terminal = ws.receive_json()
+        assert terminal["state"] == "done"
+        assert terminal["sticky"] is False
+
+
+def test_a_failed_refresh_still_reports_a_not_sticky_activity_event(client, monkeypatch):
+    monkeypatch.setattr("avg.providers.catalogues.list_image_models", lambda *a, **k: [])
+    monkeypatch.setattr("avg.providers.catalogues.list_voices", lambda *a, **k: [])
+
+    def _boom(*a, **k):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr("avg.api.routes_settings.probe.known_providers", _boom)
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        ws.receive_json()  # hello
+        with pytest.raises(RuntimeError):
+            client.post("/api/live-list/refresh", headers=AUTH)
+
+        ws.receive_json()  # running
+        terminal = ws.receive_json()
+        assert terminal["state"] == "failed"
+        assert terminal["sticky"] is False
+
+
 def test_refresh_keeps_the_text_probe_results(client, monkeypatch):
     """`save` replaces the whole cache document, so a voice refresh must
     not silently un-verify every text model."""
@@ -213,6 +258,32 @@ def test_a_suggestion_run_stores_rows_and_reports_them(client, monkeypatch):
     assert row["source"] == "suggested"
     assert row["tier"] == "cheap"
     assert row["reason"] == "fast"
+
+
+def test_a_successful_suggestion_run_reports_a_not_sticky_activity_event(client, monkeypatch):
+    from avg.providers.recommend import Suggestion
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: [
+            Suggestion(entry_id="groq/a", kind="text", tier="cheap", reason="fast")
+        ],
+    )
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+        client.app.state.suggest_thread.join(timeout=5)
+
+        running = ws.receive_json()
+        assert running["type"] == "activity"
+        assert running["activity_id"] == "live-list-suggest"
+        assert running["state"] == "running"
+        assert running["sticky"] is False
+
+        terminal = ws.receive_json()
+        assert terminal["state"] == "done"
+        assert terminal["sticky"] is False
 
 
 def test_a_measurement_outranks_an_opinion(client, monkeypatch):
@@ -307,6 +378,32 @@ def test_a_failed_text_call_is_reported_not_silent(client, monkeypatch):
     assert body["suggest_error"]
     # Never the raw provider text - that is where a key would leak.
     assert "Groq API key is not set" not in body["suggest_error"]
+
+
+def test_a_key_failure_suggestion_run_reports_a_sticky_activity_event(client, monkeypatch):
+    """Spec §3: "a provider or API-key failure: auth, quota, or rate limit"
+    is sticky - this is that failure class, just surfaced through the
+    suggestion run rather than a pipeline phase."""
+    from avg.core.errors import AvgError, ErrorKind
+
+    monkeypatch.setattr(
+        "avg.api.routes_settings.recommend.suggest_models",
+        lambda catalogue, *, config: (_ for _ in ()).throw(
+            AvgError(ErrorKind.auth, "Groq API key is not set")
+        ),
+    )
+
+    with client.websocket_connect(f"/ws/events?token={TOKEN}") as ws:
+        ws.receive_json()  # hello
+        client.post("/api/live-list/suggest", json={"kind": "models"}, headers=AUTH)
+        client.app.state.suggest_thread.join(timeout=5)
+
+        ws.receive_json()  # running
+        terminal = ws.receive_json()
+        assert terminal["state"] == "failed"
+        assert terminal["sticky"] is True
+        # Same never-leak-a-key-value rule as the polled `suggest_error`.
+        assert "Groq API key is not set" not in (terminal["detail"] or "")
 
 
 def test_an_unusable_reply_leaves_prior_suggestions_in_place(client, monkeypatch):
