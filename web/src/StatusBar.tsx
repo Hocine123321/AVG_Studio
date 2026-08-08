@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { elapsedClock, leadActivity, useActivities } from "./activity";
-import { IconCheck } from "./Icons";
+import { IconAlert, IconCheck, IconChevron, IconX } from "./Icons";
+import type { ActivityEvent } from "./useEvents";
 
 /**
  * The floating status pill: what the backend is doing, top-right of the
@@ -24,6 +25,19 @@ import { IconCheck } from "./Icons";
  * feels like it. A dropped events socket outranks any request: while it is
  * down, the app is not being told about the very work this pill exists to
  * report.
+ *
+ * Slice 17 adds a second feed on top of all of the above: a chevron-toggled
+ * detail panel showing every currently running `ActivityEvent` (the
+ * WS-scoped "what long operations exist" feed, keyed by `activity_id`),
+ * plus a sticky acknowledgement queue for outcomes the user must not miss
+ * (a failed render, a completed video, a provider-key failure).
+ * `kind`/`working` now also go busy when a WS-tracked operation is running
+ * with no HTTP call in flight - see `working`'s own comment below for why
+ * that fold was necessary, not merely convenient. The sticky queue is a
+ * separate concern from `kind`: a non-empty queue keeps the pill in its
+ * expanded (undocked) state regardless of `kind`, so a finished-but-
+ * unacknowledged outcome does not collapse back to idle. See this slice's
+ * plan for the fuller reasoning.
  */
 
 /** How long an activity must be in flight before the pill shows a ring.
@@ -31,9 +45,25 @@ import { IconCheck } from "./Icons";
  * showing one makes the pill cry wolf. */
 const RING_DELAY_MS = 150;
 
-export default function StatusBar({ connected, loading = false }: { connected: boolean; loading?: boolean }) {
+export default function StatusBar({
+  connected,
+  loading = false,
+  activity = {},
+  stickyQueue = [],
+  onAcknowledge,
+}: {
+  connected: boolean;
+  loading?: boolean;
+  /** Slice 17: `events.activity` - every currently running operation. */
+  activity?: Record<string, ActivityEvent>;
+  /** Slice 17: `events.stickyQueue` - unacknowledged outcomes, oldest first. */
+  stickyQueue?: ActivityEvent[];
+  /** Slice 17: `events.acknowledgeSticky` - dismisses one queued event by id. */
+  onAcknowledge?: (activityId: string) => void;
+}) {
   const activities = useActivities();
   const [now, setNow] = useState(() => Date.now());
+  const [detailOpen, setDetailOpen] = useState(false);
 
   useEffect(() => {
     if (activities.length === 0) return;
@@ -81,9 +111,50 @@ export default function StatusBar({ connected, loading = false }: { connected: b
   // is `lead` once it has been in flight for `RING_DELAY_MS`, `null` before
   // that, so nothing downstream needs its own timing logic.
   const activeLead = settled ? lead : null;
-  const kind = !connected ? "error" : activeLead !== null ? "busy" : "ready";
-  const working = activeLead !== null;
-  const label = kind === "error" ? "Reconnecting" : activeLead !== null ? activeLead.label : "";
+  // Slice 17: `kind`/`working` used to answer only "is an HTTP call in
+  // flight" (the pre-existing `activity.ts` axis). A running WS-tracked
+  // operation with no HTTP call in flight - the exact case this slice
+  // exists for, "a long AI phase between requests" - must also count as
+  // busy, or the pill sits there green-and-idle while a render is
+  // actually going. `activityRows` (Slice 17's own `activity` map) is
+  // folded into `working` for that reason; `activeLead`'s label still wins
+  // when both are present, since an HTTP call in flight is usually the
+  // more immediate thing happening.
+  const activityRows = Object.values(activity);
+  const wsLead = activityRows[0] ?? null;
+  const working = activeLead !== null || wsLead !== null;
+  const kind = !connected ? "error" : working ? "busy" : "ready";
+  const label =
+    kind === "error" ? "Reconnecting" : activeLead !== null ? activeLead.label : wsLead !== null ? wsLead.label : "";
+  // Slice 17: the sticky queue and the running-activity map are an
+  // independent axis from `kind` above (see this component's docstring).
+  // A non-empty queue means there is something the user has not yet
+  // acknowledged, so the pill stays visually "there" even if `kind` alone
+  // would say idle - closing the chevron never discards the queue, only
+  // the `x` on each item does.
+  const hasSticky = stickyQueue.length > 0;
+  const stickyHead = stickyQueue[0] ?? null;
+  const detailAvailable = activityRows.length > 0 || hasSticky;
+  // Auto-open the panel the moment there is something sticky to see, so a
+  // failure or a completion cannot land silently behind a closed chevron -
+  // the whole point of the sticky queue is that it is impossible to miss.
+  const wasStickyRef = useRef(false);
+  useEffect(() => {
+    if (hasSticky && !wasStickyRef.current) setDetailOpen(true);
+    wasStickyRef.current = hasSticky;
+  }, [hasSticky]);
+  const panelOpen = detailOpen && detailAvailable;
+
+  // Spec §4's three pill states. "Docked (idle)" collapses to a thin,
+  // glyph-free sliver flush with the right edge - genuinely idle AND
+  // nothing queued AND the panel isn't open. "Active" is everything else:
+  // busy, an error, or - the one place these two independent axes meet -
+  // idle but with something sticky still unacknowledged, which keeps the
+  // pill in its Active shape rather than collapsing (spec §4:
+  // "Finishing... unless a sticky state is waiting, in which case it
+  // stays out"). `panelOpen` also keeps it undocked: a sliver the user
+  // just clicked open cannot re-collapse out from under the click.
+  const docked = kind === "ready" && !working && !hasSticky && !panelOpen;
 
   // Until the library has ever answered, the pill has nothing true to say -
   // the server is up, so it would read "ready" while the screen is still
@@ -132,27 +203,32 @@ export default function StatusBar({ connected, loading = false }: { connected: b
 
   return (
     <div
-      className={`statuspill statuspill--${kind}`}
+      className={`statuspill statuspill--${kind}${docked ? " statuspill--docked" : ""}`}
       role="status"
       aria-live="polite"
       // Idle drops the visible word, and the mark itself is `aria-hidden`,
       // so without this the pill would announce nothing at all to a screen
       // reader at rest. The visible text carries it in every other state.
-      aria-label={kind === "ready" && !working ? "Ready" : undefined}
+      // Docked has neither glyph nor label (spec §4), so it gets its own
+      // wording rather than the bare "Ready".
+      aria-label={docked ? "Ready" : kind === "ready" && !working ? "Ready" : undefined}
     >
       {/* Check, dot and ring are all mounted together, stacked in one slot,
           and only opacity/transform say which one is showing. Conditionally
           mounting just one of them (the previous approach) has no way to
           animate the outgoing element - it is simply gone on the frame the
-          state changes, which is the "pop" this slice exists to remove. */}
+          state changes, which is the "pop" this slice exists to remove.
+          Docked hides this whole slot via CSS rather than unmounting it,
+          same reasoning: the slide from docked to active is a transform on
+          already-mounted content, not a mount. */}
       <span className="statuspill__icon" aria-hidden="true">
-        <span className={`statuspill__check${!working && kind === "ready" ? " is-active" : ""}`}>
+        <span className={`statuspill__check${!working && kind === "ready" && !hasSticky ? " is-active" : ""}`}>
           {/* No explicit `size`: the component's default (13) is also the
               box's own size and the ring's optical weight, so there is one
               number instead of two that happen to agree. */}
           <IconCheck />
         </span>
-        <span className={`statuspill__dot${!working && kind !== "ready" ? " is-active" : ""}`} />
+        <span className={`statuspill__dot${!working && kind !== "ready" && !hasSticky ? " is-active" : ""}`} />
         <span className={`statuspill__ring${working ? " is-active" : ""}`} />
       </span>
       <span className={`statuspill__expand${expanded ? " is-expanded" : ""}`}>
@@ -171,6 +247,62 @@ export default function StatusBar({ connected, loading = false }: { connected: b
           <span className="statuspill__more">+{activities.length - 1}</span>
         )}
       </span>
+
+      {/* The obvious click target spec §4 asks for: covers the WHOLE pill
+          (including the docked sliver, which has no other visible
+          content) rather than sitting beside it, so docked - despite
+          having no glyph or label - is still "wide enough to be an
+          obvious click target". Rendered whenever there is something to
+          reveal; a truly idle pill with nothing running and nothing
+          queued has nothing for it to open, so it is absent rather than a
+          button that opens an empty panel every time. */}
+      {detailAvailable && (
+        <button
+          type="button"
+          className={`statuspill__chevron${panelOpen ? " is-open" : ""}${docked ? " statuspill__chevron--fill" : ""}`}
+          aria-expanded={panelOpen}
+          aria-label={panelOpen ? "Hide activity details" : "Show activity details"}
+          onClick={() => setDetailOpen((v) => !v)}
+        >
+          <IconChevron />
+        </button>
+      )}
+
+      {panelOpen && (
+        <div className="statuspill-detail" role="group" aria-label="Activity details">
+          {stickyHead && (
+            <div className={`statuspill-detail__row statuspill-detail__row--sticky is-${stickyHead.state}`}>
+              <span className="statuspill-detail__icon" aria-hidden="true">
+                {stickyHead.state === "failed" ? <IconAlert /> : <IconCheck />}
+              </span>
+              <span className="statuspill-detail__text">
+                <span className="statuspill-detail__label">{stickyHead.label}</span>
+                {stickyHead.detail && <span className="statuspill-detail__meta">{stickyHead.detail}</span>}
+              </span>
+              {stickyQueue.length > 1 && (
+                <span className="statuspill-detail__count">1 of {stickyQueue.length}</span>
+              )}
+              <button
+                type="button"
+                className="statuspill-detail__ack"
+                aria-label="Dismiss"
+                onClick={() => onAcknowledge?.(stickyHead.activity_id)}
+              >
+                <IconX />
+              </button>
+            </div>
+          )}
+          {activityRows.map((row) => (
+            <div key={row.activity_id} className="statuspill-detail__row">
+              <span className="statuspill-detail__text">
+                <span className="statuspill-detail__label">{row.label}</span>
+                {row.detail && <span className="statuspill-detail__meta">{row.detail}</span>}
+              </span>
+              {row.percent !== null && <span className="statuspill-detail__percent">{row.percent}%</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

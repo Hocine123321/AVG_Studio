@@ -390,7 +390,13 @@ export default function App() {
           onCancel={cancelRender}
           onOpen={openProject}
         />
-        <StatusBar connected={events.connected} loading={projects === null} />
+        <StatusBar
+          connected={events.connected}
+          loading={projects === null}
+          activity={events.activity}
+          stickyQueue={events.stickyQueue}
+          onAcknowledge={events.acknowledgeSticky}
+        />
       </div>
     </div>
   );

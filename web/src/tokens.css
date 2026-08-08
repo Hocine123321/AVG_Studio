@@ -3268,7 +3268,10 @@ a:hover {
   transition:
     border-color calc(0.2s * var(--motion-scale)) ease-out,
     background-color calc(0.2s * var(--motion-scale)) ease-out,
-    color calc(0.2s * var(--motion-scale)) ease-out;
+    color calc(0.2s * var(--motion-scale)) ease-out,
+    width calc(0.24s * var(--motion-scale)) ease-out,
+    padding calc(0.24s * var(--motion-scale)) ease-out,
+    right calc(0.24s * var(--motion-scale)) ease-out;
 }
 
 .statuspill--ready {
@@ -3286,6 +3289,49 @@ a:hover {
 .statuspill--loading {
   --pill: var(--accent);
   padding: 10px 16px;
+}
+
+/* Slice 17 - the docked/active/finishing states from the design spec's §4.
+   Docked is a thin, glyph-free sliver flush with the right edge: `right`
+   moves the whole pill out to the viewport edge, and shrinking width/
+   padding while leaving the icon/expand/chevron content mounted (just
+   clipped by `overflow: hidden`) is the same "animate what's already
+   there, never mount/unmount" discipline the rest of this file already
+   uses for the check/dot/ring slot. `pointer-events` flips to `auto` here
+   specifically - the base `.statuspill` reports and is not a control, but
+   spec §4 asks the docked sliver to be "wide enough to be an obvious
+   click target", so this is the one state where the pill itself becomes
+   interactive rather than only the buttons inside it. */
+.statuspill--docked {
+  width: 14px;
+  min-width: 14px;
+  padding: 0;
+  right: 0;
+  border-radius: 999px 0 0 999px;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.statuspill--docked .statuspill__icon,
+.statuspill--docked .statuspill__expand {
+  opacity: 0;
+  width: 0;
+}
+
+/* The chevron button is normally a small icon-sized hit target; docked
+   stretches it to cover the whole sliver so "no glyph, no text" still
+   leaves an obvious, full-height click target per spec §4. */
+.statuspill__chevron--fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.statuspill__chevron--fill svg {
+  opacity: 0;
 }
 
 /* An indeterminate bar, in the pill's own slot, while the library is still
@@ -3343,6 +3389,9 @@ a:hover {
   width: 13px;
   height: 13px;
   flex-shrink: 0;
+  transition:
+    opacity calc(0.2s * var(--motion-scale)) ease-out,
+    width calc(0.2s * var(--motion-scale)) ease-out;
 }
 
 .statuspill__check,
@@ -3486,6 +3535,150 @@ a:hover {
   opacity: 0.8;
 }
 
+/* Slice 17 - the chevron toggle and its detail panel (spec §5). The
+   button is the pill's one interactive child in every non-docked state
+   (`.statuspill` itself keeps `pointer-events: none` - "it reports, it is
+   not a control" - so children opt back in individually, same as this
+   button already had to for any click to land). */
+.statuspill__chevron {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: 8px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--pill);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform calc(0.18s * var(--motion-scale)) ease-out;
+}
+
+.statuspill__chevron:hover {
+  background: color-mix(in srgb, var(--pill) 16%, transparent);
+}
+
+.statuspill__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+/* Anchored to the pill, not the page - spec §5: "anchors to the pill and
+   overlays the page rather than pushing it, so expanding never reflows
+   the content underneath." `position: absolute` off `.statuspill` (which
+   is itself already absolutely positioned) is what makes that true. */
+.statuspill-detail {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  pointer-events: auto;
+  animation: statuspill-detail-in calc(0.18s * var(--motion-scale)) ease-out;
+}
+
+@keyframes statuspill-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.statuspill-detail__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: calc(var(--radius) - 8px);
+  font-size: 12.5px;
+}
+
+.statuspill-detail__row--sticky {
+  background: var(--panel);
+}
+
+.statuspill-detail__row--sticky.is-failed {
+  color: var(--bad);
+}
+
+.statuspill-detail__row--sticky.is-done,
+.statuspill-detail__row--sticky.is-cancelled {
+  color: var(--sage);
+}
+
+.statuspill-detail__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.statuspill-detail__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.statuspill-detail__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.statuspill-detail__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.statuspill-detail__percent {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.statuspill-detail__count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.statuspill-detail__ack {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.statuspill-detail__ack:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .statuspill {
     transition: none;
@@ -3495,8 +3688,14 @@ a:hover {
   .statuspill__dot,
   .statuspill__ring,
   .statuspill__expand,
-  .statuspill__label {
+  .statuspill__label,
+  .statuspill__icon,
+  .statuspill__chevron {
     transition: none;
+    animation: none;
+  }
+
+  .statuspill-detail {
     animation: none;
   }
 

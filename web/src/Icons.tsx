@@ -147,3 +147,26 @@ export function IconPulse({ size = 21 }: IconProps) {
     </svg>
   );
 }
+
+/** The status pill's detail-panel toggle (Slice 17). Points down at rest;
+ * the caller rotates it 180° open via CSS (`transform: rotate(180deg)`),
+ * same as every other directional control in this file that has only one
+ * glyph and lets its user rotate it, rather than shipping an "up" twin. */
+export function IconChevron({ size = 13 }: IconProps) {
+  return (
+    <svg width={size} height={size} {...base} strokeWidth={3} aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+/** Dismiss / acknowledge - the sticky queue's own close glyph (Slice 17).
+ * Same stroke weight as `IconCheck`/`IconAlert`, the two icons it shares
+ * the pill's small-icon slot with. */
+export function IconX({ size = 13 }: IconProps) {
+  return (
+    <svg width={size} height={size} {...base} strokeWidth={3} aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
