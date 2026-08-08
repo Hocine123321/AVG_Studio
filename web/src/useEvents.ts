@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { wsUrl } from "./api";
 import { clearRenderClock } from "./renderClock";
 
@@ -74,6 +74,24 @@ export interface JobStepEvent {
   detail: string;
 }
 
+/**
+ * Slice 17: the status pill's own feed. One row per operation - a running
+ * pipeline, a render, a Live List refresh, a provider probe, a model-
+ * suggestion run - keyed by `activity_id`, which stays stable for the life
+ * of that operation. `sticky` is never derived here: it is whatever the
+ * backend emitter decided (see `avg.core.events.ActivityEvent`'s own
+ * docstring for why that decision cannot be made on the client).
+ */
+export interface ActivityEvent {
+  type: "activity";
+  activity_id: string;
+  label: string;
+  percent: number | null;
+  state: "running" | "done" | "failed" | "cancelled";
+  detail: string | null;
+  sticky: boolean;
+}
+
 export type EngineEvent =
   | ProgressEvent
   | PhaseFailedEvent
@@ -84,7 +102,8 @@ export type EngineEvent =
   | RenderFinishedEvent
   | PipelineFinishedEvent
   | JobStartedEvent
-  | JobStepEvent;
+  | JobStepEvent
+  | ActivityEvent;
 
 /** One phase's live state, in the same shape `ProjectDoc.phases` uses. */
 export interface LivePhase {
@@ -147,6 +166,30 @@ export interface EventsState {
    * transition.
    */
   phases: Record<string, Record<string, LivePhase>>;
+  /**
+   * Slice 17: every currently-running operation, keyed by `activity_id`.
+   * A `running` ActivityEvent writes/overwrites its entry; a terminal one
+   * (`done`/`failed`/`cancelled`) REMOVES it - a finished operation has no
+   * "current state" left to show a row for, same reasoning as
+   * `byProject` above. Additive: nothing here changes `byProject`, which
+   * remains the ambient "an HTTP call is in flight" signal `activity.ts`
+   * already derives the pill's `busy`/`ready`/`error` kind from - see this
+   * slice's plan for why the two are kept as separate axes rather than
+   * merged.
+   */
+  activity: Record<string, ActivityEvent>;
+  /**
+   * Slice 17: every sticky ActivityEvent not yet acknowledged, oldest
+   * first (`push`, never `unshift`) so `acknowledgeSticky` always removes
+   * the OLDEST unread item - the detail panel shows the head with a
+   * "N of M" counter when more than one is queued. Independent of
+   * `activity` above: a terminal event still gets pushed here even though
+   * it simultaneously REMOVES its row from `activity` - the two maps
+   * answer different questions ("what's running" vs "what haven't you
+   * seen yet") and a `sticky: true` event belongs in this queue purely
+   * because the emitter said so, regardless of what it did to `activity`.
+   */
+  stickyQueue: ActivityEvent[];
 }
 
 const INITIAL_STATE: EventsState = {
@@ -163,6 +206,8 @@ const INITIAL_STATE: EventsState = {
   failedProjects: {},
   connected: false,
   phases: {},
+  activity: {},
+  stickyQueue: [],
 };
 
 /**
@@ -291,6 +336,55 @@ function foldFailedProjects(
   return previous;
 }
 
+/**
+ * Fold one event into the accumulated `activity` map (Slice 17).
+ *
+ * A `running` ActivityEvent writes/overwrites `activity[activity_id]`; a
+ * terminal one (`done`/`failed`/`cancelled`) removes it - see
+ * `EventsState.activity`'s own docstring. Anything else leaves the map
+ * untouched, same discipline as `foldPhases`/`foldByProject`: several
+ * operations may be running at once and only their own events should
+ * cause an allocation.
+ */
+function foldActivity(
+  previous: EventsState["activity"],
+  payload: { type: string } & Record<string, unknown>,
+): EventsState["activity"] {
+  if (payload.type !== "activity") return previous;
+  const id = typeof payload.activity_id === "string" ? payload.activity_id : null;
+  if (id === null) return previous;
+
+  if (payload.state === "running") {
+    return { ...previous, [id]: payload as unknown as ActivityEvent };
+  }
+  // done / failed / cancelled - the operation is over, its row goes away.
+  if (!(id in previous)) return previous;
+  const next = { ...previous };
+  delete next[id];
+  return next;
+}
+
+/**
+ * Fold one event into the sticky acknowledgement queue (Slice 17, spec
+ * §3). Every event carrying `sticky: true` is appended, oldest first,
+ * regardless of what `foldActivity` above did with the SAME event -
+ * these are two independent questions ("what's running" vs "what have
+ * you not yet acknowledged"). Removal only ever happens through
+ * `acknowledgeSticky`, called from the pill's own `x` button - never
+ * derived here, and never re-derived on reconnect: `stickyQueue` is
+ * plain state carried through `reduce`'s `carried` object like every
+ * other accumulated field, so a socket drop (which only flips
+ * `connected`) cannot resurrect something the user already acknowledged.
+ */
+function foldStickyQueue(
+  previous: EventsState["stickyQueue"],
+  payload: { type: string } & Record<string, unknown>,
+): EventsState["stickyQueue"] {
+  if (payload.type !== "activity" || payload.sticky !== true) return previous;
+  return [...previous, payload as unknown as ActivityEvent];
+}
+
+
 /** Every event replaces the prior terminal/progress state so the UI reflects
  * the most recent event, rather than accumulating stale outcomes. A progress
  * event deliberately retains its preceding phase_started association because
@@ -335,7 +429,18 @@ function reduce(previous: EventsState, payload: { type: string } & Record<string
     payload.type === "job_step" ? (payload as unknown as JobStepEvent) : terminal ? null : previous.jobStep;
   const byProject = foldByProject(previous.byProject, payload);
   const failedProjects = foldFailedProjects(previous.failedProjects, payload);
-  const carried = { phases, jobStarted, jobStep, byProject, failedProjects, connected: true };
+  const activity = foldActivity(previous.activity, payload);
+  const stickyQueue = foldStickyQueue(previous.stickyQueue, payload);
+  const carried = {
+    phases,
+    jobStarted,
+    jobStep,
+    byProject,
+    failedProjects,
+    activity,
+    stickyQueue,
+    connected: true,
+  };
 
   switch (payload.type) {
     case "phase_started":
@@ -384,9 +489,24 @@ const MAX_RETRY_DELAY_MS = 15000;
  * outlives a flaky socket must not silently vanish from view - and reports
  * `connected: false` for the whole time it's down so a consumer can say so
  * honestly instead of just going quiet.
+ *
+ * Also returns `acknowledgeSticky` (Slice 17): the pill's `x` button calls
+ * this with the head of `stickyQueue` to dismiss it. This is client-only
+ * state, not a server round-trip - there is nothing for the backend to
+ * record about "the user has seen this notification".
  */
-export function useEvents(): EventsState {
+export function useEvents(): EventsState & { acknowledgeSticky: (activityId: string) => void } {
   const [state, setState] = useState<EventsState>(INITIAL_STATE);
+
+  const acknowledgeSticky = useCallback((activityId: string) => {
+    setState((previous) => {
+      const index = previous.stickyQueue.findIndex((e) => e.activity_id === activityId);
+      if (index === -1) return previous;
+      const stickyQueue = previous.stickyQueue.slice();
+      stickyQueue.splice(index, 1);
+      return { ...previous, stickyQueue };
+    });
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -437,5 +557,5 @@ export function useEvents(): EventsState {
     };
   }, []);
 
-  return state;
+  return { ...state, acknowledgeSticky };
 }
