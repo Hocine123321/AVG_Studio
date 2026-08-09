@@ -91,13 +91,7 @@ const PROVENANCE_TAGS: { source: LiveEntry["source"]; label: string }[] = [
   { source: "suggested", label: "Suggested" },
 ];
 
-export default function LiveList({ onBack: _onBack }: { onBack?: () => void }) {
-  // `onBack` is unused now that this component is a Quick panel tab rather
-  // than a full Screen with its own "Back to App health" button. Left
-  // declared, deliberately unused, for the same reason Settings.tsx's
-  // `onOpenLiveList` is: `App.tsx` still passes it until Task 9 removes
-  // both the prop and the `livelist` Screen variant together, once
-  // `QuickPanel` exists to replace what this screen used to be.
+export default function LiveList() {
   const [data, setData] = useState<LiveListResponse | null>(null);
   const [kind, setKind] = useState<LiveKind>("text");
   const [busy, setBusy] = useState(false);

@@ -1,4 +1,4 @@
-import { IconChannels, IconFilm, IconGrid, IconMoon, IconPlus, IconPulse, IconSliders, IconSun } from "./Icons";
+import { IconChannels, IconChevron, IconFilm, IconGrid, IconMoon, IconPlus, IconPulse, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
 export type RailSection = "home" | "studio" | "create" | "channels" | "settings" | "health";
@@ -18,6 +18,16 @@ export interface RailProps {
    * applies to the welcome screens, which render before Rail ever mounts. */
   theme: Theme;
   onToggleTheme: () => void;
+  /** The Quick panel's own open/closed state and toggle, per Slice 18
+   * spec §1's recorded safe default: the `<` sits at the sidebar's own
+   * outer edge, not as one of the 48px `.rail__item` icons in the main
+   * column, since it belongs to a different, cross-cutting concern (a
+   * global panel toggle) rather than a section of the app. Owned by
+   * `App.tsx`, not here or inside `QuickPanel` itself, so `Rail` can
+   * render the button without either component reaching into the
+   * other's internals (plan decision, Task 9 Step 4). */
+  quickPanelOpen: boolean;
+  onToggleQuickPanel: () => void;
 }
 
 /**
@@ -42,6 +52,8 @@ export default function Rail({
   onHealth,
   theme,
   onToggleTheme,
+  quickPanelOpen,
+  onToggleQuickPanel,
 }: RailProps) {
   const night = theme === "night";
 
@@ -50,6 +62,20 @@ export default function Rail({
       <div className="rail__logo" aria-hidden="true">
         A
       </div>
+
+      {/* Rendered right after the logo, at the rail's own outer edge, per
+          spec §1's recorded safe default - the logo keeps the corner it
+          already occupies, and this sits below it rather than fighting it
+          for the same spot. */}
+      <button
+        type="button"
+        className="quickpanel-toggle"
+        aria-expanded={quickPanelOpen}
+        aria-label={quickPanelOpen ? "Close quick panel" : "Open quick panel"}
+        onClick={onToggleQuickPanel}
+      >
+        <IconChevron />
+      </button>
 
       <button
         type="button"

@@ -62,13 +62,7 @@ function extractDetail(message: string): string {
  *    `SecretField`'s own transient input does, for as long as one request
  *    takes (see that file).
  */
-export default function Settings({ onOpenLiveList: _onOpenLiveList }: { onOpenLiveList?: () => void }) {
-  // `onOpenLiveList` is unused here now that the Live List opener has moved
-  // to the Quick panel (Slice 18 spec §0). Left declared, deliberately
-  // unused (renamed with a leading underscore for `noUnusedParameters`),
-  // rather than dropped: `App.tsx` still passes it until Task 9 removes
-  // both the prop and the `livelist` Screen variant together, once
-  // `QuickPanel` exists to replace what it opened.
+export default function Settings() {
   const {
     schema,
     ctx,

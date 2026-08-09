@@ -16,7 +16,7 @@ import AppHealth from "./AppHealth";
 import Channels from "./Channels";
 import Create from "./Create";
 import Home from "./Home";
-import LiveList from "./LiveList";
+import QuickPanel from "./QuickPanel";
 import Rail from "./Rail";
 import Settings from "./Settings";
 import Studio from "./Studio";
@@ -32,8 +32,7 @@ type Screen =
   | { name: "create" }
   | { name: "channels" }
   | { name: "settings" }
-  | { name: "health" }
-  | { name: "livelist" };
+  | { name: "health" };
 
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
@@ -118,6 +117,16 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [startError, setStartError] = useState<string | null>(null);
+  // The Quick panel's open/closed state (Slice 18 spec §1-2) - lifted here
+  // rather than owned inside `QuickPanel` itself, because the `<` toggle
+  // that flips it lives in `Rail`, a sibling component (plan decision #1 +
+  // Task 9 Step 4). `localStorage` read/write lives alongside it for the
+  // same reason: `QuickPanel` no longer owns this piece of state, so it
+  // shouldn't own persisting it either.
+  const [quickPanelOpen, setQuickPanelOpen] = useState(() => localStorage.getItem("avg.quickpanel.open") === "1");
+  useEffect(() => {
+    localStorage.setItem("avg.quickpanel.open", quickPanelOpen ? "1" : "0");
+  }, [quickPanelOpen]);
   const events = useEvents();
   // Every in-flight job, running or queued (`GET /api/jobs`). A running job
   // already announces itself over `/ws/events`, which is why `events` alone
@@ -315,10 +324,8 @@ export default function App() {
         <Create onCreated={handleProjectCreated} onGoToChannels={() => setScreen({ name: "channels" })} />
       );
     } else if (screen.name === "settings") {
-      content = <Settings onOpenLiveList={() => setScreen({ name: "livelist" })} />;
-    } else if (screen.name === "livelist") {
-    content = <LiveList onBack={() => setScreen({ name: "settings" })} />;
-  } else if (screen.name === "health") {
+      content = <Settings />;
+    } else if (screen.name === "health") {
       content = <AppHealth />;
     } else if (screen.name === "channels") {
       content = <Channels />;
@@ -365,6 +372,8 @@ export default function App() {
         onHealth={() => setScreen({ name: "health" })}
         theme={theme}
         onToggleTheme={toggleTheme}
+        quickPanelOpen={quickPanelOpen}
+        onToggleQuickPanel={() => setQuickPanelOpen((v) => !v)}
       />
       <div className="app-shell__main">
         {/* `key` on the screen name, not the content: remounting on a route
@@ -398,6 +407,10 @@ export default function App() {
           onAcknowledge={events.acknowledgeSticky}
         />
       </div>
+      {/* Mounted once, at this sibling level - not inside
+          `.app-shell__content` - so switching screens never unmounts it or
+          loses its tab and drag position (spec §1). */}
+      <QuickPanel open={quickPanelOpen} onOpenChange={setQuickPanelOpen} />
     </div>
   );
 }

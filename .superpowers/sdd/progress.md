@@ -31,18 +31,44 @@ unparameterized-`dict` returns. Task 2 adds 2 more of the exact same kind
 this file's dominant existing style (25+ instances), not a new error
 category.
 
+## Money-rule check (Task 6 Step 2), run against Task 9's QuickPanel
+No browser/DOM tooling exists in this sandbox at all (no playwright,
+puppeteer, or chromium) — matches the spec's own §5 note that "the Browser
+pane does not composite on this machine. Recorded as pending rather than
+claimed." Same limitation, not a shortcut taken here.
+
+Did the strongest available substitute: a full static trace of the call
+graph from `QuickPanel`'s mount down to `confirm_paid`.
+- `QuickPanel.tsx`: `PreviewTab` appears in exactly one place, a JSX
+  conditional on `tab === "preview"` — no effect anywhere in the file
+  reaches it or calls anything on it.
+- `PreviewTab.tsx`: zero `useEffect`s (`grep -c useEffect` = 0). Switching
+  `kind` only changes which child of `PreviewPanel` mounts.
+- `PreviewPanel.tsx`: `confirm_paid: true` appears exactly twice, both
+  inside `generateSample` functions bound only to a button's `onClick`.
+  `VoicePreview`'s free-path effect is guarded `if (paid || !voiceId)
+  return` before it can run. `ImagePreview`'s only effect is an unmount
+  cleanup with an empty dependency array — no dependency on
+  provider/model/aspectRatio, no network call.
+- Conclusion: no render-on-mount, no render-on-tab-switch, no
+  render-on-settings-change path reaches either paid call, at every layer
+  from `QuickPanel` down. Live DOM click-through against a running dev
+  server (localStorage-seeded tab, actual network tab inspection) still
+  owed once this runs on a machine with a compositing browser — same
+  status as the spec's own visual-pass note.
+
 ## Tasks
 - [x] Task 1: quick_settings.json backend document
 - [x] Task 2: routes
 - [x] Task 3: useSettingsData extraction
 - [x] Task 4: Settings.tsx cleanup
 - [x] Task 5: LiveList.tsx adapted + tag filter
-- [x] Task 6: PreviewTab.tsx (structural money-rule check done; live DOM
-      click-through deferred to Final Verification once Task 9 mounts
-      QuickPanel — no page exists yet to run it against)
+- [x] Task 6: PreviewTab.tsx (structural + call-graph money-rule check
+      done; live DOM click-through still owed — no browser in this sandbox)
 - [x] Task 7: RecentErrorsTab.tsx
 - [x] Task 8: QuickSettingsTab.tsx
-- [ ] Task 9: QuickPanel.tsx shell + wiring
+- [ ] Task 9: QuickPanel.tsx shell + wiring (code complete, build green;
+      about to commit)
 - [ ] Task 10: design language / motion
 - [ ] Task 3: useSettingsData extraction
 - [ ] Task 4: Settings.tsx cleanup
