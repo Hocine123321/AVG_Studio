@@ -97,6 +97,36 @@ export default function QuickPanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dragOffset = useRef<{ dx: number; dy: number } | null>(null);
 
+  // The portal's DOM node stays mounted forever once `open` has been true
+  // at least once - `visible` (not `mounted`) is what actually drives the
+  // open/closed CSS class. This is what makes the slide-OUT possible at
+  // all: an instant conditional unmount (`{open && ...}`) gives a CSS
+  // transition no time to run, since there is no frame between "open flips
+  // false" and the node leaving the DOM. Staying mounted and transitioning
+  // a class instead is the standard fix, and it is symmetric with the
+  // slide-IN below by construction - both directions are the same
+  // transition, just reversed, matching spec §1's "slides back out the
+  // same way."
+  const [mounted, setMounted] = useState(open);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+
+  // One frame's delay before applying the "open" class, so a first-ever
+  // mount actually paints the closed transform before transitioning away
+  // from it - flipping straight to the open class on the same render the
+  // node is created would give the browser nothing to transition FROM.
+  useEffect(() => {
+    if (!mounted) return;
+    if (open) {
+      const id = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(id);
+    }
+    setVisible(false);
+  }, [open, mounted]);
+
   useEffect(() => {
     localStorage.setItem(TAB_KEY, tab);
   }, [tab]);
@@ -174,14 +204,16 @@ export default function QuickPanel({
   }
 
   return (
-    open &&
+    mounted &&
     createPortal(
           <div
             ref={panelRef}
-            className="quickpanel"
+            className={`quickpanel${visible ? "" : " quickpanel--closed"}`}
             style={{ left: position.x, top: position.y }}
             role="dialog"
             aria-label="Quick panel"
+            aria-hidden={!open}
+            inert={!open}
           >
             <div
               className="quickpanel__header"

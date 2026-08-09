@@ -67,9 +67,13 @@ graph from `QuickPanel`'s mount down to `confirm_paid`.
       done; live DOM click-through still owed — no browser in this sandbox)
 - [x] Task 7: RecentErrorsTab.tsx
 - [x] Task 8: QuickSettingsTab.tsx
-- [ ] Task 9: QuickPanel.tsx shell + wiring (code complete, build green;
-      about to commit)
-- [ ] Task 10: design language / motion
+- [x] Task 9: QuickPanel.tsx shell + wiring
+- [x] Task 10: design language / motion (mount lifecycle redesigned:
+      stays mounted after first open so a slide-out transition has
+      something to animate; found and avoided a pre-existing gap —
+      `--font-mono`/`--ink` referenced by old code but never defined
+      anywhere in tokens.css — by using a literal monospace stack and
+      `--text`/`--muted` instead of repeating it)
 - [ ] Task 3: useSettingsData extraction
 - [ ] Task 4: Settings.tsx cleanup
 - [ ] Task 5: LiveList.tsx adapted + tag filter

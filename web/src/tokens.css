@@ -564,6 +564,7 @@ a:hover {
 .rail {
   width: 74px;
   flex-shrink: 0;
+  position: relative;
   background: var(--panel);
   border-right: 1px solid var(--line);
   display: flex;
@@ -585,6 +586,44 @@ a:hover {
   font-size: 18px;
   margin-bottom: 14px;
   border: 0;
+}
+
+/* The Quick panel's own open/close toggle (Slice 18 spec §1) - rendered at
+   the rail's own outer edge, vertically below the logo, per the spec's
+   recorded safe default: the logo keeps the corner it already occupies,
+   this sits at the column's edge rather than in it, and it is deliberately
+   NOT one of the 48px `.rail__item` icons since it belongs to a different,
+   cross-cutting concern (a global panel toggle, not a section of the app).
+   Half-overlapping the rail's own right border, the same "floating tab"
+   affordance a collapse control reads as everywhere else it appears. */
+.quickpanel-toggle {
+  position: absolute;
+  top: 78px;
+  right: -13px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--dim);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: color calc(0.15s * var(--motion-scale)), border-color calc(0.15s * var(--motion-scale));
+}
+
+.quickpanel-toggle:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.quickpanel-toggle svg {
+  transform: rotate(90deg);
+}
+
+.quickpanel-toggle[aria-expanded="true"] svg {
+  transform: rotate(-90deg);
 }
 
 .rail__item {
@@ -4423,3 +4462,239 @@ a:hover {
   color: var(--ink);
   white-space: pre;
 }
+
+/* ── the Quick panel — a floating, non-modal overlay above everything,
+   including the status pill's own detail panel (Slice 18 spec §1, §4).
+   Same surface vocabulary `.statuspill-detail` (Slice 17) already
+   established for "a floating surface the app has a vocabulary for" —
+   reused rather than re-invented. z-index 30: one clean, obviously
+   intentional step above that panel's 21. ─────────────────────────────── */
+.quickpanel {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-height: 70vh;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  overflow: hidden;
+  transform: translate(0, 0);
+  opacity: 1;
+  transition:
+    transform calc(0.22s * var(--motion-scale)),
+    opacity calc(0.22s * var(--motion-scale));
+}
+
+/* Slides out to the upper-left, the same direction it slid in from (spec
+   §1: "slides in from the upper-left and slides back out the same way").
+   `pointer-events: none` here, not just `inert` on the element, so a
+   still-transitioning panel can't catch a click meant for the page behind
+   it during the animation window. */
+.quickpanel--closed {
+  transform: translate(-28px, -28px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quickpanel {
+    transition: none;
+  }
+}
+
+/* `--motion-scale: 0` (the in-app "no motion" setting, `data-motion="none"`)
+   collapses `calc(0.22s * 0)` to a zero-length transition, which jumps
+   straight to whichever end state the class says - never a division, per
+   Slice 17's own established rule for exactly this reason: a division
+   would blow UP toward infinity as the scale shrinks instead of collapsing
+   to zero, which is the one thing that must never happen to an off-screen
+   entrance transform (Slices 13 and 14 each shipped that exact bug once).
+   No separate `[data-motion="none"]` override is needed here as a result -
+   confirmed by the calc form above, not asserted. */
+
+.quickpanel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.quickpanel__header:active {
+  cursor: grabbing;
+}
+
+.quickpanel__title {
+  flex: 1;
+  font-family: var(--font-heading);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.quickpanel__close {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.quickpanel__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.quickpanel__close svg {
+  transform: rotate(90deg);
+}
+
+.quickpanel__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.quickpanel__tab {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.quickpanel__tab:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.quickpanel__tab--on {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+/* "In work" (spec §3.5) - visibly disabled, not clickable, same 0.45
+   opacity `.rail__item:disabled` already uses for the same state, rather
+   than a second disabled treatment. */
+.quickpanel__tab:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.quickpanel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+/* The Preview tab's own layout (spec §3.3): "the frame is the subject...
+   with its controls beside rather than above it" - a row, not the stacked
+   column `.preview-panel` uses inside Settings' narrow form column, which
+   is exactly the cramped layout this tab exists to get away from. */
+.quickpanel-preview {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.quickpanel-preview__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 140px;
+}
+
+.quickpanel-preview__frame {
+  flex: 1;
+  min-width: 0;
+}
+
+.quickpanel-errors__list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quickpanel-errors__row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas);
+  overflow: hidden;
+}
+
+.quickpanel-errors__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quickpanel-errors__source {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.quickpanel-errors__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quickpanel-errors__time {
+  flex-shrink: 0;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.quickpanel-errors__detail {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 200px;
+}
+
+.quickpanel-settings__manage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
