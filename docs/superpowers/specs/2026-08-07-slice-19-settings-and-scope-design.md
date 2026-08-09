@@ -20,6 +20,12 @@ at the top, and §2 is where it is argued.
 
 ## 1. Categories, and the page's shape
 
+**Fleshed out 2026-08-09, against the mockup the app's whole visual language
+already comes from (`docs/reference/.../organic_night_v2.html` — the same file
+CLAUDE.md and the Slice 6 handoff call the design authority).** The shape below
+is what was underspecified when this section was first written; nothing in §2–§5
+changes.
+
 The catalogue declares ten groups today (`app`, `creative`, `video`, `captions`,
 `overlay`, `voice`, `images`, `render`, `models`, `keys`), rendered as one long
 scrolling page with a nav that scrolls to each. That is a flat list pretending
@@ -35,6 +41,56 @@ The category table is **one constant in one file**, beside `GROUP_LABELS`. A
 group missing from the table is a failure a test catches, not a group silently
 dropped from the page — settings that the UI never shows have been deleted
 before for looking unused.
+
+### 1.1 The category table
+
+Seven categories, matching the mockup's own `SETTINGS_TABS` names where the
+mockup has an equivalent. The mockup's demo only ever renders one group per
+tab; the real catalogue has ten groups to place, so four categories carry more
+than one:
+
+| Category | Groups inside (existing `GROUP_LABELS`) |
+|---|---|
+| Creative | Creative |
+| Models | Models & cost, Provider keys |
+| Images | Images |
+| Voice | Voice |
+| Captions | Captions, Overlay & cards |
+| Render | Render, Video format |
+| Paths | App & components |
+
+This is a fit, not a rule handed down by the mockup — the mockup never had
+Provider keys, Overlay & cards, Video format, or App & components to place, so
+their homes are a judgment call. If a category ever needs splitting, moving a
+group is a one-line table edit, never a `SettingSpec` change.
+
+### 1.2 Visual shape — tabs, not a sidebar
+
+The mockup's `.tabstrip` / `.tabchip` (a horizontal pill row) replace the
+current `.settings__nav` sidebar entirely. This is a visual and structural
+swap of the *category-selection* layer only:
+
+- Clicking a `.tabchip` shows that category's groups; the URL/selection state
+  works exactly as `activeGroup`/`jumpTo` do today, just keyed by category
+  instead of by group.
+- Search is unchanged in behaviour: it still searches every group regardless
+  of category and still wins over the category filter, per the existing
+  `settings__search` comment ("search always wins over the category list —
+  the category nav is the fallback for browsing, not the main door in").
+  A search match outside the active category switches the active tab, the
+  same way it already jumps within the sidebar today.
+- Scrollspy is unchanged in mechanism (the same `IntersectionObserver` over
+  `[data-settings-group]`), just narrower in scope: it now only has to track
+  which group *within the active category* is on screen, since switching
+  categories no longer means scrolling past nine other groups to get there.
+  For the six categories with exactly one group, there is nothing to spy on
+  and the mechanism is simply inert.
+- Groups keep their current visual design untouched — same `SettingsGroup.tsx`,
+  same field rows, same headings. Only what wraps them (sidebar → tab strip)
+  changes.
+- New CSS needed: `.tabstrip`, `.tabchip`, `.tabchip.on` do not exist in
+  `tokens.css` yet (zero matches) and are added from the mockup's rules
+  (lines ~260–262 of the mockup) rather than guessed.
 
 ## 2. Channel setting scope — the invariant that changes
 
