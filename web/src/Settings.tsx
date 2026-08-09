@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { portToGlobal, type SettingSpec } from "./api";
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
-import PreviewPanel from "./PreviewPanel";
 import SettingsGroup from "./SettingsGroup";
 import { useSettingsData } from "./useSettingsData";
 
@@ -63,7 +62,13 @@ function extractDetail(message: string): string {
  *    `SecretField`'s own transient input does, for as long as one request
  *    takes (see that file).
  */
-export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => void }) {
+export default function Settings({ onOpenLiveList: _onOpenLiveList }: { onOpenLiveList?: () => void }) {
+  // `onOpenLiveList` is unused here now that the Live List opener has moved
+  // to the Quick panel (Slice 18 spec §0). Left declared, deliberately
+  // unused (renamed with a leading underscore for `noUnusedParameters`),
+  // rather than dropped: `App.tsx` still passes it until Task 9 removes
+  // both the prop and the `livelist` Screen variant together, once
+  // `QuickPanel` exists to replace what it opened.
   const {
     schema,
     ctx,
@@ -341,27 +346,6 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
                     lengthPreset={valueById("length_preset") || "60s"}
                   />
                 )}
-                {g.group === "models" && !searching && onOpenLiveList && (
-                  <section className="models-panel" aria-label="Live List">
-                    <div className="spend-card">
-                      <div>
-                        <p className="lbl">Live List</p>
-                        <b>Which models these pickers may offer</b>
-                      </div>
-                      <span className="spend-card__note">
-                        Tick the models and voices you want offered, mark favourites, and note what
-                        each one is good for.
-                      </span>
-                      <button type="button" className="btn" onClick={onOpenLiveList}>
-                        Open Live List
-                      </button>
-                    </div>
-                  </section>
-                )}
-                {g.group === "captions" && !searching && <PreviewPanel kind="caption" valueOf={valueById} />}
-                {g.group === "overlay" && !searching && <PreviewPanel kind="overlay" valueOf={valueById} />}
-                {g.group === "images" && !searching && <PreviewPanel kind="image" valueOf={valueById} />}
-                {g.group === "voice" && !searching && <PreviewPanel kind="voice" valueOf={valueById} />}
                 <SettingsGroup title={g.label} specs={g.specs} ctx={ctx} />
               </div>
             ))
