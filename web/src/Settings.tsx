@@ -1,22 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  deleteProviderKey,
-  getChannels,
-  getKeys,
-  getSettingsSchema,
-  getSettingsValues,
-  portToGlobal,
-  saveSettingsValues,
-  setProviderKey,
-  type ChannelDoc,
-  type SettingSpec,
-} from "./api";
+import { portToGlobal, type SettingSpec } from "./api";
 import HealthPanel from "./HealthPanel";
 import ModelsPanel from "./ModelsPanel";
 import PreviewPanel from "./PreviewPanel";
 import SettingsGroup from "./SettingsGroup";
-import { applyMotionScale } from "./theme";
-import type { SettingsCtx } from "./fields/types";
+import { useSettingsData } from "./useSettingsData";
 
 /** Nicer display names for the schema's raw `group` strings. Anything not
  * listed here still renders - just title-cased - so a brand-new group
@@ -76,20 +64,19 @@ function extractDetail(message: string): string {
  *    takes (see that file).
  */
 export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => void }) {
-  const [schema, setSchema] = useState<SettingSpec[] | null>(null);
-  const [appValues, setAppValues] = useState<Record<string, unknown>>({});
-  const [channelValues, setChannelValues] = useState<Record<string, unknown>>({});
-  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-  const [channels, setChannels] = useState<ChannelDoc[]>([]);
-  const [keys, setKeys] = useState<Record<string, boolean>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [draft, setDraft] = useState<Record<string, unknown>>({});
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const [keyBusy, setKeyBusy] = useState<Record<string, boolean>>({});
-  const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
+  const {
+    schema,
+    ctx,
+    dirtyCount,
+    saving,
+    saveError,
+    handleSave,
+    handleDiscard,
+    loadError,
+    activeChannelId,
+    channelLabel,
+  } = useSettingsData();
+  const { valueById, followingGlobal } = ctx;
 
   const [porting, setPorting] = useState(false);
   const [portError, setPortError] = useState<string | null>(null);
@@ -104,90 +91,6 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
   const contentRef = useRef<HTMLDivElement | null>(null);
   const jumping = useRef(false);
   const jumpTimer = useRef<number | null>(null);
-
-  useEffect(() => {
-    Promise.all([getSettingsSchema(), getSettingsValues(), getChannels(), getKeys()])
-      .then(([schemaRes, valuesRes, channelsRes, keysRes]) => {
-        setSchema(schemaRes.settings);
-        setAppValues(valuesRes.app);
-        setChannelValues(valuesRes.channel);
-        setActiveChannelId(valuesRes.active_channel_id);
-        setChannels(channelsRes.channels);
-        setKeys(keysRes);
-      })
-      .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
-  }, []);
-
-  useEffect(() => {
-    // One shared function (`theme.ts`) drives both the numeric custom
-    // property and the `data-motion="none"` attribute, rather than this
-    // effect re-deriving the mapping. `prefers-reduced-motion` still wins -
-    // see that block in tokens.css, which is unchanged.
-    applyMotionScale(appValues["motion_scale"]);
-  }, [appValues]);
-
-  const channelLabel = useMemo(() => {
-    if (!activeChannelId) return null;
-    return channels.find((c) => c.id === activeChannelId)?.label ?? null;
-  }, [channels, activeChannelId]);
-
-  function getValue(spec: SettingSpec): unknown {
-    if (Object.prototype.hasOwnProperty.call(draft, spec.id)) return draft[spec.id];
-    if (spec.type === "secret") return keys[spec.id] ?? false;
-    const source = spec.scope === "app" ? appValues : channelValues;
-    return Object.prototype.hasOwnProperty.call(source, spec.id) ? source[spec.id] : spec.default;
-  }
-
-  /** `getValue` by id rather than by spec, as a string - what the read-only
-   * Models overview needs. Goes through `getValue`, so it shows unsaved
-   * edits, not just what is on disk. */
-  function valueById(id: string): string {
-    const spec = schema?.find((s) => s.id === id);
-    return spec ? String(getValue(spec) ?? "") : "";
-  }
-
-  function isDirty(id: string): boolean {
-    return Object.prototype.hasOwnProperty.call(draft, id);
-  }
-
-  // True while the active channel reads its channel-scope settings from the
-  // app-wide defaults document rather than its own - see `SettingsCtx`'s
-  // `followingGlobal` for what this gates. Read via `valueById` rather than
-  // `channelValues.settings_source` directly, so an unsaved edit to the
-  // switch itself (still in `draft`, not yet round-tripped through Save)
-  // takes effect on this screen the moment it is made, not after a save.
-  const followingGlobal = valueById("settings_source") === "global";
-
-  function onCommit(spec: SettingSpec, value: unknown) {
-    setSaveError(null);
-    setDraft((d) => ({ ...d, [spec.id]: value }));
-  }
-
-  const dirtyCount = Object.keys(draft).length;
-
-  async function handleSave() {
-    if (dirtyCount === 0) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const res = await saveSettingsValues(draft);
-      setAppValues(res.app);
-      setChannelValues(res.channel);
-      setActiveChannelId(res.active_channel_id);
-      setDraft({});
-    } catch (err) {
-      // Fail cleanly, honestly - keep every pending edit exactly as the
-      // user left it rather than pretending any of it saved.
-      setSaveError(extractDetail(err instanceof Error ? err.message : String(err)));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleDiscard() {
-    setDraft({});
-    setSaveError(null);
-  }
 
   /** Port to global (Important 3 of the Slice 12 review): the route existed
    * with no button in front of it, so a channel switched to "global" landed
@@ -215,53 +118,6 @@ export default function Settings({ onOpenLiveList }: { onOpenLiveList?: () => vo
       setPorting(false);
     }
   }
-
-  async function handleSetKey(provider: string, key: string) {
-    setKeyBusy((b) => ({ ...b, [provider]: true }));
-    setKeyErrors((e) => ({ ...e, [provider]: null }));
-    try {
-      const res = await setProviderKey(provider, key);
-      setKeys((k) => ({ ...k, ...res }));
-    } catch (err) {
-      setKeyErrors((e) => ({
-        ...e,
-        [provider]: extractDetail(err instanceof Error ? err.message : String(err)),
-      }));
-    } finally {
-      setKeyBusy((b) => ({ ...b, [provider]: false }));
-    }
-  }
-
-  async function handleDeleteKey(provider: string) {
-    setKeyBusy((b) => ({ ...b, [provider]: true }));
-    setKeyErrors((e) => ({ ...e, [provider]: null }));
-    try {
-      const res = await deleteProviderKey(provider);
-      setKeys((k) => ({ ...k, ...res }));
-    } catch (err) {
-      setKeyErrors((e) => ({
-        ...e,
-        [provider]: extractDetail(err instanceof Error ? err.message : String(err)),
-      }));
-    } finally {
-      setKeyBusy((b) => ({ ...b, [provider]: false }));
-    }
-  }
-
-  const ctx: SettingsCtx = {
-    getValue,
-    valueById,
-    isDirty,
-    onCommit,
-    activeChannelId,
-    channelLabel,
-    followingGlobal,
-    keys,
-    keyBusy,
-    keyErrors,
-    onSetKey: handleSetKey,
-    onDeleteKey: handleDeleteKey,
-  };
 
   const groups = useMemo(() => {
     if (!schema) return [];

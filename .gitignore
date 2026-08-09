@@ -17,3 +17,5 @@ venv/
 
 installer/AVG-Setup.exe
 .venv-linux/
+web/node_modules/
+web/dist/
