@@ -41,7 +41,7 @@ category.
       click-through deferred to Final Verification once Task 9 mounts
       QuickPanel — no page exists yet to run it against)
 - [x] Task 7: RecentErrorsTab.tsx
-- [ ] Task 8: QuickSettingsTab.tsx
+- [x] Task 8: QuickSettingsTab.tsx
 - [ ] Task 9: QuickPanel.tsx shell + wiring
 - [ ] Task 10: design language / motion
 - [ ] Task 3: useSettingsData extraction
@@ -49,6 +49,6 @@ category.
 - [ ] Task 5: LiveList.tsx adapted + tag filter
 - [ ] Task 6: PreviewTab.tsx
 - [x] Task 7: RecentErrorsTab.tsx
-- [ ] Task 8: QuickSettingsTab.tsx
+- [x] Task 8: QuickSettingsTab.tsx
 - [ ] Task 9: QuickPanel.tsx shell + wiring
 - [ ] Task 10: design language / motion

@@ -18,7 +18,11 @@ export function getToken(): string {
   return TOKEN;
 }
 
-async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const hasBody = body !== undefined;
   // Registered here, in the ONE wrapper every call goes through, so the
   // global status bar can never be missing a request that is genuinely in
@@ -76,6 +80,10 @@ export function apiDelete<T>(path: string): Promise<T> {
 
 export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   return request<T>("PATCH", path, body);
+}
+
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>("PUT", path, body);
 }
 
 /** Builds a `/ws/...` URL carrying the token as a query param, since browsers cannot set headers on a WebSocket handshake. */
@@ -688,6 +696,26 @@ export function portToGlobal(): Promise<{ ported: number }> {
 
 export function getChannels(): Promise<ChannelsResponse> {
   return apiGet<ChannelsResponse>("/api/channels");
+}
+
+export interface QuickSettingsResponse {
+  ids: string[];
+}
+
+/** The Quick panel's own chosen-settings document (Slice 18 spec §3.2) - an
+ * id the catalogue no longer has is already dropped server-side (see
+ * `avg.api.routes_settings.get_quick_settings`), so every id this returns
+ * is guaranteed to resolve against `getSettingsSchema()`'s own result. */
+export function getQuickSettings(): Promise<QuickSettingsResponse> {
+  return apiGet<QuickSettingsResponse>("/api/quick-settings");
+}
+
+/** Replaces the list wholesale - not a merge. A 400 here means an id that
+ * is not in the catalogue, which should not happen from this UI's own
+ * pickers (they only ever offer real catalogue ids) and signals a bug or a
+ * stale client if it does. */
+export function saveQuickSettings(ids: string[]): Promise<QuickSettingsResponse> {
+  return apiPut<QuickSettingsResponse>("/api/quick-settings", { ids });
 }
 
 export function createChannel(label: string, note = ""): Promise<ChannelDoc> {
