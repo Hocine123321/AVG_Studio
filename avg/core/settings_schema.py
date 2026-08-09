@@ -750,6 +750,35 @@ def channel_defaults() -> dict[str, Any]:
     return {s.id: s.default for s in SETTINGS if s.scope == "channel"}
 
 
+def resolve_channel_settings(
+    channel_settings: dict[str, Any], defaults: dict[str, Any]
+) -> dict[str, Any]:
+    """The one resolver (Slice 19 spec §2.3): for every scope="channel"
+    SettingSpec, the channel's own value if the key is present there,
+    otherwise the app-wide defaults document's value if present THERE,
+    otherwise the SettingSpec's own default. Absence is the only
+    inheritance signal - `channel_settings.get(id, ...)` would treat an
+    explicitly-stored empty string as absent, which is exactly the legacy
+    bug this function exists to not reintroduce; `in` is checked, not
+    truthiness.
+
+    Pure and I/O-free on purpose: callers own fetching both dicts (a
+    channel's `.settings`, and `avg.config.channel_defaults.load_defaults()`),
+    so this function has no path to the filesystem and no path to
+    `avg.config.channels` - every caller, api or pipeline, can use it with
+    nothing beyond stdlib dicts.
+    """
+    return {
+        spec.id: (
+            channel_settings[spec.id]
+            if spec.id in channel_settings
+            else defaults.get(spec.id, spec.default)
+        )
+        for spec in SETTINGS
+        if spec.scope == "channel"
+    }
+
+
 def validate_value(spec: SettingSpec, value: Any) -> Any:
     """Validate/coerce `value` against `spec`; raise `SettingValidationError` if it doesn't fit.
 
