@@ -33,7 +33,17 @@ category.
 
 ## Tasks
 - [x] Task 1: quick_settings.json backend document
-- [ ] Task 2: routes
+- [x] Task 2: routes
+- [x] Task 3: useSettingsData extraction
+- [x] Task 4: Settings.tsx cleanup
+- [x] Task 5: LiveList.tsx adapted + tag filter
+- [x] Task 6: PreviewTab.tsx (structural money-rule check done; live DOM
+      click-through deferred to Final Verification once Task 9 mounts
+      QuickPanel — no page exists yet to run it against)
+- [ ] Task 7: RecentErrorsTab.tsx
+- [ ] Task 8: QuickSettingsTab.tsx
+- [ ] Task 9: QuickPanel.tsx shell + wiring
+- [ ] Task 10: design language / motion
 - [ ] Task 3: useSettingsData extraction
 - [ ] Task 4: Settings.tsx cleanup
 - [ ] Task 5: LiveList.tsx adapted + tag filter
