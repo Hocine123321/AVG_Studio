@@ -16,3 +16,4 @@ venv/
 
 
 installer/AVG-Setup.exe
+.venv-linux/

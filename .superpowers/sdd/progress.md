@@ -14,8 +14,25 @@ before this is considered verified end-to-end.
 - Task 1's own test file has zero platform dependencies and is fully
   verifiable here.
 
+## Verification note
+Local-only pytest plugin at `/home/claude/verify_shims/_winstub_plugin.py`
+(outside repo, never committed) stubs `ctypes.WinDLL` and `webview` so
+Windows-only modules import on this Linux sandbox. With it: 904 passed, 26
+failed — all 26 pre-existing and unrelated to this slice (DPAPI round-trip
+needs the real Win32 API my stub fakes; edge_tts/startup_cost/font-family
+failures predate this slice). Quick-settings tests: 11/11 green. Full suite
+must be re-run for real on the Windows box; this only proves the new code
+doesn't break anything platform-independent.
+
+mypy on touched files: baseline (before this slice) 43 errors in
+`avg/api/app.py` + `avg/api/routes_settings.py`, all pre-existing
+unparameterized-`dict` returns. Task 2 adds 2 more of the exact same kind
+(`-> dict:` on the two new routes) — matches the plan's own code sample and
+this file's dominant existing style (25+ instances), not a new error
+category.
+
 ## Tasks
-- [ ] Task 1: quick_settings.json backend document
+- [x] Task 1: quick_settings.json backend document
 - [ ] Task 2: routes
 - [ ] Task 3: useSettingsData extraction
 - [ ] Task 4: Settings.tsx cleanup

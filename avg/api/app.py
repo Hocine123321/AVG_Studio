@@ -70,6 +70,7 @@ from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
 from avg.config.channel_defaults import default_channel_defaults_path
+from avg.config.quick_settings import default_quick_settings_path
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.core.error_store import ErrorStore, classify
@@ -460,6 +461,7 @@ def create_app(
     model_cache_path: Path | None = None,
     model_prefs_path: Path | None = None,
     channel_defaults_path: Path | None = None,
+    quick_settings_path: Path | None = None,
 ) -> FastAPI:
     """Build one isolated FastAPI instance.
 
@@ -535,6 +537,14 @@ def create_app(
     # `settings_source="global"` without knowing to pass this one.
     app.state.channel_defaults_path = (
         Path(channel_defaults_path) if channel_defaults_path is not None else default_channel_defaults_path()
+    )
+    # The Quick panel's own document - a list of setting ids, resolved to a
+    # concrete path here for the exact reason channel_defaults_path just
+    # above is: left `None`, a test client built without the override would
+    # fall through to `default_quick_settings_path()`'s real `%APPDATA%`
+    # silently.
+    app.state.quick_settings_path = (
+        Path(quick_settings_path) if quick_settings_path is not None else default_quick_settings_path()
     )
     # One probe sweep at a time: it costs a call per model on every keyed
     # provider, and two at once would double that for nothing.

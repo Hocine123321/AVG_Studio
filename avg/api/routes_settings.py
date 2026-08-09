@@ -49,6 +49,7 @@ from pydantic import BaseModel, Field
 
 from avg.config import channel_defaults as channel_defaults_config
 from avg.config import channels as channels_config
+from avg.config import quick_settings as quick_settings_config
 from avg.config import secrets as secrets_config
 from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
@@ -1024,6 +1025,35 @@ async def delete_live_entry(kind: str, entry_id: str, request: Request) -> dict:
     prefs, _scope = _prefs_for_scope(app_state)
     prefs.remove(kind, entry_id)
     return {"removed": entry_id}
+
+
+class QuickSettingsUpdate(BaseModel):
+    ids: list[str]
+
+
+@router.get("/api/quick-settings")
+async def get_quick_settings(request: Request) -> dict:
+    """The Quick panel's chosen settings - an id no longer in the catalogue
+    is dropped here, silently, without rewriting the stored document (see
+    `test_get_never_writes_back_the_filtered_result`): the document is what
+    the user asked for, and a setting deleted out from under it should
+    reappear if the setting ever comes back."""
+    stored = quick_settings_config.load_quick_settings(request.app.state.quick_settings_path)
+    known = {s.id for s in SETTINGS}
+    return {"ids": [i for i in stored if i in known]}
+
+
+@router.put("/api/quick-settings")
+async def put_quick_settings(body: QuickSettingsUpdate, request: Request) -> dict:
+    """Replace the list wholesale. Strict, unlike the GET above: a PUT is a
+    deliberate action driven by a picker that only ever offers real
+    catalogue ids, so an unknown id here is a bug or a stale client and
+    gets a 400 - nothing is written if any id is unknown."""
+    unknown = [i for i in body.ids if get_spec(i) is None]
+    if unknown:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"not a known setting: {unknown[0]}")
+    quick_settings_config.save_quick_settings(body.ids, request.app.state.quick_settings_path)
+    return {"ids": body.ids}
 
 
 @router.get("/api/health/report")
