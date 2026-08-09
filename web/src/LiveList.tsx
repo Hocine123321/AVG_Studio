@@ -84,7 +84,20 @@ function languageLabel(subtag: string): string {
   }
 }
 
-export default function LiveList({ onBack }: { onBack: () => void }) {
+const PROVENANCE_TAGS: { source: LiveEntry["source"]; label: string }[] = [
+  { source: "probed", label: "Verified" },
+  { source: "catalogue", label: "Listed" },
+  { source: "manual", label: "Added by me" },
+  { source: "suggested", label: "Suggested" },
+];
+
+export default function LiveList({ onBack: _onBack }: { onBack?: () => void }) {
+  // `onBack` is unused now that this component is a Quick panel tab rather
+  // than a full Screen with its own "Back to App health" button. Left
+  // declared, deliberately unused, for the same reason Settings.tsx's
+  // `onOpenLiveList` is: `App.tsx` still passes it until Task 9 removes
+  // both the prop and the `livelist` Screen variant together, once
+  // `QuickPanel` exists to replace what this screen used to be.
   const [data, setData] = useState<LiveListResponse | null>(null);
   const [kind, setKind] = useState<LiveKind>("text");
   const [busy, setBusy] = useState(false);
@@ -103,6 +116,20 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   const [locale, setLocale] = useState("all");
   const [gender, setGender] = useState("all");
   const [onlySelected, setOnlySelected] = useState(false);
+  // The provenance tags are OR'd together (any of the checked tags), and
+  // that result is AND'd with `onlySelected` and every other filter below -
+  // spec's own example: "verified or suggested, and ticked". No tag
+  // selected means this axis is off and everything shows.
+  const [provenanceFilter, setProvenanceFilter] = useState<Set<LiveEntry["source"]>>(new Set());
+
+  function toggleProvenance(source: LiveEntry["source"]) {
+    setProvenanceFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(source)) next.delete(source);
+      else next.add(source);
+      return next;
+    });
+  }
 
   const load = useCallback(async () => {
     try {
@@ -221,6 +248,7 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
   const needle = query.trim().toLowerCase();
   const visible = rows.filter((row) => {
     if (onlySelected && !row.selected) return false;
+    if (provenanceFilter.size > 0 && !provenanceFilter.has(row.source)) return false;
     if (needle) {
       const info = meta[row.id];
       // The id carries the provider ("edge/en-GB-RyanNeural"), so a query
@@ -257,21 +285,14 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
     : false;
 
   return (
-    <div className="settings">
-      <header className="settings__header">
-        <div>
-          <div className="home__kicker">Diagnostics</div>
-          <h1 className="home__title">Live List</h1>
-        </div>
-        <span className="home__spacer" />
+    <div className="livelist">
+      <div className="livelist__controls">
         {data && (
           <span className="chip" title="A channel can keep its own shortlist instead of the app-wide one.">
             {data.scope === "channel" ? "This channel’s own list" : "App-wide list"}
           </span>
         )}
-        <button type="button" className="btn" onClick={onBack}>
-          Back to App health
-        </button>
+        <span className="home__spacer" />
         <button
           type="button"
           className="btn"
@@ -288,15 +309,19 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
         >
           {suggesting === "voices" ? "Suggesting…" : "Suggest voices"}
         </button>
+        {/* Plain `.btn`, not `.btn--primary` - the Quick panel's one
+            filled-action budget belongs to the screen underneath it (spec
+            §4). This was the screen's own primary action when LiveList was
+            a full Screen; demoted here, not removed. */}
         <button
           type="button"
-          className="btn btn--primary"
+          className="btn"
           onClick={() => void refresh()}
           disabled={busy || suggesting !== null}
         >
           {busy ? "Listing…" : "Refresh catalogues"}
         </button>
-      </header>
+      </div>
 
       <p className="channels__note">
         Only ticked entries are offered when you pick a model in Settings. Favourites come first, and
@@ -365,6 +390,20 @@ export default function LiveList({ onBack }: { onBack: () => void }) {
             <span className="switch__thumb" aria-hidden="true" />
           </button>
           Ticked only ({selectedCount})
+        </div>
+
+        <div className="livelist__filter" role="group" aria-label="Filter by provenance">
+          {PROVENANCE_TAGS.map((tag) => (
+            <button
+              key={tag.source}
+              type="button"
+              aria-pressed={provenanceFilter.has(tag.source)}
+              className={`chip chip--toggle${provenanceFilter.has(tag.source) ? " chip--toggle-on" : ""}`}
+              onClick={() => toggleProvenance(tag.source)}
+            >
+              {tag.label}
+            </button>
+          ))}
         </div>
 
         {kind === "voice" && (

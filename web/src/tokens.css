@@ -258,6 +258,25 @@ a:hover {
   color: var(--accent-soft);
 }
 
+/* A `.chip` that is also a filter toggle - the Live List's provenance
+   filter (Slice 18 spec §3.1). Same shape as the plain chip; interactive
+   states are the only addition, so a toggle chip and a plain status chip
+   never read as two different controls doing the same job. */
+.chip--toggle {
+  cursor: pointer;
+}
+
+.chip--toggle:hover {
+  border-color: var(--line-2);
+  color: var(--text);
+}
+
+.chip--toggle-on {
+  border-color: transparent;
+  background: var(--accent-deep);
+  color: var(--accent-soft);
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
