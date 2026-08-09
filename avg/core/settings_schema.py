@@ -181,23 +181,6 @@ SETTINGS: list[SettingSpec] = [
         choices=["1", "2", "3", "4"],
         invalidates=None,
     ),
-    SettingSpec(
-        id="settings_source",
-        group="app",
-        label="This channel's settings",
-        help=(
-            "Use this channel's own settings, or the app-wide defaults - whole "
-            "documents, never mixed field by field. Read by "
-            "`avg/api/routes_settings.py`."
-        ),
-        type="choice",
-        default="channel",
-        scope="channel",
-        choices=["channel", "global"],
-        # Nothing is invalidated: this changes WHERE a value is read from,
-        # not what any existing artifact was made with.
-        invalidates=None,
-    ),
     # --- video format and length (channel scope: a production choice) ---
     SettingSpec(
         id="topic_research",

@@ -92,15 +92,22 @@ catches it.
 ### Config scopes (no merge layer)
 
 - `scope="app"` settings live in `SettingsDoc.values` (`%APPDATA%/AVG Studio/settings.json`).
-- `scope="channel"` settings live in the **active channel's** document, or —
-  when that channel's `settings_source` is `"global"` — in the app-wide
-  `channel_defaults.json`, **whole**. Never both: no field is ever resolved
-  by looking in one and falling back to the other, and there is no
-  absent-means-inherit. Three bugs in the legacy app came from per-field
-  implicit inheritance, which this shape has no room for. `settings_source`
-  itself is always read from the channel's own document. Porting a channel's
-  values into the defaults is one explicit, user-pressed snapshot
-  (`POST /api/settings/port-to-global`), never a live copy.
+- `scope="channel"` settings resolve through one function,
+  `avg.core.settings_schema.resolve_channel_settings` (Slice 19 §2.3):
+  the active channel's own document wins if it has the key, else the
+  app-wide `channel_defaults.json` wins if it has the key, else the
+  `SettingSpec`'s own default. Absence is the only inheritance signal —
+  presence is checked with `in`, not truthiness, so an explicitly-stored
+  empty string is returned as-is, never treated as a gap. Every reader,
+  pipeline phase or API route, goes through this one resolver; a test
+  (`tests/core/test_settings_schema.py`'s drift test) fails if a reader
+  bypasses it. Porting a channel's values into the defaults is still one
+  explicit, user-pressed snapshot (`POST /api/settings/port-to-global`),
+  never a live copy. A channel can also edit the defaults document
+  directly via the Settings screen's Global/Channel toggle
+  (`target: "global"` on `POST /api/settings/values`) — that path needs
+  no active channel, since there is nothing above the defaults document
+  to inherit from.
 - `type="secret"` values never travel through the **settings surface**: `/api/settings/values` refuses them, `SettingsDoc.values` never holds one, and `GET /api/keys` reports only *whether* a provider has a key. `avg/config/secrets.py` is the only module that encrypts, decrypts or persists them (DPAPI, `CryptProtectData`).
   This is a boundary on the *config and API surface*, not a ban on reading a key. `get_key()` is `secrets.py`'s public API and exists precisely so a provider can sign its request — every backend under `avg/providers/` calls it, by design. What must never happen is a key reaching a log line, an exception message, a `repr()`, a settings response, or a recorded HTTP fixture (`transport.py` scrubs those before writing).
 
