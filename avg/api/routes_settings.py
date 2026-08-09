@@ -60,6 +60,7 @@ from avg.core.settings_schema import (
     SETTINGS,
     SettingValidationError,
     get_spec,
+    resolve_channel_settings,
     validate_value,
 )
 from avg.core.model_prefs import KINDS, ModelPrefs
@@ -102,6 +103,12 @@ class ChannelUpdate(BaseModel):
 
 class SettingsValuesUpdate(BaseModel):
     values: dict[str, Any]
+    #: Which document channel-scope values are written to (Slice 19 §3).
+    #: Default "channel" leaves every existing caller unaffected. "global"
+    #: writes straight to the app-wide defaults document instead and needs
+    #: no active channel - there is nothing above the defaults document to
+    #: inherit from, so the "is a channel active" guard does not apply.
+    target: Literal["channel", "global"] = "channel"
 
 
 class KeySet(BaseModel):
@@ -128,49 +135,36 @@ def _app_values(app_state: Any) -> dict[str, Any]:
     return values
 
 
-def _channel_values(app_state: Any) -> dict[str, Any]:
-    """Current value for every `scope="channel"` setting.
+def _channel_values(app_state: Any, scope: Literal["channel", "global"] = "channel") -> dict[str, Any]:
+    """Current value for every `scope="channel"` setting, resolved (Slice 19
+    §2.3) through `resolve_channel_settings` - the one resolver every reader
+    goes through, here and in the pipeline.
 
-    Read from the active channel's own document, or - when that channel's
-    `settings_source` says `"global"` - from the app-wide defaults document,
-    WHOLE. There is no third case: a field absent from whichever document is
-    selected resolves to the `SettingSpec`'s own default, never to the other
-    document.
+    `scope="channel"` (the default): the active channel's own document,
+    falling back per-field to the app-wide defaults document, falling back
+    per-field to the `SettingSpec`'s own default. Absence is the only
+    inheritance signal.
 
-    That is what keeps this from being the mechanism `CLAUDE.md` deletes.
-    The three legacy bugs came from per-field, implicit inheritance; there is
-    no per-field resolution here to get wrong. Same shape as
-    `live_list_source` (see `_prefs_for_scope`).
-
-    `settings_source` itself is ALWAYS read from the channel's own document -
-    otherwise a channel switched to `"global"` could never be switched back.
+    `scope="global"`: the Settings screen's Global/Channel toggle (§3) -
+    what editing the defaults document directly looks like. Reuses the same
+    resolver with the arguments swapped: the defaults document stands in as
+    the "channel" argument, with nothing above it to inherit from, so the
+    second argument is always `{}`.
     """
+    defaults = channel_defaults_config.load_defaults(getattr(app_state, "channel_defaults_path", None))
+    if scope == "global":
+        return resolve_channel_settings(defaults, {})
+
     active_id = channels_config.active_channel_id(app_state.settings_path)
     channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
     own = channel.settings if channel is not None else {}
-
-    source = str(own.get("settings_source", "channel"))
-    if source == "global":
-        selected: dict[str, Any] = channel_defaults_config.load_defaults(
-            getattr(app_state, "channel_defaults_path", None)
-        )
-    else:
-        selected = dict(own)
-
-    values = {
-        spec.id: selected.get(spec.id, spec.default)
-        for spec in SETTINGS
-        if spec.scope == "channel"
-    }
-    # The switch is the channel's own, whichever document the rest came from.
-    values["settings_source"] = source
-    return values
+    return resolve_channel_settings(own, defaults)
 
 
-def _values_payload(app_state: Any) -> dict[str, Any]:
+def _values_payload(app_state: Any, scope: Literal["channel", "global"] = "channel") -> dict[str, Any]:
     return {
         "app": _app_values(app_state),
-        "channel": _channel_values(app_state),
+        "channel": _channel_values(app_state, scope),
         "active_channel_id": channels_config.active_channel_id(app_state.settings_path),
     }
 
@@ -1124,8 +1118,8 @@ async def get_costs() -> dict:
 
 
 @router.get("/api/settings/values")
-async def get_settings_values(request: Request) -> dict:
-    return _values_payload(request.app.state)
+async def get_settings_values(request: Request, scope: Literal["channel", "global"] = "channel") -> dict:
+    return _values_payload(request.app.state, scope)
 
 
 @router.post("/api/settings/values")
@@ -1150,34 +1144,75 @@ async def post_settings_values(body: SettingsValuesUpdate, request: Request) -> 
         else:
             channel_updates[setting_id] = value
 
-    # Validate the whole batch, including "is a channel actually active",
-    # before writing anything - a request that fails partway must not leave
-    # some settings saved and others not (see the scope rule's "fail
-    # cleanly, not write somewhere arbitrary" requirement).
-    active_id = channels_config.active_channel_id(app_state.settings_path)
-    if channel_updates and active_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="no active channel — activate a channel before saving channel-scoped settings",
-        )
+    if body.target == "global":
+        # Editing the defaults document directly needs no active channel -
+        # there is nothing above it to inherit from (Slice 19 §3).
+        if channel_updates:
+            defaults = channel_defaults_config.load_defaults(
+                getattr(app_state, "channel_defaults_path", None)
+            )
+            defaults.update(channel_updates)
+            channel_defaults_config.save_defaults(
+                defaults, getattr(app_state, "channel_defaults_path", None)
+            )
+    else:
+        # Validate the whole batch, including "is a channel actually active",
+        # before writing anything - a request that fails partway must not
+        # leave some settings saved and others not (see the scope rule's
+        # "fail cleanly, not write somewhere arbitrary" requirement).
+        active_id = channels_config.active_channel_id(app_state.settings_path)
+        if channel_updates and active_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no active channel — activate a channel before saving channel-scoped settings",
+            )
 
-    channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
-    if channel_updates and channel is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"active channel {active_id!r} no longer exists",
-        )
+        channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
+        if channel_updates and channel is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"active channel {active_id!r} no longer exists",
+            )
 
-    if channel_updates:
-        assert channel is not None  # guarded above
-        channel.settings.update(channel_updates)
-        channels_config.save_channel(channel, app_state.channels_dir)
+        if channel_updates:
+            assert channel is not None  # guarded above
+            channel.settings.update(channel_updates)
+            channels_config.save_channel(channel, app_state.channels_dir)
 
+    # app_updates behave identically regardless of target - app-scope
+    # settings were never part of the Global/Channel toggle.
     if app_updates:
         doc = load_settings(app_state.settings_path)
         doc.values.update(app_updates)
         save_settings(doc, app_state.settings_path)
 
+    return _values_payload(app_state, body.target)
+
+
+@router.delete("/api/settings/values/{setting_id}")
+async def release_setting(setting_id: str, request: Request) -> dict:
+    """Release ownership of one channel-scope setting - deletes the key
+    from the active channel's own document, so it goes back to reading the
+    app-wide defaults (or the catalogue default) per `resolve_channel_settings`.
+    The other half of §2.4's "one mechanism, two verbs": taking ownership is
+    already just an ordinary write through `POST /api/settings/values`
+    (nothing new needed there), this is the delete verb the old
+    whole-document switch never needed.
+    """
+    app_state = request.app.state
+    spec = get_spec(setting_id)
+    if spec is None or spec.scope != "channel":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"not a channel-scope setting: {setting_id!r}"
+        )
+    active_id = channels_config.active_channel_id(app_state.settings_path)
+    channel = channels_config.get_channel(active_id, app_state.channels_dir) if active_id else None
+    if channel is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="no active channel — nothing to release"
+        )
+    channel.settings.pop(setting_id, None)  # already-absent is not an error
+    channels_config.save_channel(channel, app_state.channels_dir)
     return _values_payload(app_state)
 
 
@@ -1210,11 +1245,6 @@ async def port_to_global(request: Request) -> dict[str, Any]:
         for spec in SETTINGS
         if spec.scope == "channel"
         and spec.type != "secret"
-        # `settings_source` is the channel's own switch, always read from its
-        # own document (see `_channel_values`) - copying it into the
-        # defaults document would never be read back from there, so it
-        # would just be dead weight sitting in the snapshot.
-        and spec.id != "settings_source"
         and spec.id in channel.settings
     }
     channel_defaults_config.save_defaults(

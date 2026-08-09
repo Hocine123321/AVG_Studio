@@ -524,8 +524,10 @@ def create_app(
         if model_prefs_path is not None
         else default_settings_path().with_name("model_prefs.json")
     )
-    # The app-wide defaults a channel can read instead of its own document
-    # (`settings_source`). Its own file, beside settings.json, for the same
+    # The app-wide defaults each scope="channel" setting resolves through
+    # per field when the active channel's own document doesn't hold that
+    # key (avg.core.settings_schema.resolve_channel_settings, Slice 19).
+    # Its own file, beside settings.json, for the same
     # reason the error log and the model cache have theirs - and resolved to
     # a concrete path here, exactly like those two, rather than left `None`
     # for `avg.config.channel_defaults` to default internally. Left `None`
@@ -533,8 +535,8 @@ def create_app(
     # was useless to any reader that isn't `getattr`-defensive about it, and
     # a test client built without the override would fall through to
     # `default_channel_defaults_path()`'s real `%APPDATA%` - silently, on
-    # the first future test that exercises `port-to-global` or
-    # `settings_source="global"` without knowing to pass this one.
+    # the first future test that exercises `port-to-global` or a
+    # `target: "global"` settings write without knowing to pass this one.
     app.state.channel_defaults_path = (
         Path(channel_defaults_path) if channel_defaults_path is not None else default_channel_defaults_path()
     )

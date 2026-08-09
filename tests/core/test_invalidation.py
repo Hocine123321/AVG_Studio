@@ -49,12 +49,14 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     `settings_source`, and 65 before the Slice 14 review's Important 4
     added the `overlay` group's three brand colours (`overlay_accent1`,
     `overlay_accent2`, `overlay_highlight`), and Slice 16 added
-    `max_parallel_jobs`. The count is kept as a
+    `max_parallel_jobs`, and 65 before Slice 19 removed `settings_source`
+    (superseded by `resolve_channel_settings`'s per-field resolution). The
+    count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 66
+    assert len(SETTINGS) == 65
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

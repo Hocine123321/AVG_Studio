@@ -138,16 +138,3 @@ def test_the_app_group_holds_the_apps_own_behaviour():
 
     assert BY_ID["motion_scale"].choices == ["full", "reduced", "none"]
     assert BY_ID["startup_check"].default is True
-
-
-def test_settings_source_is_a_channel_choice_like_live_list_source():
-    """Whole-document either/or, the shape `live_list_source` already
-    ships - never per-field inheritance."""
-    from avg.core.settings_schema import BY_ID
-
-    spec = BY_ID["settings_source"]
-    assert spec.group == "app"
-    assert spec.scope == "channel"
-    assert spec.choices == ["channel", "global"]
-    assert spec.default == "channel"
-    assert spec.invalidates is None

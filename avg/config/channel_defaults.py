@@ -1,19 +1,18 @@
-"""The app-wide defaults a channel can read INSTEAD of its own document.
+"""The app-wide defaults a channel-scope setting resolves through when the
+active channel's own document doesn't hold that key.
 
-`CLAUDE.md`'s Config scopes rule deletes the legacy copy mechanism: "No
-global copy, no apply/capture step, no absent-means-inherit. Three bugs in
-the legacy app came from the copy mechanism this deletes." Those three bugs
-came from PER-FIELD, IMPLICIT inheritance - a field missing from a channel
-silently resolving to a global one.
+`CLAUDE.md`'s Config scopes rule: every `scope="channel"` setting resolves
+through `avg.core.settings_schema.resolve_channel_settings` (Slice 19
+§2.3) - the channel's own document wins per field if it has the key, else
+this document wins per field if it has the key, else the `SettingSpec`'s
+own default. Absence is the only inheritance signal, checked with `in`,
+never truthiness, so an explicitly-stored empty string is never treated as
+a gap.
 
-This document is not that. A channel reads its own settings or it reads
-this one, whole, chosen explicitly by `settings_source` and defaulting to
-its own. No field is ever resolved by looking in one document and falling
-back to the other, so there is no per-field resolution to get wrong. The
-shape is the one `live_list_source` already ships
-(`avg/api/routes_settings.py`'s `_prefs_for_scope`).
-
-Storage only. The either/or resolution lives in `avg/api/routes_settings.py`.
+Storage only. The resolution itself lives in
+`avg.core.settings_schema.resolve_channel_settings`, called from
+`avg/api/routes_settings.py` and threaded into the pipeline via
+`PhaseContext.channel_values`.
 Never holds a secret: `type="secret"` values live in `avg.config.secrets`
 alone and the porting action skips them.
 """
