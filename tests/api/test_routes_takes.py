@@ -26,7 +26,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from avg.api.app import create_app
-from avg.api.routes_takes import _folder_size_bytes
+from avg.api.routes_takes import _folder_size_bytes, _sync_current_take
 from avg.config.channels import get_channel
 from avg.core.errors import ErrorKind
 from avg.core.events import PhaseFailed
@@ -692,3 +692,47 @@ def test_renamed_take_survives_a_later_take_creation(client, paths, monkeypatch)
     assert r.status_code == 201
 
     assert project.takes[0].label == "My Favorite Cut"
+
+
+def test_sync_current_take_keeps_a_legacy_snapshots_own_aspect_ratio(paths):
+    """Slice 19 Task 7's consequence #2, proven rather than assumed: a take
+    snapshotted before this slice still carries an explicit `aspect_ratio`
+    key in `settings_snapshot`, and that stored value must keep winning
+    over the derived one - it is what actually rendered for that take, and
+    a later `select` of it must not silently swap the ratio out from under
+    it."""
+    project = _project(paths)
+    take = Take(
+        id=1,
+        label="Take 1",
+        created=project.created,
+        settings_snapshot={"aspect_ratio": "16:9", "video_form": "shortform"},
+        phases={},
+        master_output=None,
+    )
+    project.takes = [take]
+
+    _sync_current_take(project, take)
+
+    assert project.aspect_ratio == "16:9"
+
+
+def test_sync_current_take_derives_aspect_ratio_when_the_snapshot_has_none(paths):
+    """The other half of the same behaviour: a take created AFTER Slice 19
+    has no `aspect_ratio` key at all (the setting no longer exists), so
+    `_sync_current_take` must derive it from the snapshot's `video_form`
+    instead of leaving the project's previous ratio in place."""
+    project = _project(paths)
+    take = Take(
+        id=1,
+        label="Take 1",
+        created=project.created,
+        settings_snapshot={"video_form": "longform"},
+        phases={},
+        master_output=None,
+    )
+    project.takes = [take]
+
+    _sync_current_take(project, take)
+
+    assert project.aspect_ratio == "16:9"

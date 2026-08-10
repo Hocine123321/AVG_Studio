@@ -116,7 +116,10 @@ def test_post_rejects_unknown_setting_id(client):
 
 
 def test_post_rejects_invalid_choice_value(client):
-    r = client.post("/api/settings/values", headers=AUTH, json={"values": {"aspect_ratio": "4:3"}})
+    # `aspect_ratio` was this test's example setting pre-Slice-19; it's no
+    # longer a real setting (derived from `video_form` instead), so
+    # `video_form` - another `type="choice"` id - stands in for it.
+    r = client.post("/api/settings/values", headers=AUTH, json={"values": {"video_form": "4:3"}})
     assert r.status_code == 400
     assert "4:3" in r.json()["detail"]
 

@@ -49,15 +49,29 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     `settings_source`, and 65 before the Slice 14 review's Important 4
     added the `overlay` group's three brand colours (`overlay_accent1`,
     `overlay_accent2`, `overlay_highlight`), and Slice 16 added
-    `max_parallel_jobs`, and 65 before Slice 19 removed `settings_source`
-    (superseded by `resolve_channel_settings`'s per-field resolution). The
-    count is kept as a
+    `max_parallel_jobs`, 65 before Slice 19 removed `settings_source`
+    (superseded by `resolve_channel_settings`'s per-field resolution), and
+    64 after Slice 19 Task 7 also removed `aspect_ratio` (now derived from
+    `video_form` - `avg.pipeline.create.derive_aspect_ratio` - rather than
+    stored as its own setting). The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 65
+    assert len(SETTINGS) == 64
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
+
+
+def test_changing_video_form_invalidates_visuals_not_merely_brief():
+    """Slice 19 Task 7's own consequence #1, pinned rather than left
+    implicit: `video_form`'s own `invalidates` says "brief" (phase 0), but
+    because `brief` is the first phase, its invalidation sweep already
+    carries every later phase with it - `visuals` included. This is what
+    makes a `video_form` change (which now also changes the derived
+    `aspect_ratio`) actually re-run the phase that bakes the frame
+    dimensions into the generated images, not just the phase that writes
+    the script."""
+    assert "visuals" in phases_to_rerun(["video_form"])
 
 
 def test_change_set_spanning_two_phases_picks_the_earlier_one():

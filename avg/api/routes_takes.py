@@ -90,7 +90,7 @@ from avg.core.settings_schema import (
 from avg.core.take_log import log_path_for
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
 from avg.export.capcut import export_take
-from avg.pipeline.create import save_project
+from avg.pipeline.create import derive_aspect_ratio, save_project
 from avg.pipeline.phase import CancellationToken
 
 from .deps import require_token
@@ -384,7 +384,13 @@ def _sync_current_take(project: ProjectDoc, take: Take) -> None:
     project.current_take_id = take.id
     project.master_output = take.master_output
     if "aspect_ratio" in take.settings_snapshot:
+        # A take snapshotted before Slice 19 still carries its own stored
+        # ratio - that value is what actually rendered for it, and must
+        # keep winning over anything derived now, or selecting an old take
+        # would silently change what its thumbnail claims to be.
         project.aspect_ratio = take.settings_snapshot["aspect_ratio"]
+    else:
+        project.aspect_ratio = derive_aspect_ratio(str(take.settings_snapshot.get("video_form", "shortform")))
 
 
 # --------------------------------------------------------------------------
@@ -546,8 +552,12 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     # Validate + coerce every override and fold it onto a THROWAWAY copy of
     # the channel's settings dict - `channel` itself is never mutated or
     # saved (see this module's docstring; matches `avg.api.app.
-    # ProjectCreate`'s own rule verbatim).
-    effective_settings = dict(channel.settings)
+    # ProjectCreate`'s own rule verbatim). Starts from the RESOLVED channel
+    # settings (Slice 19 §2.3), not `channel.settings` raw - same fix as
+    # `avg.api.app.create_project`, and for the same reason: a key this
+    # channel has no opinion on must inherit the app-wide default here too,
+    # not just on every other surface that already goes through the resolver.
+    effective_settings = dict(resolve_channel_settings(channel.settings, load_defaults(app_state.channel_defaults_path)))
     for setting_id, raw_value in body.overrides.items():
         spec = get_spec(setting_id)
         assert spec is not None and spec.scope == "channel"  # already checked by _validate_override_ids
@@ -605,13 +615,14 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     # (and sharing `phases` by reference) is all that's needed. `aspect_ratio`
     # is swapped too since (unlike every other creative setting) phases read
     # it straight off `ctx.project`, not `ctx.channel.settings` - see
-    # `_sync_current_take`.
+    # `_sync_current_take`. Derived from `video_form` (Slice 19 Task 7)
+    # rather than read as its own setting, which no longer exists.
     shadow_project = project.model_copy(
         update={
             "folder": take_folder(project, new_take.id),
             "phases": new_take.phases,
             "master_output": new_take.master_output,
-            "aspect_ratio": effective_settings.get("aspect_ratio", project.aspect_ratio),
+            "aspect_ratio": derive_aspect_ratio(str(effective_settings.get("video_form", "shortform"))),
         }
     )
 

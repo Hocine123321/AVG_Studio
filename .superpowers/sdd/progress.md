@@ -40,7 +40,7 @@ both times).
       and both API callers
 - [x] Task 5: migrate every phase file off `ctx.channel.settings`
 - [x] Task 6: the drift test
-- [ ] Task 7: `aspect_ratio` removed, derived from `video_form`
+- [x] Task 7: `aspect_ratio` removed, derived from `video_form`
 - [ ] Task 8: frontend `useSettingsData.ts` — ownership and scope
 - [ ] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
 - [ ] Task 10: frontend the category table and tab strip
@@ -128,3 +128,71 @@ shape now rather than a shape that would need un-relaxing later.
 `avg/pipeline/create.py:140`). Per explicit user instruction, no test runs
 between Task 6 and the last task — full verification (`pytest`, `mypy`)
 happens once at the end, after Task 13.
+
+## Task 7 notes
+
+Real gap found beyond the plan's own text: Task 4 was supposed to make
+`create_project` (`avg/api/app.py`) and `create_take` (`avg/api/
+routes_takes.py`) build `effective_settings` from `dict(resolved)` rather
+than `dict(channel.settings)` — the plan says so explicitly (§0's inventory
+and Task 4.3's own bullets) — but neither call site was actually changed;
+both still read `channel.settings` raw. This wasn't caught by Task 6's
+drift test because `dict(channel.settings)` matches neither of the test's
+two regexes (`.settings.get(` / `.settings[`) — a real blind spot in that
+test's coverage, noted here rather than expanded now since widening the
+regex is its own, unrequested change with its own risk of new false
+positives (e.g. `channel.settings` bare, used legitimately elsewhere for
+other purposes).
+
+Fixed both as part of this task, since Task 7.2's own text required it
+("this function already needs to move to reading through the resolver per
+Task 4's inventory... not a second raw read") — `new_project` needed a
+resolved `video_form` in hand, and that only exists if its caller actually
+resolved first:
+- `avg/api/app.py`'s `create_project`: `effective_settings` now starts
+  from `dict(resolve_channel_settings(channel.settings, load_defaults(...)))`.
+- `avg/api/routes_takes.py`'s `create_take`: same fix, same reasoning —
+  `effective_settings` now starts resolved before overrides fold onto it.
+
+`avg/pipeline/create.py`: `aspect_ratio` `SettingSpec` deleted from the
+catalogue. `new_project` gained a required `video_form: str` keyword-only
+parameter, replacing its internal `channel.settings.get("aspect_ratio")`
+read entirely; `derive_aspect_ratio()` (public, not the plan's own private-
+underscore naming, since `routes_takes.py`'s `_sync_current_take` needs to
+import the same mapping rather than duplicate it) is the one place the
+`shortform -> 9:16` / `longform -> 16:9` mapping is written down.
+
+`avg/api/routes_takes.py`'s `_sync_current_take`: added the `else` branch
+deriving from `take.settings_snapshot.get("video_form")` when no legacy
+`aspect_ratio` key is present; the `if "aspect_ratio" in ...` branch itself
+is untouched, so an old take's own stored ratio still wins, as the spec's
+consequence #2 requires. `create_take`'s shadow-project assembly (line
+~620) now calls `derive_aspect_ratio` too, instead of reading a key that no
+longer exists in `effective_settings`.
+
+**Tests:** `tests/pipeline/test_create.py` rewritten for the new
+`video_form=` kwarg throughout; the two old aspect-ratio-from-channel tests
+replaced with `test_new_project_derives_aspect_ratio_from_shortform`,
+`..._from_longform`, and `test_new_project_ignores_a_stray_aspect_ratio_
+key_on_the_channel` (consequence #3). `tests/core/test_invalidation.py`:
+tripwire count 65 -> 64, plus a new `test_changing_video_form_invalidates_
+visuals_not_merely_brief` pinning consequence #1 (previously implicit in
+phase ordering, never asserted). `tests/api/test_routes_settings.py`: the
+invalid-choice-value test's example setting swapped from the now-gone
+`aspect_ratio` to `video_form` (both `type="choice"`, same test intent).
+`tests/api/test_routes_takes.py`: two new direct unit tests against
+`_sync_current_take` itself — one proving a legacy snapshot's stored
+`aspect_ratio` wins (consequence #2, the plan's own requested "new test"),
+one proving the derive-from-`video_form` path when no such key exists.
+
+Audited (no changes needed, confirmed harmless per the plan's own
+distinction): `test_preview_routes.py`, `test_models.py`,
+`test_persistence.py`, `test_legacy_import.py`, `test_settings_import.py`,
+`test_images.py`, `test_prompts.py` — every `aspect_ratio` reference in
+these is either `ProjectDoc.aspect_ratio` field construction (the field
+itself was never removed, only the settable channel setting) or an image
+provider's own `.generate(aspect_ratio=...)` render-time argument, neither
+of which this task touches.
+
+**Known state:** no test run yet, per the same explicit instruction as
+Task 6 — full verification deferred to after the last task in this slice.

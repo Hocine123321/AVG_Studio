@@ -220,17 +220,6 @@ SETTINGS: list[SettingSpec] = [
         invalidates="script",
     ),
     SettingSpec(
-        id="aspect_ratio",
-        group="video",
-        label="Aspect ratio",
-        help="Output frame aspect ratio.",
-        type="choice",
-        default="9:16",
-        scope="channel",
-        choices=["9:16", "16:9", "1:1"],
-        invalidates="visuals",
-    ),
-    SettingSpec(
         id="fps",
         group="video",
         label="Frame rate",

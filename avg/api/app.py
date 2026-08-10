@@ -1049,9 +1049,18 @@ def create_app(
             )
 
         # Validate every override against the catalogue and fold it onto a
-        # THROWAWAY copy of the channel's settings dict - `channel` itself
-        # is never mutated or saved (see `ProjectCreate`'s docstring above).
-        effective_settings = dict(channel.settings)
+        # THROWAWAY copy of the channel's RESOLVED settings (Slice 19 §2.3) -
+        # `channel` itself is never mutated or saved (see `ProjectCreate`'s
+        # docstring above). Starting from `resolve_channel_settings`'s
+        # output rather than the channel's own raw `.settings` is what the
+        # spec's §5.2 footnote named as a real divergence ("`create_project`
+        # folds overrides onto `channel.settings` while the Settings screen
+        # resolves through `_channel_values`") - without it, a channel that
+        # owns no opinion on a key would silently see the SettingSpec's own
+        # hardcoded default here while every other surface saw the app-wide
+        # `channel_defaults.json` value for that same key.
+        resolved = resolve_channel_settings(channel.settings, load_defaults(app.state.channel_defaults_path))
+        effective_settings = dict(resolved)
         for setting_id, raw_value in body.overrides.items():
             spec = get_spec(setting_id)
             if spec is None or spec.scope != "channel":
@@ -1086,7 +1095,12 @@ def create_app(
         # `save_project` writes atomically but does not arbitrate. A
         # different project starting concurrently is exactly what the job
         # cap (`app.state.jobs`, `max_parallel_jobs`) now allows.
-        project = new_project(topic, effective_channel, app.state.output_root)
+        project = new_project(
+            topic,
+            effective_channel,
+            app.state.output_root,
+            video_form=str(effective_settings.get("video_form", "shortform")),
+        )
         if app.state.jobs.has_job(project.id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

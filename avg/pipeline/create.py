@@ -33,7 +33,6 @@ from pathlib import Path
 
 from avg.config.channels import Channel
 from avg.core.models import PhaseRecord, ProjectDoc, Take
-from avg.core.settings_schema import channel_defaults
 from avg.core.takes import alias_root_take_phases
 
 # Sub-folders a fresh project needs before any phase can run, matching what
@@ -41,6 +40,23 @@ from avg.core.takes import alias_root_take_phases
 # project (`_INPUT_DIRS`) - a new project must look the same shape from day
 # one rather than growing folders ad hoc as each phase first writes to one.
 _PROJECT_DIRS: tuple[str, ...] = ("script", "images", "audio", "render")
+
+# shortform -> 9:16, longform -> 16:9 (Slice 19 spec §5.2) - the one place
+# this mapping is written down. `video_form` shapes the writing
+# (avg.pipeline.phases._common.form_label); this is what makes it also
+# shape the frame, which the removed `aspect_ratio` setting's own help text
+# already claimed and did not actually do before this slice.
+_FORM_ASPECT: dict[str, str] = {"shortform": "9:16", "longform": "16:9"}
+
+
+def derive_aspect_ratio(video_form: str) -> str:
+    """`video_form` -> output frame aspect ratio. Unknown values fall back
+    to shortform's 9:16 rather than raising, matching how a missing/invalid
+    catalogue value already resolves elsewhere in this codebase (Slice 19
+    §2.3's own "absence is the only inheritance signal" - this is the same
+    spirit one level up, applied to a derived rather than a stored value).
+    """
+    return _FORM_ASPECT.get(video_form, _FORM_ASPECT["shortform"])
 
 
 def _slugify(text: str) -> str:
@@ -114,19 +130,20 @@ def save_project(project: ProjectDoc) -> None:
         raise
 
 
-def new_project(topic: str, channel: Channel, output_root: Path) -> ProjectDoc:
+def new_project(topic: str, channel: Channel, output_root: Path, *, video_form: str) -> ProjectDoc:
     """Create a new project's folder and document for `topic` under
     `output_root`, using `channel`'s creative settings.
 
     `phases` starts empty (every phase implicitly `'pending'`) and
     `master_output` starts `None` - a brand new project has produced
-    nothing yet. `aspect_ratio` comes from the active channel's own
-    `settings["aspect_ratio"]` (falling back to the settings catalogue's
-    default, `avg.core.settings_schema.channel_defaults()`, if the channel
-    hasn't set one) - creative settings live on the channel and nowhere
-    else (see `avg.config.channels`'s module docstring). `short_edge` has
-    no channel setting of its own yet, so it takes the same default
-    `ProjectDoc` itself declares.
+    nothing yet. `aspect_ratio` is no longer its own setting (Slice 19 Task
+    7) - it is derived from `video_form` via `derive_aspect_ratio`, which
+    the caller passes in already resolved (`resolve_channel_settings`,
+    overrides folded on) rather than this function reading `channel.settings`
+    raw - the exact bypass Slice 19's drift test (`tests/core/
+    test_settings_schema.py::test_no_reader_bypasses_the_resolver`) exists to
+    catch. `short_edge` has no channel setting of its own yet, so it takes
+    the same default `ProjectDoc` itself declares.
     """
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -137,7 +154,7 @@ def new_project(topic: str, channel: Channel, output_root: Path) -> ProjectDoc:
     for sub in _PROJECT_DIRS:
         (folder / sub).mkdir(parents=True, exist_ok=True)
 
-    aspect_ratio = channel.settings.get("aspect_ratio") or channel_defaults()["aspect_ratio"]
+    aspect_ratio = derive_aspect_ratio(video_form)
 
     # `phases` is created once and handed to BOTH the document and take 1,
     # by reference. The runner mutates `project.phases[key]` in place, and
