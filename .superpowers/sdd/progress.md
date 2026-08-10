@@ -39,7 +39,7 @@ both times).
 - [x] Task 4: thread `channel_values` through `PhaseContext`/`runner.run`
       and both API callers
 - [x] Task 5: migrate every phase file off `ctx.channel.settings`
-- [ ] Task 6: the drift test
+- [x] Task 6: the drift test
 - [ ] Task 7: `aspect_ratio` removed, derived from `video_form`
 - [ ] Task 8: frontend `useSettingsData.ts` — ownership and scope
 - [ ] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
@@ -102,3 +102,29 @@ regressions. `mypy` on the 7 touched files: 628 errors both before and after
 (stashed the working tree to confirm) — no new errors introduced.
 
 Build/test/commit done as this task's own commit, per plan.
+
+## Task 6 notes
+
+Task 6's own text assumes the drift scan finds zero offenders on the
+Task-5-complete tree and says any offender found is a Task-5 straggler to
+be amended there. That assumption doesn't hold: a hand-run of the scan
+confirms exactly one offender, `avg/pipeline/create.py:140`
+(`aspect_ratio`) — which Task 5's own notes above already named and
+deliberately deferred as "Task 7's job, not Task 5's." Reopening Task 5's
+commit to chase a straggler it explicitly, correctly declined to fix would
+contradict Task 5's own reasoning.
+
+Resolution (user-directed): wrote `test_no_reader_bypasses_the_resolver`
+into `tests/core/test_settings_schema.py` exactly per the plan's spec —
+same regex, same file-level allowlist (`avg/api/routes_settings.py` only,
+covering both the resolver's own `_channel_values` construction and the
+legitimate `port_to_global` raw read). Did not add a second, temporary
+allowlist entry for `create.py` — Task 7 removes that offender outright
+(derives `aspect_ratio` from `video_form` instead of reading
+`channel.settings` at all), so the test is written to its final, intended
+shape now rather than a shape that would need un-relaxing later.
+
+**Known state:** this test will fail until Task 7 lands (one offender:
+`avg/pipeline/create.py:140`). Per explicit user instruction, no test runs
+between Task 6 and the last task — full verification (`pytest`, `mypy`)
+happens once at the end, after Task 13.
