@@ -533,7 +533,7 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
 
     try:
         width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)  # type: ignore[no-untyped-call]
-        settings = ctx.channel.settings
+        settings = ctx.channel_values
         return write_layers(
             Path(ctx.project.folder),
             edit_plan,

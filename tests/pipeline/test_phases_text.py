@@ -596,6 +596,32 @@ def test_the_brief_researches_first_when_asked(tmp_path, monkeypatch):
     assert [phase for phase, _ in fake.calls] == ["brief", "brief"]
 
 
+def test_research_inherits_from_the_app_wide_defaults_when_the_channel_has_no_opinion(tmp_path, monkeypatch):
+    """Slice 19 Task 5: the phase reads `ctx.channel_values`, not
+    `ctx.channel.settings` directly - so a channel that owns no
+    `topic_research` key at all still researches when the app-wide
+    defaults document says to. Before this migration the phase saw only
+    the channel's own (empty) dict and silently skipped research
+    regardless of what the defaults document held."""
+    research_reply = "Lighthouses were striped for daytime identification, called day marks."
+    brief_reply = json.dumps({"emotional_arc": "curiosity", "tone": "warm", "angle": "a"})
+    fake = _QueueGenerator([research_reply, brief_reply])
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+
+    project = _project(tmp_path)
+    # The channel's own document is empty - `topic_research` is absent, not
+    # `False` - and the value comes only from the resolved `channel_values`
+    # (built here the same way `resolve_channel_settings` is used everywhere
+    # else: channel dict, then defaults dict).
+    channel = _channel({})
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {"topic_research": True})
+
+    BriefPhase().run(ctx)
+
+    assert (project.folder / "script" / "topic_research.txt").exists()
+
+
 def test_a_failed_research_call_writes_nothing_and_does_not_fail_the_brief(tmp_path, monkeypatch):
     """The brief is the phase's real output. A research call that fails costs
     the script its background, not the run."""

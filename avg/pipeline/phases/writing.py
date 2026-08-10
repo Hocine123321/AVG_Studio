@@ -122,7 +122,7 @@ class BriefPhase:
         # makes it worth a call at all. A failure writes NOTHING: an empty
         # file would read as "research ran and found nothing" to both the
         # prompt builder and the user.
-        if ctx.channel is not None and ctx.channel.settings.get("topic_research"):
+        if ctx.channel is not None and ctx.channel_values.get("topic_research"):
             ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Researching the topic..."))
             try:
                 research = generate_text(

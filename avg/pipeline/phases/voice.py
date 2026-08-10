@@ -216,7 +216,7 @@ class VoicePhase:
         if not narration.strip():
             raise AvgError(ErrorKind.bug, "voice phase: narration.txt is empty")
 
-        settings = ctx.channel.settings
+        settings = ctx.channel_values
         provider_name = str(settings.get("voice_provider") or _DEFAULT_PROVIDER)
         voice_id = str(settings.get("voice_id") or "").strip() or _DEFAULT_VOICE_ID.get(
             provider_name, _DEFAULT_VOICE_ID[_DEFAULT_PROVIDER]

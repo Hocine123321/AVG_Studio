@@ -244,7 +244,7 @@ def resolve_font_family(ctx: PhaseContext) -> str:
     (see this repo's `global-font` memory note: `config.edit.font` had to
     reach both the caption `.ass` Style line AND the card renderer, and a
     B2.19.3 release existed solely to fix the half that was missed)."""
-    return resolve_font_family_value(str(ctx.channel.settings.get("font_family") or ""))
+    return resolve_font_family_value(str(ctx.channel_values.get("font_family") or ""))
 
 
 # Delivery-cue markers a narration/scene text may carry (script.py's own
@@ -287,14 +287,14 @@ def duration_seconds(ctx: PhaseContext) -> int:
     or unrecognised preset degrades to the 30-second default rather than
     raising - a broken/legacy channel document must still produce a
     buildable prompt."""
-    preset = str(ctx.channel.settings.get("length_preset") or "")
+    preset = str(ctx.channel_values.get("length_preset") or "")
     return _LENGTH_PRESET_SECONDS.get(preset, _DEFAULT_LENGTH_SECONDS)
 
 
 def form_label(ctx: PhaseContext) -> str:
     """The active channel's `video_form` expanded to the prompt's
     human-readable label; unset/unrecognised degrades to short-form."""
-    form = str(ctx.channel.settings.get("video_form") or _DEFAULT_FORM)
+    form = str(ctx.channel_values.get("video_form") or _DEFAULT_FORM)
     return _FORM_LABELS.get(form, _FORM_LABELS[_DEFAULT_FORM])
 
 
@@ -304,7 +304,7 @@ def creative_inputs(ctx: PhaseContext) -> CreativeInputs:
     what they mean. `aspect_ratio` comes from `ctx.project` (already
     resolved once at project-creation time by
     `avg.pipeline.create.new_project`), not re-read from the channel."""
-    settings = ctx.channel.settings
+    settings = ctx.channel_values
     return CreativeInputs(
         topic=ctx.project.title,
         content_shape=str(settings.get("content_shape") or "documentary"),

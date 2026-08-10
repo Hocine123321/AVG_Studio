@@ -119,6 +119,36 @@ class _QueueGenerator:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def test_draw_overlay_assets_inherits_accent_colors_from_the_app_wide_defaults(tmp_path, monkeypatch):
+    """Slice 19 Task 5: `_draw_overlay_assets` reads `ctx.channel_values`,
+    not `ctx.channel.settings` directly - so `overlay_accent1`/`accent2`/
+    `highlight` set only in the app-wide defaults document (never owned by
+    the channel) still reach `write_layers`."""
+    from avg.pipeline.phases.director import _draw_overlay_assets
+
+    monkeypatch.setattr("avg.media.vendor.avg._target_size", lambda ar, se: (1080, 1920))
+    captured: list[tuple] = []
+    monkeypatch.setattr(
+        "avg.media.overlays.write_layers",
+        lambda *args: captured.append(args) or 1,
+    )
+
+    project = _project(tmp_path)
+    channel = _channel({})  # owns none of the three overlay colors
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(
+        channel.settings,
+        {"overlay_accent1": "#e08a4e", "overlay_accent2": "#aebf92", "overlay_highlight": "#ffffff"},
+    )
+    rdir = render_dir(ctx)
+    rdir.mkdir(parents=True, exist_ok=True)
+
+    _draw_overlay_assets(ctx, rdir, {"overlays": []})
+
+    accent1, accent2, highlight = captured[0][6], captured[0][7], captured[0][8]
+    assert (accent1, accent2, highlight) == ("#e08a4e", "#aebf92", "#ffffff")
+
+
 def test_edit_plan_derives_from_the_card_plan():
     """One owner for a card's text. card_plan.json decides what a card says;
     edit_plan.json is the same information in the shape cmd_overlay_render
@@ -486,6 +516,53 @@ def test_captions_font_family_defaults_to_arial_when_unset(tmp_path, monkeypatch
     ScreenTextPhase().run(ctx)
     content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
     assert "Style: Default,Arial," in content
+
+
+def test_captions_font_family_inherits_from_the_app_wide_defaults(tmp_path, monkeypatch):
+    """Slice 19 Task 5: `resolve_font_family` (`_common.py`) reads
+    `ctx.channel_values`, not `ctx.channel.settings.get(...)` directly - so
+    a channel that owns no `font_family` at all still uses whatever the
+    app-wide defaults document supplies, not the hardcoded Arial fallback
+    the previous test (`..._defaults_to_arial_when_unset`) exercises when
+    NEITHER the channel nor the defaults have an opinion."""
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    channel = _channel({})  # owns no font_family
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {"font_family": "Bebas Neue"})
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+    content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+    assert "Style: Default,Bebas Neue," in content
+
+
+def test_captions_font_size_and_position_inherit_from_the_app_wide_defaults(tmp_path, monkeypatch):
+    """Same migration, the other two captions fields
+    (`captions_font_size`/`captions_position`) read in `captions.py` itself
+    rather than `_common.py`."""
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    channel = _channel({})  # owns neither key
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(
+        channel.settings, {"captions_font_size": 72, "captions_position": "top"}
+    )
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+    content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+    assert "Style: Default,Arial,72," in content
+    # `position="top"` maps to ASS alignment 8 (`_ALIGNMENT_BY_POSITION`) -
+    # the Style line's Alignment field, right after the fixed style values.
+    style_line = next(line for line in content.splitlines() if line.startswith("Style: Default,"))
+    assert style_line.split(",")[18] == "8"
 
 
 def test_resolve_font_family_extracts_family_name_from_a_font_file_path():

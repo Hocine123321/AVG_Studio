@@ -474,7 +474,7 @@ class ScreenTextPhase:
         # explicitly asked not to make. Off means off, and the phase
         # completes rather than failing, because "no captions" is a valid
         # finished state, not an error.
-        if ctx.channel is not None and ctx.channel.settings.get("captions_enabled") is False:
+        if ctx.channel is not None and ctx.channel_values.get("captions_enabled") is False:
             ctx.emit(
                 ProgressEvent(
                     project_id=ctx.project.id, percent=100, message="Captions are switched off for this channel."
@@ -516,8 +516,8 @@ class ScreenTextPhase:
         card_windows = _card_suppression_windows(cards_in, scene_windows)
 
         font_name = resolve_font_family(ctx)
-        font_size = int(ctx.channel.settings.get("captions_font_size") or 0) or _DEFAULT_FONT_SIZE
-        position = str(ctx.channel.settings.get("captions_position") or "bottom")
+        font_size = int(ctx.channel_values.get("captions_font_size") or 0) or _DEFAULT_FONT_SIZE
+        position = str(ctx.channel_values.get("captions_position") or "bottom")
         width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)
 
         cues = _group_cues(words)

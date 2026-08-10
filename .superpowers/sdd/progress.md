@@ -1,84 +1,104 @@
-# Slice 18 — Quick panel — progress ledger
+# Slice 19 — Settings, scope, and the small fixes — progress ledger
 
 Environment note: implementing on a Linux sandbox, not the Windows dev box.
-`.venv-build` is a Windows venv (WinDLL/pywebview) and cannot run here. Built
-`.venv-linux` for verification of platform-independent modules. Anything
-importing `avg.config.secrets` (WinDLL crypt32) or `avg.shell` (pywebview)
-cannot be collected by pytest on this machine — pre-existing baseline issue,
-not introduced by this slice. Full suite must be re-run on the Windows box
-before this is considered verified end-to-end.
+`.venv-build` is a Windows venv (WinDLL/pywebview) and cannot run here.
+Rebuilt `.venv-linux` (core deps only: fastapi, uvicorn, pydantic, pytest,
+httpx, numpy, Pillow — no pywebview/pydub/moviepy) plus the local-only
+winstub pytest plugin at `/home/claude/verify_shims/_winstub_plugin.py`
+(outside the repo, never committed) that stubs `ctypes.WinDLL` and `webview`
+so `avg.config.secrets`/`avg.shell` import here. Same setup as Slice 18's
+own verification pass; neither the venv nor the shim persist between
+sandbox sessions, so a resumed session must rebuild both before trusting a
+"tests pass" claim.
 
-## Baseline (before Task 1)
-- `tests` collection on Linux: 29 errors (all pre-existing: WinDLL / webview
-  import failures), unrelated files unaffected.
-- Task 1's own test file has zero platform dependencies and is fully
-  verifiable here.
+## Baseline (measured on tree at 146e649, before this session's changes)
+`pytest tests -q` with the shim: **26 failed, 916 passed, 1 skipped.**
+All 26 are pre-existing and unrelated to Slice 19:
+- DPAPI round-trip (`tests/config/test_secrets.py`, `test_routes_settings.py`
+  secret-leak tests, `test_health.py`) — needs the real Win32 API the stub
+  fakes, not fixable on Linux.
+- `edge_tts` not installed in this lean venv (`tests/providers/test_voice.py`).
+- `startup_cost` import-isolation tests — sensitive to which optional
+  packages happen to be installed in the venv.
+- `test_shell.py::test_reading_the_setting_needs_no_server_and_no_app` —
+  subprocess-based, environment-sensitive.
+- `test_resolve_font_family_extracts_family_name_from_a_font_file_path` —
+  `Path(r"C:\...").stem` behaves differently on POSIX (backslash isn't a
+  path separator) than on Windows; a genuine platform difference in the
+  test's own fixture, not a bug in `resolve_font_family_value`.
 
-## Verification note
-Local-only pytest plugin at `/home/claude/verify_shims/_winstub_plugin.py`
-(outside repo, never committed) stubs `ctypes.WinDLL` and `webview` so
-Windows-only modules import on this Linux sandbox. With it: 904 passed, 26
-failed — all 26 pre-existing and unrelated to this slice (DPAPI round-trip
-needs the real Win32 API my stub fakes; edge_tts/startup_cost/font-family
-failures predate this slice). Quick-settings tests: 11/11 green. Full suite
-must be re-run for real on the Windows box; this only proves the new code
-doesn't break anything platform-independent.
-
-mypy on touched files: baseline (before this slice) 43 errors in
-`avg/api/app.py` + `avg/api/routes_settings.py`, all pre-existing
-unparameterized-`dict` returns. Task 2 adds 2 more of the exact same kind
-(`-> dict:` on the two new routes) — matches the plan's own code sample and
-this file's dominant existing style (25+ instances), not a new error
-category.
-
-## Money-rule check (Task 6 Step 2), run against Task 9's QuickPanel
-No browser/DOM tooling exists in this sandbox at all (no playwright,
-puppeteer, or chromium) — matches the spec's own §5 note that "the Browser
-pane does not composite on this machine. Recorded as pending rather than
-claimed." Same limitation, not a shortcut taken here.
-
-Did the strongest available substitute: a full static trace of the call
-graph from `QuickPanel`'s mount down to `confirm_paid`.
-- `QuickPanel.tsx`: `PreviewTab` appears in exactly one place, a JSX
-  conditional on `tab === "preview"` — no effect anywhere in the file
-  reaches it or calls anything on it.
-- `PreviewTab.tsx`: zero `useEffect`s (`grep -c useEffect` = 0). Switching
-  `kind` only changes which child of `PreviewPanel` mounts.
-- `PreviewPanel.tsx`: `confirm_paid: true` appears exactly twice, both
-  inside `generateSample` functions bound only to a button's `onClick`.
-  `VoicePreview`'s free-path effect is guarded `if (paid || !voiceId)
-  return` before it can run. `ImagePreview`'s only effect is an unmount
-  cleanup with an empty dependency array — no dependency on
-  provider/model/aspectRatio, no network call.
-- Conclusion: no render-on-mount, no render-on-tab-switch, no
-  render-on-settings-change path reaches either paid call, at every layer
-  from `QuickPanel` down. Live DOM click-through against a running dev
-  server (localStorage-seeded tab, actual network tab inspection) still
-  owed once this runs on a machine with a compositing browser — same
-  status as the spec's own visual-pass note.
+`mypy` on the 7 phase files touched this task: **628 errors, 15 files**
+(baseline, measured before and after — see Task 5 section, identical count
+both times).
 
 ## Tasks
-- [x] Task 1: quick_settings.json backend document
-- [x] Task 2: routes
-- [x] Task 3: useSettingsData extraction
-- [x] Task 4: Settings.tsx cleanup
-- [x] Task 5: LiveList.tsx adapted + tag filter
-- [x] Task 6: PreviewTab.tsx (structural + call-graph money-rule check
-      done; live DOM click-through still owed — no browser in this sandbox)
-- [x] Task 7: RecentErrorsTab.tsx
-- [x] Task 8: QuickSettingsTab.tsx
-- [x] Task 9: QuickPanel.tsx shell + wiring
-- [x] Task 10: design language / motion (mount lifecycle redesigned:
-      stays mounted after first open so a slide-out transition has
-      something to animate; found and avoided a pre-existing gap —
-      `--font-mono`/`--ink` referenced by old code but never defined
-      anywhere in tokens.css — by using a literal monospace stack and
-      `--text`/`--muted` instead of repeating it)
-- [ ] Task 3: useSettingsData extraction
-- [ ] Task 4: Settings.tsx cleanup
-- [ ] Task 5: LiveList.tsx adapted + tag filter
-- [ ] Task 6: PreviewTab.tsx
-- [x] Task 7: RecentErrorsTab.tsx
-- [x] Task 8: QuickSettingsTab.tsx
-- [ ] Task 9: QuickPanel.tsx shell + wiring
-- [ ] Task 10: design language / motion
+- [x] Task 1: `resolve_channel_settings`, the one resolver
+- [x] Task 2: remove `settings_source`, rewrite CLAUDE.md's Config scopes
+- [x] Task 3: wire resolver into routes_settings.py; ownership routes;
+      Global-mode read/write
+- [x] Task 4: thread `channel_values` through `PhaseContext`/`runner.run`
+      and both API callers
+- [x] Task 5: migrate every phase file off `ctx.channel.settings`
+- [ ] Task 6: the drift test
+- [ ] Task 7: `aspect_ratio` removed, derived from `video_form`
+- [ ] Task 8: frontend `useSettingsData.ts` — ownership and scope
+- [ ] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
+- [ ] Task 10: frontend the category table and tab strip
+- [ ] Task 11: frontend the Global/Channel toggle
+- [ ] Task 12: small fix — remove "Run again" from phase-error surfaces
+- [ ] Task 13: small fix — the "A" logo becomes the main menu
+
+## Task 5 notes
+Mechanical migration across the seven files from the plan's §0 inventory:
+`_common.py`, `writing.py`, `visuals.py`, `voice.py`, `render.py`,
+`captions.py`, `director.py`. Every `ctx.channel.settings.get(...)` /
+`settings.get(...)` (where `settings = ctx.channel.settings`) replaced with
+the equivalent read against `ctx.channel_values`. Local `or _DEFAULT_X`
+fallbacks deliberately left untouched, per the plan's own scope note (a
+separate, unrequested cleanup with its own risk).
+
+`render.py` additionally lost its `getattr(ctx.channel, "settings", {}) or
+{}` guards at both call sites (`_composite_request`, `_render`) — no longer
+needed since `channel_values` is a required `PhaseContext` field independent
+of whether `ctx.channel` is `None`, unlike the raw `.settings` attribute
+access it replaced.
+
+**Drift-scan run by hand** (Task 6's own regex, `\.settings\.get\(|\.settings\[`,
+against `avg/pipeline` and `avg/api`) confirms zero offenders in the 7 phase
+files after this task. The one remaining hit anywhere in scope is
+`avg/pipeline/create.py:140` (`aspect_ratio`) — expected, that's Task 7's
+job, not Task 5's.
+
+**Test fallout caught:** `tests/pipeline/test_phase_render.py` builds a bare
+`SimpleNamespace` ctx (not a real `PhaseContext`) for ~15 `RenderPhase().run()`
+call sites. It had no `channel_values` attribute; with the `getattr` guard
+removed from `render.py`, every one of those tests would have raised
+`AttributeError`. Fixed by adding `channel_values={}` to that fixture
+(mirrors the file's own existing `render_lease=None` precedent and comment
+style).
+
+**Representative tests added** (per the task's own instruction: "one
+representative field per file is enough given Task 6 catches anything a
+file-by-file read missed structurally"), each proving a value absent from
+the channel's own document but present in the resolved `channel_values`
+(built via `resolve_channel_settings` with a non-empty `defaults` argument)
+is what the phase actually uses — the behaviour that could not have been
+true before this task:
+- `test_phases_text.py`: `test_research_inherits_from_the_app_wide_defaults_when_the_channel_has_no_opinion`
+- `test_phases_media.py`: `test_visuals_inherits_image_provider_from_the_app_wide_defaults`,
+  `test_voice_inherits_provider_from_the_app_wide_defaults`
+- `test_phases_polish.py`: `test_captions_font_family_inherits_from_the_app_wide_defaults`
+  (also covers `_common.py`'s `resolve_font_family`),
+  `test_captions_font_size_and_position_inherit_from_the_app_wide_defaults`,
+  `test_draw_overlay_assets_inherits_accent_colors_from_the_app_wide_defaults`
+- `test_phase_render.py`: `test_render_reads_fps_off_channel_values_even_with_no_channel`
+  (channel is `None` in this file's own fixture, proving `channel_values`
+  is genuinely independent of `ctx.channel`, not merely a renamed read of it)
+
+**Verification:** `pytest tests -q` after all changes: **26 failed, 923
+passed, 1 skipped** — identical 26 pre-existing baseline failures (including
+the same font-family POSIX/Windows path test), 7 new tests all green, zero
+regressions. `mypy` on the 7 touched files: 628 errors both before and after
+(stashed the working tree to confirm) — no new errors introduced.
+
+Build/test/commit done as this task's own commit, per plan.

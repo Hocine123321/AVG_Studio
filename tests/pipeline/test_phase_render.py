@@ -38,6 +38,14 @@ def _ctx(tmp_path: Path, token: CancellationToken | None = None):
     ctx = SimpleNamespace(
         project=project,
         channel=None,
+        # `PhaseContext.channel_values` is a required field with no default
+        # (Slice 19 Task 4); the real code reads `ctx.channel_values`
+        # directly (no `getattr` fallback since Task 5's migration), so this
+        # bare `SimpleNamespace` needs the attribute too. Empty dict mirrors
+        # what `resolve_channel_settings` would produce for a `channel=None`
+        # request - every key falls to its `SettingSpec` default upstream of
+        # this phase, so `_render_kwargs`/`_composite_request` see nothing.
+        channel_values={},
         router=None,
         emit=emitted.append,
         cancel_token=token or CancellationToken(),
@@ -169,6 +177,31 @@ def test_render_threads_setting_reaches_the_request():
     assert _thread_kwargs(None) == {}
     assert _thread_kwargs(-1) == {}
     assert _thread_kwargs("plenty") == {}
+
+
+def test_render_reads_fps_off_channel_values_even_with_no_channel(tmp_path, monkeypatch):
+    """Slice 19 Task 5: `RenderPhase._render` passes `ctx.channel_values`
+    into `_render_kwargs`, not `getattr(ctx.channel, "settings", {})`. Before
+    the migration a `channel=None` context (the exact shape this file's own
+    `_ctx` fixture builds) could never carry `fps` at all, since there was
+    no `.settings` to read. Now `channel_values` is independent of
+    `ctx.channel` - the resolver's own output, threaded in by the caller -
+    so `fps` reaches the real `RenderRequest` regardless."""
+    captured: list[object] = []
+
+    def events(request, project_id):
+        captured.append(request)
+        out = request.project_folder / "master_output.mp4"
+        out.write_bytes(b"video-bytes")
+        yield RenderFinished(project_id=project_id, output=out, size_bytes=11)
+
+    monkeypatch.setattr(render_mod, "MediaEngine", lambda: _Engine(events))
+    ctx, _ = _ctx(tmp_path)
+    ctx.channel_values = {"fps": 24}  # channel is still None
+
+    render_mod.RenderPhase().run(ctx)
+
+    assert captured[0].fps == 24
 
 
 # ── the two-part render ───────────────────────────────────────────────────

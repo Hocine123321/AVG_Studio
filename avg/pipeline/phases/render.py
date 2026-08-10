@@ -122,7 +122,7 @@ def _composite_request(ctx: PhaseContext) -> CompositeRequest:
     cache's key - guessing it means a silent cache miss that re-transcribes
     and re-pays.
     """
-    settings = getattr(ctx.channel, "settings", {}) or {}
+    settings = ctx.channel_values
     source = read_json(render_dir(ctx) / "_transcript_source.json")
     provider = str((source or {}).get("provider") or "estimated") if isinstance(source, dict) else "estimated"
     # `resolve_font_family` reaches into the channel and this phase's own
@@ -220,9 +220,7 @@ class RenderPhase:
             project_folder=ctx.project.folder,
             aspect_ratio=ctx.project.aspect_ratio,
             short_edge=ctx.project.short_edge,
-            # `ctx.channel` is typed as a Channel but is None in the render
-            # engine's own unit tests, which construct a context without one.
-            **_render_kwargs(getattr(ctx.channel, "settings", {}) or {}),
+            **_render_kwargs(ctx.channel_values),
         )
 
         engine = MediaEngine()

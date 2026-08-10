@@ -281,7 +281,7 @@ class VisualsPhase:
         if not jobs:
             raise AvgError(ErrorKind.bug, "visuals phase: scenes.json had no usable scene entries")
 
-        settings = ctx.channel.settings
+        settings = ctx.channel_values
         provider_name = str(settings.get("image_provider") or _DEFAULT_PROVIDER)
         model = str(settings.get("image_model") or _DEFAULT_MODEL)
         aspect_ratio = ctx.project.aspect_ratio

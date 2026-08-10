@@ -329,6 +329,30 @@ def test_visuals_generates_one_image_per_scene_and_writes_manifest(tmp_path, mon
     assert any(isinstance(e, ProgressEvent) and e.percent == 100 for e in events)
 
 
+def test_visuals_inherits_image_provider_from_the_app_wide_defaults(tmp_path, monkeypatch):
+    """Slice 19 Task 5: the phase reads `ctx.channel_values`, not
+    `ctx.channel.settings.get(...)` directly - so a channel that owns
+    neither `image_provider` nor `image_model` still uses whatever the
+    app-wide defaults document supplies, not the phase's own hardcoded
+    `_DEFAULT_PROVIDER`/`_DEFAULT_MODEL` fallback."""
+    fake = _FakeImageProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    channel = _channel({})  # owns neither key
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(
+        channel.settings, {"image_provider": "pollinations", "image_model": "flux"}
+    )
+    _write_scenes(ctx, ["prompt one"])
+
+    VisualsPhase().run(ctx)
+
+    manifest = read_json(project.folder / "images" / "manifest.json")
+    assert manifest["provider"] == "pollinations"
+    assert manifest["model"] == "flux"
+
+
 def test_visuals_one_image_failing_does_not_kill_the_phase(tmp_path, monkeypatch):
     """The task's named invariant: scene 2 of 3 fails outright, but scenes
     1 and 3 still land on disk, the phase does not raise, and the failure
@@ -674,6 +698,30 @@ def test_voice_uses_configured_provider_voice_and_model(tmp_path, monkeypatch):
 
     assert captured_provider_args[0][0] == "edge"
     assert fake.calls[0][1] == "en-US-GuyNeural"
+
+
+def test_voice_inherits_provider_from_the_app_wide_defaults(tmp_path, monkeypatch):
+    """Slice 19 Task 5: same migration as visuals - a channel that owns no
+    `voice_provider` still uses the app-wide defaults document's value,
+    read through `ctx.channel_values`, not the phase's own hardcoded
+    `_DEFAULT_PROVIDER` fallback."""
+    fake = _FakeVoiceProvider()
+    _patch_audio_pipeline(monkeypatch)
+    captured_provider_args: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        "avg.pipeline.phases.voice._build_provider",
+        lambda name, transport: (captured_provider_args.append((name, transport)), fake)[1],
+    )
+
+    project = _project(tmp_path)
+    channel = _channel({})  # owns no voice_provider
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {"voice_provider": "edge"})
+    _write_narration(ctx, "No pauses here at all.")
+
+    VoicePhase().run(ctx)
+
+    assert captured_provider_args[0][0] == "edge"
 
 
 def test_voice_emits_completion_progress_event(tmp_path, monkeypatch):
