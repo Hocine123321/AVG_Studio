@@ -47,6 +47,7 @@ from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ProgressEvent
 from avg.core.models import ProjectDoc
+from avg.core.settings_schema import resolve_channel_settings
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases import captions as captions_module
 from avg.pipeline.phases._common import read_json, render_dir, resolve_font_family, script_dir, write_json
@@ -77,9 +78,11 @@ def _channel(settings: dict[str, Any] | None = None) -> Channel:
 
 def _ctx(project: ProjectDoc, *, channel: Channel | None = None, router: Any = None) -> tuple[PhaseContext, list[Any]]:
     events: list[Any] = []
+    resolved_channel = channel or _channel()
     ctx = PhaseContext(
         project=project,
-        channel=channel or _channel(),
+        channel=resolved_channel,
+        channel_values=resolve_channel_settings(resolved_channel.settings, {}),
         router=router,
         emit=events.append,
         cancel_token=CancellationToken(),
@@ -488,7 +491,14 @@ def test_captions_font_family_defaults_to_arial_when_unset(tmp_path, monkeypatch
 def test_resolve_font_family_extracts_family_name_from_a_font_file_path():
     ctx_channel = _channel({"font_family": r"C:\Windows\Fonts\Montserrat-Bold.ttf"})
     project = ProjectDoc(id="p", title="t", folder=Path("."), created="2026-07-26T00:00:00")
-    ctx = PhaseContext(project=project, channel=ctx_channel, router=None, emit=lambda e: None, cancel_token=CancellationToken())
+    ctx = PhaseContext(
+        project=project,
+        channel=ctx_channel,
+        channel_values=resolve_channel_settings(ctx_channel.settings, {}),
+        router=None,
+        emit=lambda e: None,
+        cancel_token=CancellationToken(),
+    )
     assert resolve_font_family(ctx) == "Montserrat-Bold"
 
 

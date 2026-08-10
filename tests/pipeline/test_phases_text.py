@@ -33,6 +33,7 @@ from avg.pipeline.phases.writing import BriefPhase, script_substate
 from avg.pipeline.phases.director import Director1Phase
 from avg.pipeline.phases.writing import ScriptPhase
 from avg.pipeline.phases._common import read_json, script_dir, write_json
+from avg.core.settings_schema import resolve_channel_settings
 from avg.providers.text.router import TextResult
 
 NARRATION = (
@@ -73,9 +74,11 @@ def _channel(settings: dict[str, Any] | None = None) -> Channel:
 
 def _ctx(project: ProjectDoc, *, channel: Channel | None = None, router: Any = None) -> tuple[PhaseContext, list[Any]]:
     events: list[Any] = []
+    resolved_channel = channel or _channel()
     ctx = PhaseContext(
         project=project,
-        channel=channel or _channel(),
+        channel=resolved_channel,
+        channel_values=resolve_channel_settings(resolved_channel.settings, {}),
         router=router,
         emit=events.append,
         cancel_token=CancellationToken(),

@@ -80,6 +80,7 @@ def run(
     project: ProjectDoc,
     *,
     channel: Channel,
+    channel_values: dict[str, Any],
     router: object = None,
     start_from: int = 0,
     only: str | None = None,
@@ -148,6 +149,13 @@ def run(
     Consumed like `MediaEngine.render()`: iterate it to completion (a `for`
     loop that doesn't break early) so every phase attempted actually gets to
     update its `PhaseRecord` before the caller moves on.
+
+    `channel_values` is every scope="channel" setting, already resolved
+    (Slice 19 §2.3, `avg.core.settings_schema.resolve_channel_settings`) -
+    passed straight onto each phase's `PhaseContext`. Required, not
+    computed here: this module has no `channel_defaults_path` (that is an
+    `app_state` concept, and the runner stays below the API layer), so it
+    only carries what its caller already resolved.
     """
     cancel_token = cancel_token or CancellationToken()
     to_run = _select(phases, start_from, only)
@@ -221,6 +229,7 @@ def run(
         ctx = PhaseContext(
             project=project,
             channel=channel,
+            channel_values=channel_values,
             router=router,
             emit=buffered.append,
             cancel_token=cancel_token,

@@ -69,7 +69,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
-from avg.config.channel_defaults import default_channel_defaults_path
+from avg.config.channel_defaults import default_channel_defaults_path, load_defaults
 from avg.config.quick_settings import default_quick_settings_path
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
@@ -80,7 +80,12 @@ from avg.core.take_log import TakeLog, log_path_for
 from avg.core.events import JobStarted, JobStep, PhaseFailed, ProgressEvent, RenderCancelled, RenderFinished
 from avg.core.jobs import Job, JobRegistry
 from avg.core.models import PhaseRecord, ProjectDoc, RenderRequest
-from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
+from avg.core.settings_schema import (
+    SettingValidationError,
+    get_spec,
+    resolve_channel_settings,
+    validate_value,
+)
 from avg.core.takes import take_folder, take_root
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
@@ -99,6 +104,7 @@ def _default_run_pipeline(
     project: ProjectDoc,
     *,
     channel: Any,
+    channel_values: dict[str, Any],
     router: Any = None,
     start_from: int = 0,
     only: str | None = None,
@@ -129,6 +135,7 @@ def _default_run_pipeline(
     return run(
         project,
         channel=channel,
+        channel_values=channel_values,
         router=router,
         start_from=start_from,
         only=only,
@@ -847,6 +854,16 @@ def create_app(
         """
         cancel_token = CancellationToken()
 
+        # Resolved once, here, rather than inside `_worker`: `channel` is a
+        # `model_copy` the route already built (`effective_channel` for a
+        # fresh project, or the plain active channel for a resume), so this
+        # is the one place per run that both halves of `resolve_channel_settings`
+        # (Slice 19 §2.3) - the channel's own document and the app-wide
+        # defaults document - are both in hand together.
+        channel_values = resolve_channel_settings(
+            channel.settings, load_defaults(app.state.channel_defaults_path)
+        )
+
         # One run log for this job, on the take the run belongs to. Built here
         # rather than inside the worker so the route can fail loudly if the
         # path is wrong, and closed in the worker's `finally`.
@@ -937,6 +954,7 @@ def create_app(
                 for event in run_pipeline(
                     project,
                     channel=channel,
+                    channel_values=channel_values,
                     router=router_config,
                     start_from=start_from,
                     cancel_token=cancel_token,

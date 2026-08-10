@@ -72,6 +72,15 @@ class PhaseContext:
     router: Any
     emit: Callable[[Any], None]
     cancel_token: CancellationToken
+    #: Every scope="channel" setting, already resolved (Slice 19 §2.3) -
+    #: `channel`'s own document if it had the key, else the app-wide
+    #: defaults, else the SettingSpec default. A phase reads settings from
+    #: HERE, never from `channel.settings` directly - the latter is only
+    #: what THIS channel happens to have written, which is exactly the
+    #: unresolved, no-fallback view the old per-reader `.get(id) or
+    #: literal_default` pattern was quietly reinventing, once per call
+    #: site, with a different literal each time.
+    channel_values: dict[str, Any]
     #: The take's run log (`avg.core.take_log.TakeLog`), or `None` in unit
     #: contexts that build a bare context. A phase logs the DETAIL behind its
     #: events here - a model it fell back to, a file it could not read -

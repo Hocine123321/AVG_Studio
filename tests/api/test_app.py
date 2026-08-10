@@ -768,6 +768,7 @@ def test_the_take_wrapper_forwards_the_lease_it_is_given():
         routes_takes._default_run_pipeline(
             ProjectDoc(id="p", title="T", folder=Path("."), created="2026-08-07T00:00:00"),
             channel=None,
+            channel_values={},
             render_lease=lease,
         )
     finally:

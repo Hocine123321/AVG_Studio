@@ -22,6 +22,7 @@ from avg.config.channels import Channel
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.events import ActivityEvent, CompositeFinished, PhaseFailed, PhaseFinished, PhaseStarted, PipelineCancelled, PipelineFinished, ProgressEvent, RenderFinished
 from avg.core.models import ProjectDoc
+from avg.core.settings_schema import resolve_channel_settings
 from avg.pipeline import registry as registry_mod
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.registry import REGISTRY
@@ -46,6 +47,13 @@ def _project(**overrides: Any) -> ProjectDoc:
 
 def _channel() -> Channel:
     return Channel(id="ch", label="Ch", settings={})
+
+
+# `_channel()` always returns empty settings, so every scope="channel"
+# setting resolves to the SettingSpec's own default (Slice 19 §2.3) - one
+# fixed value shared by every `run(..., channel=_channel(), channel_values=_CHANNEL_VALUES, ...)` call in
+# this file, rather than recomputing the same resolution at each site.
+_CHANNEL_VALUES = resolve_channel_settings({}, {})
 
 
 @dataclass
@@ -91,7 +99,7 @@ def test_full_sequence_runs_every_phase_in_order():
     project = _project()
     phases = _phases()
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
 
     assert all(p.calls == ["proj1"] for p in phases)
     finished_keys = [e.phase for e in events if isinstance(e, PhaseFinished)]
@@ -111,7 +119,7 @@ def test_a_successful_run_emits_exactly_one_sticky_done_activity_event():
     project = _project()
     phases = _phases()
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
     activity = [e for e in events if isinstance(e, ActivityEvent)]
 
     assert activity, "no ActivityEvent emitted at all"
@@ -127,7 +135,7 @@ def test_every_activity_event_in_one_run_shares_one_activity_id():
     project = _project()
     phases = _phases()
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
     ids = {e.activity_id for e in events if isinstance(e, ActivityEvent)}
 
     assert ids == {f"pipeline:{project.id}"}
@@ -137,7 +145,7 @@ def test_a_failed_phase_emits_exactly_one_sticky_failed_activity_event():
     project = _project()
     phases = _phases(fail_at=2, fail_with=RuntimeError("boom"))
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
     terminal = [e for e in events if isinstance(e, ActivityEvent) and e.state != "running"]
 
     assert len(terminal) == 1
@@ -151,7 +159,7 @@ def test_a_cancelled_run_emits_exactly_one_sticky_cancelled_activity_event():
     phases = _phases()
     phases[0].cancel_after = token
 
-    events = list(run(project, channel=_channel(), phases=phases, cancel_token=token))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, cancel_token=token))
     terminal = [e for e in events if isinstance(e, ActivityEvent) and e.state != "running"]
 
     assert len(terminal) == 1
@@ -307,7 +315,7 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
     for sub in ("script", "images", "audio", "render"):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
 
-    events = list(run(project, channel=_channel()))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES))
 
     finished = [e for e in events if isinstance(e, PhaseFinished)]
     assert len(finished) == 8
@@ -343,7 +351,7 @@ def test_resume_from_each_phase_runs_only_phases_from_there_on(start_from):
     project = _project()
     phases = _phases()
 
-    list(run(project, channel=_channel(), start_from=start_from, phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, start_from=start_from, phases=phases))
 
     for phase in phases:
         if phase.id < start_from:
@@ -362,10 +370,10 @@ def test_next_phase_id_drives_a_true_resume_after_an_only_run():
     project = _project()
     phases = _phases()
 
-    list(run(project, channel=_channel(), only="brief", phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, only="brief", phases=phases))
     assert registry_mod.next_phase_id(project) == 1
 
-    list(run(project, channel=_channel(), start_from=1, phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, start_from=1, phases=phases))
     assert all(p.calls == ["proj1"] for p in phases)
     assert registry_mod.next_phase_id(project) == 8
 
@@ -378,7 +386,7 @@ def test_next_phase_id_does_not_advance_past_a_failed_phase():
     project = _project()
     phases = _phases(fail_at=2, fail_with=AvgError(ErrorKind.bug, "boom"))
 
-    list(run(project, channel=_channel(), phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
 
     assert registry_mod.next_phase_id(project) == 2
 
@@ -389,7 +397,7 @@ def test_only_runs_exactly_one_phase():
     project = _project()
     phases = _phases()
 
-    events = list(run(project, channel=_channel(), only="voice", phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, only="voice", phases=phases))
 
     ran = [p.key for p in phases if p.calls]
     assert ran == ["voice"]
@@ -410,7 +418,7 @@ def test_only_ignores_start_from():
     project = _project()
     phases = _phases()
 
-    list(run(project, channel=_channel(), start_from=5, only="brief", phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, start_from=5, only="brief", phases=phases))
 
     assert phases[0].calls == ["proj1"]
     assert set(project.phases.keys()) == {"brief"}
@@ -421,7 +429,7 @@ def test_only_with_unknown_key_raises_and_touches_nothing():
     phases = _phases()
 
     with pytest.raises(UnknownPhaseError):
-        list(run(project, channel=_channel(), only="does-not-exist", phases=phases))
+        list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, only="does-not-exist", phases=phases))
 
     assert project.phases == {}
     assert all(p.calls == [] for p in phases)
@@ -434,7 +442,7 @@ def test_failing_phase_halts_run_records_error_and_leaves_earlier_output_intact(
     err = AvgError(ErrorKind.quota, "out of credits", detail="daily cap")
     phases = _phases(fail_at=3, fail_with=err)  # "visuals" fails
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
 
     for phase in phases[:3]:
         assert project.phases[phase.key].status == "done"
@@ -456,7 +464,7 @@ def test_a_plain_exception_is_classified_as_bug_and_still_halts_cleanly():
     project = _project()
     phases = _phases(fail_at=0, fail_with=RuntimeError("boom"))
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
 
     assert project.phases["brief"].status == "failed"
     assert project.phases["brief"].error == "boom"
@@ -468,11 +476,11 @@ def test_a_plain_exception_is_classified_as_bug_and_still_halts_cleanly():
 def test_retrying_a_failed_phase_clears_its_error_on_success():
     project = _project()
     phases = _phases(fail_at=0, fail_with=RuntimeError("boom"))
-    list(run(project, channel=_channel(), phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
     assert project.phases["brief"].status == "failed"
 
     phases[0].fail_with = None  # simulate the underlying problem being fixed
-    list(run(project, channel=_channel(), only="brief", phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, only="brief", phases=phases))
 
     assert project.phases["brief"].status == "done"
     assert project.phases["brief"].error is None
@@ -486,7 +494,7 @@ def test_cancellation_between_phases_stops_before_the_next_one():
     token = CancellationToken()
     phases[0].cancel_after = token  # cancel once "brief" has finished running
 
-    events = list(run(project, channel=_channel(), phases=phases, cancel_token=token))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, cancel_token=token))
 
     assert phases[0].calls == ["proj1"]
     assert project.phases["brief"].status == "done"
@@ -506,7 +514,7 @@ def test_cancellation_set_before_the_run_starts_runs_nothing():
     token = CancellationToken()
     token.cancel()
 
-    events = list(run(project, channel=_channel(), phases=phases, cancel_token=token))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, cancel_token=token))
 
     assert all(p.calls == [] for p in phases)
     assert project.phases == {}
@@ -523,7 +531,7 @@ def test_ctx_emit_events_surface_before_phase_finished():
     marker = object()
     phases[0].emits = [marker]
 
-    events = list(run(project, channel=_channel(), phases=phases))
+    events = list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
     non_activity = [e for e in events if not isinstance(e, ActivityEvent)]
 
     assert isinstance(non_activity[0], PhaseStarted)
@@ -543,13 +551,15 @@ def test_phase_receives_the_given_channel_and_router():
 
         def run(self, ctx: PhaseContext) -> None:
             seen["channel"] = ctx.channel
+            seen["channel_values"] = ctx.channel_values
             seen["router"] = ctx.router
 
     channel = _channel()
     router = object()
-    list(run(project, channel=channel, router=router, phases=[Probe()]))
+    list(run(project, channel=channel, channel_values=_CHANNEL_VALUES, router=router, phases=[Probe()]))
 
     assert seen["channel"] is channel
+    assert seen["channel_values"] is _CHANNEL_VALUES
     assert seen["router"] is router
 
 
@@ -570,7 +580,7 @@ def test_starting_partway_marks_the_later_phases_pending():
     # `_phases(8)` builds RecordingPhase stubs whose keys come straight from
     # REGISTRY (`_KEYS` at the top of this file), so the reset has real keys
     # to act on without running a single real phase.
-    list(runner.run(project, channel=_channel(), start_from=3, phases=_phases(8)))
+    list(runner.run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, start_from=3, phases=_phases(8)))
 
     assert project.phases["brief"].status == "done"
     assert project.phases["script"].status == "done"
@@ -596,6 +606,7 @@ def test_the_sweep_does_not_call_on_phase_change_when_nothing_was_reset():
         runner.run(
             project,
             channel=_channel(),
+            channel_values=_CHANNEL_VALUES,
             phases=[],  # no phases to run either, so ANY call proves the sweep fired for nothing
             on_phase_change=lambda: calls.append(None),
         )
@@ -615,7 +626,7 @@ def test_an_only_run_resets_nothing_else():
     for phase in REGISTRY:
         project.phases[phase.key] = PhaseRecord(name=phase.name, status="done")
 
-    list(runner.run(project, channel=_channel(), only="visuals", phases=_phases(8)))
+    list(runner.run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, only="visuals", phases=_phases(8)))
 
     # Untouched by an `only=` run: no reset, no re-run.
     assert project.phases["render"].status == "done"
@@ -646,6 +657,7 @@ def test_a_partial_rerun_that_never_reaches_a_phase_leaves_it_pending():
         runner.run(
             project,
             channel=_channel(),
+            channel_values=_CHANNEL_VALUES,
             start_from=3,
             phases=_phases(8, fail_at=4, fail_with=RuntimeError("boom")),
         )

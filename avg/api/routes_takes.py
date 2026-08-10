@@ -76,11 +76,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
+from avg.config.channel_defaults import load_defaults
 from avg.core.artifacts import ARTIFACTS, available, resolve, spec_for
 from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.jobs import Job
 from avg.core.models import ProjectDoc, Take
-from avg.core.settings_schema import SettingValidationError, get_spec, validate_value
+from avg.core.settings_schema import (
+    SettingValidationError,
+    get_spec,
+    resolve_channel_settings,
+    validate_value,
+)
 from avg.core.take_log import log_path_for
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
 from avg.export.capcut import export_take
@@ -96,6 +102,7 @@ def _default_run_pipeline(
     project: ProjectDoc,
     *,
     channel: Any,
+    channel_values: dict[str, Any],
     router: Any = None,
     start_from: int = 0,
     only: str | None = None,
@@ -123,6 +130,7 @@ def _default_run_pipeline(
     return run(
         project,
         channel=channel,
+        channel_values=channel_values,
         router=router,
         start_from=start_from,
         only=only,
@@ -548,6 +556,13 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
         except SettingValidationError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     effective_channel = channel.model_copy(update={"settings": effective_settings})
+    # Resolved once, here, alongside `effective_channel` - same override
+    # layer both were built from (Slice 19 §2.3): a take's per-video
+    # overrides win, else the app-wide defaults document, else the
+    # SettingSpec default.
+    channel_values = resolve_channel_settings(
+        effective_settings, load_defaults(app_state.channel_defaults_path)
+    )
 
     # Built BEFORE the take is cloned and saved: a malformed 'provider/model'
     # must be a 400 with nothing written, not a 400 that leaves an orphan
@@ -612,6 +627,7 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             for event in run_pipeline(
                 shadow_project,
                 channel=effective_channel,
+                channel_values=channel_values,
                 router=router_config,
                 start_from=plan.start_id,
                 cancel_token=cancel_token,

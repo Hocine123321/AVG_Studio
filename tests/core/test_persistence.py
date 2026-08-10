@@ -28,6 +28,7 @@ from avg.config.channels import Channel
 from avg.config.legacy_import import import_project
 from avg.core.errors import AvgError, ErrorKind
 from avg.core.models import PhaseRecord, ProjectDoc, Take
+from avg.core.settings_schema import resolve_channel_settings
 from avg.pipeline.create import save_project
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.runner import run
@@ -37,6 +38,11 @@ FIXTURE_LEGACY = Path(__file__).parent.parent / "fixtures" / "legacy_project"
 
 def _channel() -> Channel:
     return Channel(id="ch", label="Ch", settings={})
+
+
+# `_channel()` always returns empty settings, so every scope="channel"
+# setting resolves to the SettingSpec's own default (Slice 19 §2.3).
+_CHANNEL_VALUES = resolve_channel_settings({}, {})
 
 
 def _project(tmp_path: Path, **overrides) -> ProjectDoc:
@@ -149,7 +155,7 @@ def test_a_completing_phase_writes_the_file(tmp_path):
     project = _project(tmp_path)
     phases = _phases(1)
 
-    list(run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project)))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, on_phase_change=lambda: save_project(project)))
 
     raw = json.loads((project.folder / "project.json").read_text(encoding="utf-8"))
     assert raw["phases"]["phase0"]["status"] == "done"
@@ -160,7 +166,7 @@ def test_a_failing_phase_still_writes_the_file(tmp_path):
     err = AvgError(ErrorKind.bug, "boom")
     phases = _phases(1, fail_at=0, fail_with=err)
 
-    list(run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project)))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, on_phase_change=lambda: save_project(project)))
 
     raw = json.loads((project.folder / "project.json").read_text(encoding="utf-8"))
     assert raw["phases"]["phase0"]["status"] == "failed"
@@ -177,7 +183,7 @@ def test_killing_mid_run_keeps_the_completed_phases_on_disk(tmp_path):
     project = _project(tmp_path)
     phases = _phases(2)
 
-    gen = run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project))
+    gen = run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, on_phase_change=lambda: save_project(project))
     # Pull events only through phase0's PhaseFinished, then simply stop
     # consuming - the "kill". Driven by event TYPE rather than a fixed pull
     # count: Slice 17 interleaves ActivityEvents into this same stream, and
@@ -204,7 +210,7 @@ def test_no_persistence_happens_without_the_hook(tmp_path):
     project = _project(tmp_path)
     phases = _phases(1)
 
-    list(run(project, channel=_channel(), phases=phases))
+    list(run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases))
 
     assert not (project.folder / "project.json").exists()
 
@@ -251,7 +257,7 @@ def test_reread_after_restart_reflects_a_simulated_kill_mid_run(tmp_path):
     project = _project(tmp_path)
     phases = _phases(2)
 
-    gen = run(project, channel=_channel(), phases=phases, on_phase_change=lambda: save_project(project))
+    gen = run(project, channel=_channel(), channel_values=_CHANNEL_VALUES, phases=phases, on_phase_change=lambda: save_project(project))
     # Same "kill right after phase0's write-through" simulation as
     # test_killing_mid_run_keeps_the_completed_phases_on_disk above - see
     # that test's comment for why this is driven by event type rather than
