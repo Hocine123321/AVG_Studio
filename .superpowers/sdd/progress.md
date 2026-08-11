@@ -310,3 +310,53 @@ run build` (`tsc -b && vite build`): clean, 59 modules, no errors.
 Backend `pytest`/`mypy` deferred per explicit instruction since Task 6 -
 running now, after Task 13, as the single verification pass for the
 whole slice (Tasks 6-13).
+
+`pytest tests -q`: **26 failed, 928 passed, 1 skipped**. Same 26
+pre-existing failures as this sandbox's own recorded baseline (DPAPI/
+secrets-file round-trip, `edge_tts` not installed, `webview`/`ctypes.
+WinDLL` shim gaps, the POSIX/Windows font-family path test, and the
+legacy-projects scan needing a real `D:\AI_Video_Gen` that doesn't exist
+here) - confirmed same failing test names, zero regressions. Passed count
++5 over the 923 baseline, net of Task 6's one new test, Task 7's swap of
+2 old aspect-ratio tests for 4 new ones (+2), the invalidation pin (+1),
+and `_sync_current_take`'s 2 new direct unit tests (+2).
+
+`mypy`, whole-package count not directly comparable to the 628 figure
+Task 5 recorded (different environment - this sandbox's mypy/stub
+versions differ from the real dev machine's, so absolute counts don't
+mean the same thing across the two). Instead, ran the same before/after
+comparison Task 5 used, but via `git stash`+`checkout d7e6a10` for a true
+same-environment baseline rather than a stash of uncommitted work: mypy
+on the 4 backend files Tasks 6-7 touched (`avg/api/app.py`, `avg/api/
+routes_takes.py`, `avg/core/settings_schema.py`, `avg/pipeline/create.py`)
+- **27 errors at `d7e6a10` (pre-Slice-19-Task-6), 27 errors at HEAD**,
+same errors verbatim (all pre-existing `dict` missing-type-argument /
+`no-any-return` findings unrelated to this slice's changes) - zero new
+mypy errors introduced.
+
+**Slice 19 (Tasks 6-13) complete.** Every task committed and pushed
+individually to `origin/main`; this verification pass and its ledger
+entry are the last piece, committed together.
+
+**DOM/computed-style checks** (per CLAUDE.md's "no frontend unit tests"
+convention - a scripted check against a real render, not a persisted test
+file; harness lives outside the repo at `/home/claude/dom_check`, same
+throwaway-tooling precedent as the Linux `ctypes.WinDLL`/`webview` pytest
+shim, since this sandbox has no display for the usual Browser-pane visual
+pass):
+
+- `SettingsGroup.tsx` (Task 9), rendered via `esbuild` + `jsdom` +
+  `react-dom/client` (`react`/`react-dom` marked external so the harness
+  and the bundled component share one React instance - a duplicate copy
+  is what "Invalid hook call" meant on the first attempt): an inherited
+  field's control (the app's own `Select`, a `<button disabled>` under
+  the hood, not a native `<select>`) is genuinely disabled and shows a
+  "Take ownership" button that calls `onCommit` with the field's current
+  value; an owned field is not disabled and shows a "Release" button that
+  calls `onReleaseOwnership` with the field's id; in `scope === "global"`
+  neither button renders and nothing is disabled. All 9 assertions passed.
+- `Rail.tsx` (Task 13): `.rail__logo` renders as a real `<button>`
+  (`aria-label="Your videos"`, `aria-current="page"` when
+  `active === "home"`), calls `onHome` on click, and no duplicate
+  `.rail__logo`/`IconGrid` element remains. All 6 assertions passed.
+
