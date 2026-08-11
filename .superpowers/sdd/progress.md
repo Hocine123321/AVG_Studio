@@ -42,11 +42,11 @@ both times).
 - [x] Task 6: the drift test
 - [x] Task 7: `aspect_ratio` removed, derived from `video_form`
 - [x] Task 8: frontend `useSettingsData.ts` — ownership and scope
-- [ ] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
-- [ ] Task 10: frontend the category table and tab strip
-- [ ] Task 11: frontend the Global/Channel toggle
-- [ ] Task 12: small fix — remove "Run again" from phase-error surfaces
-- [ ] Task 13: small fix — the "A" logo becomes the main menu
+- [x] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
+- [x] Task 10: frontend the category table and tab strip
+- [x] Task 11: frontend the Global/Channel toggle
+- [x] Task 12: small fix — remove "Run again" from phase-error surfaces
+- [x] Task 13: small fix — the "A" logo becomes the main menu
 
 ## Task 5 notes
 Mechanical migration across the seven files from the plan's §0 inventory:
@@ -233,3 +233,50 @@ on type 'SettingsCtx'` - the one remaining consumer, fixed in Task 9-11.
 `web/package-lock.json` picked up 54 lines of Linux-only npm-install noise
 (platform-specific optional deps the Windows-generated lockfile doesn't
 list) - reverted, not committed; not a real project change.
+
+## Tasks 9-11 notes (committed together with Task 12/13 — see below)
+
+Task 9: `SettingsGroup.tsx` now computes `ownershipApplies = spec.scope
+=== "channel" && ctx.scope === "channel"` per row; an inherited field
+renders disabled (reusing `.field-input:disabled`/`.switch:disabled` -
+no new disabled visual, per plan) with a muted explanatory line and a
+"Take ownership" button (`ctx.onCommit(spec, ctx.getValue(spec))` - joins
+the ordinary draft batch, saved on the next "Save changes", not an
+immediate write); an owned field gets a small "Release" button
+(`ctx.onReleaseOwnership(spec.id)` - immediate, not batched, matching the
+secret lane's own immediate-delete precedent). `.btn.btn--sm`/`.btn--sm
+.btn--ghost` reused rather than new classes, per this file's existing
+row-chrome vocabulary.
+
+Task 10: `Settings.tsx`'s sidebar (`.settings__nav`) replaced by
+`CATEGORIES` (7 entries, all 10 schema groups covered - `keys` folded
+into Models, `overlay` into Captions, `video` into Render, matching the
+plan's own grouping) rendered as `.tabstrip`/`.tabchip` (CSS copied
+verbatim from `docs/reference/organic_night_v2.html:260-262`).
+`activeGroup`/`jumpTo` became `activeCategory`/`jumpToCategory`; clicking
+a tab actually filters to that category's groups (`categoryGroups`), not
+just an anchor-scroll within one continuous page. Search still wins over
+the category filter (`searchResults` scans every group regardless of
+`activeCategory`), and a new effect corrects `activeCategory` to wherever
+the first search match lives, so the tab strip's highlight never points
+at a category with nothing shown. The scrollspy (Intersection Observer)
+is kept per Task 10.4's own instruction, narrowed automatically since it
+only ever observes what `visibleGroups` renders; its only visible effect
+now is `.settings-group__title--active` (a subtle accent-color highlight)
+for the three two-group categories (Models, Captions, Render) - inert for
+the four single-group ones, as the plan itself predicted. The
+category-completeness assertion lives in the `groups` `useMemo` itself: a
+schema group with no `CATEGORIES` home throws at render time (this
+codebase's stand-in for a frontend unit test, per CLAUDE.md's "no
+frontend unit tests" convention already used for the runtime checks in
+this same file).
+
+Task 11: the Global/Channel switch sits in `.settings__header`, styled
+with the existing `.switch`/`.switch__thumb` tokens (no new toggle
+component). Wired straight to `scope`/`setScope` from `useSettingsData`;
+disabled when no channel is active (nothing to switch to/from). The old
+`followingGlobal` banner (a `settings_source`-reading channel silently
+showing every field disabled) is replaced by a `scope === "global"` banner
+explaining the opposite state - nothing is disabled in Global mode, this
+note is purely informational, not a warning.
+

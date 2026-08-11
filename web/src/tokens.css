@@ -574,9 +574,14 @@ a:hover {
   gap: 6px;
 }
 
+/* A real `<button>` since Slice 19 Task 13 (it is the app's primary
+   navigation, not decoration) - `padding: 0` and `cursor: pointer` undo
+   the browser's own button defaults, which this rule didn't need to state
+   while it was a `<div>`. */
 .rail__logo {
   width: 38px;
   height: 38px;
+  padding: 0;
   border-radius: 14px;
   background: var(--accent);
   color: var(--canvas);
@@ -586,6 +591,12 @@ a:hover {
   font-size: 18px;
   margin-bottom: 14px;
   border: 0;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+
+.rail__logo:hover {
+  background: var(--accent-soft);
 }
 
 /* The Quick panel's own open/close toggle (Slice 18 spec §1) - rendered at
@@ -1840,24 +1851,26 @@ a:hover {
 
 .settings__layout {
   display: flex;
-  align-items: flex-start;
-  gap: 30px;
+  flex-direction: column;
+  gap: 20px;
   flex: 1;
   min-height: 0;
 }
 
-.settings__nav {
-  width: 220px;
-  flex-shrink: 0;
+.settings__top {
   display: flex;
   flex-direction: column;
   gap: 14px;
   position: sticky;
   top: 0;
+  background: var(--canvas);
+  z-index: 1;
+  padding-top: 2px;
 }
 
 .settings__search {
   width: 100%;
+  max-width: 360px;
   min-height: 42px;
   padding: 0 16px;
   font: inherit;
@@ -1877,30 +1890,48 @@ a:hover {
   border-color: color-mix(in srgb, var(--text) 32%, transparent);
 }
 
-.settings__nav-list {
+/* Verbatim from docs/reference/organic_night_v2.html:260-262 (Slice 19
+   §1.2's "taken rather than guessed") - the mockup's own bare `.on` class
+   is kept as-is rather than converted to this codebase's usual BEM-ish
+   modifier style. */
+.tabstrip {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
 }
 
-.settings__nav-item {
-  text-align: left;
-  border: 0;
+.tabchip {
+  border-radius: 999px;
+  padding: 6px 15px;
+  font-size: 13px;
+  border: 1px solid var(--line-2);
   background: transparent;
   color: var(--muted);
-  padding: 9px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13.5px;
   cursor: pointer;
 }
 
-.settings__nav-item:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  color: var(--text);
+.tabchip.on {
+  border-color: transparent;
+  background: var(--accent-deep);
+  color: var(--accent-soft);
 }
 
-.settings__nav-item--on {
-  background: var(--surface-2);
+/* An owned/inherited toggle, not the mockup's own bare `.tabchip`, so it
+   is exempted from the "verbatim" note above. */
+.settings__scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings__scope-label {
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.settings__scope-label--on {
+  font-size: 12.5px;
   color: var(--text);
 }
 
@@ -1909,9 +1940,9 @@ a:hover {
 
    On `[data-settings-group]`, not on `.settings-group`: `scroll-margin`
    only applies to the element `scrollIntoView` was actually called on, and
-   `Settings.tsx`'s `jumpTo` targets the wrapping div (the one that may
-   also carry the Components or Models panel above the group's heading).
-   Set on the inner `<section>` it was silently doing nothing. */
+   `Settings.tsx`'s `jumpToCategory` scrolls the whole content pane, but
+   this still matters for any future in-page anchor jump within it. Set on
+   the inner `<section>` it was silently doing nothing. */
 [data-settings-group] {
   scroll-margin-top: 12px;
 }
@@ -1936,6 +1967,13 @@ a:hover {
   font-family: var(--font-heading);
   font-size: 20px;
   margin: 0 0 10px;
+}
+
+/* Task 10.4's scrollspy, narrowed to the active category - inert for the
+   single-group categories (Creative, Images, Voice, Paths), the only
+   visible effect within a multi-group one (Models, Captions, Render). */
+.settings-group__title--active {
+  color: var(--accent);
 }
 
 .settings-group__list {

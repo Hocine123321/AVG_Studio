@@ -6,6 +6,12 @@ export interface SettingsGroupProps {
   title: string;
   specs: SettingSpec[];
   ctx: SettingsCtx;
+  /** Whether this group is the one nearest the middle of the viewport
+   * right now (Settings.tsx's scrollspy, Slice 19 Task 10.4) - purely a
+   * `.settings-group__title--active` highlight for multi-group categories
+   * (Models, Captions, Render); optional so every other caller
+   * (QuickSettingsTab, NewTakePanel) is unaffected. */
+  active?: boolean;
 }
 
 /**
@@ -28,10 +34,10 @@ export interface SettingsGroupProps {
  * mode nothing is ever disabled for this reason: editing the defaults
  * document directly has nothing above it to inherit from.
  */
-export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps) {
+export default function SettingsGroup({ title, specs, ctx, active }: SettingsGroupProps) {
   return (
     <section className="settings-group">
-      <h2 className="settings-group__title">{title}</h2>
+      <h2 className={`settings-group__title${active ? " settings-group__title--active" : ""}`}>{title}</h2>
       <div className="settings-group__list">
         {specs.map((spec) => {
           const dirty = ctx.isDirty(spec.id);
