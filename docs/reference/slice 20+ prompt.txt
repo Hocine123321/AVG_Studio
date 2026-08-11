@@ -1,0 +1,767 @@
+You are working on **AVG Studio**, a Windows desktop AI video-generation application.
+
+## Mission
+
+Implement the requested improvements, tuning changes, and bug fixes below as a coherent engineering pass.
+
+**Do not merely patch symptoms.** Inspect the existing implementation, understand the relevant architecture and existing design language, then implement the correct underlying solution.
+
+**Before changing anything:**
+
+1. Read the relevant module docstrings.
+2. Read `.superpowers/sdd/progress.md` and the current relevant spec/plan documents.
+3. Inspect the existing implementation of every affected feature.
+4. Search for existing reusable components/utilities before creating new ones.
+5. Preserve the repository's architecture and single-sources-of-truth.
+
+Only make changes directly requested here. **Do not add unrelated features, refactor unrelated code, or redesign the application beyond these requirements.**
+
+---
+
+# Repository constraints
+
+These are non-negotiable:
+
+* `.venv-build\Scripts\python.exe` is the Python interpreter.
+* Run Python tests with:
+  `.venv-build\Scripts\python.exe -m pytest tests -q`
+* No live API calls in tests.
+* `avg/media/vendor/` is protected. **Never edit it.**
+* Nothing below `avg/api/` may print or prompt.
+* Long-running work uses typed event generators.
+* `create_app(...)` is the construction entry point; tests must use its path overrides and never touch the real user profile.
+* `avg/core/settings_schema.py` is the source of truth for user-configurable settings.
+* `avg/pipeline/registry.py` is the backend source of truth for phase order.
+* `web/src/phases.ts` mirrors the backend phase keys and must remain synchronized.
+* `avg/pipeline/create.py::save_project` is the only writer of `project.json`.
+* `avg/core/takes.py::PHASE_ARTIFACTS` is the source of truth for phase-written artifacts.
+* Channel settings must resolve through the existing centralized resolver.
+* Secrets must remain inside the secrets boundary and never appear in logs, fixtures, exceptions, settings responses, or reprs.
+* Reuse existing design-system values from `web/src/tokens.css`.
+* Never introduce native `<select>`, visible native checkbox/radio controls, or browser-default form controls.
+* Use the existing `Select`, `.switch`, `.select-dot`, etc.
+* Never add Google Fonts imports.
+* One filled terracotta `.btn--primary` action per screen.
+* Final UI verification should happen once after the complete UI slice, not after every individual task.
+* Do not modify the protected legacy render engine.
+
+Current architecture and module ownership are documented in `App Info.md` and `CLAUDE.md`. Treat those as authoritative. Do not resurrect pre-consolidation module paths from historical documents.
+
+---
+
+# Execution strategy
+
+This is a large change set. **Do not attempt to blindly implement everything in one uninterrupted edit.**
+
+Work in logical slices.
+
+For each slice:
+
+1. Inspect.
+2. State the implementation plan briefly.
+3. Implement.
+4. Run the smallest relevant tests/checks.
+5. Fix regressions.
+6. Continue to the next slice.
+
+Use the repository's existing conventions and components wherever possible.
+
+Do not create a speculative abstraction merely because several requested features sound similar. First determine whether an existing abstraction already handles the concern.
+
+### Stop and ask before
+
+* deleting files;
+* adding dependencies;
+* changing the database/schema/storage format in a backwards-incompatible way;
+* modifying `avg/media/vendor/`;
+* changing external API contracts in a way that could break existing clients;
+* making a destructive migration of existing user data.
+
+For ordinary implementation decisions, proceed without asking.
+
+---
+
+# 1. UserAssets storage architecture
+
+## Requirement
+
+Move **all user-created/persistent application data** under one organized root folder named:
+
+`UserAssets`
+
+This includes, as applicable:
+
+* application configuration;
+* API keys/secrets;
+* application logs;
+* user-created projects;
+* videos;
+* generated media;
+* other persistent user-owned application assets.
+
+The structure must be **organized, minimal, predictable, and easy for the user to navigate**.
+
+## Important
+
+Do not simply dump the existing `%APPDATA%` and `%LOCALAPPDATA%` contents into one folder.
+
+Design a clean directory structure based on the actual ownership of the existing data.
+
+Inspect:
+
+* `avg/config/settings.py`
+* `avg/config/channels.py`
+* `avg/config/secrets.py`
+* `avg/core/error_store.py`
+* model/cache storage
+* project/output-root handling
+* thumbnail/cache handling
+* logging implementation
+* installer/build assumptions
+* all path-resolution code
+
+Determine which data is:
+
+* user-owned persistent data;
+* derived/rebuildable cache;
+* application/runtime state;
+* bundled application data.
+
+Only user/application persistent data requested here belongs under `UserAssets`.
+
+Preserve atomic writes, secret protection, migration safety, and test isolation.
+
+### Migration
+
+Existing installations must not silently lose data.
+
+Implement an appropriate migration/discovery strategy for existing data.
+
+The new layout must become the canonical layout.
+
+Update documentation/comments/tests that encode the old locations.
+
+---
+
+# 2. Ken Burns / Ken Zoom intensity
+
+Add a user-configurable setting controlling the intensity of the Ken Zoom effect.
+
+Current behavior effectively zooms approximately 100% into the image and loses too much of the original frame.
+
+Requirements:
+
+* expose a user setting;
+* provide a sensible default;
+* allow the user to reduce/increase intensity;
+* integrate it into the existing phase/settings architecture;
+* invalidate the appropriate phase when changed;
+* ensure the generated motion respects the selected intensity;
+* do not hard-code a second configuration system.
+
+Inspect the current motion/render implementation first and determine the actual mathematical meaning of the current "100%" behavior before implementing the control.
+
+Add tests for the transformation/configuration logic where practical.
+
+---
+
+# 3. App Health → Logs
+
+Inside **App Health → Recent Errors**, add a button named:
+
+`Logs`
+
+It should open the application's logs.
+
+Requirements:
+
+* use the existing design system;
+* do not introduce a second logging viewer architecture;
+* make the interaction useful on Windows;
+* preserve the existing Recent Errors behavior;
+* keep the action visually secondary to the screen's single primary action.
+
+---
+
+# 4. Quick Panel
+
+Make the Quick Panel:
+
+* resizable;
+* slightly wider at its minimum width so its contents do not wrap incorrectly.
+
+Inspect the existing panel implementation and CSS before changing it.
+
+Requirements:
+
+* preserve the existing puller behavior;
+* maintain sensible min/max bounds;
+* avoid breaking the Preview tab;
+* persist the size only if the existing architecture has an appropriate place for UI preferences;
+* do not introduce arbitrary dimensions unrelated to the design system.
+
+---
+
+# 5. Studio side tab
+
+Make the **Studio** side-tab functional.
+
+Clicking it should take the user to the **latest opened video/project**, not simply a generic Studio screen.
+
+Determine what "latest opened" should mean from the existing project/take state and UI behavior.
+
+Do not confuse:
+
+* latest created project;
+* current take;
+* latest opened project.
+
+Persist the minimum state necessary to make this behavior reliable across normal application use.
+
+---
+
+# 6. Create Video → Research Topic
+
+Add a:
+
+`Research Topic`
+
+toggle to the Create Video page.
+
+Trace the current creation flow before wiring it.
+
+The toggle must:
+
+* have a real persisted/requested value;
+* affect the pipeline behavior;
+* have an appropriate default;
+* integrate with settings/configuration only if it is genuinely a user setting;
+* avoid creating a fake UI-only toggle.
+
+Determine the appropriate phase/input boundary for research rather than embedding research logic into an unrelated phase.
+
+---
+
+# 7. Optimized narration / "polished" voice step
+
+The current optimized narration/polished step cuts audio too aggressively and uses an outdated approach.
+
+This requires a **real technical improvement**, not merely different constants.
+
+Inspect:
+
+* the current narration pipeline;
+* audio timing;
+* silence detection/trimming;
+* voice provider output;
+* how narration duration maps to scenes;
+* how downstream phases consume the result;
+* relevant legacy implementation and its documented rationale.
+
+Replace the outdated aggressive trimming strategy with a more robust approach that preserves natural speech.
+
+The result should:
+
+* avoid chopping phonemes/words;
+* avoid unnatural silence removal;
+* preserve intentional pauses where possible;
+* produce stable timing;
+* remain deterministic enough for testing;
+* not break scene/audio alignment.
+
+## Voice customization
+
+Add appropriate settings for controlling this behavior.
+
+Possible dimensions include, where technically meaningful:
+
+* silence threshold;
+* minimum silence duration;
+* maximum removable silence;
+* padding/keep duration;
+* aggressiveness.
+
+Do not blindly expose every internal parameter. Expose the controls that actually provide useful user-level control.
+
+Use the project's settings architecture.
+
+---
+
+# 8. Render phase custom video player
+
+When the video completes in the **Render** phase, its phase preview must show a built-in custom video player.
+
+The player must follow AVG Studio's design philosophy.
+
+Do not use a generic browser/native player UI as the final experience.
+
+Inspect existing media-preview/player components first.
+
+The player should account for:
+
+* play/pause;
+* seek/progress;
+* duration;
+* volume/mute where appropriate;
+* loading/empty states;
+* completed render state;
+* responsive sizing;
+* keyboard accessibility;
+* the existing design language.
+
+Do not add unnecessary controls.
+
+---
+
+# 9. Built-in custom voice player
+
+Replace default/native voice playback UI with a reusable built-in custom voice player.
+
+Inspect all current places where generated voices/audio are played.
+
+Build/reuse one consistent player component rather than implementing separate players for each screen.
+
+It should fit the application's design language and support the interaction users actually need.
+
+Avoid native `<audio controls>` as the final UI.
+
+---
+
+# 10. Settings → Models primary/backup grouping
+
+In Settings → Models, primary and backup models belonging to the same phase currently appear as separate parts.
+
+Merge them into **one phase section** showing:
+
+* Primary model
+* Backup model
+
+together.
+
+Read `organic_night_v2.html` for the exact visual/reference structure before implementing this section.
+
+Preserve the existing model preference semantics.
+
+Do not alter the meaning of primary vs backup routing.
+
+---
+
+# 11. Replace avoidable manual-entry settings
+
+The Settings UI currently forces the user to manually type values even where the application already knows the valid choices.
+
+Replace these with proper built-in selectors/pickers where the application can provide the options.
+
+At minimum address:
+
+* Captions Font
+* Style
+* Personality
+* Font Size
+* Voice Model
+* Frame Rate
+
+Voice models must be sourced from the **Live List/model-cache mechanism**, analogous to AI models.
+
+## Explicit exclusions
+
+Do **not** replace:
+
+* Style Lock
+* Accents
+
+Those are intentionally advanced/customizable brand-preset controls.
+
+## Slider special handling
+
+Settings with meaningful minimum/maximum numeric ranges must use a new built-in Slider control.
+
+At minimum:
+
+* Voice Stability
+* Render Threads
+* Voice Speed
+* Frame Rate
+
+Frame Rate range:
+
+`15–60`
+
+Slider changes must occur in **5% increments of the control's configured range**, not arbitrary one-unit increments.
+
+Render Threads must account for available user hardware when determining its valid range.
+
+The slider must:
+
+* follow the existing design system;
+* display the current value;
+* support keyboard interaction;
+* have appropriate min/max/step semantics;
+* avoid native browser styling;
+* integrate with `SettingSpec`.
+
+Do not create bespoke slider implementations for each setting.
+
+---
+
+# 12. Naming change
+
+Rename:
+
+`Content shape`
+
+to:
+
+`Personality`
+
+everywhere this concept appears.
+
+This includes UI labels, settings schema metadata, help text, API-facing display metadata, and any relevant documentation.
+
+Do not rename unrelated concepts merely because they contain similar wording.
+
+---
+
+# 13. Status pill
+
+## Active
+
+When the status pill is active:
+
+* make it circular;
+* width and height must be equal;
+* reduce it from the current elongated pill shape.
+
+## Idle
+
+When idle:
+
+* reposition it as a pull-like button;
+* place it near the top-left;
+* not directly against the corner;
+* animate it with a pull-like motion.
+
+Inspect the existing status-pill implementation before changing it.
+
+Animation should be subtle and consistent with the application's motion language.
+
+Do not introduce an animation library.
+
+---
+
+# 14. Quick Panel puller
+
+Move the `<` Quick Panel puller.
+
+It should align with the **A icon**, rather than sitting beside the Create Video button.
+
+Preserve its semantics and keyboard accessibility.
+
+---
+
+# 15. App Health expandable sections
+
+The App Health sections:
+
+1. Dependency Check
+2. App Warmup
+3. Safeguards
+
+currently consume too much space.
+
+Make each section expandable/collapsible.
+
+## Collapsed state
+
+Show the existing concise summary, e.g.:
+
+* Passed
+* 1 error found
+* etc.
+
+## Expanded state
+
+Reveal the additional diagnostic information.
+
+Requirements:
+
+* smooth expansion/collapse;
+* preserve the existing information;
+* add a `<` button/control to each section;
+* correct orientation/state indication;
+* keyboard accessible;
+* no layout jumping beyond what the expansion naturally causes.
+
+Use CSS transitions where sufficient.
+
+---
+
+# 16. Missing Script and Render phase previews
+
+Every project phase has a phase preview.
+
+Some phases show:
+
+* a brief before execution;
+* or information describing what happened.
+
+The **Script** and **Render** phases currently have no proper preview because they contain sub-steps.
+
+That is incorrect.
+
+Build proper previews for both phases while respecting their sub-step structure.
+
+The previews must:
+
+* use the existing phase-preview design language;
+* represent the phase's meaningful state;
+* account for sub-steps;
+* show useful information before/during/after execution where the existing architecture supports it;
+* not fake data;
+* integrate with the event/progress system.
+
+Do not simplify the phase merely to make the preview easier.
+
+---
+
+# 17. My Videos performance and selection behavior
+
+The main My Videos menu becomes laggy with many videos.
+
+Investigate the actual performance bottleneck before optimizing.
+
+Potential areas to inspect include:
+
+* unnecessary rendering;
+* media loading;
+* thumbnail loading;
+* repeated metadata calculations;
+* event handlers;
+* hover state;
+* DOM size.
+
+Do not prematurely implement virtualization unless the actual implementation warrants it.
+
+## Video plates
+
+Polish the video cards/plates while maintaining the existing visual language.
+
+## Selection mode
+
+Remove the current hover-to-select behavior.
+
+Add a visible:
+
+`Select`
+
+toggle/button at the top.
+
+Behavior:
+
+* normal mode: cards behave normally;
+* selection mode: clicking cards selects them;
+* selection-specific actions appear;
+* hover should not secretly toggle selection.
+
+When a video is selected / hovered in selection mode, provide actions including:
+
+* `Export` → export to editable CapCut format;
+* `Open Folder`.
+
+Reuse the existing CapCut export API/implementation.
+
+Do not duplicate export logic.
+
+---
+
+# 18. Broken progress bar
+
+The bottom progress bar works for the first phase but remains at `100%` when moving to the next phase.
+
+Find the underlying state/event lifecycle bug.
+
+Do not simply reset the CSS width.
+
+Trace:
+
+* phase start events;
+* phase completion events;
+* runner state;
+* `useEvents.ts`;
+* phase registry;
+* progress aggregation;
+* UI derived state.
+
+Ensure every new phase starts from its own correct progress state and the overall progress remains correct throughout the complete pipeline.
+
+Add regression coverage.
+
+---
+
+# 19. Quick Panel Preview refresh
+
+Inside:
+
+`Quick Panel → Preview`
+
+add a:
+
+`Refresh`
+
+button.
+
+Current problem:
+
+changing settings does not automatically refresh the preview.
+
+Implement the button using the existing preview/data-fetch architecture.
+
+If safe and appropriate, also ensure the preview invalidates naturally when relevant settings change; the explicit Refresh button must remain available regardless.
+
+Do not create a duplicate fetch implementation.
+
+---
+
+# 20. Recent Errors expansion bug
+
+When the user clicks an error in **Recent Errors**, its details are supposed to appear underneath it.
+
+That behavior currently does not work.
+
+Trace the existing implementation and fix the actual regression.
+
+Do not replace the interaction with a new unrelated modal.
+
+Add a regression test if the behavior can be tested at the appropriate layer.
+
+---
+
+# 21. Incorrect 30-second output for 2m/4m projects
+
+This is a high-priority bug.
+
+When the user requests a 2-minute or 4-minute video, the application sometimes produces a ~30-second result.
+
+Find the actual source of the duration loss.
+
+Trace the complete duration flow:
+
+* Create Video input;
+* project settings/model;
+* brief/script generation;
+* scene planning;
+* narration duration;
+* phase data;
+* render configuration;
+* final media duration.
+
+Do not simply stretch the final video to the requested duration.
+
+The requested duration must meaningfully influence the generated project.
+
+Add regression coverage for at least:
+
+* short/default duration;
+* 2-minute duration;
+* 4-minute duration.
+
+Use deterministic/mocked data rather than live AI providers.
+
+---
+
+# UI/reference requirements
+
+Before modifying UI:
+
+* inspect `web/src/tokens.css`;
+* inspect nearby existing components;
+* inspect `organic_night_v2.html` for the Models reference;
+* reuse existing spacing/radii/typography;
+* use existing custom controls;
+* do not invent a second design language.
+
+For new reusable controls such as:
+
+* Slider
+* Video Player
+* Voice Player
+
+build them as reusable components if the existing architecture supports that naturally.
+
+---
+
+# Testing requirements
+
+At minimum, add/update regression coverage for the backend behavior affected by:
+
+* UserAssets path resolution/migration;
+* Ken Zoom configuration;
+* research toggle;
+* narration polishing;
+* voice settings;
+* model cache/voice model selection;
+* phase progress reset;
+* requested video duration;
+* any persistence changes.
+
+For frontend:
+
+* run TypeScript build;
+* run lint;
+* use the existing DOM/computed-style checks where available;
+* verify the final UI slice visually once at the end.
+
+Run:
+
+`.venv-build\Scripts\python.exe -m pytest tests -q`
+
+and:
+
+`cd web && npm run build`
+
+and:
+
+`cd web && npm run lint`
+
+Fix regressions rather than weakening tests.
+
+---
+
+# Final verification
+
+Before declaring completion, verify:
+
+1. No protected vendor files changed.
+2. No live provider calls were introduced into tests.
+3. No secrets entered logs, fixtures, responses, or error messages.
+4. No native form controls were introduced.
+5. `SettingSpec.invalidates` is present for every new setting.
+6. Backend and frontend phase keys remain synchronized.
+7. UserAssets is the canonical user-data location.
+8. Existing projects/data remain recoverable after migration.
+9. Render remains serialized through the single MediaEngine.
+10. Existing takes semantics remain intact.
+11. CapCut export still works.
+12. 2m/4m requested durations no longer collapse to ~30 seconds.
+13. Progress correctly transitions between every phase.
+14. Script and Render have functional previews.
+15. Voice and video players use the new built-in UI.
+16. Models show primary + backup together per phase.
+17. Settings use selectors/sliders where specified.
+18. App Health sections collapse/expand correctly.
+19. Recent Error details expand correctly.
+20. Quick Panel resizing/puller behavior works.
+21. Studio opens the latest opened project.
+22. My Videos remains responsive with many projects.
+
+At the end, provide a concise implementation summary containing:
+
+* files/components changed;
+* tests added/updated;
+* verification commands and results;
+* any intentionally deferred item;
+* any migration or user-data compatibility consideration.
+
+Do not claim a feature is complete unless it was actually implemented and verified.
+
+This prompt is for an agentic tool with real system access. Review the scope locks, forbidden actions, and stop conditions before executing. Confirm file paths, directories, and permissions match the actual project.
