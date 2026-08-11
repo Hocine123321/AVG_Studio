@@ -280,3 +280,33 @@ showing every field disabled) is replaced by a `scope === "global"` banner
 explaining the opposite state - nothing is disabled in Global mode, this
 note is purely informational, not a warning.
 
+
+## Task 12 notes
+
+`Studio.tsx`'s `ArtifactDetail`: removed both direct `onClick={() => void
+onStartRender()}` buttons (the failed-phase one and the render-done one).
+`onStartRender` itself removed from `ArtifactDetail`'s props and its call
+site (`noUnusedParameters` caught the now-dead prop immediately). Nothing
+else touched - confirmed the three surviving paths (take strip's "New
+take", the per-phase "Run again" that opens the new-take panel, and the
+header CTA) still exist unchanged in this file.
+
+## Task 13 notes
+
+`Rail.tsx`: `.rail__logo` is now a real `<button onClick={onHome}>`
+(`aria-label="Your videos"`, `aria-current` when `active === "home"`),
+not a `<div aria-hidden>`. The separate `IconGrid` `.rail__item` this
+duplicated is deleted outright, along with its now-unused `IconGrid`
+import - two controls doing the same job was the defect Task 13 names,
+so removing the duplicate rather than keeping both. `tokens.css`'s
+`.rail__logo` gains `padding: 0`, `cursor: pointer`, and a hover state
+(undoing/adding what a bare `<div>` never needed as a button).
+
+## Final verification
+
+`npx tsc -b`: clean. `npx oxlint`: 0 warnings, 0 errors, 47 files. `npm
+run build` (`tsc -b && vite build`): clean, 59 modules, no errors.
+
+Backend `pytest`/`mypy` deferred per explicit instruction since Task 6 -
+running now, after Task 13, as the single verification pass for the
+whole slice (Tasks 6-13).

@@ -1,4 +1,4 @@
-import { IconChannels, IconChevron, IconFilm, IconGrid, IconMoon, IconPlus, IconPulse, IconSliders, IconSun } from "./Icons";
+import { IconChannels, IconChevron, IconFilm, IconMoon, IconPlus, IconPulse, IconSliders, IconSun } from "./Icons";
 import type { Theme } from "./theme";
 
 export type RailSection = "home" | "studio" | "create" | "channels" | "settings" | "health";
@@ -59,9 +59,21 @@ export default function Rail({
 
   return (
     <nav className="rail" aria-label="Sections">
-      <div className="rail__logo" aria-hidden="true">
+      {/* The "A" logo is the app's primary navigation, not decoration
+          (Slice 19 Task 13) - a real `<button>`, reachable by Tab and
+          activatable by Enter/Space, not a `<div aria-hidden>` a screen
+          reader would skip and a keyboard could never reach. The separate
+          `IconGrid` rail item this replaces is gone entirely, not hidden -
+          two controls doing the same job was the defect. */}
+      <button
+        type="button"
+        className="rail__logo"
+        onClick={onHome}
+        aria-label="Your videos"
+        aria-current={active === "home" ? "page" : undefined}
+      >
         A
-      </div>
+      </button>
 
       {/* Rendered right after the logo, at the rail's own outer edge, per
           spec §1's recorded safe default - the logo keeps the corner it
@@ -75,17 +87,6 @@ export default function Rail({
         onClick={onToggleQuickPanel}
       >
         <IconChevron />
-      </button>
-
-      <button
-        type="button"
-        className={`rail__item${active === "home" ? " rail__item--on" : ""}`}
-        onClick={onHome}
-        title="Your videos"
-        aria-label="Your videos"
-        aria-current={active === "home" ? "page" : undefined}
-      >
-        <IconGrid />
       </button>
 
       <button

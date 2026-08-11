@@ -151,7 +151,6 @@ function ArtifactDetail({
   project,
   take,
   isCurrentTake,
-  onStartRender,
   onCancel,
   takeId,
   duration,
@@ -173,7 +172,6 @@ function ArtifactDetail({
    * panel says so honestly rather than silently showing the wrong take's
    * video under the right take's label. */
   isCurrentTake: boolean;
-  onStartRender: () => Promise<void>;
   onCancel: () => void;
   /** Which take's files the panel should read. `null` only in the window
    * before the first `GET .../takes` lands. */
@@ -221,13 +219,6 @@ function ArtifactDetail({
         <p>{message}</p>
         {detail && <div className="artifact-failed__detail">{detail}</div>}
         <div className="artifact-failed__actions">
-          {/* Secondary here on purpose - the header CTA is already the one
-           * filled `.btn--primary` action for this same "Run again", and two
-           * filled buttons on one screen is the exact defect the design
-           * tokens warn against. */}
-          <button type="button" className="btn" onClick={() => void onStartRender()}>
-            Run again
-          </button>
           {kind && <span className="chip chip--bad">{kind}</span>}
         </div>
       </div>
@@ -293,14 +284,6 @@ function ArtifactDetail({
             <dt>Aspect</dt>
             <dd>{project.aspect_ratio}</dd>
           </dl>
-          <div className="artifact-failed__actions">
-            {/* Secondary here too, for the same reason as the failed-state
-             * button above - the header already carries the one filled CTA. */}
-            <button type="button" className="btn" onClick={() => void onStartRender()}>
-              <IconPlay />
-              Run again
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -754,7 +737,6 @@ export default function Studio({
               project={project}
               take={selectedTake}
               isCurrentTake={isCurrentTake}
-              onStartRender={onStartRender}
               onCancel={onCancel}
               takeId={selectedTakeId}
               duration={formatDuration(record?.duration_ms)}
