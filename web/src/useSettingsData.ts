@@ -5,6 +5,7 @@ import {
   getKeys,
   getSettingsSchema,
   getSettingsValues,
+  releaseSettingValue,
   saveSettingsValues,
   setProviderKey,
   type ChannelDoc,
@@ -53,6 +54,13 @@ export function useSettingsData() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // The Settings screen's Global/Channel toggle (Slice 19 §3) - a
+  // presentation-mode switch, not persisted anywhere; switching it does
+  // not write anything by itself. Starts on "channel" so every existing
+  // screen (Quick Settings included) sees exactly what it did before this
+  // slice.
+  const [scope, setScope] = useState<"channel" | "global">("channel");
+
   const [keyBusy, setKeyBusy] = useState<Record<string, boolean>>({});
   const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
 
@@ -76,6 +84,28 @@ export function useSettingsData() {
     // see that block in tokens.css, which is unchanged.
     applyMotionScale(appValues["motion_scale"]);
   }, [appValues]);
+
+  // Re-reads channel-scope values whenever the toggle itself changes -
+  // "channel" and "global" are two different documents (the active
+  // channel's own vs the app-wide defaults), not two views of the same
+  // data, so switching needs a real refetch, not a client-side recompute.
+  // Guarded on `schema` so this never double-fires alongside the initial
+  // load effect above (that one always starts from "channel" scope).
+  useEffect(() => {
+    if (schema === null) return;
+    getSettingsValues(scope)
+      .then((res) => {
+        setChannelValues(res.channel);
+        setActiveChannelId(res.active_channel_id);
+      })
+      .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
+    // A pending edit belongs to whichever document was on screen when it
+    // was made - carrying it across to the other document would silently
+    // apply it somewhere the user never saw it land.
+    setDraft({});
+    setSaveError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const channelLabel = useMemo(() => {
     if (!activeChannelId) return null;
@@ -101,13 +131,17 @@ export function useSettingsData() {
     return Object.prototype.hasOwnProperty.call(draft, id);
   }
 
-  // True while the active channel reads its channel-scope settings from the
-  // app-wide defaults document rather than its own - see `SettingsCtx`'s
-  // `followingGlobal` for what this gates. Read via `valueById` rather than
-  // `channelValues.settings_source` directly, so an unsaved edit to the
-  // switch itself (still in `draft`, not yet round-tripped through Save)
-  // takes effect the moment it is made, not after a save.
-  const followingGlobal = valueById("settings_source") === "global";
+  /** Whether the active channel's own document holds an explicit key for
+   * `id` - `false` also when no channel is active (nothing to own).
+   * Purely a client-side read of data the hook already has in memory
+   * (`channels`, from `getChannels()`); goes stale the moment ownership
+   * changes, so both `handleSave` and `releaseOwnership` refetch
+   * `channels` after a successful write, same discipline as their own
+   * values refetch. */
+  function isOwned(id: string): boolean {
+    const channel = channels.find((c) => c.id === activeChannelId);
+    return channel !== undefined && Object.prototype.hasOwnProperty.call(channel.settings, id);
+  }
 
   function onCommit(spec: SettingSpec, value: unknown) {
     setSaveError(null);
@@ -121,11 +155,16 @@ export function useSettingsData() {
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await saveSettingsValues(draft);
+      const res = await saveSettingsValues(draft, scope);
       setAppValues(res.app);
       setChannelValues(res.channel);
       setActiveChannelId(res.active_channel_id);
       setDraft({});
+      // A save can turn a previously-inherited field into an owned one -
+      // refetch `channels` so `isOwned` reflects that immediately rather
+      // than lagging until the next unrelated reload.
+      const channelsRes = await getChannels();
+      setChannels(channelsRes.channels);
     } catch (err) {
       // Fail cleanly, honestly - keep every pending edit exactly as the
       // user left it rather than pretending any of it saved.
@@ -138,6 +177,22 @@ export function useSettingsData() {
   function handleDiscard() {
     setDraft({});
     setSaveError(null);
+  }
+
+  /** `DELETE /api/settings/values/{id}` - deletes the key from the active
+   * channel's own document immediately, not batched into `draft` like an
+   * ordinary edit (mirrors the secret lane's own immediate delete). */
+  async function releaseOwnership(id: string) {
+    setSaveError(null);
+    try {
+      const res = await releaseSettingValue(id);
+      setChannelValues(res.channel);
+      setActiveChannelId(res.active_channel_id);
+      const channelsRes = await getChannels();
+      setChannels(channelsRes.channels);
+    } catch (err) {
+      setSaveError(extractDetail(err instanceof Error ? err.message : String(err)));
+    }
   }
 
   async function handleSetKey(provider: string, key: string) {
@@ -179,7 +234,9 @@ export function useSettingsData() {
     onCommit,
     activeChannelId,
     channelLabel,
-    followingGlobal,
+    scope,
+    isOwned,
+    onReleaseOwnership: releaseOwnership,
     keys,
     keyBusy,
     keyErrors,
@@ -199,5 +256,7 @@ export function useSettingsData() {
     channels,
     activeChannelId,
     channelLabel,
+    scope,
+    setScope,
   };
 }

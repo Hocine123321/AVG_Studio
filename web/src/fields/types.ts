@@ -31,16 +31,27 @@ export interface SettingsCtx {
    * than silently failing on save. */
   activeChannelId: string | null;
   channelLabel: string | null;
-  /** True while the active channel's `settings_source` reads `"global"`.
-   * `avg/api/routes_settings.py`'s `_channel_values` reads the app-wide
-   * defaults document whole in that state and `post_settings_values` still
-   * write-through to the channel's own document underneath it - a value the
-   * screen would show saved but never actually apply. `settings_source`
-   * itself stays enabled regardless (see `SettingsGroup.tsx`); it is the
-   * only way back. Everything else edits by porting (`POST
-   * /api/settings/port-to-global`), never by editing a value this screen
-   * cannot show landing anywhere. */
-  followingGlobal: boolean;
+
+  /** The Settings screen's Global/Channel toggle (Slice 19 §3) - a
+   * presentation-mode switch, not persisted state. `"channel"`: fields
+   * show the active channel's resolved values, and an inherited
+   * (unowned) `scope="channel"` field renders disabled with a "Take
+   * ownership" affordance (see `isOwned`). `"global"`: fields read/write
+   * the app-wide defaults document directly - nothing is ever disabled in
+   * this mode, since there is nothing above the defaults document to
+   * inherit from. */
+  scope: "channel" | "global";
+  /** Whether the active channel's own document holds an explicit key for
+   * `id` (as opposed to inheriting it from the app-wide defaults document
+   * or the `SettingSpec`'s own default). Only meaningful when `scope ===
+   * "channel"` and the field itself is `scope: "channel"` - callers outside
+   * that combination should treat every field as owned/editable. */
+  isOwned: (id: string) => boolean;
+  /** `DELETE /api/settings/values/{id}` - deletes the key from the active
+   * channel's own document immediately (not batched into the draft, unlike
+   * every other edit this context exposes - see `onCommit`), so the field
+   * goes back to showing whatever it now inherits. */
+  onReleaseOwnership: (id: string) => void;
 
   keys: Record<string, boolean>;
   keyBusy: Record<string, boolean>;

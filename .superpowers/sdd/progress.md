@@ -41,7 +41,7 @@ both times).
 - [x] Task 5: migrate every phase file off `ctx.channel.settings`
 - [x] Task 6: the drift test
 - [x] Task 7: `aspect_ratio` removed, derived from `video_form`
-- [ ] Task 8: frontend `useSettingsData.ts` — ownership and scope
+- [x] Task 8: frontend `useSettingsData.ts` — ownership and scope
 - [ ] Task 9: frontend ownership UI in `SettingsGroup.tsx`/fields
 - [ ] Task 10: frontend the category table and tab strip
 - [ ] Task 11: frontend the Global/Channel toggle
@@ -196,3 +196,40 @@ of which this task touches.
 
 **Known state:** no test run yet, per the same explicit instruction as
 Task 6 — full verification deferred to after the last task in this slice.
+
+## Task 8 notes
+
+`api.ts`: `getSettingsValues(scope?)` appends `?scope=global` when set;
+`saveSettingsValues(values, target?)` passes `{ values, target }`, default
+`"channel"` so every pre-existing caller (NewTakePanel does not call this
+one, but QuickSettingsTab/PreviewTab share the hook) is unaffected; new
+`releaseSettingValue(id)` wraps `DELETE /api/settings/values/{id}`.
+
+`fields/types.ts`: `followingGlobal` removed; added `scope: "channel" |
+"global"`, `isOwned: (id: string) => boolean`, `onReleaseOwnership: (id:
+string) => void`.
+
+`useSettingsData.ts`: `scope` is local `useState`, not persisted (spec §3 -
+a presentation-mode switch). A second effect refetches channel-scope
+values whenever `scope` changes (guarded on `schema !== null` so it never
+double-fires alongside the initial-load effect) and clears `draft` - an
+edit made in one document must not silently apply to the other after a
+toggle. `handleSave` now passes `scope` as `saveSettingsValues`'s `target`
+and refetches `channels` after a successful save (a save can turn an
+inherited field into an owned one). `isOwned` reads `channels` (already in
+memory via `getChannels()`) client-side, per the plan's own §8.3 - no new
+backend read. `releaseOwnership` calls the new endpoint then refetches
+both values and channels.
+
+`NewTakePanel.tsx`: this panel edits per-take overrides, never the channel
+document, so ownership doesn't apply here - `scope: "channel"`, `isOwned:
+() => true` (always editable, matching the old `followingGlobal: false`'s
+intent), `onReleaseOwnership` a no-op stub only present to satisfy
+`SettingsCtx`'s shape.
+
+**Build confirmed to fail exactly as the plan predicted** (`npx tsc -b`):
+one error, `Settings.tsx(78,22): Property 'followingGlobal' does not exist
+on type 'SettingsCtx'` - the one remaining consumer, fixed in Task 9-11.
+`web/package-lock.json` picked up 54 lines of Linux-only npm-install noise
+(platform-specific optional deps the Windows-generated lockfile doesn't
+list) - reverted, not committed; not a real project change.

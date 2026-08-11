@@ -673,16 +673,39 @@ export function getSettingsSchema(): Promise<SettingsSchemaResponse> {
   return apiGet<SettingsSchemaResponse>("/api/settings/schema");
 }
 
-export function getSettingsValues(): Promise<SettingsValuesResponse> {
-  return apiGet<SettingsValuesResponse>("/api/settings/values");
+/** `scope="global"` reads the app-wide defaults document directly (the
+ * Settings screen's Global/Channel toggle, Slice 19 §3) instead of the
+ * active channel's resolved view - omit it (or pass `"channel"`) for the
+ * ordinary, channel-resolved read every existing caller already wants. */
+export function getSettingsValues(scope?: "channel" | "global"): Promise<SettingsValuesResponse> {
+  return apiGet<SettingsValuesResponse>(
+    scope === "global" ? "/api/settings/values?scope=global" : "/api/settings/values",
+  );
 }
 
 /** Saves a batch of `{id: value}` pairs in one request - the server
  * validates and (for channel-scoped ids) requires an active channel for
  * the WHOLE batch before writing anything, so a mixed batch either lands
- * completely or not at all (see `routes_settings.post_settings_values`). */
-export function saveSettingsValues(values: Record<string, unknown>): Promise<SettingsValuesResponse> {
-  return apiPost<SettingsValuesResponse>("/api/settings/values", { values });
+ * completely or not at all (see `routes_settings.post_settings_values`).
+ * `target="global"` writes channel-scope ids straight into the app-wide
+ * defaults document instead of the active channel's own (Slice 19 §3) -
+ * defaults to `"channel"`, so every pre-Slice-19 caller is unaffected. */
+export function saveSettingsValues(
+  values: Record<string, unknown>,
+  target?: "channel" | "global",
+): Promise<SettingsValuesResponse> {
+  return apiPost<SettingsValuesResponse>("/api/settings/values", { values, target });
+}
+
+/** `DELETE /api/settings/values/{id}` - releases ownership of one
+ * channel-scope setting: deletes the key from the active channel's own
+ * document, so it goes back to reading the app-wide defaults (or the
+ * catalogue default) per `resolve_channel_settings`. The other half of
+ * §2.4's "one mechanism, two verbs" - taking ownership is just an ordinary
+ * `saveSettingsValues` call, this is the delete verb the old
+ * whole-document `settings_source` switch never needed. */
+export function releaseSettingValue(id: string): Promise<SettingsValuesResponse> {
+  return apiDelete<SettingsValuesResponse>(`/api/settings/values/${encodeURIComponent(id)}`);
 }
 
 /** `POST /api/settings/port-to-global` - one explicit, user-pressed

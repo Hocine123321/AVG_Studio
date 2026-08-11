@@ -1993,6 +1993,12 @@ a:hover {
   color: var(--bad);
 }
 
+/* An inherited field's own explanation is informational, not an error -
+   same size/position as `.field-row__blocked`, muted rather than `--bad`. */
+.field-row__blocked--muted {
+  color: var(--dim);
+}
+
 .field-row__scope {
   font-size: 10.5px;
   letter-spacing: 0.02em;
@@ -2021,6 +2027,7 @@ a:hover {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: 10px;
   justify-content: flex-end;
   min-width: 160px;
 }

@@ -19,15 +19,14 @@ export interface SettingsGroupProps {
  * active, in which case the control is disabled rather than silently
  * failing later), and whether the row has an unsaved edit.
  *
- * A third disabled state sits beside "no active channel": the active
- * channel's `settings_source` reading `"global"`. The route still write-
- * throughs an edit to the channel's own document in that state (see
- * `avg.api.routes_settings.post_settings_values` and its docstring on why
- * that is intentional), but `_channel_values` is reading the defaults
- * document while it is on, so the screen would show the save land and then
- * never show it applied - the exact silent no-op Important 4 of the Slice
- * 12 review found. `settings_source` itself is exempted: it is how the user
- * gets back, and disabling it would strand them.
+ * Ownership (Slice 19 §2.4) is the fourth thing, and only applies to
+ * `scope="channel"` fields while `ctx.scope === "channel"`: an inherited
+ * (unowned) field renders disabled - reusing the same `.field-input:
+ * disabled`/`.switch:disabled` tokens `channelBlocked` already uses, not a
+ * new visual state - with a "Take ownership" button beside it; an owned
+ * one gains a small "Release" affordance. In `ctx.scope === "global"`
+ * mode nothing is ever disabled for this reason: editing the defaults
+ * document directly has nothing above it to inherit from.
  */
 export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps) {
   return (
@@ -40,8 +39,13 @@ export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps)
           // comment) so they are never "blocked" by channel state - only
           // the six ordinary channel-scoped types can be.
           const channelBlocked = spec.scope === "channel" && spec.type !== "secret" && !ctx.activeChannelId;
-          const followingGlobal =
-            spec.scope === "channel" && spec.id !== "settings_source" && ctx.followingGlobal;
+          // Ownership only means something for a channel-scope field while
+          // looking at the channel's own (not the global) view - no
+          // `scope="channel"` setting is ever `type="secret"` (see
+          // `avg.core.settings_schema`), so no extra type guard is needed.
+          const ownershipApplies = spec.scope === "channel" && ctx.scope === "channel";
+          const owned = !ownershipApplies || ctx.isOwned(spec.id);
+          const inherited = ownershipApplies && !owned;
 
           return (
             <div key={spec.id} className={`field-row${dirty ? " field-row--dirty" : ""}`}>
@@ -61,9 +65,34 @@ export default function SettingsGroup({ title, specs, ctx }: SettingsGroupProps)
                 {channelBlocked && (
                   <p className="field-row__blocked">Activate a channel before this can be saved.</p>
                 )}
+                {inherited && (
+                  <p className="field-row__blocked field-row__blocked--muted">
+                    Inherited from the app-wide defaults. Take ownership to set this channel&rsquo;s
+                    own value.
+                  </p>
+                )}
               </div>
               <div className="field-row__control">
-                <Field spec={spec} ctx={ctx} disabled={channelBlocked || followingGlobal} />
+                <Field spec={spec} ctx={ctx} disabled={channelBlocked || inherited} />
+                {inherited && (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() => ctx.onCommit(spec, ctx.getValue(spec))}
+                  >
+                    Take ownership
+                  </button>
+                )}
+                {ownershipApplies && owned && (
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--ghost"
+                    onClick={() => ctx.onReleaseOwnership(spec.id)}
+                    title="Release this channel's own value and go back to inheriting"
+                  >
+                    Release
+                  </button>
+                )}
               </div>
             </div>
           );
