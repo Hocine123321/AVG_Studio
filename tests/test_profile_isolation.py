@@ -21,7 +21,6 @@ import os
 from pathlib import Path
 
 from avg.config import channel_defaults, channels, secrets, settings, user_assets
-from avg.core import model_prefs
 from avg.media import thumbnails
 from avg.providers import models
 
@@ -51,10 +50,12 @@ def test_every_default_document_path_avoids_the_real_profile() -> None:
         "channels/": channels.default_channels_dir(),
         "channel_defaults.json": channel_defaults.default_channel_defaults_path(),
         "secrets.dat": secrets.default_secrets_path(),
-        "model_prefs.json": model_prefs.default_prefs_path(),
         "model_cache.json": models.default_cache_path(),
         "thumbs/": thumbnails.default_cache_dir(),
         "UserAssets/": user_assets.user_assets_root(),
+        "errors.json": user_assets.default_errors_path(),
+        "model_prefs.json": user_assets.default_model_prefs_path(),
+        "working_models.json": user_assets.default_working_models_path(),
     }
     real_folders = _real_app_folders()
     for label, path in resolved.items():

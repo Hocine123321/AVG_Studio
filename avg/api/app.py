@@ -73,6 +73,7 @@ from avg.config.channel_defaults import default_channel_defaults_path, load_defa
 from avg.config.quick_settings import default_quick_settings_path
 from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
+from avg.config.user_assets import default_errors_path, default_model_prefs_path, default_working_models_path
 from avg.core.error_store import ErrorStore, classify
 from avg.core.model_cache import ModelCache
 from avg.core.model_prefs import ModelPrefs
@@ -506,30 +507,28 @@ def create_app(
     app.state.settings_path = Path(settings_path) if settings_path is not None else None
     app.state.channels_dir = Path(channels_dir) if channels_dir is not None else None
     app.state.secrets_path = Path(secrets_path) if secrets_path is not None else None
-    # Errors live beside the settings document, so a user who moves their
-    # profile takes the log with them. Overridable like every other path so
-    # tests never write into the real %APPDATA%.
+    # Errors live under UserAssets/Logs - see avg.config.user_assets for
+    # why this default lives there rather than beside ErrorStore itself
+    # (avg/core/ cannot import avg/config/). Overridable like every other
+    # path so tests never write into the real profile.
     app.state.error_store = ErrorStore(
-        Path(errors_path)
-        if errors_path is not None
-        else default_settings_path().with_name("errors.json")
+        Path(errors_path) if errors_path is not None else default_errors_path()
     )
-    # Which models a probe proved working. Beside the settings document for
-    # the same reason the error log is, and NOT the same file as
-    # `avg/providers/models.py`'s `model_cache.json`, which caches what a
-    # provider *advertises* - see `avg.core.model_cache`'s docstring.
+    # Which models a probe proved working. Deliberately NOT under
+    # UserAssets - a rebuildable cache, not user data; stays at its
+    # pre-Slice-20 %APPDATA% location - see
+    # avg.config.user_assets.default_working_models_path. NOT the same
+    # file as `avg/providers/models.py`'s `model_cache.json`, which caches
+    # what a provider *advertises* - see `avg.core.model_cache`'s
+    # docstring.
     app.state.model_cache = ModelCache(
-        Path(model_cache_path)
-        if model_cache_path is not None
-        else default_settings_path().with_name("working_models.json")
+        Path(model_cache_path) if model_cache_path is not None else default_working_models_path()
     )
-    # The Live List's user-owned data: ticks, favourites, notes. A separate
-    # document from the cache above, which is replaced wholesale on every
-    # sweep - see `avg.core.model_prefs`.
+    # The Live List's user-owned data: ticks, favourites, notes. Under
+    # UserAssets/Config, beside settings.json - see
+    # avg.config.user_assets.default_model_prefs_path.
     app.state.model_prefs = ModelPrefs(
-        Path(model_prefs_path)
-        if model_prefs_path is not None
-        else default_settings_path().with_name("model_prefs.json")
+        Path(model_prefs_path) if model_prefs_path is not None else default_model_prefs_path()
     )
     # The app-wide defaults each scope="channel" setting resolves through
     # per field when the active channel's own document doesn't hold that

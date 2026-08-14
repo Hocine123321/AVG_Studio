@@ -151,3 +151,43 @@ def _record_migration(new_root: Path, moved: list[dict[str, str]]) -> None:
         with suppress(OSError):
             os.remove(tmp_name)
         raise
+
+
+def default_errors_path() -> Path:
+    """`Documents/AVG Studio/UserAssets/Logs/errors.json` -
+    `avg.core.error_store.ErrorStore`'s document. Lives here, not beside
+    that class, because `avg/core/` cannot import `avg/config/` (see this
+    module's docstring); `avg/api/app.py` is the only caller.
+    """
+    return user_assets_root() / "Logs" / "errors.json"
+
+
+def default_model_prefs_path() -> Path:
+    """`Documents/AVG Studio/UserAssets/Config/model_prefs.json` -
+    `avg.core.model_prefs.ModelPrefs`'s document, the user's own ticks,
+    favourites and notes. Same layering reason as `default_errors_path`.
+    Replaces `avg.core.model_prefs.default_prefs_path`, which this slice
+    removes - that function was never actually `create_app`'s source for
+    this default (it used a `.with_name()` shortcut off
+    `default_settings_path()` instead) and had exactly this layering
+    problem already, just unexercised.
+    """
+    return user_assets_root() / "Config" / "model_prefs.json"
+
+
+def default_working_models_path() -> Path:
+    """`%APPDATA%/AVG Studio/working_models.json` - deliberately NOT under
+    `UserAssets`. `avg.core.model_cache.ModelCache`'s document: which
+    models a probe has actually proven working, replaced wholesale on
+    every sweep. A cache, not user data - see this module's docstring for
+    why caches stay where they were.
+
+    Independent of `default_settings_path` on purpose: before this slice
+    both were composed from the same `%APPDATA%/AVG Studio` base by
+    coincidence (`create_app` used `default_settings_path().with_name(
+    "working_models.json")`), and that coincidence would have silently
+    pulled this cache into `UserAssets` the moment `default_settings_path`
+    moved, had this stayed a shortcut off it instead of its own function.
+    """
+    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(base) / "AVG Studio" / "working_models.json"

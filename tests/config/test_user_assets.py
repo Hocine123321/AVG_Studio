@@ -152,3 +152,27 @@ def test_user_assets_root_triggers_migration_from_appdata(monkeypatch, tmp_path)
     assert root == home / "Documents" / "AVG Studio" / "UserAssets"
     assert (root / "Config" / "settings.json").read_text(encoding="utf-8") == '{"schema_version": 1}'
     assert not (old_avg / "settings.json").exists()
+
+
+import avg.config.user_assets as user_assets_module
+
+
+def test_default_errors_path_is_under_logs(monkeypatch, tmp_path):
+    monkeypatch.setattr(user_assets_module, "user_assets_root", lambda: tmp_path)
+    assert user_assets_module.default_errors_path() == tmp_path / "Logs" / "errors.json"
+
+
+def test_default_model_prefs_path_is_under_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(user_assets_module, "user_assets_root", lambda: tmp_path)
+    assert user_assets_module.default_model_prefs_path() == tmp_path / "Config" / "model_prefs.json"
+
+
+def test_default_working_models_path_stays_at_appdata_not_userassets(monkeypatch, tmp_path):
+    appdata = tmp_path / "appdata"
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "somewhere_else"))
+
+    path = user_assets_module.default_working_models_path()
+
+    assert path == appdata / "AVG Studio" / "working_models.json"
+    assert "UserAssets" not in path.parts

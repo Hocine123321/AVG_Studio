@@ -16,9 +16,9 @@ Every document this app owns resolves its own default location from
 `%APPDATA%`, `%LOCALAPPDATA%` or `%USERPROFILE%` at call time -
 `avg.config.settings`, `avg.config.channels`,
 `avg.config.channel_defaults`, `avg.config.secrets`,
-`avg.config.user_assets`, `avg.core.model_prefs`, `avg.providers.models`
-and `avg.media.thumbnails` all read one of the three environment
-variables themselves. `create_app`'s path overrides are how a test
+`avg.config.user_assets`, `avg.providers.models` and
+`avg.media.thumbnails` all read one of the three environment variables
+themselves. `create_app`'s path overrides are how a test
 *should* stay isolated, but they are opt-in, and a test that simply
 omits one gets the developer's real `%APPDATA%/AVG Studio` or
 `Documents/AVG Studio` with no complaint - it reads their actual

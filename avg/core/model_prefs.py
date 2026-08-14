@@ -73,17 +73,6 @@ def _lock_for(path: Path) -> threading.Lock:
         return lock
 
 
-def default_prefs_path() -> Path:
-    """`%APPDATA%/AVG Studio/model_prefs.json`.
-
-    Mirrors `avg.core.model_cache`'s and `avg.config.settings`'s own
-    defaults; `create_app` passes an override so tests never touch the
-    real profile.
-    """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "model_prefs.json"
-
-
 class ModelPrefs:
     """Read/write access to one `model_prefs.json`."""
 
