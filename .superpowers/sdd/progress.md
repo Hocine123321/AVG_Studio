@@ -456,3 +456,55 @@ all eight relocated/new documents plus the three that stayed at
 itself user-relocatable; physically moving an *existing* install's video
 library (only a fresh install's suggested default changed); the App
 Health "Logs" button UI; any UI work at all (this slice is backend-only).
+
+---
+
+## Slice 22 — Progress bar phase-transition bug (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-22-progress-bar-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-22-progress-bar-plan.md`, on
+branch `slice-22-progress-bar` off `main` (pushed to
+`origin/slice-22-progress-bar`). Frontend-only slice, one file, one
+function, one commit.
+
+**Root cause:** `web/src/useEvents.ts`'s `foldByProject` - the per-project
+progress map behind `Transport.tsx` (mounted once, visible on every
+screen) - only ever handled `progress` events (write/overwrite) and
+terminal events (delete). A `phase_started` event fell through to the
+untouched-map branch on purpose, per the function's own prior docstring.
+Net effect: phase N's last `progress` event (percent 100) stayed in the
+map after phase N+1 started, until phase N+1 happened to emit its own
+first `progress` tick - visibly stuck at the previous phase's 100% in
+the meantime.
+
+**Fix:** `foldByProject` gained a `phase_started` branch that replaces
+(never deletes) the project's entry with a fresh `{percent: 0, message:
+"Starting <Phase>…"}`, phase label resolved from `phases.ts`'s
+`PHASE_DEFS`. Replace rather than delete because `Home.tsx`'s
+hero/stack requires a truthy `byProject` entry to show a job at all - a
+bare delete would make an actively running job flicker out of the UI for
+the gap, which is worse than the bug being fixed. Side effect noted in
+the design spec as intentional: a job's very first phase now appears in
+the hero the moment `phase_started` fires (at 0%) rather than waiting for
+its first `progress` tick.
+
+**Verification:** `cd web && npm run build && npm run lint` - both clean,
+pure addition, nothing else in the file needed adjustment, matching the
+plan's prediction exactly. No frontend test runner exists in this repo
+(`web/package.json` has no `vitest`/`jest` - confirmed, not introduced
+here per the design spec's explicit scope). The plan's documented manual
+check (start a real pipeline run, watch the transport bar cross a phase
+boundary in a live WebView session) is outside what this sandbox can
+exercise - flagging that as unverified-by-me rather than claiming it was
+checked; the fix is a direct, minimal, single-branch addition whose logic
+was verified by code review against every consumer (`Home.tsx`,
+`useRenderClock`) as the design spec itself lays out, but an actual
+running-app check is still worth doing before this ships.
+
+**Commit** (branch `slice-22-progress-bar`, pushed): `99fe376`, plus this
+ledger entry.
+
+**Deferred / explicitly out of scope** (per the design spec): adding a
+frontend test runner; the single last-event `progress`/`phaseStarted`
+reducer path (already correct, not touched); `foldPhases` (separate
+function/consumer, not implicated in this bug).
