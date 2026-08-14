@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { wsUrl } from "./api";
+import { PHASE_DEFS } from "./phases";
 import { clearRenderClock } from "./renderClock";
 
 /**
@@ -267,14 +268,24 @@ function foldPhases(
 /**
  * Fold one event into the accumulated per-project progress map.
  *
- * A `progress` event writes (or overwrites) that project's entry. A terminal
- * event - the job finished, failed or was cancelled - deletes it, because a
- * finished job has no "latest progress" a consumer should keep showing; the
- * finished/cancelled/failed single-event fields are where that outcome lives
- * instead. Anything else (a phase transition, the socket's own "hello")
- * leaves the map untouched, for the same reason `foldPhases` does: several
- * jobs may be ticking at once and only their own `progress` events should
- * cause an allocation.
+ * A `progress` event writes (or overwrites) that project's entry. A
+ * `phase_started` event replaces it with a fresh zero-percent entry for
+ * the new phase - without this, a project's entry keeps whatever
+ * `percent` the PREVIOUS phase's last `progress` event left behind until
+ * the new phase happens to emit its own first one, which can be a while;
+ * from a consumer's point of view (Transport.tsx, mounted once, on every
+ * screen) that's indistinguishable from the bar being stuck at 100%
+ * between phases (Slice 22's bug report). Replacing rather than deleting
+ * the entry matters: `Home.tsx`'s hero/stack requires a truthy entry to
+ * show a job at all, so a bare delete here would make an actively
+ * running job flicker out of the UI for the gap instead of just showing
+ * a stale number. A terminal event - the job finished, failed or was
+ * cancelled - still deletes the entry entirely, because a finished job
+ * has no "latest progress" a consumer should keep showing; the
+ * finished/cancelled/failed single-event fields are where that outcome
+ * lives instead. Anything else (the socket's own "hello") leaves the map
+ * untouched, for the same reason `foldPhases` does: several jobs may be
+ * ticking at once and only their own events should cause an allocation.
  */
 function foldByProject(
   previous: EventsState["byProject"],
@@ -285,6 +296,12 @@ function foldByProject(
 
   if (payload.type === "progress") {
     return { ...previous, [id]: payload as unknown as ProgressEvent };
+  }
+  if (payload.type === "phase_started") {
+    const phase = typeof payload.phase === "string" ? payload.phase : "";
+    const label = PHASE_DEFS.find((def) => def.key === phase)?.label ?? phase;
+    const message = label ? `Starting ${label}…` : "Starting…";
+    return { ...previous, [id]: { type: "progress", project_id: id, percent: 0, message } };
   }
   if (
     payload.type === "render_finished" ||
