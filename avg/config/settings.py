@@ -31,6 +31,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from avg.config.user_assets import user_assets_root
+
 # ── App Settings Document ────────────────────────────
 
 SCHEMA_VERSION = 1
@@ -71,15 +73,14 @@ class SettingsDoc(BaseModel):
 
 
 def default_settings_path() -> Path:
-    """`%APPDATA%/AVG Studio/settings.json`.
+    """`Documents/AVG Studio/UserAssets/Config/settings.json`.
 
-    Falls back to `~/AppData/Roaming` if `APPDATA` is somehow unset (never
-    true on a real Windows session, but keeps this callable in stripped-down
-    environments) rather than raising - mirrors
-    `avg.media.thumbnails.default_cache_dir`'s treatment of `LOCALAPPDATA`.
+    Composed from `avg.config.user_assets.user_assets_root()` - see that
+    module for the fallback behaviour and the one-time migration off the
+    pre-Slice-20 `%APPDATA%/AVG Studio/settings.json` this triggers on
+    first call.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "settings.json"
+    return user_assets_root() / "Config" / "settings.json"
 
 
 def load_settings(path: Path | None = None) -> SettingsDoc:

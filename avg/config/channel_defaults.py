@@ -26,15 +26,16 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from avg.config.user_assets import user_assets_root
+
 
 def default_channel_defaults_path() -> Path:
-    """`%APPDATA%/AVG Studio/channel_defaults.json`.
+    """`Documents/AVG Studio/UserAssets/Config/channel_defaults.json`.
 
     Mirrors `avg.config.settings`'s own default; `create_app` passes an
     override so tests never touch the real profile.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "channel_defaults.json"
+    return user_assets_root() / "Config" / "channel_defaults.json"
 
 
 def load_defaults(path: Path | None = None) -> dict[str, Any]:

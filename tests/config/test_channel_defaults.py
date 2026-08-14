@@ -6,7 +6,7 @@ and is tested there.
 
 from __future__ import annotations
 
-from avg.config.channel_defaults import load_defaults, save_defaults
+from avg.config.channel_defaults import default_channel_defaults_path, load_defaults, save_defaults
 
 
 def test_a_missing_document_is_empty_not_an_error(tmp_path):
@@ -35,3 +35,8 @@ def test_saving_replaces_wholesale(tmp_path):
     save_defaults({"a": 1, "b": 2}, path)
     save_defaults({"a": 9}, path)
     assert load_defaults(path) == {"a": 9}
+
+
+def test_default_channel_defaults_path_is_under_user_assets_config(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.config.channel_defaults.user_assets_root", lambda: tmp_path)
+    assert default_channel_defaults_path() == tmp_path / "Config" / "channel_defaults.json"

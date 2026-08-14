@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from avg.config.quick_settings import STARTER_PRESET, load_quick_settings, save_quick_settings
+from avg.config.quick_settings import (
+    STARTER_PRESET,
+    default_quick_settings_path,
+    load_quick_settings,
+    save_quick_settings,
+)
 
 
 def test_a_missing_document_reads_as_the_starter_preset():
@@ -44,3 +49,8 @@ def test_saving_an_empty_list_is_allowed_and_round_trips(tmp_path):
     path = tmp_path / "quick_settings.json"
     save_quick_settings([], path)
     assert load_quick_settings(path) == []
+
+
+def test_default_quick_settings_path_is_under_user_assets_config(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.config.quick_settings.user_assets_root", lambda: tmp_path)
+    assert default_quick_settings_path() == tmp_path / "Config" / "quick_settings.json"
