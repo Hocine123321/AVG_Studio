@@ -291,12 +291,33 @@ naturally and the word count above counts every real word (ignore the markers).
 """
 
 
+# Calibrated to reproduce this app's pre-Slice-21 fixed 60-75 word budget
+# exactly at the 30s preset (30 * 2.0 = 60, 30 * 2.5 = 75) - not a
+# different pace picked from scratch. See
+# docs/superpowers/specs/2026-08-11-slice-21-duration-narration-design.md
+# §1 for why the old fixed budget was the actual cause of 2m/4m
+# collapsing to ~30s.
+_WORDS_PER_SECOND_MIN = 2.0
+_WORDS_PER_SECOND_MAX = 2.5
+
+
+def _word_budget_for_duration(duration_seconds: int) -> tuple[int, int]:
+    """The Pass 1 narration prompt's word-count target for a given spoken
+    length. Was a fixed 60-75 words regardless of `duration_seconds`
+    before this - correct only for the 30s preset it was written against.
+    """
+    return (
+        max(1, round(duration_seconds * _WORDS_PER_SECOND_MIN)),
+        max(1, round(duration_seconds * _WORDS_PER_SECOND_MAX)),
+    )
+
+
 def build_narration_prompt(
     inputs: CreativeInputs,
     *,
     personality: dict[str, PersonalityPreset] | None = None,
-    word_min: int = 60,
-    word_max: int = 75,
+    word_min: int | None = None,
+    word_max: int | None = None,
     pause_frequency: str | None = "medium",
     include_markers: bool = True,
     extra_context: str = "",
@@ -309,11 +330,19 @@ def build_narration_prompt(
     few-shot examples, house style rules) - this module has no opinion on
     those subsystems and just places the text where the old prompt's
     `=== SYSTEM RULES ===` section did.
+
+    `word_min`/`word_max` default to `_word_budget_for_duration(inputs.
+    duration_seconds)` when not given - pass them explicitly only to
+    override that calibration (as one test intentionally does).
     """
     preset = get_preset(inputs.content_shape, personality)
     tone_text = resolve_visual_tone(inputs.visual_tone)
     tone_line = f"\nTone & style: {tone_text} — apply this to the narration voice." if tone_text else ""
     dur_str = _duration_phrase(inputs.duration_seconds)
+    if word_min is None or word_max is None:
+        default_min, default_max = _word_budget_for_duration(inputs.duration_seconds)
+        word_min = default_min if word_min is None else word_min
+        word_max = default_max if word_max is None else word_max
 
     pause_section = build_pause_section(pause_frequency) if pause_frequency else ""
     marker_section = MARKER_SECTION if include_markers else ""
