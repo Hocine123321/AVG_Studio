@@ -37,6 +37,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from avg.config.settings import load_settings, save_settings
+from avg.config.user_assets import user_assets_root
 
 SCHEMA_VERSION = 1
 
@@ -66,13 +67,12 @@ class Channel(BaseModel):
 
 
 def default_channels_dir() -> Path:
-    """`%APPDATA%/AVG Studio/channels/`.
+    """`Documents/AVG Studio/UserAssets/Config/channels/`.
 
-    Falls back to `~/AppData/Roaming` if `APPDATA` is somehow unset,
-    mirroring `avg.config.settings.default_settings_path`.
+    Composed from `avg.config.user_assets.user_assets_root()`, matching
+    `avg.config.settings.default_settings_path`.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "channels"
+    return user_assets_root() / "Config" / "channels"
 
 
 def _resolve_dir(channels_dir: Path | None) -> Path:

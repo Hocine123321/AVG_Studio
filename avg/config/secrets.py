@@ -29,6 +29,8 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
+from avg.config.user_assets import user_assets_root
+
 # CRYPTPROTECT_UI_FORBIDDEN: never let the Win32 API pop a UI prompt - a
 # headless desktop app must fail closed (return None), not hang on a modal.
 _CRYPTPROTECT_UI_FORBIDDEN = 0x01
@@ -153,13 +155,14 @@ def _unprotect(ciphertext: bytes) -> bytes | None:
 
 
 def default_secrets_path() -> Path:
-    """`%APPDATA%/AVG Studio/secrets.dat`.
+    """`Documents/AVG Studio/UserAssets/Secrets/secrets.dat`.
 
-    Falls back to `~/AppData/Roaming` if `APPDATA` is somehow unset, mirroring
-    `avg.config.settings.default_settings_path`.
+    Composed from `avg.config.user_assets.user_assets_root()`. DPAPI ties
+    the ciphertext to the Windows user account, not to the file's path -
+    moving this file on the same machine, same account, never invalidates
+    it, so this move is exactly as safe as every other document's.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "secrets.dat"
+    return user_assets_root() / "Secrets" / "secrets.dat"
 
 
 def _load_store(path: Path | None) -> dict[str, str]:

@@ -248,5 +248,10 @@ class TestSeeding:
 
         assert list_channels(channels_dir=channels_dir) == []
 
-    def test_default_paths_live_under_appdata_avg_studio(self):
-        assert default_channels_dir().parts[-2:] == ("AVG Studio", "channels")
+    def test_default_paths_live_under_user_assets_config(self):
+        assert default_channels_dir().parts[-2:] == ("Config", "channels")
+
+
+def test_default_channels_dir_is_under_user_assets_config(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.config.channels.user_assets_root", lambda: tmp_path)
+    assert default_channels_dir() == tmp_path / "Config" / "channels"

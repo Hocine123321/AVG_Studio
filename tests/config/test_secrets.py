@@ -175,3 +175,8 @@ def test_reads_the_real_legacy_secrets_file_on_this_dev_machine():
         assert isinstance(provider, str)
         assert isinstance(value, str)
         assert value != ""
+
+
+def test_default_secrets_path_is_under_user_assets_secrets(monkeypatch, tmp_path):
+    monkeypatch.setattr(secrets, "user_assets_root", lambda: tmp_path)
+    assert secrets.default_secrets_path() == tmp_path / "Secrets" / "secrets.dat"

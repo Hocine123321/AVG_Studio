@@ -20,6 +20,8 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
+from avg.config.user_assets import user_assets_root
+
 STARTER_PRESET: list[str] = [
     "video_form",
     "length_preset",
@@ -30,8 +32,9 @@ STARTER_PRESET: list[str] = [
 
 
 def default_quick_settings_path() -> Path:
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "quick_settings.json"
+    """`Documents/AVG Studio/UserAssets/Config/quick_settings.json` -
+    composed from `avg.config.user_assets.user_assets_root()`."""
+    return user_assets_root() / "Config" / "quick_settings.json"
 
 
 def load_quick_settings(path: Path | None = None) -> list[str]:

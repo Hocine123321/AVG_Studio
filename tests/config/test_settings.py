@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from avg.config.settings import SettingsDoc, load_settings, save_settings
+from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings
 
 
 def test_round_trips_a_saved_document(tmp_path):
@@ -122,3 +122,8 @@ class TestLegacyActiveChannelMigration:
         doc = load_settings(settings_path)
         assert doc.active_channel_id is None
         assert not settings_path.exists()  # nothing to migrate, nothing written
+
+
+def test_default_settings_path_is_under_user_assets_config(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.config.settings.user_assets_root", lambda: tmp_path)
+    assert default_settings_path() == tmp_path / "Config" / "settings.json"
