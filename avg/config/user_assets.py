@@ -36,7 +36,12 @@ module leaves them alone.
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import tempfile
+from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -48,7 +53,101 @@ def user_assets_root() -> Path:
     Falls back to `Path.home()` if `USERPROFILE` is somehow unset (never
     true on a real Windows session, but keeps this callable in
     stripped-down environments), matching every other `default_*_path()`
-    in this codebase's treatment of `APPDATA`/`LOCALAPPDATA`.
+    in this codebase's treatment of `APPDATA`/`LOCALAPPDATA`. Triggers
+    `migrate_legacy_files` on every call - see that function for why a
+    stateless, filesystem-driven idempotency check is safe to run this
+    often.
     """
     base = os.environ.get("USERPROFILE") or str(Path.home())
-    return Path(base) / "Documents" / "AVG Studio" / "UserAssets"
+    root = Path(base) / "Documents" / "AVG Studio" / "UserAssets"
+    old_base = Path(os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")) / "AVG Studio"
+    migrate_legacy_files(old_base, root)
+    return root
+
+
+# (old %APPDATA%/AVG Studio-relative name, new UserAssets-relative path) -
+# every document that existed before this slice and belongs under the new
+# root. `working_models.json` and `model_cache.json` are deliberately
+# absent - see the module docstring's "What stays OUT" section.
+_MIGRATIONS: tuple[tuple[str, str], ...] = (
+    ("settings.json", "Config/settings.json"),
+    ("channel_defaults.json", "Config/channel_defaults.json"),
+    ("quick_settings.json", "Config/quick_settings.json"),
+    ("model_prefs.json", "Config/model_prefs.json"),
+    ("channels", "Config/channels"),
+    ("secrets.dat", "Secrets/secrets.dat"),
+    ("errors.json", "Logs/errors.json"),
+)
+
+
+def migrate_legacy_files(old_base: Path, new_root: Path) -> list[dict[str, str]]:
+    """Move each `_MIGRATIONS` entry from `old_base` into `new_root`, once.
+
+    Idempotent by construction, not by a remembered flag: an item only
+    moves when its old path exists AND its new path doesn't yet, so once
+    an item has moved its old path is gone and every later call skips it
+    for free - no in-memory guard to accidentally reset between calls or
+    leak state across a test session. If BOTH paths exist (a second
+    install, a downgrade-then-upgrade, or a previous run of this exact
+    function on the same machine), the new path wins and the old one is
+    left exactly as it was - never deleted, never overwritten - matching
+    "existing installations must not silently lose data".
+
+    A single item failing to move (locked file, permissions) is skipped
+    rather than raising - matching every loader in this codebase, a
+    partial migration must never be the thing that crashes startup, and
+    the remaining items still get their chance, here and on the next
+    launch.
+
+    Returns what actually moved this call (`[]` on every call after the
+    first, and on a fresh install with nothing old to find). When
+    anything moves, `_record_migration` appends one manifest entry to
+    `new_root/migration.json`.
+    """
+    moved: list[dict[str, str]] = []
+    for old_name, new_rel in _MIGRATIONS:
+        old_path = old_base / old_name
+        new_path = new_root / new_rel
+        if not old_path.exists() or new_path.exists():
+            continue
+        try:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path), str(new_path))
+        except OSError:
+            continue
+        moved.append({"from": str(old_path), "to": str(new_path)})
+    if moved:
+        _record_migration(new_root, moved)
+    return moved
+
+
+def _record_migration(new_root: Path, moved: list[dict[str, str]]) -> None:
+    """Append one `{"at": ..., "moved": [...]}` event to `migration.json`.
+
+    Read-append-write rather than overwrite: a migration that only
+    partially completes on one launch (see `migrate_legacy_files`) and
+    picks up the remaining items on a later one must not lose the record
+    of the first pass. Atomic (temp file + `os.replace`), matching every
+    other document this app writes.
+    """
+    manifest_path = new_root / "migration.json"
+    events: list[dict[str, object]] = []
+    try:
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(existing, dict) and isinstance(existing.get("events"), list):
+            events = existing["events"]
+    except Exception:
+        events = []
+
+    events.append({"at": datetime.now(timezone.utc).isoformat(), "moved": moved})
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=manifest_path.parent, prefix=".migration-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"events": events}, f, indent=2)
+        os.replace(tmp_name, manifest_path)
+    except BaseException:
+        with suppress(OSError):
+            os.remove(tmp_name)
+        raise
