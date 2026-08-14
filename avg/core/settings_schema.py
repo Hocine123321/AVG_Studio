@@ -501,6 +501,27 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="script",
     ),
+    SettingSpec(
+        id="voice_trim_aggressiveness",
+        group="voice",
+        label="Trim aggressiveness",
+        help="How readily the dead-air removal step treats a quiet stretch as silence to cut. \"Medium\" matches this app's original fixed behavior.",
+        type="choice",
+        default="medium",
+        scope="channel",
+        choices=["low", "medium", "high"],
+        invalidates="voice",
+    ),
+    SettingSpec(
+        id="voice_max_removable_silence_pct",
+        group="voice",
+        label="Max removable silence (%)",
+        help="If dead-air removal would cut more than this share of a segment's own length, it backs off one aggressiveness level and tries once more.",
+        type="float",
+        default=40.0,
+        scope="channel",
+        invalidates="voice",
+    ),
     # --- image provider and model ---
     SettingSpec(
         id="image_provider",

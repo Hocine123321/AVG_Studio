@@ -39,7 +39,7 @@ from avg.core.settings_schema import resolve_channel_settings
 from avg.pipeline.phase import CancellationToken, PhaseContext
 from avg.pipeline.phases._common import read_json, script_dir, write_json
 from avg.pipeline.phases.visuals import VisualsPhase
-from avg.pipeline.phases.voice import VoicePhase
+from avg.pipeline.phases.voice import VoicePhase, _AGGRESSIVENESS_PARAMS, _clean_segment, _removed_pct
 
 # ── shared test scaffolding (mirrors test_phases_text.py) ──────────────────
 
@@ -524,6 +524,12 @@ def _patch_audio_pipeline(monkeypatch):
     def fake_remove_silences_core(inp, out, thresh, min_sil, keep, beat_map, timeline, scene_map, pause_map="", pause_target_ms=0):
         remove_silences_calls.append((inp, out, thresh, min_sil, keep, beat_map, timeline, scene_map, pause_map, pause_target_ms))
         Path(out).write_bytes(Path(inp).read_bytes())
+        # Matches avg.media.vendor.avg.remove_silences_core's real return
+        # shape. removed_dur=0.0 keeps every pre-Slice-21 test's assertion
+        # that remove_silences_core is called exactly once per segment
+        # true - 0% removed never exceeds any cap, so nothing here ever
+        # triggers Slice 21's retry.
+        return {"no_speech": False, "original_dur": 1.0, "cleaned_dur": 1.0, "removed_dur": 0.0, "chunks": 1, "pauses_kept": 0}
 
     monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove_silences_core)
 
@@ -639,6 +645,130 @@ def test_voice_removes_dead_air_via_vendored_remove_silences_core_once_per_segme
         # pipeline (Director II and Captions haven't run) - the vendored
         # function's own "absent" spelling is "".
         assert beat_map == timeline == scene_map == ""
+
+
+def test_medium_aggressiveness_matches_the_original_fixed_values():
+    assert _AGGRESSIVENESS_PARAMS["medium"] == (-40.0, 400, 100)
+
+
+def test_removed_pct_none_when_no_speech_detected():
+    assert _removed_pct({"no_speech": True, "original_dur": 5.0, "removed_dur": 5.0}) is None
+
+
+def test_removed_pct_computed_normally():
+    assert _removed_pct({"no_speech": False, "original_dur": 10.0, "removed_dur": 3.0}) == 30.0
+
+
+def test_segment_under_cap_needs_no_retry(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_remove(inp, out, thresh, min_sil, keep, *rest):
+        calls.append(thresh)
+        return {"no_speech": False, "original_dur": 10.0, "cleaned_dur": 9.0, "removed_dur": 1.0}
+
+    monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove)
+    ctx, _events = _ctx(_project(tmp_path))
+
+    _clean_segment(
+        ctx,
+        segment_index=1,
+        raw_path=tmp_path / "raw.mp3",
+        clean_path=tmp_path / "clean.mp3",
+        aggressiveness="medium",
+        max_removable_pct=40.0,
+    )
+
+    assert calls == [-40.0]  # one call, medium's own threshold, no retry
+
+
+def test_segment_over_cap_retries_one_level_down(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_remove(inp, out, thresh, min_sil, keep, *rest):
+        calls.append(thresh)
+        removed = 2.0 if thresh == -40.0 else 8.0  # less aggressive → less removed
+        return {"no_speech": False, "original_dur": 10.0, "cleaned_dur": 10.0 - removed, "removed_dur": removed}
+
+    monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove)
+    ctx, _events = _ctx(_project(tmp_path))
+
+    _clean_segment(
+        ctx,
+        segment_index=1,
+        raw_path=tmp_path / "raw.mp3",
+        clean_path=tmp_path / "clean.mp3",
+        aggressiveness="high",
+        max_removable_pct=40.0,
+    )
+
+    assert calls == [-35.0, -40.0]  # high, then medium (one level down)
+
+
+def test_already_lowest_level_gets_no_retry(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_remove(inp, out, thresh, min_sil, keep, *rest):
+        calls.append(thresh)
+        return {"no_speech": False, "original_dur": 10.0, "cleaned_dur": 5.0, "removed_dur": 5.0}
+
+    monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove)
+    ctx, _events = _ctx(_project(tmp_path))
+
+    _clean_segment(
+        ctx,
+        segment_index=1,
+        raw_path=tmp_path / "raw.mp3",
+        clean_path=tmp_path / "clean.mp3",
+        aggressiveness="low",
+        max_removable_pct=40.0,
+    )
+
+    assert calls == [-45.0]  # low's own threshold, once - nowhere lower to retry with
+
+
+def test_still_over_cap_after_retry_reports_degradation(tmp_path, monkeypatch):
+    def fake_remove(inp, out, thresh, min_sil, keep, *rest):
+        return {"no_speech": False, "original_dur": 10.0, "cleaned_dur": 2.0, "removed_dur": 8.0}
+
+    monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove)
+    reported = []
+    monkeypatch.setattr(
+        "avg.pipeline.phases.voice.report_degradation",
+        lambda ctx, summary: reported.append(summary),
+    )
+    ctx, _events = _ctx(_project(tmp_path))
+
+    _clean_segment(
+        ctx,
+        segment_index=3,
+        raw_path=tmp_path / "raw.mp3",
+        clean_path=tmp_path / "clean.mp3",
+        aggressiveness="high",
+        max_removable_pct=40.0,
+    )
+
+    assert len(reported) == 1
+    assert "Segment 3" in reported[0]
+
+
+def test_voice_trim_aggressiveness_setting_reaches_remove_silences_core(tmp_path, monkeypatch):
+    """End-to-end, through the real phase: a channel's
+    `voice_trim_aggressiveness` setting is what `remove_silences_core`
+    actually gets called with, not just what `_clean_segment` does in
+    isolation above."""
+    fake = _FakeVoiceProvider()
+    remove_calls, _assemble_calls = _patch_voice_collaborators(monkeypatch, fake)
+
+    project = _project(tmp_path)
+    channel = _channel({"voice_trim_aggressiveness": "low"})
+    ctx, _events = _ctx(project, channel=channel)
+    _write_narration(ctx, "One single segment, no pause markers here.")
+
+    VoicePhase().run(ctx)
+
+    assert len(remove_calls) == 1
+    _inp, _out, thresh, min_sil, keep, *_rest = remove_calls[0]
+    assert (thresh, min_sil, keep) == _AGGRESSIVENESS_PARAMS["low"]
 
 
 def test_voice_no_pause_marker_produces_a_single_segment_and_zero_gap(tmp_path, monkeypatch):

@@ -31,7 +31,8 @@ before the deliberate `[pause]` gaps are (re-)inserted. That ordering
 matters: `remove_silences_core` has no knowledge of the pause segmentation
 this phase just did, so if the exact pause silence were already present in
 the audio it hands the function, the same threshold algorithm that trims
-ordinary dead air would crunch the deliberate gap down to `_KEEP_SILENCE_MS`
+ordinary dead air would crunch the deliberate gap down to whatever
+`voice_trim_aggressiveness` currently keeps
 along with it. Cleaning each segment in isolation and only inserting the
 exact gap length afterward keeps the two concerns - "trim natural TTS dead
 air" and "hold this deliberate pause open for exactly N ms" - from fighting
@@ -46,14 +47,19 @@ value): they exist to protect specific beats/takeover-graphics gaps that
 Director II (Phase 5) and Captions (Phase 6) haven't produced yet at this
 point in the pipeline.
 
-Settings not yet in `avg.core.settings_schema` (silence threshold, minimum
-silence length, how much air to keep, and the dynamic-pause target length)
-are fixed constants below, mirroring the legacy app's own shipped defaults
-(`D:\\AI_Video_Gen\\main.ps1`'s `config.audio`/`config.voice.dynamic_pauses`
-- `silence_thresh_dbfs=-40`, `min_silence_len_ms=400`, `keep_silence_ms=100`,
-`dynamic_pauses.length_ms=700` for its default "medium" frequency) - the
-same "generous, fixed default until a real setting exists" pattern
-`avg.pipeline.phases.director`'s `_MIN_IMAGES`/`_MAX_IMAGES` already uses.
+Silence threshold, minimum silence length and how much air to keep are no
+longer fixed constants (Slice 21) - `voice_trim_aggressiveness` (channel
+setting) picks one of three named presets, `_AGGRESSIVENESS_PARAMS`,
+`"medium"` being the exact legacy-mirroring values
+(`silence_thresh_dbfs=-40`, `min_silence_len_ms=400`, `keep_silence_ms=100`)
+this phase always used before. `voice_max_removable_silence_pct` caps how
+much of a segment's own length that trimming is allowed to remove before
+backing off one level and trying once more - see `_clean_segment` below.
+The dynamic-pause target length (`_DEFAULT_PAUSE_MS`) stays a fixed
+constant - a different concern (how long a *deliberate* pause is held
+open), not addressed by this slice - the same "generous, fixed default
+until a real setting exists" pattern `avg.pipeline.phases.director`'s
+`_MIN_IMAGES`/`_MAX_IMAGES` already uses.
 """
 
 from __future__ import annotations
@@ -62,6 +68,7 @@ import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
@@ -97,10 +104,20 @@ _PROVIDERS: dict[str, type] = {
 _DEFAULT_VOICE_ID = {"elevenlabs": "21m00Tcm4TlvDq8ikWAM", "edge": "en-US-ChristopherNeural"}
 _DEFAULT_MODEL = {"elevenlabs": "eleven_flash_v2_5", "edge": "unused"}
 
-# Legacy config.audio defaults (main.ps1) - see module docstring.
-_SILENCE_THRESH_DBFS = -40.0
-_MIN_SILENCE_LEN_MS = 400
-_KEEP_SILENCE_MS = 100
+# (silence_thresh_dbfs, min_silence_len_ms, keep_silence_ms) per
+# `voice_trim_aggressiveness` level. "medium" is exactly this phase's
+# pre-Slice-21 fixed behavior (main.ps1's config.audio defaults) - the
+# default setting value, so nobody who doesn't touch this setting sees
+# any change.
+_AGGRESSIVENESS_PARAMS: dict[str, tuple[float, int, int]] = {
+    "low": (-45.0, 500, 150),
+    "medium": (-40.0, 400, 100),
+    "high": (-35.0, 300, 80),
+}
+# One step less aggressive than each key - what a capped segment retries
+# with. "low" maps to itself: already the least aggressive level, nothing
+# to back off to.
+_AGGRESSIVENESS_STEP_DOWN: dict[str, str] = {"high": "medium", "medium": "low", "low": "low"}
 
 # Legacy voice.dynamic_pauses.length_ms default for "medium" frequency.
 _DEFAULT_PAUSE_MS = 700
@@ -260,18 +277,22 @@ class VoicePhase:
 
             ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=60, message="Removing dead air..."))
 
+            aggressiveness = str(settings.get("voice_trim_aggressiveness") or "medium")
+            if aggressiveness not in _AGGRESSIVENESS_PARAMS:
+                aggressiveness = "medium"
+            max_removable_pct = float(settings.get("voice_max_removable_silence_pct", 40.0))
+            max_removable_pct = max(0.0, min(100.0, max_removable_pct))
+
             cleaned_paths = []
             for i, raw_path in enumerate(raw_paths, start=1):
                 clean_path = tmp_path / f"clean_{i:03d}.mp3"
-                remove_silences_core(
-                    str(raw_path),
-                    str(clean_path),
-                    _SILENCE_THRESH_DBFS,
-                    _MIN_SILENCE_LEN_MS,
-                    _KEEP_SILENCE_MS,
-                    "",
-                    "",
-                    "",
+                _clean_segment(
+                    ctx,
+                    segment_index=i,
+                    raw_path=raw_path,
+                    clean_path=clean_path,
+                    aggressiveness=aggressiveness,
+                    max_removable_pct=max_removable_pct,
                 )
                 cleaned_paths.append(clean_path)
 
@@ -293,6 +314,58 @@ class VoicePhase:
             report_degradation(ctx, message)
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=100, message="Voice & Audio complete."))
+
+
+def _clean_segment(
+    ctx: PhaseContext,
+    *,
+    segment_index: int,
+    raw_path: Path,
+    clean_path: Path,
+    aggressiveness: str,
+    max_removable_pct: float,
+) -> None:
+    """Run `remove_silences_core` once at `aggressiveness`; if it removed
+    more than `max_removable_pct` of the segment's own original length,
+    retry exactly once at one level less aggressive (a no-op retry if
+    already at "low" - see `_AGGRESSIVENESS_STEP_DOWN`). If it's still
+    over the cap after that, keep the retried result anyway and report
+    the degradation - never a second retry, never silently discarding
+    audio the user already paid a provider for.
+    """
+    thresh, min_sil, keep = _AGGRESSIVENESS_PARAMS[aggressiveness]
+    result = remove_silences_core(  # type: ignore[no-untyped-call]  # the vendored engine is untyped by design
+        str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", ""
+    )
+    removed_pct = _removed_pct(result)
+    if removed_pct is None or removed_pct <= max_removable_pct:
+        return
+
+    fallback_level = _AGGRESSIVENESS_STEP_DOWN[aggressiveness]
+    if fallback_level != aggressiveness:
+        thresh, min_sil, keep = _AGGRESSIVENESS_PARAMS[fallback_level]
+        result = remove_silences_core(  # type: ignore[no-untyped-call]  # the vendored engine is untyped by design
+            str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", ""
+        )
+        removed_pct = _removed_pct(result)
+        aggressiveness = fallback_level
+
+    if removed_pct is not None and removed_pct > max_removable_pct:
+        report_degradation(
+            ctx,
+            f"Segment {segment_index}: dead-air removal cut {removed_pct:.0f}% of the "
+            f"audio, above the {max_removable_pct:.0f}% cap even at \"{aggressiveness}\" "
+            "- kept the result anyway rather than discard synthesized audio.",
+        )
+
+
+def _removed_pct(result: dict[str, Any]) -> float | None:
+    """`None` when there's nothing meaningful to divide by (no speech
+    detected at all, or a zero-length original) - callers treat that as
+    "no cap concern", not as "0% removed"."""
+    if result.get("no_speech") or not result.get("original_dur"):
+        return None
+    return 100.0 * float(result["removed_dur"]) / float(result["original_dur"])
 
 
 def _write_scene_audio_map(ctx: PhaseContext, audio_dir: Path) -> None:
