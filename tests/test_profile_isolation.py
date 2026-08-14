@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from avg.config import channel_defaults, channels, secrets, settings
+from avg.config import channel_defaults, channels, secrets, settings, user_assets
 from avg.core import model_prefs
 from avg.media import thumbnails
 from avg.providers import models
@@ -41,6 +41,7 @@ def _real_app_folders() -> list[Path]:
     return [
         home / "AppData" / "Roaming" / "AVG Studio",
         home / "AppData" / "Local" / "AVG Studio",
+        home / "Documents" / "AVG Studio",
     ]
 
 
@@ -53,6 +54,7 @@ def test_every_default_document_path_avoids_the_real_profile() -> None:
         "model_prefs.json": model_prefs.default_prefs_path(),
         "model_cache.json": models.default_cache_path(),
         "thumbs/": thumbnails.default_cache_dir(),
+        "UserAssets/": user_assets.user_assets_root(),
     }
     real_folders = _real_app_folders()
     for label, path in resolved.items():
@@ -80,9 +82,11 @@ def test_the_redirected_profile_is_writable() -> None:
     target.unlink()
 
 
-def test_both_variables_are_set() -> None:
-    # Every resolver falls back to `Path.home() / "AppData" / ...` when the
+def test_all_variables_are_set() -> None:
+    # Every resolver falls back to `Path.home() / "AppData" / ...` (or, for
+    # avg.config.user_assets, `Path.home() / "Documents" / ...`) when its
     # variable is unset, which would defeat the redirect entirely, so the
-    # fixture must leave both of them populated rather than deleted.
+    # fixture must leave all three populated rather than deleted.
     assert os.environ.get("APPDATA")
     assert os.environ.get("LOCALAPPDATA")
+    assert os.environ.get("USERPROFILE")
