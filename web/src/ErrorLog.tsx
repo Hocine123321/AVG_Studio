@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { clearErrors, getErrors, type AppError } from "./api";
+import { clearErrors, getErrors, openLogsFolder, type AppError } from "./api";
 
 const SEVERITY_LABEL: Record<AppError["severity"], string> = {
   critical: "Critical",
@@ -23,10 +23,27 @@ const SEVERITY_CLASS: Record<AppError["severity"], string> = {
  * remove. The detail is already redacted server-side, so it is safe to
  * put on the clipboard as-is.
  */
-function promptFor(error: AppError): string {
-  const context = Object.entries(error.context)
+/** The same formatting `promptFor` has always used for the clipboard
+ * prompt's Context section - reused by the on-screen expansion (Slice 23)
+ * so an error with no `detail` (every `low`-severity degradation - see
+ * `avg.core.error_store.ErrorStore.degraded`) still shows the one thing
+ * this app already knows about it, instead of nothing. */
+function contextText(error: AppError): string {
+  return Object.entries(error.context)
     .map(([key, value]) => `- ${key}: ${value}`)
     .join("\n");
+}
+
+/** What a click on a row reveals: real detail (a traceback, most often)
+ * if there is one, otherwise the same context `promptFor` already puts on
+ * the clipboard, otherwise a plain admission there's nothing further -
+ * never nothing at all, which read as the click doing nothing. */
+function expandedContent(error: AppError): string {
+  return error.detail || contextText(error) || "No further detail recorded for this error.";
+}
+
+function promptFor(error: AppError): string {
+  const context = contextText(error);
 
   return [
     "I hit an error in AVG Studio (Python + FastAPI backend, React 19 in a",
@@ -109,6 +126,9 @@ export default function ErrorLog() {
             {lowCount} minor
           </button>
         )}
+        <button type="button" className="btn btn--sm" onClick={() => void openLogsFolder()}>
+          Logs
+        </button>
         <button
           type="button"
           className="btn"
@@ -131,7 +151,7 @@ export default function ErrorLog() {
               type="button"
               className="errorlog__summary"
               onClick={() => setExpanded(expanded === error.id ? null : error.id)}
-              title={error.detail ? "Show the full detail" : error.summary}
+              title={error.detail || Object.keys(error.context).length > 0 ? "Show the full detail" : error.summary}
             >
               {error.summary}
             </button>
@@ -145,8 +165,8 @@ export default function ErrorLog() {
             <button type="button" className="btn btn--sm" onClick={() => void copy(error)}>
               {copied === error.id ? "Copied" : "Copy"}
             </button>
-            {expanded === error.id && error.detail && (
-              <pre className="errorlog__detail">{error.detail}</pre>
+            {expanded === error.id && (
+              <pre className="errorlog__detail">{expandedContent(error)}</pre>
             )}
           </li>
         ))}

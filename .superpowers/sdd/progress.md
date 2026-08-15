@@ -456,3 +456,225 @@ all eight relocated/new documents plus the three that stayed at
 itself user-relocatable; physically moving an *existing* install's video
 library (only a fresh install's suggested default changed); the App
 Health "Logs" button UI; any UI work at all (this slice is backend-only).
+
+---
+
+## Slice 21 — Duration bug + narration trimming rework (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-21-duration-narration-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-21-duration-narration-plan.md`,
+both tasks, on branch `slice-21-duration-narration` (off `main`, after
+Slice 20's PR #6 merged) - not `main` - pushed to
+`origin/slice-21-duration-narration` after each commit.
+
+**Environment:** same Linux sandbox setup as Slice 20 (`.venv-linux` +
+the `sitecustomize.py` shim on `PYTHONPATH` at
+`/home/claude/pytest_linux_shim/`, outside the repo). Baseline re-confirmed
+before touching code: **980 passed, 7 failed, 1 skipped** - same 7
+environment-specific failures as Slice 20's baseline (DPAPI, font
+resolution, real dev-machine legacy path).
+
+**Task 1 - word budget scales with duration.**
+`avg.pipeline.prompts._word_budget_for_duration(duration_seconds)`
+replaces the fixed `word_min=60, word_max=75` `build_narration_prompt`
+always used regardless of the requested length - the direct cause of
+2m/4m requests collapsing to ~30s of actual narration (the writer was
+never told to write more). Calibrated to reproduce the old fixed values
+exactly at the 30s preset (`* 2.0` / `* 2.5`). `word_min`/`word_max`
+became `None`-default so the one caller (`writing.py`) picks up the
+scaled budget with no code change; explicit overrides (one existing
+test) still win.
+
+**Task 2 - trimming gets a real ceiling.** Two new channel settings
+(`voice_trim_aggressiveness`: low/medium/high, default medium;
+`voice_max_removable_silence_pct`: float, default 40.0) replace
+`avg.pipeline.phases.voice`'s three fixed silence-removal constants with
+`_AGGRESSIVENESS_PARAMS`, a three-preset map - "medium" reproduces the
+exact old fixed values, so nobody who doesn't touch the setting sees any
+change. `_clean_segment` runs `remove_silences_core` once, and if the
+result removed more than the cap allows, retries exactly once at one
+aggressiveness level down (`_AGGRESSIVENESS_STEP_DOWN`) - already-"low"
+retries with itself and is treated as no retry. Still over the cap after
+the retry: keeps the result and calls `report_degradation` rather than
+raising or silently discarding synthesized audio. `voice_speed` remains
+unwired, `_MIN_SCENES`/`_MAX_SCENES` unchanged - both explicitly out of
+scope per the design spec.
+
+**Fallout beyond the plan's own file list**, found and fixed during
+verification:
+- A second, independent fake `remove_silences_core` in
+  `tests/pipeline/test_runner.py`'s registry smoke test (the plan's file
+  list only named the one in `test_phases_media.py`) had the same
+  `None`-return incompatibility once `_clean_segment` started calling
+  `.get(...)` on the result - fixed the same way, a realistic result
+  dict.
+- The plan's own `test_segment_over_cap_retries_one_level_down` fixture
+  had an inverted conditional (`8.0 if thresh == -40.0 else 2.0`) that
+  contradicted its own comment and never actually exercised the retry
+  path it claims to test - the first call (aggressiveness="high",
+  thresh=-35.0) fell into the `else` branch and returned an
+  under-the-cap value, so no retry ever fired. Corrected to
+  `2.0 if thresh == -40.0 else 8.0`, verified the corrected assertion
+  passes against the (unmodified, spec-matching) `_clean_segment`
+  implementation.
+- `tests/core/test_invalidation.py`'s `SETTINGS`-count tripwire
+  (64 → 66) for the two new settings - exactly the kind of update its
+  own docstring anticipates.
+- Three new mypy errors from `voice.py`'s new code (two
+  `no-untyped-call` on the vendored `remove_silences_core`, one
+  `float(object)` incompatibility in `_removed_pct`) - fixed with the
+  same `# type: ignore[no-untyped-call]  # the vendored engine is
+  untyped by design` pattern already used elsewhere in this file and
+  `director.py`, and by typing `_removed_pct`'s parameter `dict[str,
+  Any]` instead of `dict[str, object]`.
+
+**Final verification (Step 3.1):**
+- `pytest tests -q`: **980 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as the pre-slice baseline. Zero regressions.
+- `mypy avg`: 689 errors (was 690 before this slice touched anything;
+  the one fewer is incidental to this slice's own new code, not a
+  pre-existing error that disappeared elsewhere) - zero new errors
+  contributed by any file this slice touches, confirmed via `git stash`
+  same-environment comparison exactly as Slice 20's Task 7 did.
+
+**Commits** (branch `slice-21-duration-narration`, each pushed):
+`25dfe6f` Task 1, `2223ce0` Task 2, plus this ledger entry for Task 3.
+
+**Deferred / explicitly out of scope** (per the design spec): wiring
+`voice_speed` into actual TTS synthesis; widening
+`_MIN_SCENES`/`_MAX_SCENES` for long-form videos; a dedicated Slider UI
+treatment for the two new settings (the existing generic Settings UI
+already renders a `choice` and a `float` correctly without one - belongs
+with the Settings-selectors slice instead).
+
+---
+
+## Slice 22 — Progress bar phase-transition bug (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-22-progress-bar-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-22-progress-bar-plan.md`, on
+branch `slice-22-progress-bar` off `main` (pushed to
+`origin/slice-22-progress-bar`). Frontend-only slice, one file, one
+function, one commit.
+
+**Root cause:** `web/src/useEvents.ts`'s `foldByProject` - the per-project
+progress map behind `Transport.tsx` (mounted once, visible on every
+screen) - only ever handled `progress` events (write/overwrite) and
+terminal events (delete). A `phase_started` event fell through to the
+untouched-map branch on purpose, per the function's own prior docstring.
+Net effect: phase N's last `progress` event (percent 100) stayed in the
+map after phase N+1 started, until phase N+1 happened to emit its own
+first `progress` tick - visibly stuck at the previous phase's 100% in
+the meantime.
+
+**Fix:** `foldByProject` gained a `phase_started` branch that replaces
+(never deletes) the project's entry with a fresh `{percent: 0, message:
+"Starting <Phase>…"}`, phase label resolved from `phases.ts`'s
+`PHASE_DEFS`. Replace rather than delete because `Home.tsx`'s
+hero/stack requires a truthy `byProject` entry to show a job at all - a
+bare delete would make an actively running job flicker out of the UI for
+the gap, which is worse than the bug being fixed. Side effect noted in
+the design spec as intentional: a job's very first phase now appears in
+the hero the moment `phase_started` fires (at 0%) rather than waiting for
+its first `progress` tick.
+
+**Verification:** `cd web && npm run build && npm run lint` - both clean,
+pure addition, nothing else in the file needed adjustment, matching the
+plan's prediction exactly. No frontend test runner exists in this repo
+(`web/package.json` has no `vitest`/`jest` - confirmed, not introduced
+here per the design spec's explicit scope). The plan's documented manual
+check (start a real pipeline run, watch the transport bar cross a phase
+boundary in a live WebView session) is outside what this sandbox can
+exercise - flagging that as unverified-by-me rather than claiming it was
+checked; the fix is a direct, minimal, single-branch addition whose logic
+was verified by code review against every consumer (`Home.tsx`,
+`useRenderClock`) as the design spec itself lays out, but an actual
+running-app check is still worth doing before this ships.
+
+**Commit** (branch `slice-22-progress-bar`, pushed): `99fe376`, plus this
+ledger entry.
+
+**Deferred / explicitly out of scope** (per the design spec): adding a
+frontend test runner; the single last-event `progress`/`phaseStarted`
+reducer path (already correct, not touched); `foldPhases` (separate
+function/consumer, not implicated in this bug).
+
+---
+
+## Slice 23 — App Health improvements (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-23-app-health-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-23-app-health-plan.md`, all 4
+tasks, on the single accumulating `development` branch (per instruction:
+one branch for every slice going forward, no more per-slice branches, no
+more checking whether a previous slice's branch merged to `main` before
+starting the next one).
+
+**Mid-slice housekeeping, worth recording:** the `development` branch was
+deleted and recreated remotely partway through this slice (PRs #8 "Slice
+22 done" and #9 "Slice 21 duration narration" merged into it on GitHub).
+Reconciling brought in Slice 21's and 22's code cleanly, but
+`.superpowers/sdd/progress.md` on the remote had regressed to its
+pre-Slice-20 state - missing the Slice 20 *and* Slice 21 ledger entries
+entirely (fewer lines than even `main`, which has Slice 20's entry via
+its own merged PR). Reconstructed the file from this session's own commit
+history (`aca86f7` for the 19+20+22 shape, `edf3285` for the Slice 21
+entry) rather than accept the loss - restored in its own commit
+(`7ccb702`) before continuing Task 3.
+
+**Task 1 - Recent Errors always shows something.** `ErrorLog.tsx`'s
+expansion previously showed nothing when a row's `error.detail` was
+empty - true for every `low`-severity `ErrorStore.degraded()` entry, so
+Recent Errors' whole "click a row to expand" affordance silently did
+nothing for the most common severity. `contextText` (the same formatting
+`promptFor` already put on the clipboard) and `expandedContent`
+(`detail || contextText || <fallback sentence>`) mean a click always
+reveals *something*.
+
+**Task 2 - Logs button.** `POST /api/health/open-logs` (new route in
+`routes_settings.py`) reveals `errors.json`'s folder in Explorer -
+`os.startfile` + a `PYTEST_CURRENT_TEST` guard + `suppress(Exception)`,
+the same shape `avg.export.capcut.export_take`'s existing Explorer reveal
+already uses. Creates the folder first if it's missing (a fresh install
+with zero recorded errors has never had reason to create it). Two new
+backend tests, one of which spies on `os.startfile` directly - a bare
+200-response check can't distinguish "the guard worked" from "the guard's
+`AttributeError` got silently swallowed by `suppress(Exception)`" on this
+non-Windows sandbox, matching `test_capcut.py`'s own established
+technique for the identical problem.
+
+**Task 3 - collapsible App Health sections.** `AppHealth.tsx`'s three
+stage headers (`<header>`) became `<button>`s (full CSS reset - border,
+background, font, text-align, width - per CLAUDE.md's native-control
+rule, since a button is exactly the kind of control that rule exists
+for) toggling a `health-checks--collapsed` class on each stage's check
+list. Default state (`openStages`, seeded via `useEffect` keyed on
+`stage.key` so a user's own toggle is never overridden by a later
+report): passing stages start collapsed, failing stages start open - a
+failure is this screen's content, not an error state to click past.
+Chevron rotation reuses `StatusBar.tsx`'s existing `.statuspill__chevron
+.is-open` rotate-the-svg pattern rather than inventing a new one.
+
+**Final verification (Task 4):**
+- `pytest tests -q`: **985 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as every prior slice's baseline (DPAPI, font
+  resolution, real dev-machine legacy path). Zero regressions.
+- `mypy avg`: 690 errors - identical to the pre-slice baseline (this
+  slice's one new mypy-relevant line, the new route's bare `dict` return,
+  matches the file's own existing style throughout `routes_settings.py`,
+  not a new pattern).
+- `cd web && npm run build && npm run lint`: clean (0 errors, 0
+  warnings) for both Tasks 2's frontend half and Task 3's CSS/JSX.
+
+**Commits** (branch `development`, pushed after this entry): `03b294f`
+Task 1, `33dadbb` Task 2, `3fc1f3e`+`7ccb702` the mid-slice reconciliation,
+`42f5569` Task 3, plus this ledger entry for Task 4.
+
+**Deferred / explicitly out of scope** (per the design spec): a
+dedicated "open explorer" abstraction shared across `capcut.py` and this
+new route (two call sites, not yet worth extracting); persisting
+`openStages` across a screen remount (session-only, resets to the
+seeded default on next visit - matching every other screen's use of
+plain `useState` for UI-only toggle state); a manual live-app check of
+the collapse animation, same caveat as Slice 22's manual-check note -
+this sandbox cannot exercise a running WebView session.

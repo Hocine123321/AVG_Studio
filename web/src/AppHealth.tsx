@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealthReport, type HealthReport } from "./api";
 import ErrorLog from "./ErrorLog";
+import { IconChevron } from "./Icons";
 import ModelCacheCard from "./ModelCacheCard";
 
 /**
@@ -53,6 +54,26 @@ export default function AppHealth() {
 
   const failing = report?.stages.filter((s) => !s.ok) ?? [];
 
+  // Passing stages start collapsed - "Passed" in the header chip is
+  // usually the whole answer, which is the entire reason this exists
+  // (the sections "currently consume too much space"). Failing stages
+  // start open - a failed check is this screen's content, not an error
+  // state to click past. A user's own toggle, once made, is never
+  // overridden by a later report unless it's a stage key seen for the
+  // first time.
+  const [openStages, setOpenStages] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (!report) return;
+    setOpenStages((prev) => {
+      const next = { ...prev };
+      for (const stage of report.stages) {
+        if (!(stage.key in next)) next[stage.key] = !stage.ok;
+      }
+      return next;
+    });
+  }, [report]);
+  const toggleStage = (key: string) => setOpenStages((prev) => ({ ...prev, [key]: !prev[key] }));
+
   return (
     <div className="settings">
       <header className="settings__header">
@@ -89,41 +110,55 @@ export default function AppHealth() {
       {!report && !error && <p className="home__empty">Running checks…</p>}
 
       <div className="health-stages">
-        {report?.stages.map((stage, index) => (
-          <section key={stage.key} className={`health-stage${stage.ok ? "" : " health-stage--bad"}`}>
-            <header className="health-stage__head">
-              {/* The step number carries the ordering the stages actually
-                  have - this is a pipeline, not three independent panels. */}
-              <span className="health-stage__num" aria-hidden="true">
-                {index + 1}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <h2 className="health-stage__title">{stage.name}</h2>
-                <p className="health-stage__detail">{stage.detail}</p>
-              </div>
-              <span className="home__spacer" />
-              <span className={stage.ok ? "chip chip--ok" : "chip chip--bad"}>
-                {stage.ok ? "Passed" : "Failed"}
-              </span>
-            </header>
+        {report?.stages.map((stage, index) => {
+          const isOpen = openStages[stage.key] ?? !stage.ok;
+          return (
+            <section key={stage.key} className={`health-stage${stage.ok ? "" : " health-stage--bad"}`}>
+              <button
+                type="button"
+                className="health-stage__head"
+                onClick={() => toggleStage(stage.key)}
+                aria-expanded={isOpen}
+              >
+                {/* The step number carries the ordering the stages actually
+                    have - this is a pipeline, not three independent panels. */}
+                <span className="health-stage__num" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <h2 className="health-stage__title">{stage.name}</h2>
+                  <p className="health-stage__detail">{stage.detail}</p>
+                </div>
+                <span className="home__spacer" />
+                <span className={stage.ok ? "chip chip--ok" : "chip chip--bad"}>
+                  {stage.ok ? "Passed" : "Failed"}
+                </span>
+                <span className={`health-stage__chevron${isOpen ? " is-open" : ""}`}>
+                  <IconChevron />
+                </span>
+              </button>
 
-            <ul className="health-checks">
-              {stage.checks.map((check) => (
-                <li key={check.name} className="health-check">
-                  <span className={`health-check__dot${check.ok ? " health-check__dot--ok" : " health-check__dot--bad"}`} aria-hidden="true" />
-                  <span className="health-check__name">{check.name}</span>
-                  {check.required === false && (
-                    <span className="health-check__optional">Optional</span>
-                  )}
-                  {check.version && <span className="health-check__version mono">{check.version}</span>}
-                  <span className="health-check__detail" title={check.detail}>
-                    {check.detail}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+              <ul
+                className={`health-checks${isOpen ? "" : " health-checks--collapsed"}`}
+                aria-hidden={!isOpen}
+              >
+                {stage.checks.map((check) => (
+                  <li key={check.name} className="health-check">
+                    <span className={`health-check__dot${check.ok ? " health-check__dot--ok" : " health-check__dot--bad"}`} aria-hidden="true" />
+                    <span className="health-check__name">{check.name}</span>
+                    {check.required === false && (
+                      <span className="health-check__optional">Optional</span>
+                    )}
+                    {check.version && <span className="health-check__version mono">{check.version}</span>}
+                    <span className="health-check__detail" title={check.detail}>
+                      {check.detail}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
       </div>
 
       <ModelCacheCard />

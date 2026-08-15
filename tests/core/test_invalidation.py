@@ -53,12 +53,14 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     (superseded by `resolve_channel_settings`'s per-field resolution), and
     64 after Slice 19 Task 7 also removed `aspect_ratio` (now derived from
     `video_form` - `avg.pipeline.create.derive_aspect_ratio` - rather than
-    stored as its own setting). The count is kept as a
+    stored as its own setting), and 66 after Slice 21 added the `voice`
+    group's `voice_trim_aggressiveness` and
+    `voice_max_removable_silence_pct`. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 64
+    assert len(SETTINGS) == 66
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 
