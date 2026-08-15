@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { clearErrors, getErrors, type AppError } from "./api";
+import { clearErrors, getErrors, openLogsFolder, type AppError } from "./api";
 
 const SEVERITY_LABEL: Record<AppError["severity"], string> = {
   critical: "Critical",
@@ -126,6 +126,9 @@ export default function ErrorLog() {
             {lowCount} minor
           </button>
         )}
+        <button type="button" className="btn btn--sm" onClick={() => void openLogsFolder()}>
+          Logs
+        </button>
         <button
           type="button"
           className="btn"

@@ -287,6 +287,10 @@ export function clearErrors(): Promise<{ cleared: boolean }> {
   return apiDelete<{ cleared: boolean }>("/api/errors");
 }
 
+export function openLogsFolder(): Promise<{ opened: string }> {
+  return apiPost<{ opened: string }>("/api/health/open-logs");
+}
+
 /** Report a failure only the frontend can see - a dropped socket, an image
  * that would not load. Fire-and-forget by convention: a failure to report
  * a failure must never surface as a second error. */

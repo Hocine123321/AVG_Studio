@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -452,6 +453,44 @@ def test_health_report_checks_the_isolated_paths_not_the_real_profile(client, pa
     safeguards = next(s for s in body["stages"] if s["key"] == "safeguards")
     writable = next(c for c in safeguards["checks"] if c["name"] == "Library folder writable")
     assert str(paths["output_root"]) in writable["detail"]
+
+
+def test_open_logs_folder_creates_it_and_needs_a_token(client):
+    from avg.config.user_assets import default_errors_path
+
+    assert client.post("/api/health/open-logs").status_code == 401
+
+    r = client.post("/api/health/open-logs", headers=AUTH)
+    assert r.status_code == 200
+    opened = Path(r.json()["opened"])
+    assert opened.is_dir()
+    assert opened == default_errors_path().parent
+
+
+def test_open_logs_folder_does_not_open_explorer_under_pytest(client, monkeypatch):
+    """Same guard, same test technique as `capcut.py`'s existing
+    `test_export_does_not_open_explorer_under_pytest` - a spy on
+    `os.startfile` proves the route never calls it during the suite,
+    which just checking for a 200 response cannot: `suppress(Exception)`
+    would swallow a broken guard's `AttributeError` on this non-Windows
+    sandbox exactly as quietly as a working guard's absence of a call,
+    making the two indistinguishable without a spy.
+    """
+    import os
+
+    calls = []
+    # os.startfile doesn't exist on non-Windows Pythons; add it if absent
+    # so the spy can be installed uniformly regardless of platform -
+    # matching test_capcut.py's own handling of the same situation.
+    if not hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(os, "startfile", lambda *a, **k: calls.append(a), raising=False)
+    assert "PYTEST_CURRENT_TEST" in os.environ
+
+    r = client.post("/api/health/open-logs", headers=AUTH)
+
+    assert r.status_code == 200
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
