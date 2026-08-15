@@ -598,3 +598,83 @@ ledger entry.
 frontend test runner; the single last-event `progress`/`phaseStarted`
 reducer path (already correct, not touched); `foldPhases` (separate
 function/consumer, not implicated in this bug).
+
+---
+
+## Slice 23 — App Health improvements (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-23-app-health-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-23-app-health-plan.md`, all 4
+tasks, on the single accumulating `development` branch (per instruction:
+one branch for every slice going forward, no more per-slice branches, no
+more checking whether a previous slice's branch merged to `main` before
+starting the next one).
+
+**Mid-slice housekeeping, worth recording:** the `development` branch was
+deleted and recreated remotely partway through this slice (PRs #8 "Slice
+22 done" and #9 "Slice 21 duration narration" merged into it on GitHub).
+Reconciling brought in Slice 21's and 22's code cleanly, but
+`.superpowers/sdd/progress.md` on the remote had regressed to its
+pre-Slice-20 state - missing the Slice 20 *and* Slice 21 ledger entries
+entirely (fewer lines than even `main`, which has Slice 20's entry via
+its own merged PR). Reconstructed the file from this session's own commit
+history (`aca86f7` for the 19+20+22 shape, `edf3285` for the Slice 21
+entry) rather than accept the loss - restored in its own commit
+(`7ccb702`) before continuing Task 3.
+
+**Task 1 - Recent Errors always shows something.** `ErrorLog.tsx`'s
+expansion previously showed nothing when a row's `error.detail` was
+empty - true for every `low`-severity `ErrorStore.degraded()` entry, so
+Recent Errors' whole "click a row to expand" affordance silently did
+nothing for the most common severity. `contextText` (the same formatting
+`promptFor` already put on the clipboard) and `expandedContent`
+(`detail || contextText || <fallback sentence>`) mean a click always
+reveals *something*.
+
+**Task 2 - Logs button.** `POST /api/health/open-logs` (new route in
+`routes_settings.py`) reveals `errors.json`'s folder in Explorer -
+`os.startfile` + a `PYTEST_CURRENT_TEST` guard + `suppress(Exception)`,
+the same shape `avg.export.capcut.export_take`'s existing Explorer reveal
+already uses. Creates the folder first if it's missing (a fresh install
+with zero recorded errors has never had reason to create it). Two new
+backend tests, one of which spies on `os.startfile` directly - a bare
+200-response check can't distinguish "the guard worked" from "the guard's
+`AttributeError` got silently swallowed by `suppress(Exception)`" on this
+non-Windows sandbox, matching `test_capcut.py`'s own established
+technique for the identical problem.
+
+**Task 3 - collapsible App Health sections.** `AppHealth.tsx`'s three
+stage headers (`<header>`) became `<button>`s (full CSS reset - border,
+background, font, text-align, width - per CLAUDE.md's native-control
+rule, since a button is exactly the kind of control that rule exists
+for) toggling a `health-checks--collapsed` class on each stage's check
+list. Default state (`openStages`, seeded via `useEffect` keyed on
+`stage.key` so a user's own toggle is never overridden by a later
+report): passing stages start collapsed, failing stages start open - a
+failure is this screen's content, not an error state to click past.
+Chevron rotation reuses `StatusBar.tsx`'s existing `.statuspill__chevron
+.is-open` rotate-the-svg pattern rather than inventing a new one.
+
+**Final verification (Task 4):**
+- `pytest tests -q`: **985 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as every prior slice's baseline (DPAPI, font
+  resolution, real dev-machine legacy path). Zero regressions.
+- `mypy avg`: 690 errors - identical to the pre-slice baseline (this
+  slice's one new mypy-relevant line, the new route's bare `dict` return,
+  matches the file's own existing style throughout `routes_settings.py`,
+  not a new pattern).
+- `cd web && npm run build && npm run lint`: clean (0 errors, 0
+  warnings) for both Tasks 2's frontend half and Task 3's CSS/JSX.
+
+**Commits** (branch `development`, pushed after this entry): `03b294f`
+Task 1, `33dadbb` Task 2, `3fc1f3e`+`7ccb702` the mid-slice reconciliation,
+`42f5569` Task 3, plus this ledger entry for Task 4.
+
+**Deferred / explicitly out of scope** (per the design spec): a
+dedicated "open explorer" abstraction shared across `capcut.py` and this
+new route (two call sites, not yet worth extracting); persisting
+`openStages` across a screen remount (session-only, resets to the
+seeded default on next visit - matching every other screen's use of
+plain `useState` for UI-only toggle state); a manual live-app check of
+the collapse animation, same caveat as Slice 22's manual-check note -
+this sandbox cannot exercise a running WebView session.
