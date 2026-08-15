@@ -3254,6 +3254,18 @@ a:hover {
   align-items: center;
   gap: 14px;
   margin-bottom: 14px;
+  /* This was a plain <header> until Slice 23 made the whole row a toggle
+     - reset every browser button default (border/background/font/
+     text-align/width) rather than let any of them peek through, per
+     CLAUDE.md's "never leave a native control at browser defaults" rule. */
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
 }
 
 .health-stage__num {
@@ -3285,10 +3297,37 @@ a:hover {
   color: var(--dim);
 }
 
+/* Same rotate-the-svg-on-.is-open pattern as .statuspill__chevron. Not a
+   button of its own - `.health-stage__head` is already the whole hit
+   target - just the icon's rotation state. */
+.health-stage__chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform calc(0.18s * var(--motion-scale)) ease-out;
+}
+
+.health-stage__chevron.is-open {
+  transform: rotate(180deg);
+}
+
 .health-checks {
   list-style: none;
   margin: 0;
   padding: 0;
+  overflow: hidden;
+  max-height: 1200px;
+  transition:
+    max-height calc(0.22s * var(--motion-scale)) ease-out,
+    opacity calc(0.18s * var(--motion-scale)) ease-out;
+}
+
+/* A passing stage's checks start collapsed (AppHealth.tsx's default),
+   and a user's own toggle collapses either kind - max-height rather than
+   `display: none` so the height change animates instead of snapping. */
+.health-checks--collapsed {
+  max-height: 0;
+  opacity: 0;
 }
 
 .health-check {
