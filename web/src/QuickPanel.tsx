@@ -8,19 +8,37 @@ import RecentErrorsTab from "./RecentErrorsTab";
 import { useSettingsData } from "./useSettingsData";
 
 const POSITION_KEY = "avg.quickpanel.position";
+const SIZE_KEY = "avg.quickpanel.size";
 const TAB_KEY = "avg.quickpanel.tab";
 
-// Used to clamp before the panel has ever been measured (first paint of a
-// fresh install, no `POSITION_KEY` yet) - kept in sync with the panel's
-// actual CSS size in tokens.css (Task 10). Once the panel has rendered,
-// `panelRef`'s own measured box is used instead, so a real CSS change
-// never has to be mirrored into a second set of numbers here.
+// The panel's default AND fallback size - used both to seed `readSize()`
+// on a fresh install (no `SIZE_KEY` yet) and to clamp before the panel has
+// ever been measured. Once rendered, `panelRef`'s own measured box is used
+// instead for clamping position, so a resize never has to be mirrored into
+// a second set of numbers - only these two defaults are hand-maintained.
 const FALLBACK_WIDTH = 380;
 const FALLBACK_HEIGHT = 520;
+
+// 340 leaves real margin below the fixed 380 every install already used
+// without inviting the five-tab-label wrap the item warns about (spec
+// §2) - confirmed against the rendered tab strip, not just arithmetic, is
+// still worth doing once this is actually running.
+const MIN_WIDTH = 340;
+const MAX_WIDTH = 640;
+const MIN_HEIGHT = 320;
+// A fraction of the window, matching the pre-resize `max-height: 70vh`
+// cap's own idiom, not a fixed pixel count - a resizable panel's ceiling
+// should still scale with the screen it's on.
+const MAX_HEIGHT_VH = 0.8;
 
 interface Position {
   x: number;
   y: number;
+}
+
+interface Size {
+  w: number;
+  h: number;
 }
 
 /** A window resized smaller between sessions must not restore the panel
@@ -32,6 +50,17 @@ function clamp(pos: Position, panelW: number, panelH: number): Position {
   return { x: Math.min(Math.max(pos.x, 0), maxX), y: Math.min(Math.max(pos.y, 0), maxY) };
 }
 
+/** Keeps a resize within both the fixed floor/ceiling above AND the
+ * window's own current height - the same "don't let a smaller window
+ * strand it" reasoning `clamp` above already applies to position. */
+function clampSize(size: Size): Size {
+  const maxH = window.innerHeight * MAX_HEIGHT_VH;
+  return {
+    w: Math.min(Math.max(size.w, MIN_WIDTH), MAX_WIDTH),
+    h: Math.min(Math.max(size.h, MIN_HEIGHT), maxH),
+  };
+}
+
 function readPosition(): Position {
   try {
     const raw = localStorage.getItem(POSITION_KEY);
@@ -41,6 +70,18 @@ function readPosition(): Position {
     return parsed;
   } catch {
     return { x: 90, y: 60 };
+  }
+}
+
+function readSize(): Size {
+  try {
+    const raw = localStorage.getItem(SIZE_KEY);
+    if (!raw) return { w: FALLBACK_WIDTH, h: FALLBACK_HEIGHT };
+    const parsed = JSON.parse(raw) as Size;
+    if (typeof parsed.w !== "number" || typeof parsed.h !== "number") return { w: FALLBACK_WIDTH, h: FALLBACK_HEIGHT };
+    return clampSize(parsed);
+  } catch {
+    return { w: FALLBACK_WIDTH, h: FALLBACK_HEIGHT };
   }
 }
 
@@ -92,10 +133,12 @@ export default function QuickPanel({
       : "livelist";
   });
   const [position, setPosition] = useState<Position>(readPosition);
+  const [size, setSize] = useState<Size>(readSize);
 
   const settingsData = useSettingsData();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dragOffset = useRef<{ dx: number; dy: number } | null>(null);
+  const resizeStart = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
 
   // The portal's DOM node stays mounted forever once `open` has been true
   // at least once - `visible` (not `mounted`) is what actually drives the
@@ -134,6 +177,20 @@ export default function QuickPanel({
   useEffect(() => {
     localStorage.setItem(POSITION_KEY, JSON.stringify(position));
   }, [position]);
+
+  useEffect(() => {
+    localStorage.setItem(SIZE_KEY, JSON.stringify(size));
+  }, [size]);
+
+  // A manual resize can push the panel's own edge past the window's -
+  // the existing window-resize listener below only re-clamps position when
+  // the WINDOW changes, not when the PANEL does, so this covers the other
+  // half of the same concern.
+  useEffect(() => {
+    const { w, h } = panelSize();
+    setPosition((p) => clamp(p, w, h));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [size]);
 
   /** The panel's own current box, or the fallback before it has ever
    * rendered - see `FALLBACK_WIDTH`/`FALLBACK_HEIGHT`'s own comment. */
@@ -203,13 +260,31 @@ export default function QuickPanel({
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }
 
+  function onResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    resizeStart.current = { startX: e.clientX, startY: e.clientY, startW: size.w, startH: size.h };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onResizePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizeStart.current) return;
+    const { startX, startY, startW, startH } = resizeStart.current;
+    setSize(clampSize({ w: startW + (e.clientX - startX), h: startH + (e.clientY - startY) }));
+  }
+
+  function onResizePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizeStart.current) return;
+    resizeStart.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }
+
   return (
     mounted &&
     createPortal(
           <div
             ref={panelRef}
             className={`quickpanel${visible ? "" : " quickpanel--closed"}`}
-            style={{ left: position.x, top: position.y }}
+            style={{ left: position.x, top: position.y, width: size.w, height: size.h }}
             role="dialog"
             aria-label="Quick panel"
             aria-hidden={!open}
@@ -264,6 +339,14 @@ export default function QuickPanel({
               {tab === "errors" && <RecentErrorsTab />}
               {tab === "inwork" && <p className="home__empty">More tools are coming here.</p>}
             </div>
+            <div
+              className="quickpanel__resize-handle"
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerUp}
+              onPointerCancel={onResizePointerUp}
+              aria-hidden="true"
+            />
           </div>,
           document.body,
         )
