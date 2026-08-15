@@ -124,6 +124,34 @@ def test_manifest_records_what_moved(tmp_path):
     }]
 
 
+def test_manifest_write_failure_does_not_crash_or_undo_the_move(tmp_path, monkeypatch):
+    """The files themselves already moved by the time `_record_migration`
+    runs - a failure writing the audit trail (disk full, a permissions
+    quirk) must not raise back out through `migrate_legacy_files` (which
+    is on the path of every `default_*_path()` caller, including app
+    startup) or make the caller think nothing moved.
+    """
+    old_base = tmp_path / "old"
+    new_root = tmp_path / "new"
+    old_base.mkdir()
+    (old_base / "settings.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(
+        user_assets_module,
+        "_record_migration",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    moved = migrate_legacy_files(old_base, new_root)  # must not raise
+
+    assert moved == [{
+        "from": str(old_base / "settings.json"),
+        "to": str(new_root / "Config" / "settings.json"),
+    }]
+    assert (new_root / "Config" / "settings.json").exists()
+    assert not (new_root / "migration.json").exists()  # the write that failed
+
+
 def test_manifest_appends_across_two_migration_passes(tmp_path):
     old_base = tmp_path / "old"
     new_root = tmp_path / "new"

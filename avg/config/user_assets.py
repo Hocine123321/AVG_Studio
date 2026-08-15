@@ -117,7 +117,16 @@ def migrate_legacy_files(old_base: Path, new_root: Path) -> list[dict[str, str]]
             continue
         moved.append({"from": str(old_path), "to": str(new_path)})
     if moved:
-        _record_migration(new_root, moved)
+        # Best-effort: the files themselves already moved successfully at
+        # this point. A manifest-write failure (disk full, a permissions
+        # quirk on the newly-created UserAssets root) must not undo that
+        # or crash the caller - `user_assets_root()` is on the path of
+        # every `default_*_path()` function, so an uncaught exception here
+        # would take down app startup itself over losing an audit trail,
+        # which contradicts this function's own "must never crash
+        # startup" rule for the moves themselves.
+        with suppress(Exception):
+            _record_migration(new_root, moved)
     return moved
 
 
