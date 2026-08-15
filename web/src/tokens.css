@@ -600,16 +600,18 @@ a:hover {
 }
 
 /* The Quick panel's own open/close toggle (Slice 18 spec §1) - rendered at
-   the rail's own outer edge, vertically below the logo, per the spec's
-   recorded safe default: the logo keeps the corner it already occupies,
-   this sits at the column's edge rather than in it, and it is deliberately
-   NOT one of the 48px `.rail__item` icons since it belongs to a different,
-   cross-cutting concern (a global panel toggle, not a section of the app).
+   the rail's own outer edge, vertically CENTERED on the "A" logo (Slice 24 -
+   `top: 78px` put it inside the Create Video button's own row instead,
+   which is the bug the item reported; `22px` is the logo's own vertical
+   center: `16px` rail padding + half of the logo's `38px` height, minus
+   half this toggle's `26px` height). Deliberately NOT one of the 48px
+   `.rail__item` icons since it belongs to a different, cross-cutting
+   concern (a global panel toggle, not a section of the app).
    Half-overlapping the rail's own right border, the same "floating tab"
    affordance a collapse control reads as everywhere else it appears. */
 .quickpanel-toggle {
   position: absolute;
-  top: 78px;
+  top: 22px;
   right: -13px;
   width: 26px;
   height: 26px;
@@ -4558,8 +4560,6 @@ a:hover {
   z-index: 30;
   display: flex;
   flex-direction: column;
-  width: 380px;
-  max-height: 70vh;
   border-radius: var(--radius-lg);
   border: 1px solid var(--line-2);
   background: var(--surface);
@@ -4582,6 +4582,32 @@ a:hover {
   transform: translate(-28px, -28px);
   opacity: 0;
   pointer-events: none;
+}
+
+/* Slice 24 - the corner drag handle for resizing the panel (spec §2), the
+   universal `<textarea>` resize convention. Same pointer-capture technique
+   as the header drag (`QuickPanel.tsx`'s `onResizePointer*`), not a new
+   drag implementation. */
+.quickpanel__resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  border-radius: 0 0 var(--radius-lg) 0;
+}
+
+.quickpanel__resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--line-2);
+  border-bottom: 2px solid var(--line-2);
+  border-radius: 0 0 2px 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

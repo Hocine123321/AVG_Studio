@@ -30,6 +30,10 @@ const KIND_OPTIONS: { value: PreviewKind; label: string }[] = [
  */
 export default function PreviewTab({ ctx }: { ctx: SettingsCtx }) {
   const [kind, setKind] = useState<PreviewKind>("caption");
+  // Bumped to force an immediate re-fetch rather than waiting for the
+  // debounce - see PreviewPanel.tsx's `refreshKey` doc for why this only
+  // does anything for Caption/Overlay.
+  const [refreshKey, setRefreshKey] = useState(0);
   return (
     <div className="quickpanel-preview">
       <div className="quickpanel-preview__picker">
@@ -40,9 +44,16 @@ export default function PreviewTab({ ctx }: { ctx: SettingsCtx }) {
           onChange={(v) => setKind(v as PreviewKind)}
           ariaLabel="Choose what to preview"
         />
+        <button
+          type="button"
+          className="btn btn--sm"
+          onClick={() => setRefreshKey((k) => k + 1)}
+        >
+          Refresh
+        </button>
       </div>
       <div className="quickpanel-preview__frame">
-        <PreviewPanel kind={kind} valueOf={ctx.valueById} />
+        <PreviewPanel kind={kind} valueOf={ctx.valueById} refreshKey={refreshKey} />
       </div>
     </div>
   );

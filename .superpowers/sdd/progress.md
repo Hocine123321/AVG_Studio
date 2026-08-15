@@ -678,3 +678,73 @@ seeded default on next visit - matching every other screen's use of
 plain `useState` for UI-only toggle state); a manual live-app check of
 the collapse animation, same caveat as Slice 22's manual-check note -
 this sandbox cannot exercise a running WebView session.
+
+---
+
+## Slice 24 — Quick Panel resize, puller position, Preview refresh (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-14-slice-24-quickpanel-design.md`
+and `docs/superpowers/plans/2026-08-14-slice-24-quickpanel-plan.md`, all 4
+tasks, on the shared `development` branch. Frontend-only slice - no
+backend files touched, full `pytest`/`mypy` sweep run anyway as a sanity
+check (Step 7.1's habit), confirmed unaffected.
+
+**Task 1 - puller alignment.** `.quickpanel-toggle`'s `top: 78px` put it
+inside the Create Video button's own row instead of centered on the "A"
+logo, per the item's own report. One-line CSS fix (`top: 22px` - the
+logo's own vertical center: 16px rail padding + half the logo's 38px
+height, minus half the toggle's own 26px height).
+
+**Task 2 - resizable panel, wider floor.** `.quickpanel`'s fixed
+`width: 380px; max-height: 70vh` moved to `QuickPanel.tsx`'s inline
+style, driven by a new `size` state (persisted to `localStorage` under
+`avg.quickpanel.size`, same pattern as the existing `position` state).
+Bounds: 340-640px wide (340 leaves real margin below the old fixed 380
+without inviting the five-tab-label wrap the item warned about),
+320px-80vh tall. A corner drag handle (`.quickpanel__resize-handle`,
+the universal `<textarea>`-resize affordance) reuses the header drag's
+existing pointer-capture technique rather than a new implementation. A
+resize that pushes the panel's own edge past the window boundary
+re-clamps position via a `useEffect` keyed on `size` - covers the half
+of "don't strand it off-screen" the existing window-resize listener
+doesn't (that one only fires on the WINDOW changing, not the panel).
+Checked the Preview tab's frame sizing against the new bounds before
+concluding no CSS change was needed there: `.preview-frame img` scales
+proportionally (`width: 100%; height: auto`), `.quickpanel__body` is
+already `flex: 1; overflow: auto` - nothing clips at either bound.
+
+**Task 3 - Preview refresh button.** A `Refresh` button in
+`PreviewTab.tsx` bumps a `refreshKey` counter, threaded through
+`PreviewPanel.tsx`'s dispatcher into `CaptionPreview`/`OverlayPreview`'s
+existing debounced re-render effect (added to each one's dependency
+array) - forces an immediate re-fetch rather than waiting out the
+debounce. Deliberately NOT threaded into `VoicePreview`/`ImagePreview` -
+both are paid, gated behind their own explicit "Generate a sample"
+button (`confirm_paid: true`), and giving Refresh a second path to that
+call would be exactly the money-rule regression this module's docstring
+already warns against. Documented directly on the `refreshKey` prop
+itself so a future reader extending this button doesn't wire it into
+the paid previews by reflex.
+
+**Final verification (Task 4):**
+- `pytest tests -q`: **983 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as every prior slice's baseline. Zero
+  regressions (expected - no backend file touched).
+- `mypy avg`: 690 errors, identical to baseline (no `avg/` files
+  touched).
+- `cd web && npm run build && npm run lint`: clean (0 errors, 0
+  warnings) after every task.
+
+**Commits** (branch `development`, pushed after this entry): `13d15fc`
+Task 1, `4f1b6dd` Task 2, `fcad369` Task 3, plus this ledger entry for
+Task 4.
+
+**Deferred / explicitly out of scope** (per the design spec): a visible
+resize-bounds indicator (e.g. a tooltip on the handle); persisting size
+independently per tab (one size for the whole panel, matching how
+position already works); wiring Refresh into `VoicePreview`/
+`ImagePreview` (see Task 3 above - deliberately never, not merely
+deferred); the same manual live-app check caveat as Slices 22 and 23 -
+drag-resize and the puller's visual alignment are verified by code
+review and build/lint, not an actual running WebView session, which
+this sandbox cannot exercise.
