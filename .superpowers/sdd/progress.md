@@ -363,4 +363,238 @@ pass):
 
 ---
 
+## Slice 20 — UserAssets storage consolidation (2026-08-14)
 
+Implemented per `docs/superpowers/specs/2026-08-11-slice-20-userassets-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-20-userassets-plan.md`, all 7
+tasks, on branch `slice-20-userassets` (not `main` - kept as a reviewable
+backup branch per instruction), one commit per task, pushed to
+`origin/slice-20-userassets` after each.
+
+**Environment note:** this session's sandbox is Linux, not the Windows dev
+machine `.venv-build` targets. Built a disposable `.venv-linux` (gitignored,
+matching the existing `.venv-linux/` entry) plus a sandbox-only
+`sitecustomize.py` shim on `PYTHONPATH` (outside the repo, at
+`/home/claude/pytest_linux_shim/` - same throwaway-tooling precedent as
+Slice 19's DOM-check harness) that no-ops `ctypes.WinDLL`/`ctypes.
+GetLastError` so `avg.config.secrets`'s module-level DPAPI binding doesn't
+crash import on non-Windows. Established a same-environment baseline before
+touching any code: **947 passed, 7 failed, 1 skipped** - the 7 are all
+environment-specific and pre-existing, not Slice 20 regressions: 5 DPAPI
+round-trip tests in `test_secrets.py` (need real Windows crypt32), 1 font
+resolution test in `test_phases_polish.py` (needs a real Windows font
+path), 1 legacy-scan test needing the real dev machine's `D:\AI_Video_Gen`
+data. Verified `mypy avg`'s 690 errors are identical (same files, same
+messages) before and after the slice via `git stash` comparison - none of
+Slice 20's touched files (`avg/config/*.py`, `avg/core/model_prefs.py`,
+`avg/api/app.py`) contribute any.
+
+**What moved.** Eight documents now resolve under
+`Documents/AVG Studio/UserAssets/`, migrated once and automatically from
+their pre-Slice-20 `%APPDATA%/AVG Studio/` location the first time
+`user_assets_root()` is called (`migrate_legacy_files`, idempotent by
+filesystem state - an item moves only when its old path exists and its
+new path doesn't yet, and both existing leaves the old copy alone rather
+than overwriting):
+
+| Document | New location |
+|---|---|
+| `settings.json` | `UserAssets/Config/settings.json` |
+| `channel_defaults.json` | `UserAssets/Config/channel_defaults.json` |
+| `quick_settings.json` | `UserAssets/Config/quick_settings.json` |
+| `model_prefs.json` | `UserAssets/Config/model_prefs.json` |
+| `channels/` | `UserAssets/Config/channels/` |
+| `secrets.dat` | `UserAssets/Secrets/secrets.dat` |
+| `errors.json` | `UserAssets/Logs/errors.json` |
+| (new projects) | `UserAssets/Projects/` (`suggest_output_root`'s fallback, Task 6 - existing installs' library location is unchanged, only a *fresh* install's suggested default moves) |
+
+Each move is recorded in an append-only `UserAssets/migration.json`
+manifest (`{"events": [{"at": ..., "moved": [...]}]}`).
+
+**What deliberately stayed put** (all caches, rebuildable, not user data
+- see `avg/config/user_assets.py`'s module docstring): `working_models.json`
+(`avg.core.model_cache`, still `%APPDATA%/AVG Studio/`),
+`model_cache.json` (`avg.providers.models`'s advertised-catalogue cache,
+untouched - not even imported by this slice), and the thumbnail cache
+(`avg.media.thumbnails`, still `%LOCALAPPDATA%`).
+
+**Layering:** `default_errors_path`, `default_model_prefs_path` and
+`default_working_models_path` live in `avg/config/user_assets.py` rather
+than beside `ErrorStore`/`ModelPrefs`/`ModelCache` in `avg/core/`, because
+`avg/core/` cannot import `avg/config/` (CLAUDE.md's Architecture
+section). `avg.core.model_prefs.default_prefs_path` is removed - it had
+exactly this layering problem already, latent, since `create_app` never
+actually called it (its only caller anywhere in the repo was the
+isolation test, now updated to call the new function instead).
+
+**Test-harness isolation** (Task 2) extended `tests/conftest.py`'s
+session-wide fixture to also redirect `USERPROFILE`, alongside the
+existing `APPDATA`/`LOCALAPPDATA` redirect - this is what stops the suite
+from ever touching a developer's real `Documents/AVG Studio` the moment
+Task 4 makes `default_settings_path()` (and friends) depend on
+`user_assets_root()` for real. `tests/test_profile_isolation.py` covers
+all eight relocated/new documents plus the three that stayed at
+`%APPDATA%`/`%LOCALAPPDATA%` by name.
+
+**Final verification (Step 7.1):**
+- `pytest tests -q`: **967 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as the pre-slice baseline, net +20 passing (16
+  from Task 4's full-suite exercise of every `create_app(...)` call site
+  through the real new root, +3 from Task 5, +1 from Task 6's new test).
+  Zero regressions.
+- `mypy avg`: 690 errors, identical set to the pre-slice baseline (verified
+  via `git stash` same-environment comparison). Zero new errors.
+- `cd web && npm run build && npm run lint`: clean (0 errors, 0 warnings)
+  - expected, since no Slice 20 task touches `web/`; run anyway per the
+    plan as a sanity check.
+
+**Commits** (branch `slice-20-userassets`, each pushed individually):
+`bd206fb` Task 1, `cabe54c` Task 2, `b59749b` Task 3, `ccd39fb` Task 4,
+`3bd9ff2` Task 5, `d9a66d6` Task 6, plus this ledger entry for Task 7.
+
+**Deferred / explicitly out of scope** (per the plan): making `UserAssets`
+itself user-relocatable; physically moving an *existing* install's video
+library (only a fresh install's suggested default changed); the App
+Health "Logs" button UI; any UI work at all (this slice is backend-only).
+
+---
+
+## Slice 21 — Duration bug + narration trimming rework (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-21-duration-narration-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-21-duration-narration-plan.md`,
+both tasks, on branch `slice-21-duration-narration` (off `main`, after
+Slice 20's PR #6 merged) - not `main` - pushed to
+`origin/slice-21-duration-narration` after each commit.
+
+**Environment:** same Linux sandbox setup as Slice 20 (`.venv-linux` +
+the `sitecustomize.py` shim on `PYTHONPATH` at
+`/home/claude/pytest_linux_shim/`, outside the repo). Baseline re-confirmed
+before touching code: **980 passed, 7 failed, 1 skipped** - same 7
+environment-specific failures as Slice 20's baseline (DPAPI, font
+resolution, real dev-machine legacy path).
+
+**Task 1 - word budget scales with duration.**
+`avg.pipeline.prompts._word_budget_for_duration(duration_seconds)`
+replaces the fixed `word_min=60, word_max=75` `build_narration_prompt`
+always used regardless of the requested length - the direct cause of
+2m/4m requests collapsing to ~30s of actual narration (the writer was
+never told to write more). Calibrated to reproduce the old fixed values
+exactly at the 30s preset (`* 2.0` / `* 2.5`). `word_min`/`word_max`
+became `None`-default so the one caller (`writing.py`) picks up the
+scaled budget with no code change; explicit overrides (one existing
+test) still win.
+
+**Task 2 - trimming gets a real ceiling.** Two new channel settings
+(`voice_trim_aggressiveness`: low/medium/high, default medium;
+`voice_max_removable_silence_pct`: float, default 40.0) replace
+`avg.pipeline.phases.voice`'s three fixed silence-removal constants with
+`_AGGRESSIVENESS_PARAMS`, a three-preset map - "medium" reproduces the
+exact old fixed values, so nobody who doesn't touch the setting sees any
+change. `_clean_segment` runs `remove_silences_core` once, and if the
+result removed more than the cap allows, retries exactly once at one
+aggressiveness level down (`_AGGRESSIVENESS_STEP_DOWN`) - already-"low"
+retries with itself and is treated as no retry. Still over the cap after
+the retry: keeps the result and calls `report_degradation` rather than
+raising or silently discarding synthesized audio. `voice_speed` remains
+unwired, `_MIN_SCENES`/`_MAX_SCENES` unchanged - both explicitly out of
+scope per the design spec.
+
+**Fallout beyond the plan's own file list**, found and fixed during
+verification:
+- A second, independent fake `remove_silences_core` in
+  `tests/pipeline/test_runner.py`'s registry smoke test (the plan's file
+  list only named the one in `test_phases_media.py`) had the same
+  `None`-return incompatibility once `_clean_segment` started calling
+  `.get(...)` on the result - fixed the same way, a realistic result
+  dict.
+- The plan's own `test_segment_over_cap_retries_one_level_down` fixture
+  had an inverted conditional (`8.0 if thresh == -40.0 else 2.0`) that
+  contradicted its own comment and never actually exercised the retry
+  path it claims to test - the first call (aggressiveness="high",
+  thresh=-35.0) fell into the `else` branch and returned an
+  under-the-cap value, so no retry ever fired. Corrected to
+  `2.0 if thresh == -40.0 else 8.0`, verified the corrected assertion
+  passes against the (unmodified, spec-matching) `_clean_segment`
+  implementation.
+- `tests/core/test_invalidation.py`'s `SETTINGS`-count tripwire
+  (64 → 66) for the two new settings - exactly the kind of update its
+  own docstring anticipates.
+- Three new mypy errors from `voice.py`'s new code (two
+  `no-untyped-call` on the vendored `remove_silences_core`, one
+  `float(object)` incompatibility in `_removed_pct`) - fixed with the
+  same `# type: ignore[no-untyped-call]  # the vendored engine is
+  untyped by design` pattern already used elsewhere in this file and
+  `director.py`, and by typing `_removed_pct`'s parameter `dict[str,
+  Any]` instead of `dict[str, object]`.
+
+**Final verification (Step 3.1):**
+- `pytest tests -q`: **980 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as the pre-slice baseline. Zero regressions.
+- `mypy avg`: 689 errors (was 690 before this slice touched anything;
+  the one fewer is incidental to this slice's own new code, not a
+  pre-existing error that disappeared elsewhere) - zero new errors
+  contributed by any file this slice touches, confirmed via `git stash`
+  same-environment comparison exactly as Slice 20's Task 7 did.
+
+**Commits** (branch `slice-21-duration-narration`, each pushed):
+`25dfe6f` Task 1, `2223ce0` Task 2, plus this ledger entry for Task 3.
+
+**Deferred / explicitly out of scope** (per the design spec): wiring
+`voice_speed` into actual TTS synthesis; widening
+`_MIN_SCENES`/`_MAX_SCENES` for long-form videos; a dedicated Slider UI
+treatment for the two new settings (the existing generic Settings UI
+already renders a `choice` and a `float` correctly without one - belongs
+with the Settings-selectors slice instead).
+
+---
+
+## Slice 22 — Progress bar phase-transition bug (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-11-slice-22-progress-bar-design.md`
+and `docs/superpowers/plans/2026-08-11-slice-22-progress-bar-plan.md`, on
+branch `slice-22-progress-bar` off `main` (pushed to
+`origin/slice-22-progress-bar`). Frontend-only slice, one file, one
+function, one commit.
+
+**Root cause:** `web/src/useEvents.ts`'s `foldByProject` - the per-project
+progress map behind `Transport.tsx` (mounted once, visible on every
+screen) - only ever handled `progress` events (write/overwrite) and
+terminal events (delete). A `phase_started` event fell through to the
+untouched-map branch on purpose, per the function's own prior docstring.
+Net effect: phase N's last `progress` event (percent 100) stayed in the
+map after phase N+1 started, until phase N+1 happened to emit its own
+first `progress` tick - visibly stuck at the previous phase's 100% in
+the meantime.
+
+**Fix:** `foldByProject` gained a `phase_started` branch that replaces
+(never deletes) the project's entry with a fresh `{percent: 0, message:
+"Starting <Phase>…"}`, phase label resolved from `phases.ts`'s
+`PHASE_DEFS`. Replace rather than delete because `Home.tsx`'s
+hero/stack requires a truthy `byProject` entry to show a job at all - a
+bare delete would make an actively running job flicker out of the UI for
+the gap, which is worse than the bug being fixed. Side effect noted in
+the design spec as intentional: a job's very first phase now appears in
+the hero the moment `phase_started` fires (at 0%) rather than waiting for
+its first `progress` tick.
+
+**Verification:** `cd web && npm run build && npm run lint` - both clean,
+pure addition, nothing else in the file needed adjustment, matching the
+plan's prediction exactly. No frontend test runner exists in this repo
+(`web/package.json` has no `vitest`/`jest` - confirmed, not introduced
+here per the design spec's explicit scope). The plan's documented manual
+check (start a real pipeline run, watch the transport bar cross a phase
+boundary in a live WebView session) is outside what this sandbox can
+exercise - flagging that as unverified-by-me rather than claiming it was
+checked; the fix is a direct, minimal, single-branch addition whose logic
+was verified by code review against every consumer (`Home.tsx`,
+`useRenderClock`) as the design spec itself lays out, but an actual
+running-app check is still worth doing before this ships.
+
+**Commit** (branch `slice-22-progress-bar`, pushed): `99fe376`, plus this
+ledger entry.
+
+**Deferred / explicitly out of scope** (per the design spec): adding a
+frontend test runner; the single last-event `progress`/`phaseStarted`
+reducer path (already correct, not touched); `foldPhases` (separate
+function/consumer, not implicated in this bug).
