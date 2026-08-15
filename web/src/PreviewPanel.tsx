@@ -24,6 +24,13 @@ interface Props {
   /** Settings.tsx's own `valueById` - draft-aware, so the preview reflects
    * an edit the instant it is made rather than waiting for Save. */
   valueOf: (id: string) => string;
+  /** Bumped by `PreviewTab`'s Refresh button. Only `CaptionPreview` and
+   * `OverlayPreview` read it - `VoicePreview`/`ImagePreview` are paid,
+   * gated behind their own explicit "Generate a sample" button, and stay
+   * that way; adding a second path to `confirm_paid: true` here would be
+   * exactly the regression this module's own docstring already warns
+   * against (see "the money rule" below). */
+  refreshKey?: number;
 }
 
 /** Pulls FastAPI's `{"detail": "..."}` body out of the raw text `api.ts`'s
@@ -77,14 +84,20 @@ function captionFrameSize(aspectRatio: string): { width: number; height: number 
  * be a pile of kind-specific branches masquerading as one component. What
  * IS shared is the debounce interval, the paid-provider set, and the frame
  * markup, all defined once above/below rather than per kind. */
-export default function PreviewPanel({ kind, valueOf }: Props) {
-  if (kind === "caption") return <CaptionPreview valueOf={valueOf} />;
-  if (kind === "overlay") return <OverlayPreview valueOf={valueOf} />;
+export default function PreviewPanel({ kind, valueOf, refreshKey }: Props) {
+  if (kind === "caption") return <CaptionPreview valueOf={valueOf} refreshKey={refreshKey} />;
+  if (kind === "overlay") return <OverlayPreview valueOf={valueOf} refreshKey={refreshKey} />;
   if (kind === "voice") return <VoicePreview valueOf={valueOf} />;
   return <ImagePreview valueOf={valueOf} />;
 }
 
-function CaptionPreview({ valueOf }: { valueOf: (id: string) => string }) {
+function CaptionPreview({
+  valueOf,
+  refreshKey,
+}: {
+  valueOf: (id: string) => string;
+  refreshKey?: number;
+}) {
   // RAW values, straight off the setting - no invented fallback here. The
   // backend's `sample_ass` (avg.pipeline.phases.captions) is the one
   // resolver: a blank font or a size of 0 reaches it exactly as the real
@@ -133,7 +146,7 @@ function CaptionPreview({ valueOf }: { valueOf: (id: string) => string }) {
         });
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [width, height, fontName, fontSize, position]);
+  }, [width, height, fontName, fontSize, position, refreshKey]);
 
   useEffect(
     () => () => {
@@ -160,7 +173,13 @@ function CaptionPreview({ valueOf }: { valueOf: (id: string) => string }) {
  * settings change. `Promise.allSettled` rather than `Promise.all`: a
  * failure drawing one card (an unknown element, which cannot actually
  * happen here since both specs are fixed) must not blank the other. */
-function OverlayPreview({ valueOf }: { valueOf: (id: string) => string }) {
+function OverlayPreview({
+  valueOf,
+  refreshKey,
+}: {
+  valueOf: (id: string) => string;
+  refreshKey?: number;
+}) {
   // RAW values, same rule as `CaptionPreview` above: `overlay_png`/
   // `takeover_png` resolve a blank value through
   // `avg.media.overlays.resolve_brand`, the same function a real render
@@ -222,7 +241,7 @@ function OverlayPreview({ valueOf }: { valueOf: (id: string) => string }) {
       });
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [width, height, font, accent1, accent2, highlight]);
+  }, [width, height, font, accent1, accent2, highlight, refreshKey]);
 
   useEffect(
     () => () => {
