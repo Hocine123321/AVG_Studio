@@ -221,12 +221,16 @@ export default function QuickPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
 
-  // Re-clamp on resize while open, per spec §2.
+  // Re-clamp on resize while open, per spec §2. Size first, then position
+  // with the (possibly now-smaller) size - a window that got shorter must
+  // shrink the panel's own height back under the new `MAX_HEIGHT_VH`
+  // ceiling, not just nudge its position; clampSize's ceiling is itself a
+  // fraction of `window.innerHeight`, so it already reflects the new size
+  // by the time this runs.
   useEffect(() => {
     if (!open) return;
     function onResize() {
-      const { w, h } = panelSize();
-      setPosition((p) => clamp(p, w, h));
+      setSize((s) => clampSize(s));
     }
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);

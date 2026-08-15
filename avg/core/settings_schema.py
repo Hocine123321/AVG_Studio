@@ -239,6 +239,16 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="director2",
     ),
+    SettingSpec(
+        id="kb_intensity",
+        group="video",
+        label="Ken Zoom intensity",
+        help="How far the pan/zoom drifts from each scene's own designed motion (0 = none, 100 = default, up to 150 = stronger). Applied at render time, on top of whatever motion Director already chose per scene.",
+        type="int",
+        default=100,
+        scope="channel",
+        invalidates="render",
+    ),
     # --- per-phase text models (the mockup's Models table) ---
     #
     # One `provider/model` string per slot rather than a provider choice
