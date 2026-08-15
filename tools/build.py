@@ -61,14 +61,25 @@ def build_pyinstaller() -> None:
     )
 
 
-def build_installer(iscc: Path = DEFAULT_ISCC) -> None:
-    """Run Inno Setup on installer/avg.iss -> dist/AVG-Setup.exe."""
+def build_installer(iscc: Path = DEFAULT_ISCC, release: bool = False) -> None:
+    """Run Inno Setup on installer/avg.iss -> dist/AVG-Setup.exe.
+
+    `release=False` (the default) passes /DFASTBUILD, which installer/avg.iss
+    reads to switch Compression to lzma2/fast - seconds instead of minutes for
+    the ~430MB onedir tree, at the cost of a bigger .exe. Only pass
+    release=True for the build you're actually about to publish; that's the
+    one time the slow lzma2/max compression is worth paying for.
+    """
     onedir = REPO_ROOT / "dist" / "AVG" / "AVG.exe"
     if not onedir.is_file():
         raise SystemExit(f"{onedir} is missing - run `python tools/build.py pyinstaller` first")
     if not iscc.is_file():
         raise SystemExit(f"ISCC.exe not found at {iscc} - pass --iscc PATH")
-    subprocess.run([str(iscc), str(ISS)], check=True, cwd=REPO_ROOT)
+    cmd = [str(iscc)]
+    if not release:
+        cmd.append("/DFASTBUILD")
+    cmd.append(str(ISS))
+    subprocess.run(cmd, check=True, cwd=REPO_ROOT)
 
 
 def build_nuitka(entry: Path = SPIKE_ENTRY, output_filename: str = "avg-spike-nuitka.exe") -> None:
@@ -96,15 +107,20 @@ def main() -> None:
         "--iscc", type=Path, default=DEFAULT_ISCC,
         help="path to ISCC.exe (only used by 'installer'/'all')",
     )
+    parser.add_argument(
+        "--release", action="store_true",
+        help="use full lzma2/max compression (slow) instead of the default fast "
+             "dev compression (only used by 'installer'/'all')",
+    )
     args = parser.parse_args()
 
     if args.step == "pyinstaller":
         build_pyinstaller()
     elif args.step == "installer":
-        build_installer(iscc=args.iscc)
+        build_installer(iscc=args.iscc, release=args.release)
     elif args.step == "all":
         build_pyinstaller()
-        build_installer(iscc=args.iscc)
+        build_installer(iscc=args.iscc, release=args.release)
     elif args.step == "nuitka":
         build_nuitka()
 

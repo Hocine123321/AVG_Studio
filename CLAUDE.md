@@ -36,7 +36,7 @@ Then open `http://127.0.0.1:8756/?token=devtoken`.
 
 Frontend (`cd web`): `npm run dev`, `npm run build` (`tsc -b && vite build`), `npm run lint` (oxlint). No frontend unit tests — the UI is verified by looking at it.
 
-Full app + installer from current source (~4 min): run `Build Installer.bat`, which wraps `tools/make_release.ps1`. Produces `AVG APP/` (runnable) and `installer/AVG-Setup.exe`. `-SkipInstaller` skips the slow Inno Setup compress. `tools/build.py pyinstaller|installer|all` is the layer underneath; it requires `web/dist` and `vendor/ffmpeg/ffmpeg.exe` (`tools/fetch_ffmpeg.py`) and fails loudly if either is missing.
+Full app + installer from current source (~4 min at full quality, well under a minute for the default fast dev build): run `Build Installer.bat`, which wraps `tools/make_release.ps1`. Produces `AVG APP/` (runnable) and `installer/AVG-Setup.exe`. Installer compression defaults to `lzma2/fast`; `-Release` switches to full `lzma2/max` for the build you actually publish. `-SkipInstaller` skips the Inno Setup step entirely (app-only). `web/` build is skipped automatically when nothing under it changed since the last run (`web/.build-hash`). `tools/build.py pyinstaller|installer|all [--release]` is the layer underneath; it requires `web/dist` and `vendor/ffmpeg/ffmpeg.exe` (`tools/fetch_ffmpeg.py`) and fails loudly if either is missing. `dist/`, `AVG APP/`, and `build/` are gitignored (regenerated, not committed) — ship a release via GitHub Releases, not a repo commit.
 
 ## Architecture
 

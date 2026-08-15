@@ -7,16 +7,39 @@
     Run it any time the source changes. It always rebuilds from the live files;
     there is no cache to go stale and nothing to remember to update first.
 
+    Two things make the default run fast:
+      - The installer step uses lzma2/fast, not lzma2/max. Pass -Release for the
+        build you're actually about to publish/ship - THAT one is worth the extra
+        few minutes of lzma2/max compression on ~430MB. Every other run doesn't
+        need to pay for it.
+      - `npm run build` is skipped when nothing under web/ (src, public, config,
+        lockfile) changed since the last successful build. Delete
+        web\.build-hash to force a rebuild if this is ever wrong.
+    PyInstaller's own build\ cache is left alone between runs on purpose - it's
+    what makes a rebuild with only a few changed .py files fast. Don't add
+    --clean to the pyinstaller call in tools/build.py; that throws the cache
+    away and turns every run into a from-scratch freeze.
+
     Usage (from anywhere):
         powershell -ExecutionPolicy Bypass -File "D:\AVG_Studio\tools\make_release.ps1"
-        powershell ... -File tools\make_release.ps1 -SkipInstaller   # app only, faster
+        powershell ... -File tools\make_release.ps1 -SkipInstaller   # app only, fastest
+        powershell ... -File tools\make_release.ps1 -Release         # publishing: full lzma2/max
 #>
 [CmdletBinding()]
 param(
-    # Skip the Inno Setup step. The app in "AVG APP\" is still refreshed - useful
-    # while iterating, since compressing 425 MB is the slowest part by far.
-    [switch]$SkipInstaller
+    # Skip the Inno Setup step entirely. The app in "AVG APP\" is still
+    # refreshed - useful while iterating on app code with no installer changes
+    # to verify.
+    [switch]$SkipInstaller,
+    # Full lzma2/max compression instead of the default lzma2/fast. Slower
+    # (minutes, not seconds, for ~430MB) but produces the smaller installer
+    # that's actually worth shipping. Use this only for the build you publish.
+    [switch]$Release
 )
+
+if ($SkipInstaller -and $Release) {
+    throw "-SkipInstaller and -Release are mutually exclusive (there's no installer to compress)."
+}
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -37,14 +60,41 @@ if (-not (Test-Path $py)) {
 Step 'Building the web UI'
 Push-Location (Join-Path $repo 'web')
 try {
-    & npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed ($LASTEXITCODE)" }
+    # Hash everything that can affect the bundle: source, static assets, and
+    # every config file that feeds vite/tsc. Sorted paths -> deterministic hash
+    # regardless of filesystem enumeration order.
+    $hashInputs = @(Get-ChildItem -Recurse -File -Path 'src', 'public' -EA SilentlyContinue) +
+                  @(Get-Item -EA SilentlyContinue 'package.json', 'package-lock.json',
+                    'vite.config.ts', 'tsconfig.json', 'tsconfig.app.json',
+                    'tsconfig.node.json', 'index.html')
+    $combined = ($hashInputs | Sort-Object FullName | Get-FileHash -Algorithm SHA256).Hash -join '|'
+    $hashBytes = [Text.Encoding]::UTF8.GetBytes($combined)
+    $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($hashBytes)) -replace '-', ''
+
+    $hashFile = '.build-hash'
+    $prevHash = if (Test-Path $hashFile) { (Get-Content $hashFile -Raw).Trim() } else { '' }
+
+    if ($hash -eq $prevHash -and (Test-Path 'dist\index.html')) {
+        Note 'web/ unchanged since the last build - skipping npm run build'
+    } else {
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build failed ($LASTEXITCODE)" }
+        Set-Content -Path $hashFile -Value $hash -NoNewline
+    }
 } finally { Pop-Location }
 
 Step 'Freezing the app'
 Push-Location $repo
 try {
-    if ($SkipInstaller) { & $py tools\build.py pyinstaller } else { & $py tools\build.py all }
+    if ($SkipInstaller) {
+        & $py tools\build.py pyinstaller
+    } elseif ($Release) {
+        Note 'Full lzma2/max compression (-Release) - this is the slow part, on purpose.'
+        & $py tools\build.py all --release
+    } else {
+        Note 'Fast lzma2/fast compression (default). Pass -Release for the build you ship.'
+        & $py tools\build.py all
+    }
     if ($LASTEXITCODE -ne 0) { throw "tools/build.py failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 

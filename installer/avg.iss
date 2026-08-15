@@ -31,7 +31,16 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
 OutputBaseFilename=AVG-Setup
+; lzma2/max squeezes the smallest installer but is by far the slowest step in a
+; release build (~430MB of frozen deps). tools/build.py passes /DFASTBUILD on
+; every normal iteration build (lzma2/fast - seconds, not minutes) and only
+; drops to lzma2/max when make_release.ps1 is run with -Release, i.e. the build
+; that's actually about to be published.
+#ifdef FASTBUILD
+Compression=lzma2/fast
+#else
 Compression=lzma2/max
+#endif
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
