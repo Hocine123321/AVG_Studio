@@ -46,7 +46,8 @@ def _render_kwargs(settings: dict) -> dict[str, object]:
     `render_engine` were dead switches in the catalogue: the settings screen
     rendered them, saved them, and no render ever read them - the values
     actually used came from the LEGACY `config.json`, which the user has no
-    way to edit from this app.
+    way to edit from this app. `kb_intensity` (Slice 25) was the same
+    story, added to this function rather than given a second one.
 
     Only keys the channel actually carries are returned, so an unset setting
     still falls through to `RenderRequest`'s own default rather than being
@@ -58,6 +59,9 @@ def _render_kwargs(settings: dict) -> dict[str, object]:
         kwargs["fps"] = fps
     if isinstance(settings.get("ken_burns"), bool):
         kwargs["ken_burns"] = settings["ken_burns"]
+    kb_intensity = settings.get("kb_intensity")
+    if isinstance(kb_intensity, int) and not isinstance(kb_intensity, bool):
+        kwargs["kb_intensity"] = kb_intensity
     codec = settings.get("render_codec")
     if isinstance(codec, str) and codec:
         kwargs["codec"] = codec

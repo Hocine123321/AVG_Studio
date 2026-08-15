@@ -179,6 +179,22 @@ def test_render_threads_setting_reaches_the_request():
     assert _thread_kwargs("plenty") == {}
 
 
+def test_kb_intensity_setting_reaches_the_request():
+    """`RenderSettings`/`config.json` used to be the only source for this -
+    a real channel setting today, same pattern `fps` already has.
+    """
+    from avg.pipeline.phases.render import _render_kwargs
+
+    assert _render_kwargs({"kb_intensity": 60})["kb_intensity"] == 60
+    assert _render_kwargs({"kb_intensity": 150})["kb_intensity"] == 150
+    # Unset, wrong type, or a bool (which `isinstance(x, int)` would
+    # otherwise accept - `bool` is an `int` subclass in Python) all defer
+    # to `RenderRequest`'s own default, matching `fps`'s existing guard.
+    assert "kb_intensity" not in _render_kwargs({})
+    assert "kb_intensity" not in _render_kwargs({"kb_intensity": "a lot"})
+    assert "kb_intensity" not in _render_kwargs({"kb_intensity": True})
+
+
 def test_render_reads_fps_off_channel_values_even_with_no_channel(tmp_path, monkeypatch):
     """Slice 19 Task 5: `RenderPhase._render` passes `ctx.channel_values`
     into `_render_kwargs`, not `getattr(ctx.channel, "settings", {})`. Before
