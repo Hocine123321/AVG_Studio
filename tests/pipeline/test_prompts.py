@@ -343,3 +343,25 @@ def test_scene_segmentation_prompt_preserves_narration_verbatim_instruction_and_
     text = build_scene_segmentation_prompt(_inputs(), narration=narration)
     assert narration in text
     assert "the narration is FINAL" in text
+
+
+from avg.pipeline.prompts import _word_budget_for_duration
+
+
+@pytest.mark.parametrize(
+    "duration_seconds,expected",
+    [
+        (30, (60, 75)),      # today's fixed values, reproduced exactly
+        (60, (120, 150)),
+        (90, (180, 225)),
+        (120, (240, 300)),   # the "2m" preset
+        (240, (480, 600)),   # the "4m" preset
+    ],
+)
+def test_word_budget_scales_with_duration(duration_seconds, expected):
+    assert _word_budget_for_duration(duration_seconds) == expected
+
+
+def test_narration_prompt_default_word_bounds_scale_with_duration():
+    text = build_narration_prompt(_inputs(duration_seconds=120))
+    assert "240 to 300 words" in text

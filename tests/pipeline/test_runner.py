@@ -276,6 +276,10 @@ def test_default_registry_runs_all_eight_stub_phases_successfully(monkeypatch, t
 
     def fake_remove_silences_core(inp, out, thresh, min_sil, keep, beat_map, timeline, scene_map, pause_map="", pause_target_ms=0):
         Path(out).write_bytes(Path(inp).read_bytes())
+        # Matches avg.media.vendor.avg.remove_silences_core's real return
+        # shape (Slice 21) - this smoke test's own fake, independent of the
+        # one in tests/pipeline/test_phases_media.py.
+        return {"no_speech": False, "original_dur": 1.0, "cleaned_dur": 1.0, "removed_dur": 0.0, "chunks": 1, "pauses_kept": 0}
 
     monkeypatch.setattr("avg.pipeline.phases.voice.remove_silences_core", fake_remove_silences_core)
 
