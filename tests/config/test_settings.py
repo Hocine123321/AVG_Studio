@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings
+from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
 
 
 def test_round_trips_a_saved_document(tmp_path):
@@ -127,3 +127,14 @@ class TestLegacyActiveChannelMigration:
 def test_default_settings_path_is_under_user_assets_config(monkeypatch, tmp_path):
     monkeypatch.setattr("avg.config.settings.user_assets_root", lambda: tmp_path)
     assert default_settings_path() == tmp_path / "Config" / "settings.json"
+
+
+def test_suggest_output_root_default_falls_back_to_user_assets_projects(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.config.settings.LEGACY_OUTPUT_ROOT", tmp_path / "no_such_legacy_folder")
+    monkeypatch.setattr("avg.config.settings.user_assets_root", lambda: tmp_path / "UserAssets")
+
+    fallback, count, source = suggest_output_root()
+
+    assert source == "default"
+    assert fallback == tmp_path / "UserAssets" / "Projects"
+    assert count == 0

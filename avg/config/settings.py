@@ -173,8 +173,9 @@ def suggest_output_root() -> tuple[Path, int, str]:
     user for confirmation):
       1. The legacy folder, if it exists AND actually holds projects -
          `("legacy", <path>, <count>)`.
-      2. Otherwise `%USERPROFILE%/Videos/AVG Studio` - `("default", <path>, <count>)`.
-         Not created here; the folder is only created when the user accepts
+      2. Otherwise `UserAssets/Projects` (`avg.config.user_assets.
+         user_assets_root()`) - `("default", <path>, <count>)`. Not
+         created here; the folder is only created when the user accepts
          it (see `avg.api.app`'s `POST /api/settings`), and its count is
          whatever `import_all` finds if it happens to already exist, 0
          otherwise.
@@ -190,7 +191,7 @@ def suggest_output_root() -> tuple[Path, int, str]:
         if report.imported:
             return LEGACY_OUTPUT_ROOT, len(report.imported), "legacy"
 
-    fallback = Path.home() / "Videos" / "AVG Studio"
+    fallback = user_assets_root() / "Projects"
     count = len(import_all(fallback).imported) if fallback.exists() else 0
     return fallback, count, "default"
 
