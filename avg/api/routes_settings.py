@@ -37,6 +37,7 @@ in through the generic values route either.
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import threading
@@ -1095,6 +1096,29 @@ async def get_health_report(request: Request, refresh: bool = False, deep: bool 
             for stage in stages
         ],
     }
+
+
+@router.post("/api/health/open-logs")
+async def open_logs_folder(request: Request) -> dict:
+    """Reveals the folder holding `errors.json` in Explorer - the App
+    Health screen's Logs button. Same `os.startfile` + pytest-skip +
+    swallow-failures shape as `avg.export.capcut.export_take`'s existing
+    Explorer reveal, not a new one - opens the containing folder, not the
+    file itself, for the same reason: `os.startfile` on a `.json` file
+    launches whatever program Windows associates with that extension, not
+    Explorer.
+
+    Creates the folder first if it doesn't exist yet - a fresh install
+    with no recorded errors has never had a reason to create it, and a
+    button that silently does nothing on a clean install is exactly the
+    failure shape Task 1 of this slice fixes for Recent Errors.
+    """
+    folder = request.app.state.error_store.path.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        with suppress(Exception):
+            os.startfile(folder)  # type: ignore[attr-defined]  # Windows-only, by design
+    return {"opened": str(folder)}
 
 
 @router.get("/api/costs")
