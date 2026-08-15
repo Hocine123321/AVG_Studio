@@ -748,3 +748,58 @@ deferred); the same manual live-app check caveat as Slices 22 and 23 -
 drag-resize and the puller's visual alignment are verified by code
 review and build/lint, not an actual running WebView session, which
 this sandbox cannot exercise.
+
+---
+
+## Slice 25 — Ken Zoom intensity (2026-08-15)
+
+Implemented per `docs/superpowers/specs/2026-08-14-slice-25-kenzoom-design.md`
+and `docs/superpowers/plans/2026-08-14-slice-25-kenzoom-plan.md`, one
+task, on the shared `development` branch.
+
+**Root cause, traced in the design spec before any code was touched:**
+`kb_intensity` was a `RenderRequest` field with correct plumbing all the
+way down to the vendored render call, but no `SettingSpec` existed for
+it - the Settings screen had nothing to render, so the value it always
+got was `RenderRequest`'s own hardcoded default (100), regardless of
+what a user might have wanted. Exact same class of bug
+`avg.pipeline.phases.render._render_kwargs`'s own docstring already
+names as its reason for existing (`fps`, `ken_burns`, `render_codec`,
+`render_engine` all had this same gap once) - `kb_intensity` was simply
+never added to that function when it was written.
+
+**The fix, one function extension:** a new `SettingSpec(id="kb_intensity",
+group="video", type="int", default=100, scope="channel",
+invalidates="render")`, and `_render_kwargs` gains one more branch
+(`isinstance(kb_intensity, int) and not isinstance(kb_intensity, bool)`
+- the same `bool`-is-an-`int`-subclass guard `fps`'s branch already
+uses). `invalidates="render"`, not `ken_burns`'s own `"director2"` -
+intensity scales an already-decided per-scene motion at render time, so
+changing it only needs a re-render, never re-planning scenes.
+
+**Traced but explicitly not touched:** the mathematical meaning of
+"100" (a neutral 1.0x multiplier on each scene's own designed motion
+deviation from no-zoom, not "100% zoom") - documented in the setting's
+own `help` text so the number means something to whoever sees it in the
+UI. `kb_mode`'s pre-existing `"flat"`/`"dynamic"` default mismatch
+between `RenderSettings` and the vendored function's own signature -
+real, but unrelated to this item and out of scope per the design spec.
+
+**Fallout:** the `SETTINGS`-count tripwire in `test_invalidation.py`
+(66 → 67), the same routine update Slice 21's Task 2 needed for its own
+two new settings.
+
+**Final verification:**
+- `pytest tests -q`: **984 passed, 7 failed, 1 skipped** - same 7
+  pre-existing failures as every prior slice's baseline. Zero
+  regressions.
+- `mypy avg`: 690 errors, identical to baseline. Zero new errors.
+
+**Commit** (branch `development`, pushed): `dd6e998`, plus this ledger
+entry.
+
+**Deferred / explicitly out of scope** (per the design spec): `kb_mode`
+(not requested, unrelated pre-existing inconsistency); a Slider UI
+treatment for `kb_intensity` (the Settings-selectors slice's concern -
+the existing generic settings UI already renders an `int` setting
+correctly without one).
