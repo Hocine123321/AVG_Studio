@@ -771,6 +771,26 @@ def test_voice_trim_aggressiveness_setting_reaches_remove_silences_core(tmp_path
     assert (thresh, min_sil, keep) == _AGGRESSIVENESS_PARAMS["low"]
 
 
+def test_a_malformed_max_removable_pct_falls_back_rather_than_crashing(tmp_path, monkeypatch):
+    """A hand-edited or otherwise corrupted `settings.json` must not take
+    out the whole Voice phase over one bad value in
+    `voice_max_removable_silence_pct` - falls back to the 40.0 default,
+    the same defensiveness `kb_intensity` already has in
+    `avg.pipeline.phases.render._render_kwargs`.
+    """
+    fake = _FakeVoiceProvider()
+    _remove_calls, _assemble_calls = _patch_voice_collaborators(monkeypatch, fake)
+
+    project = _project(tmp_path)
+    channel = _channel({"voice_max_removable_silence_pct": "not a number"})
+    ctx, _events = _ctx(project, channel=channel)
+    _write_narration(ctx, "One single segment, no pause markers here.")
+
+    VoicePhase().run(ctx)  # must not raise
+
+    assert (project.folder / "audio" / "optimized_voice.mp3").exists()
+
+
 def test_voice_no_pause_marker_produces_a_single_segment_and_zero_gap(tmp_path, monkeypatch):
     fake = _FakeVoiceProvider()
     _remove_calls, assemble_calls = _patch_voice_collaborators(monkeypatch, fake)

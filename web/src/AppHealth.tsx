@@ -126,8 +126,16 @@ export default function AppHealth() {
                   {index + 1}
                 </span>
                 <div style={{ minWidth: 0 }}>
-                  <h2 className="health-stage__title">{stage.name}</h2>
-                  <p className="health-stage__detail">{stage.detail}</p>
+                  {/* `<button>`'s content model is phrasing content only -
+                      `<h2>`/`<p>` (both flow/block-level, not phrasing)
+                      inside one is invalid HTML regardless of how browsers
+                      happen to render it. `<span>` with `display: block`
+                      (tokens.css) keeps the exact same visual stacking
+                      with none of that. */}
+                  <span className="health-stage__title" role="heading" aria-level={2}>
+                    {stage.name}
+                  </span>
+                  <span className="health-stage__detail">{stage.detail}</span>
                 </div>
                 <span className="home__spacer" />
                 <span className={stage.ok ? "chip chip--ok" : "chip chip--bad"}>
