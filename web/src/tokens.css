@@ -4590,10 +4590,15 @@ a:hover {
    drag implementation. */
 .quickpanel__resize-handle {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 16px;
-  height: 16px;
+  right: 0;
+  bottom: 0;
+  /* Hit area a bit larger than the visible grip below - 16px was tight
+     for a mouse pointer to land on reliably, and there is real headroom
+     for it now that `.quickpanel__body`'s margin (above) keeps this whole
+     corner clear regardless. The visible icon's own footprint (14-22px
+     from the corner, via its `::after`) is unchanged. */
+  width: 20px;
+  height: 20px;
   cursor: nwse-resize;
   border-radius: 0 0 var(--radius-lg) 0;
 }
@@ -4601,8 +4606,8 @@ a:hover {
 .quickpanel__resize-handle::after {
   content: "";
   position: absolute;
-  right: 4px;
-  bottom: 4px;
+  right: 6px;
+  bottom: 6px;
   width: 8px;
   height: 8px;
   border-right: 2px solid var(--line-2);
@@ -4710,6 +4715,20 @@ a:hover {
   min-height: 0;
   overflow: auto;
   padding: 14px;
+  /* Slice 24's resize handle lives in this exact corner (`right: 0;
+     bottom: 0; width/height: 20px` on `.quickpanel__resize-handle`,
+     sibling below). Without this margin, `overflow: auto`'s own
+     scrollbar - vertical OR horizontal, whichever the content triggers -
+     renders flush against THIS element's own border-box edge, which is
+     otherwise flush against the panel's edge too: the scrollbar's own
+     hit-testing wins over the handle sitting underneath it, regardless
+     of DOM order or z-index, since a native scrollbar isn't part of the
+     normal CSS stacking-context painting model. 24px clears the handle's
+     full 0-20px footprint on both axes with a small buffer against pixel
+     rounding at the exact boundary - confirmed against the handle's own
+     numbers, not a guess. */
+  margin-right: 24px;
+  margin-bottom: 24px;
 }
 
 /* The Preview tab's own layout (spec §3.3): "the frame is the subject...
