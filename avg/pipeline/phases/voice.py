@@ -280,8 +280,16 @@ class VoicePhase:
             aggressiveness = str(settings.get("voice_trim_aggressiveness") or "medium")
             if aggressiveness not in _AGGRESSIVENESS_PARAMS:
                 aggressiveness = "medium"
-            max_removable_pct = float(settings.get("voice_max_removable_silence_pct", 40.0))
-            max_removable_pct = max(0.0, min(100.0, max_removable_pct))
+            # isinstance first, not a bare float(...) - a malformed value
+            # (a hand-edited settings.json, a future migration bug) must
+            # fall back to the default rather than raise and take out the
+            # whole phase over one bad setting, matching every other
+            # settings read on this line (`aggressiveness` above,
+            # `pauses_enabled` below) and `avg.pipeline.phases.render
+            # ._render_kwargs`'s own `kb_intensity` handling.
+            raw_max_pct = settings.get("voice_max_removable_silence_pct", 40.0)
+            max_removable_pct = raw_max_pct if isinstance(raw_max_pct, (int, float)) and not isinstance(raw_max_pct, bool) else 40.0
+            max_removable_pct = max(0.0, min(100.0, float(max_removable_pct)))
 
             cleaned_paths = []
             for i, raw_path in enumerate(raw_paths, start=1):
