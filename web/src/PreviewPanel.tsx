@@ -24,12 +24,14 @@ interface Props {
   /** Settings.tsx's own `valueById` - draft-aware, so the preview reflects
    * an edit the instant it is made rather than waiting for Save. */
   valueOf: (id: string) => string;
-  /** Bumped by `PreviewTab`'s Refresh button. Only `CaptionPreview` and
-   * `OverlayPreview` read it - `VoicePreview`/`ImagePreview` are paid,
-   * gated behind their own explicit "Generate a sample" button, and stay
-   * that way; adding a second path to `confirm_paid: true` here would be
-   * exactly the regression this module's own docstring already warns
-   * against (see "the money rule" below). */
+  /** Bumped by `PreviewTab`'s Refresh button. `CaptionPreview` and
+   * `OverlayPreview` always read it; `VoicePreview` reads it too, but only
+   * its free-provider auto-refresh effect - never `generateSample`, the
+   * one path to `confirm_paid: true`, which Refresh must never gain a
+   * second route to (see "the money rule" below). `ImagePreview` doesn't
+   * accept it at all: every image generation is paid with no free-path
+   * effect to safely wire it into, so a Refresh press there would have
+   * nothing non-paid left to do. */
   refreshKey?: number;
 }
 
@@ -87,7 +89,7 @@ function captionFrameSize(aspectRatio: string): { width: number; height: number 
 export default function PreviewPanel({ kind, valueOf, refreshKey }: Props) {
   if (kind === "caption") return <CaptionPreview valueOf={valueOf} refreshKey={refreshKey} />;
   if (kind === "overlay") return <OverlayPreview valueOf={valueOf} refreshKey={refreshKey} />;
-  if (kind === "voice") return <VoicePreview valueOf={valueOf} />;
+  if (kind === "voice") return <VoicePreview valueOf={valueOf} refreshKey={refreshKey} />;
   return <ImagePreview valueOf={valueOf} />;
 }
 
@@ -277,7 +279,13 @@ function OverlayPreview({
   );
 }
 
-function VoicePreview({ valueOf }: { valueOf: (id: string) => string }) {
+function VoicePreview({
+  valueOf,
+  refreshKey,
+}: {
+  valueOf: (id: string) => string;
+  refreshKey?: number;
+}) {
   const provider = valueOf("voice_provider") || "elevenlabs";
   const voiceId = valueOf("voice_id");
   const paid = PAID_VOICE_PROVIDERS.has(provider);
@@ -298,7 +306,12 @@ function VoicePreview({ valueOf }: { valueOf: (id: string) => string }) {
   // never run for a provider in `PAID_VOICE_PROVIDERS`, or a settings
   // change - not a press - would spend ElevenLabs characters. `paid` sits
   // first in the guard specifically so that flips to true before anything
-  // else in this effect can run.
+  // else in this effect can run. `refreshKey` (Slice 24/26) rides in this
+  // same dependency array for the same reason `width`/`fontName`/etc. do
+  // in `CaptionPreview` - it forces this exact free re-fetch, on demand,
+  // through the one path that was already safe to force. It is NOT
+  // threaded into `generateSample` below - that stays the only path to
+  // `confirm_paid: true`, unchanged.
   useEffect(() => {
     if (paid || !voiceId) return;
     const generation = ++generationRef.current;
@@ -322,7 +335,7 @@ function VoicePreview({ valueOf }: { valueOf: (id: string) => string }) {
         });
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [paid, provider, voiceId]);
+  }, [paid, provider, voiceId, refreshKey]);
 
   useEffect(
     () => () => {

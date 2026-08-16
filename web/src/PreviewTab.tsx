@@ -17,22 +17,27 @@ const KIND_OPTIONS: { value: PreviewKind; label: string }[] = [
  * with a kind picker beside it rather than the group-implied choice
  * Settings.tsx relied on.
  *
- * `PreviewPanel` itself is untouched - it already takes `{ kind, valueOf }`
- * and knows nothing about its container, so `ctx.valueById` (the same
+ * `PreviewPanel` itself takes `{ kind, valueOf, refreshKey }` and knows
+ * nothing about its container, so `ctx.valueById` (the same
  * `useSettingsData()` instance `QuickSettingsTab` shares - decision #3 of
- * the plan) is all this needs to pass through.
+ * the plan) is all this needs to pass through, alongside the `refreshKey`
+ * counter this Refresh button bumps.
  *
- * The money rule travels with `PreviewPanel` unchanged: neither
- * `VoicePreview` nor `ImagePreview` has any effect that reaches
- * `confirm_paid: true` - only their own "Generate a sample" button does.
- * Switching `kind` here just changes WHICH free-or-paid component mounts;
- * it does not add a new path to either paid call.
+ * The money rule holds regardless of `refreshKey`: neither `VoicePreview`
+ * nor `ImagePreview` has any EFFECT that reaches `confirm_paid: true` -
+ * only their own "Generate a sample" button does, unchanged.
+ * `VoicePreview` does read `refreshKey`, but only inside its free-provider
+ * auto-refresh effect (see `PreviewPanel.tsx`'s own doc on the prop) - a
+ * press does nothing for a paid voice provider, same as it always has.
+ * `ImagePreview` doesn't accept `refreshKey` at all, so the button is
+ * disabled outright on the Image tab rather than sit there looking live
+ * and doing nothing.
  */
 export default function PreviewTab({ ctx }: { ctx: SettingsCtx }) {
   const [kind, setKind] = useState<PreviewKind>("caption");
   // Bumped to force an immediate re-fetch rather than waiting for the
-  // debounce - see PreviewPanel.tsx's `refreshKey` doc for why this only
-  // does anything for Caption/Overlay.
+  // debounce - see PreviewPanel.tsx's `refreshKey` doc for exactly which
+  // kinds and which of their effects it reaches.
   const [refreshKey, setRefreshKey] = useState(0);
   return (
     <div className="quickpanel-preview">
@@ -47,6 +52,8 @@ export default function PreviewTab({ ctx }: { ctx: SettingsCtx }) {
         <button
           type="button"
           className="btn btn--sm"
+          disabled={kind === "image"}
+          title={kind === "image" ? "Image generation always costs a call - use \u201cGenerate a sample\u201d below" : undefined}
           onClick={() => setRefreshKey((k) => k + 1)}
         >
           Refresh
