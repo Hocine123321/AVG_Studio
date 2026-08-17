@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { artifactFileUrl, artifactUrl, getTakeArtifactList } from "../api";
+import VoicePlayer from "../VoicePlayer";
 
 /**
  * One body per phase, reading that phase's real output.
@@ -260,13 +261,13 @@ export function VoiceBody({ projectId, takeId, files }: BodyProps) {
       {has("raw_voice") && (
         <section className="artifact-audio">
           <p className="lbl">Raw narration</p>
-          <audio controls preload="none" src={artifactUrl(projectId, takeId, "raw_voice")} />
+          <VoicePlayer src={artifactUrl(projectId, takeId, "raw_voice")} label="raw narration" />
         </section>
       )}
       {has("optimized_voice") && (
         <section className="artifact-audio">
           <p className="lbl">Optimized narration — this is what the render uses</p>
-          <audio controls preload="none" src={artifactUrl(projectId, takeId, "optimized_voice")} />
+          <VoicePlayer src={artifactUrl(projectId, takeId, "optimized_voice")} label="optimized narration" />
         </section>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { previewCaption, previewImage, previewOverlay, previewTakeover, previewVoice } from "./api";
+import VoicePlayer from "./VoicePlayer";
 
 /** How long a settings change waits before it fires a free preview request -
  * long enough that dragging a slider or holding a key down settles before
@@ -366,7 +367,7 @@ function VoicePreview({
       <p className="lbl">Live preview</p>
       <div className={`preview-frame preview-frame--audio${busy ? " preview-frame--busy" : ""}`}>
         {url ? (
-          <audio controls src={url} />
+          <VoicePlayer src={url} label="voice sample" />
         ) : (
           <p className="preview-panel__empty">
             {paid
