@@ -239,9 +239,40 @@ export default function App() {
     apiPost(`/api/projects/${id}/cancel`).catch(() => {});
   }
 
+  // "Latest opened", not latest created and not the current take within a
+  // project (spec §1's explicit distinction) - every navigation-to-Studio
+  // path already goes through this one function, so recording it here
+  // covers Home's card click, Create's onCreated, and Run again/Resume
+  // (openAndRender, below) without instrumenting each separately.
+  const LAST_PROJECT_KEY = "avg.studio.lastProjectId";
+
   function openProject(id: string) {
     setStartError(null);
     setScreen({ name: "project", id });
+    try {
+      localStorage.setItem(LAST_PROJECT_KEY, id);
+    } catch {
+      // Best-effort - a UI convenience, never worth failing navigation over.
+    }
+  }
+
+  /** The Studio rail item's own handler - opens whichever project was last
+   * opened, confirming it still exists first (archived counts, since
+   * archiving only hides a project from Home's grid, it doesn't remove
+   * it - only a genuinely deleted or never-yet-opened id falls through).
+   * No stored id, or a stale one, goes Home instead of a dead click. */
+  function openStudio() {
+    let lastId: string | null = null;
+    try {
+      lastId = localStorage.getItem(LAST_PROJECT_KEY);
+    } catch {
+      lastId = null;
+    }
+    if (lastId && projects?.some((p) => p.id === lastId)) {
+      openProject(lastId);
+    } else {
+      setScreen({ name: "home" });
+    }
   }
 
   /** `Create`'s `onCreated` - the project already exists and its pipeline
@@ -367,6 +398,7 @@ export default function App() {
         }
         onHome={() => setScreen({ name: "home" })}
         onCreate={() => setScreen({ name: "create" })}
+        onStudio={openStudio}
         onChannels={() => setScreen({ name: "channels" })}
         onSettings={() => setScreen({ name: "settings" })}
         onHealth={() => setScreen({ name: "health" })}

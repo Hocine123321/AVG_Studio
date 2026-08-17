@@ -11,6 +11,10 @@ export interface RailProps {
   active: RailSection;
   onHome: () => void;
   onCreate: () => void;
+  /** Opens the latest opened project - App.tsx's own `openStudio`, which
+   * already confirms the id still exists and falls back to Home. This
+   * component doesn't make that decision, only triggers it. */
+  onStudio: () => void;
   onChannels: () => void;
   onSettings: () => void;
   onHealth: () => void;
@@ -47,6 +51,7 @@ export default function Rail({
   active,
   onHome,
   onCreate,
+  onStudio,
   onChannels,
   onSettings,
   onHealth,
@@ -100,9 +105,16 @@ export default function Rail({
         <IconPlus />
       </button>
 
-      <span className={`rail__item${active === "studio" ? " rail__item--on" : ""}`} aria-hidden="true">
+      <button
+        type="button"
+        className={`rail__item${active === "studio" ? " rail__item--on" : ""}`}
+        onClick={onStudio}
+        title="Studio"
+        aria-label="Studio — your latest opened video"
+        aria-current={active === "studio" ? "page" : undefined}
+      >
         <IconFilm />
-      </span>
+      </button>
 
       <span className="rail__spacer" />
 

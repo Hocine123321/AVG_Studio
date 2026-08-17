@@ -786,6 +786,12 @@ export interface TakesResponse {
   /** The whole project's size on disk, in bytes - server-computed (see
    * `routes_takes._folder_size_bytes`), never walked from the browser. */
   disk_bytes: number;
+  /** Per take id (as a string key, matching every other JSON-object-keyed-
+   * by-id shape this API already returns): where Script and Render each
+   * got to, derived server-side off the take's own folder - see
+   * `avg.pipeline.phases.writing.script_substate` and
+   * `avg.pipeline.phases.render.render_substate`. */
+  substates: Record<string, { script: "pending" | "partial" | "done"; render: "none" | "base" | "done" }>;
 }
 
 /** `POST .../takes/preview` and the real `POST .../takes` share this body

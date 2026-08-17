@@ -88,7 +88,7 @@ from avg.core.settings_schema import (
     validate_value,
 )
 from avg.core.take_log import log_path_for
-from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder
+from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder, take_root
 from avg.export.capcut import export_take
 from avg.pipeline.create import derive_aspect_ratio, save_project
 from avg.pipeline.phase import CancellationToken
@@ -477,6 +477,12 @@ async def list_take_artifact_dir(project_id: str, take_id: int, key: str, reques
 
 @router.get("/api/projects/{project_id}/takes")
 async def list_takes(project_id: str, request: Request) -> dict:
+    # Imported here, not at module level, matching avg/api/app.py's own
+    # handling of these two - "reaches outside pure I/O" is worth keeping
+    # visible at the call site for a route file this thin.
+    from avg.pipeline.phases.render import render_substate  # noqa: PLC0415
+    from avg.pipeline.phases.writing import script_substate  # noqa: PLC0415
+
     project = _get_project(request.app.state, project_id)
     # Safe on every call (idempotent, a no-op once takes exist) - see
     # `avg.core.takes.migrate_to_takes`'s own docstring. A legacy project
@@ -494,6 +500,23 @@ async def list_takes(project_id: str, request: Request) -> dict:
         # slice of it - "how much is this project costing me on disk" is a
         # project-level question, matching the spec's own header placement.
         "disk_bytes": _folder_size_bytes(Path(project.folder)),
+        # Slice 27: the SAME two functions `GET /api/projects` already
+        # calls for a project's current take, looped over every take here -
+        # Studio can view any take, not only the current one, and the
+        # "why has my video no captions" question `render_substate`'s own
+        # docstring exists to answer applies to whichever take is open.
+        # `take_root`, not `take_folder` (see that function's own
+        # docstring and app.py's identical choice) - a `storage="root"`
+        # take's artifacts live in the project folder itself, and
+        # `take_folder` would only ever name the `takes/<id>/` path, empty
+        # for such a take.
+        "substates": {
+            str(take.id): {
+                "script": script_substate(take_root(project, take.id) / "script"),
+                "render": render_substate(take_root(project, take.id)),
+            }
+            for take in project.takes
+        },
     }
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { artifactFileUrl, artifactUrl, getTakeArtifactList } from "../api";
+import VoicePlayer from "../VoicePlayer";
 
 /**
  * One body per phase, reading that phase's real output.
@@ -114,8 +115,22 @@ export function ScriptBody({ projectId, takeId, files }: BodyProps) {
 
   if (!("narration" in files) && !("scenes" in files)) return <Missing what="script" />;
 
+  // Mirrors avg.pipeline.phases.writing.script_substate's own three
+  // states (pending/partial/done), derived the same way it is server-side
+  // - from which of these two files exist - rather than a new field: this
+  // component already has `files`, and Pass 2 (segmentation) can genuinely
+  // take a while, so "narration exists, scenes doesn't yet" deserves its
+  // own message instead of silently showing an empty scenes section.
+  const partial = ("narration" in files) && !("scenes" in files);
+
   return (
     <div className="artifact-stack">
+      {partial && (
+        <p className="lbl">
+          <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
+          Draft written — segmenting into scenes…
+        </p>
+      )}
       {Array.isArray(scenes) && scenes.length > 0 && (
         <>
           <p className="lbl">{scenes.length} scenes</p>
@@ -260,13 +275,13 @@ export function VoiceBody({ projectId, takeId, files }: BodyProps) {
       {has("raw_voice") && (
         <section className="artifact-audio">
           <p className="lbl">Raw narration</p>
-          <audio controls preload="none" src={artifactUrl(projectId, takeId, "raw_voice")} />
+          <VoicePlayer src={artifactUrl(projectId, takeId, "raw_voice")} label="raw narration" />
         </section>
       )}
       {has("optimized_voice") && (
         <section className="artifact-audio">
           <p className="lbl">Optimized narration — this is what the render uses</p>
-          <audio controls preload="none" src={artifactUrl(projectId, takeId, "optimized_voice")} />
+          <VoicePlayer src={artifactUrl(projectId, takeId, "optimized_voice")} label="optimized narration" />
         </section>
       )}
     </div>
