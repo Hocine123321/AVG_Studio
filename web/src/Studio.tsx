@@ -8,6 +8,7 @@ import type {
   RenderSubstate,
   ScriptSubstate,
   Take,
+  TakesResponse,
 } from "./api";
 import { formatUsd, projectSpend } from "./costs";
 import type { LivePhase, PhaseFailedEvent, ProgressEvent, RenderCancelledEvent, RenderFinishedEvent } from "./useEvents";
@@ -17,6 +18,14 @@ import { groupStatus, PHASE_DEFS, PHASE_ORDER, type DisplayPhaseStatus } from ".
 import PhaseArtifact from "./artifacts/PhaseArtifact";
 import Player from "./Player";
 import TakeStrip from "./TakeStrip";
+
+// Mirrors avg.pipeline.phases.render._BASE_PERCENT_SPAN - keep in sync by
+// hand, the same convention phases.ts already uses for the backend phase
+// registry. The base render pass is scaled into 0-70% of overall
+// progress specifically so the composite pass's own 0-100% doesn't read
+// as the render restarting; this is what lets the frontend say which of
+// the two it's currently in without a new event type.
+const RENDER_BASE_PERCENT_SPAN = 70;
 
 function formatDuration(ms?: number | null): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
@@ -155,6 +164,7 @@ function ArtifactDetail({
   takeId,
   duration,
   cost,
+  renderSubstate,
 }: {
   phaseKey: string;
   record: PhaseRecord | undefined;
@@ -178,13 +188,19 @@ function ArtifactDetail({
   takeId: number | null;
   duration: string;
   cost: string | null;
+  /** From the takes response's new `substates` map (Slice 27 Task 2) -
+   * `undefined` only in the brief window before the first `GET .../takes`
+   * response lands, same as `take` itself. */
+  renderSubstate: "none" | "base" | "done" | undefined;
 }) {
   const status: PhaseStatus = record?.status ?? "pending";
 
   // A running phase streams into the same view it is later inspected in.
   if (phaseKey === "render" && progress) {
+    const step = progress.percent < RENDER_BASE_PERCENT_SPAN ? "Step 1 of 2 — base video" : "Step 2 of 2 — overlays & captions";
     return (
       <div className="artifact-progress">
+        <p className="lbl" style={{ marginBottom: 4 }}>{step}</p>
         <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
           <span className="artifact-progress__pct">{progress.percent}%</span>
           <span style={{ fontSize: 15, color: "var(--muted)" }}>{progress.message}</span>
@@ -238,6 +254,11 @@ function ArtifactDetail({
           </span>
           Render finished
         </div>
+        {renderSubstate === "base" && (
+          <p className="artifact-empty" style={{ marginTop: -4, marginBottom: 8 }}>
+            Overlays and captions weren't baked into this video — only the base render completed.
+          </p>
+        )}
         <dl className="artifact-summary__grid">
           {take?.master_output && (
             <>
@@ -268,6 +289,11 @@ function ArtifactDetail({
             </span>
             Render finished
           </div>
+          {renderSubstate === "base" && (
+            <p className="artifact-empty" style={{ marginTop: -4, marginBottom: 8 }}>
+              Overlays and captions weren't baked into this video — only the base render completed.
+            </p>
+          )}
           <dl className="artifact-summary__grid">
             {output && (
               <>
@@ -293,6 +319,13 @@ function ArtifactDetail({
   // not run yet still says so - there is nothing on disk to show - but
   // "Done." on its own, which is what six of the eight used to render, is
   // gone.
+  if (status === "pending" && phaseKey === "render") {
+    return (
+      <p className="artifact-empty">
+        Two steps when this runs: the base video first, then overlays and captions.
+      </p>
+    );
+  }
   if (status === "pending") return <p className="artifact-empty">Not started yet.</p>;
 
   return (
@@ -373,6 +406,7 @@ export default function Studio({
   const [diskBytes, setDiskBytes] = useState<number>(0);
   const [selectedTakeId, setSelectedTakeId] = useState<number | null>(null);
   const [takesError, setTakesError] = useState<string | null>(null);
+  const [substates, setSubstates] = useState<TakesResponse["substates"]>({});
   // Set the instant `NewTakePanel` reports a create succeeded, cleared on
   // the first terminal event for this project - bridges the gap before the
   // new take's own `phases` dict has recorded a single transition yet (see
@@ -402,6 +436,7 @@ export default function Studio({
       setTakes(res.takes);
       setCurrentTakeId(res.current_take_id);
       setDiskBytes(res.disk_bytes);
+      setSubstates(res.substates);
       setTakesError(null);
       return res;
     });
@@ -739,6 +774,7 @@ export default function Studio({
               isCurrentTake={isCurrentTake}
               onCancel={onCancel}
               takeId={selectedTakeId}
+              renderSubstate={selectedTakeId !== null ? substates[String(selectedTakeId)]?.render : undefined}
               duration={formatDuration(record?.duration_ms)}
               cost={
                 costTable
