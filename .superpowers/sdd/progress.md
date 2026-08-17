@@ -892,3 +892,144 @@ off, confirm it isn't) - this sandbox has no live WebView2 session to
 click through, same standing limitation as every prior UI slice
 (Slices 22-25's ledger entries carry the identical caveat). Flagging
 for a real click-through when one is available.
+
+---
+
+## Slice 27 — Studio screen: nav, custom players, phase previews (2026-08-17)
+
+Implemented per `docs/superpowers/specs/2026-08-14-slice-27-studio-design.md`
+and `docs/superpowers/plans/2026-08-14-slice-27-studio-plan.md` (pulled
+onto `development` from `main` alongside Slice 26's and Slice 28's docs
+- see Slice 26's own entry). Six tasks, each verified and committed
+separately on `development`:
+
+1. `1648445` - Studio rail opens the latest opened project
+2. `b2fa17e` - per-take `script`/`render` substates in the takes API
+3. `a205f5a` - `useMediaPlayer`, the shared player state/controls hook
+4. `eff4ab5` - custom video/voice players replace native `<video
+   controls>`/`<audio controls>` everywhere
+5. `fc92a8e` - Script's partial ("segmenting into scenes") state
+6. `ed1bcf6` - Render's proper base/composite preview
+
+**1. Studio nav.** `App.tsx`'s `openProject` now persists the id to
+`localStorage` - every navigation-to-Studio path already goes through
+that one function, so recording it there covers Home's card click,
+Create's `onCreated`, and Resume without instrumenting each separately.
+A new `openStudio()` (the rail item's actual handler, previously a
+`<span aria-hidden>` with no click handler at all) resolves the stored
+id, confirms it still exists (archived counts - only a genuinely
+deleted or never-opened id falls through), and falls back to Home
+otherwise.
+
+**2. Backend substates.** `GET /api/projects/{id}/takes` gains
+`substates: {take_id: {script, render}}`, the same two functions (
+`script_substate`, `render_substate`) `GET /api/projects` already calls
+for a project's current take, looped over every take via `take_root`
+instead of one. **Plan correction:** the plan assumed `take_root` was
+"almost certainly" already imported in `routes_takes.py` - it wasn't,
+only `take_folder` was. Added it to the existing import. This matters
+per `CLAUDE.md`'s own rule (`take_root`, never `take_folder`, for
+reading a take's files) - `app.py`'s equivalent route already gets this
+right; mirrored its choice rather than the plan's assumption. One
+purpose-built test (not `_add_second_take`, whose 14-byte fake output
+is under `render_substate`'s 1024-byte floor and can't exercise
+`"base"`); confirmed it actually failed (`KeyError: 'substates'`)
+before the implementation existed.
+
+**3. `useMediaPlayer`.** One hook, one state machine (playing,
+currentTime, duration, buffering, muted, error) and controls
+(togglePlay, seek, toggleMute) against a `HTMLMediaElement` ref -
+works unmodified for both `HTMLVideoElement` and `HTMLAudioElement`.
+Also exports `formatPlaybackTime` (seconds -> `M:SS`), deliberately
+not a consolidation of `Studio.tsx`'s/`TakeStrip.tsx`'s own
+`formatDuration` (milliseconds, a phase-duration concern, not media
+playback position).
+
+**4. Custom players.** `Player.tsx` rewritten onto the hook - video
+keeps its `.player` frame (still Range-seekable) but drops the
+browser's own controls for the shared `.media-player` row. New
+`VoicePlayer.tsx` is the audio counterpart, plus a mute button (the
+one place several narration takes compared back-to-back makes an
+unexpected earbud-blast a real concern). Wired into all three
+remaining native-control spots: `VoiceBody`'s two narration tracks and
+`PreviewPanel.tsx`'s `VoicePreview` sample - the third was found during
+this task's own audit, not originally scoped to this slice, and fixed
+here anyway rather than left as a lingering fourth spot. Confirmed
+zero `<audio>`/`<video>` elements remain anywhere outside the two new
+components themselves. **Two plan corrections:** the CSS draft's own
+comment flagged its token names as guesses needing verification -
+`--surface-3` and `--danger` don't exist in `tokens.css`. Used the real
+hover pattern `.rail__item:hover` already uses
+(`color-mix(in srgb, var(--text) 6%, transparent)`) and the real name
+`--bad` (confirmed via `.btn--danger`). Also used `--radius-sm` rather
+than `--radius-md` for the new rule - `--radius-md` is referenced by
+`.subphase` elsewhere in this file but was never actually defined in
+`:root`, a pre-existing latent bug not worth propagating into a second
+rule.
+
+**5. Script partial state.** `ScriptBody` derives a `partial` boolean
+(narration exists, scenes doesn't yet) and shows "Draft written —
+segmenting into scenes…" with the exact `.dot.pulse` / `var(--accent)`
+affordance `Studio.tsx` already uses for a running phase. Confirmed
+this genuinely mirrors `avg.pipeline.phases.writing.script_substate`'s
+own server-side derivation (`has_narration and not has_scenes ->
+"partial"`) before writing it.
+
+**6. Render preview.** `TakesResponse` (`api.ts`) gains `substates`,
+threaded through `Studio.tsx`'s `refreshTakes` into new state, and from
+there into `ArtifactDetail` as a `renderSubstate` prop keyed off
+whichever take is actually *selected* - not `project.render_substate`,
+which only ever reflects the project's current take (the phase rail's
+own compact status-dot wiring via `displayStatuses` stays on that
+current-take-only substate, unchanged - out of scope per the design
+spec's own §5, not an oversight). A live render's progress view now
+names the active pass ("Step 1 of 2 — base video" / "Step 2 of 2 —
+overlays & captions") via a frontend `RENDER_BASE_PERCENT_SPAN`
+mirroring the backend's actual `_BASE_PERCENT_SPAN = 70` - confirmed
+name and value before writing it, not assumed. Render's pending state
+gets its own two-step description. A finished `"base"`-substate render
+says overlays/captions weren't baked in. **One plan gap, not a design
+gap:** the design spec explicitly says this base-only note belongs in
+"both the not-current-take and the normal cases," but the plan's own
+diff only showed editing the second (current-take) branch. Added it to
+the first (not-current-take, summary-only) branch too - the design's
+own reasoning applies just as much to a take you're viewing but
+haven't made current.
+
+**Final verification (Task 7):**
+- `pytest tests -q`: **992 passed, 2 failed, 1 skipped** - this
+  session's established 2-failure baseline (see Slice 26's entry for
+  why it's 2 and not the historical 7), zero regressions across all
+  six tasks.
+- `mypy avg`: **690 errors** - unchanged from baseline throughout.
+- `cd web && npm run build && npm run lint`: clean at every single task
+  checkpoint, including Task 6's on the first attempt - every plan
+  string Task 6 referenced (the backend constant's exact name and
+  value, `ArtifactDetail`'s prop shape) was verified against the real
+  files before writing, which is exactly why nothing needed fixing
+  after the fact there, unlike three earlier tasks in this same slice.
+
+**Pattern worth naming for whoever picks up Slice 28 next:** this
+slice's plan had more assumption-vs-reality gaps than Slice 26's single
+task did (missing `take_root` import, two invented CSS token names, one
+missing branch in a two-branch diff) - all caught by verifying each
+plan claim against the actual file before applying it, none by trusting
+the plan's own confidence ("almost certainly already imported"). Task 6,
+where every claim actually held on first check, produced a clean build
+on the first attempt; the earlier tasks that skipped straight to
+applying a diff needed a follow-up fix each time. Read-before-write is
+cheaper than fix-after-write.
+
+**Deferred / not done:** every manual click-through this slice's
+design spec calls for (Studio nav round-trip; both players' real
+playback and keyboard control; Script's segmenting message during an
+actual Pass 2 gap; Render's step label flipping past 70% and the
+base-only note on a real incomplete-composite take) - this sandbox has
+no live WebView2 session, the same standing limitation noted on every
+UI slice back through Slice 22. Flagging for a real click-through
+when one is available; nothing here should be treated as visually
+confirmed, only build/lint/type-clean and logically verified against
+the backend it mirrors.
+
+**Commits** (branch `development`, pushed): `1648445`, `b2fa17e`,
+`a205f5a`, `eff4ab5`, `fc92a8e`, `ed1bcf6`, plus this ledger entry.
