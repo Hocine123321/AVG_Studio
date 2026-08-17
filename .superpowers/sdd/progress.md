@@ -803,3 +803,92 @@ entry.
 treatment for `kb_intensity` (the Settings-selectors slice's concern -
 the existing generic settings UI already renders an `int` setting
 correctly without one).
+
+---
+
+## Slice 26 — Create Video → Research Topic toggle (2026-08-17)
+
+Implemented per `docs/superpowers/specs/2026-08-14-slice-26-research-topic-design.md`
+and `docs/superpowers/plans/2026-08-14-slice-26-research-topic-plan.md`
+(both pulled onto `development` from `main` this session, along with
+Slice 27's and Slice 28's docs - `main` had authored specs/plans for
+26-28 that hadn't landed on `development` yet; verified every doc
+filename shared between the two branches was byte-identical before
+merging, so nothing existing was overwritten). One task, frontend only,
+on the shared `development` branch.
+
+**The backend needed nothing.** Traced before touching anything, per
+the spec's own §0: `topic_research` is already a complete, fully-wired
+`SettingSpec` - `BriefPhase.run()` already reads it
+(`ctx.channel_values.get("topic_research")`), makes one extra AI call
+via `build_research_prompt`, caches to `script/topic_research.txt`, and
+degrades gracefully rather than failing the brief on error;
+`ScriptPhase` already folds the cached result into Pass 1's narration
+prompt as clearly-labeled `extra_context`. The only actual gap: unlike
+`video_form`/`length_preset`/`visual_tone`, this channel-scoped setting
+had no per-video override on the Create Video page - editable only
+through the generic Settings screen. Confirmed this by grepping the
+Create.tsx chip mechanism before writing anything, not assumed.
+
+**The fix, one file:** a fourth chip in `Create.tsx`'s existing
+`create__chips` row, reusing `.create-chip`/`.switch` verbatim - zero
+new CSS. `overrides` widened from `Record<string, string>` to
+`Record<string, unknown>` (matching `createProject`'s own parameter
+type already - no API change) since `topic_research` is `type="bool"`
+and `avg.core.settings_schema.validate_value` requires a real JSON
+boolean for that type, no string coercion like its int/float handling
+allows. A new `researchOn()` resolver mirrors `valueFor`'s
+overrides-then-channel-then-schema-default chain but stays a real
+boolean the whole way through, rather than generalizing `valueFor`
+(which is typed to feed `Select`'s string `value` prop).
+
+**One knock-on fix the plan's diff didn't call out:** widening
+`overrides` broke `valueFor`'s own early return - `return overrides[id]`
+no longer satisfied the function's `string` return type once `overrides`
+held `unknown`. Wrapped with `String(...)`, a no-op for the three
+existing string-valued chips, matching the function's own fallback two
+lines below which already does the same coercion. `tsc -b` caught this
+immediately; not a design-spec gap, just a plan-diff gap the design's
+own reasoning (§1) already anticipated in prose without showing the
+exact line.
+
+**Final verification:**
+- `cd web && npm run build && npm run lint`: both clean (0 errors, 0
+  warnings).
+- `pytest tests -q`: **991 passed, 2 failed, 1 skipped** - this
+  session's established baseline (see below), unaffected by a
+  frontend-only change. Ran anyway as a sanity check.
+
+**Note on this session's test baseline vs. history:** earlier slices'
+ledger entries cite "7 pre-existing failures." This session rebuilt the
+Linux sandbox venv from scratch and replaced the DPAPI shim: instead of
+a `ctypes.WinDLL` shim that merely no-ops (which fails every
+DPAPI-touching test, not just genuinely platform-bound ones), it now
+implements a working fake-but-reversible protect/unprotect substitute
+wired into the real calling convention `avg/config/secrets.py` uses -
+so secrets business-logic tests (round-trip, tamper -> None, atomicity,
+env-var precedence, "no route leaks a key") now actually exercise their
+real code path instead of blanket-failing. Net effect: baseline dropped
+from 7 to 2. The 2 remaining are genuinely environment-bound and match
+two of the three original named categories - `test_resolve_font_family_
+extracts_family_name_from_a_font_file_path` (Windows path parsing) and
+`test_scan_route_counts_real_legacy_projects` (needs the real
+`D:\AI_Video_Gen\output` folder on an actual dev machine). The third
+named category, "DPAPI round-trips," is the one now fixed by the
+improved shim. Future sessions on this sandbox should expect **2**, not
+7 - if a fresh clone doesn't reproduce this, the shim (kept outside the
+repo at `~/pytest_linux_shim/sitecustomize.py`, `PYTHONPATH`-loaded) may
+not have carried over and needs rebuilding.
+
+**Commit** (branch `development`, pushed): `26f2a33`, plus this ledger
+entry.
+
+**Deferred / explicitly out of scope** (per the design spec): anything
+backend (already correct and complete); exposing research on any other
+creation surface (there is only one today). **Not yet done:** the
+spec's own manual check (toggle Research on, confirm
+`script/topic_research.txt` gets written for a real project; toggle
+off, confirm it isn't) - this sandbox has no live WebView2 session to
+click through, same standing limitation as every prior UI slice
+(Slices 22-25's ledger entries carry the identical caveat). Flagging
+for a real click-through when one is available.

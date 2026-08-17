@@ -58,7 +58,14 @@ export default function Create({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [topic, setTopic] = useState("");
-  const [overrides, setOverrides] = useState<Record<string, string>>({});
+  // `unknown`, not `string`: the three existing chips are all
+  // `type="choice"` and correctly send strings, but `topic_research` is
+  // `type="bool"` and `avg.core.settings_schema.validate_value` requires
+  // an actual JSON boolean for that type (no string coercion, unlike its
+  // permissive int/float handling) - see the design spec §1. Matches
+  // `createProject`'s own `Record<string, unknown>` parameter already -
+  // no API change, just no longer narrowing it away here.
+  const [overrides, setOverrides] = useState<Record<string, unknown>>({});
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -84,7 +91,13 @@ export default function Create({
   }, [schema]);
 
   function valueFor(id: string): string {
-    if (Object.prototype.hasOwnProperty.call(overrides, id)) return overrides[id];
+    // `String(...)`, not a bare return: `overrides` is now `Record<string,
+    // unknown>` (see the state declaration above) since topic_research
+    // needs to carry a real boolean, but this function still only ever
+    // feeds Select's `value` prop for the three choice chips - a no-op
+    // coercion for those (already strings), matching the fallback two
+    // lines below which already does the same thing.
+    if (Object.prototype.hasOwnProperty.call(overrides, id)) return String(overrides[id]);
     const fromChannel = channelValues[id];
     if (fromChannel !== undefined) return String(fromChannel);
     return String(specById.get(id)?.default ?? "");
@@ -92,6 +105,21 @@ export default function Create({
 
   function isOverridden(id: string): boolean {
     return Object.prototype.hasOwnProperty.call(overrides, id) && overrides[id] !== String(channelValues[id] ?? "");
+  }
+
+  const RESEARCH_ID = "topic_research";
+
+  /** Same overrides-then-channel-then-schema-default chain `valueFor`
+   * uses for the Select chips, kept as its own function rather than a
+   * generalization of `valueFor` - that one is typed to always return a
+   * `string` (it feeds `Select`'s `value` prop), this one has to stay a
+   * real boolean the whole way through (see Step 1.1's note on
+   * `validate_value`). */
+  function researchOn(): boolean {
+    if (Object.prototype.hasOwnProperty.call(overrides, RESEARCH_ID)) return Boolean(overrides[RESEARCH_ID]);
+    const fromChannel = channelValues[RESEARCH_ID];
+    if (fromChannel !== undefined) return Boolean(fromChannel);
+    return Boolean(specById.get(RESEARCH_ID)?.default ?? false);
   }
 
   async function handleStart() {
@@ -177,6 +205,21 @@ export default function Create({
             </label>
           );
         })}
+        {specById.has(RESEARCH_ID) && (
+          <label className="create-chip">
+            <span className="create-chip__label">Research topic</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={researchOn()}
+              aria-label="Research the topic before writing"
+              className={`switch${researchOn() ? " switch--on" : ""}`}
+              onClick={() => setOverrides((o) => ({ ...o, [RESEARCH_ID]: !researchOn() }))}
+            >
+              <span className="switch__thumb" aria-hidden="true" />
+            </button>
+          </label>
+        )}
       </div>
       <p className="create__note">Changes here apply to this video only — the channel itself is unchanged.</p>
 
