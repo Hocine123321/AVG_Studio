@@ -115,8 +115,22 @@ export function ScriptBody({ projectId, takeId, files }: BodyProps) {
 
   if (!("narration" in files) && !("scenes" in files)) return <Missing what="script" />;
 
+  // Mirrors avg.pipeline.phases.writing.script_substate's own three
+  // states (pending/partial/done), derived the same way it is server-side
+  // - from which of these two files exist - rather than a new field: this
+  // component already has `files`, and Pass 2 (segmentation) can genuinely
+  // take a while, so "narration exists, scenes doesn't yet" deserves its
+  // own message instead of silently showing an empty scenes section.
+  const partial = ("narration" in files) && !("scenes" in files);
+
   return (
     <div className="artifact-stack">
+      {partial && (
+        <p className="lbl">
+          <span className="dot pulse" style={{ background: "var(--accent)" }} aria-hidden="true" />
+          Draft written — segmenting into scenes…
+        </p>
+      )}
       {Array.isArray(scenes) && scenes.length > 0 && (
         <>
           <p className="lbl">{scenes.length} scenes</p>
