@@ -213,6 +213,33 @@ def test_get_takes_disk_usage_of_an_empty_project_matches_what_migration_wrote(c
     assert expected > 0  # migrate_to_takes + _migrate_and_persist's save_project both just ran
 
 
+def test_takes_response_includes_a_substate_per_take(client, paths):
+    """Mirrors GET /api/projects' own per-project script_substate/
+    render_substate computation (unrelated to Slice 20's UserAssets work),
+    just looped over every take instead of only the project's current one
+    - Studio can view any take, not only the current one.
+    """
+    project = _project(paths)
+    _seed_take1(project)  # script: both files written -> "done". render: no master_output.mp4 -> "none".
+    take2 = take_folder(project, 2)
+    take2.mkdir(parents=True, exist_ok=True)
+    # >= _MIN_OUTPUT_BYTES (1024), unlike _add_second_take's own 14-byte
+    # fake - real enough to register as the "base" substate.
+    (take2 / "master_output.mp4").write_bytes(b"x" * 2048)
+    project.takes.append(Take(id=2, label="Take 2", created=project.created, phases={}, master_output=None))
+    client.app.state.projects[project.id] = project
+
+    r = client.get(f"/api/projects/{project.id}/takes", headers=AUTH)
+    assert r.status_code == 200
+    substates = r.json()["substates"]
+
+    assert substates["1"] == {"script": "done", "render": "none"}
+    # script_substate returns "pending", not "none", when neither file
+    # exists - confirmed against its own return type
+    # (Literal["pending", "partial", "done"]) rather than assumed.
+    assert substates["2"] == {"script": "pending", "render": "base"}
+
+
 # ---------------------------------------------------------------------------
 # POST .../takes/preview - computes only
 # ---------------------------------------------------------------------------
