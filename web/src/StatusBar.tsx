@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { elapsedClock, leadActivity, useActivities } from "./activity";
+import { leadActivity, useActivities } from "./activity";
 import { IconAlert, IconCheck, IconChevron, IconX } from "./Icons";
 import type { ActivityEvent } from "./useEvents";
 
 /**
- * The floating status pill: what the backend is doing, top-right of the
- * content area.
+ * The floating status pill: what the backend is doing, top-left of the
+ * content area (Slice 28 - was top-right).
  *
  * Every HTTP call registers itself in `activity.ts` (from the one wrapper in
  * `api.ts`, so nothing can be missing), and this names whatever is in flight
@@ -62,14 +62,7 @@ export default function StatusBar({
   onAcknowledge?: (activityId: string) => void;
 }) {
   const activities = useActivities();
-  const [now, setNow] = useState(() => Date.now());
   const [detailOpen, setDetailOpen] = useState(false);
-
-  useEffect(() => {
-    if (activities.length === 0) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [activities.length]);
 
   // Highest priority first, oldest within it. A running job outranks every
   // request, so the pill can no longer read "Ready!" through a render -
@@ -196,22 +189,28 @@ export default function StatusBar({
     );
   }
 
-  // The part that grows and shrinks: the label, the clock, and the "+N"
-  // overflow count. Computed once so the JSX below and the width-animating
-  // wrapper agree about when there is anything in it to show.
-  const expanded = label !== "" || activeLead !== null;
+  // Slice 28: the circle carries no visible text in any state anymore -
+  // this is now the ONLY place the label/clock ever reach the user who
+  // hasn't clicked the chevron, so it has to say what used to be visible,
+  // not just "Ready"/undefined for the states that previously showed
+  // nothing. Docked still gets its own fixed wording (nothing meaningful
+  // to report while idle); every other state uses the same `label` text
+  // that used to render inline, with the same "…" for an in-progress
+  // clock the visible version used to add.
+  const pillAriaLabel = docked
+    ? "Ready"
+    : label !== ""
+      ? `${label}${activeLead !== null ? "…" : ""}`
+      : kind === "ready"
+        ? "Ready"
+        : undefined;
 
   return (
     <div
       className={`statuspill statuspill--${kind}${docked ? " statuspill--docked" : ""}`}
       role="status"
       aria-live="polite"
-      // Idle drops the visible word, and the mark itself is `aria-hidden`,
-      // so without this the pill would announce nothing at all to a screen
-      // reader at rest. The visible text carries it in every other state.
-      // Docked has neither glyph nor label (spec §4), so it gets its own
-      // wording rather than the bare "Ready".
-      aria-label={docked ? "Ready" : kind === "ready" && !working ? "Ready" : undefined}
+      aria-label={pillAriaLabel}
     >
       {/* Check, dot and ring are all mounted together, stacked in one slot,
           and only opacity/transform say which one is showing. Conditionally
@@ -230,22 +229,6 @@ export default function StatusBar({
         </span>
         <span className={`statuspill__dot${!working && kind !== "ready" && !hasSticky ? " is-active" : ""}`} />
         <span className={`statuspill__ring${working ? " is-active" : ""}`} />
-      </span>
-      <span className={`statuspill__expand${expanded ? " is-expanded" : ""}`}>
-        {label !== "" && (
-          // Keyed so the label replays its entry each time the pill changes
-          // between resting and working, rather than swapping text in place.
-          <span className="statuspill__label" key={working ? "working" : "resting"}>
-            {label}
-            {activeLead !== null && "…"}
-          </span>
-        )}
-        {activeLead !== null && (
-          <span className="statuspill__clock mono">{elapsedClock(activeLead.startedAt, now)}</span>
-        )}
-        {activeLead !== null && activities.length > 1 && (
-          <span className="statuspill__more">+{activities.length - 1}</span>
-        )}
       </span>
 
       {/* The obvious click target spec §4 asks for: covers the WHOLE pill
