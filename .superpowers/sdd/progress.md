@@ -1033,3 +1033,73 @@ the backend it mirrors.
 
 **Commits** (branch `development`, pushed): `1648445`, `b2fa17e`,
 `a205f5a`, `eff4ab5`, `fc92a8e`, `ed1bcf6`, plus this ledger entry.
+
+---
+
+## Slice 28 — Status pill: circular active, top-left pull-tab idle (2026-08-17)
+
+Implemented per `docs/superpowers/specs/2026-08-16-slice-28-statuspill-
+design.md` and `docs/superpowers/plans/2026-08-16-slice-28-statuspill-
+plan.md` (pulled onto `development` from `main` alongside Slice 26's
+and Slice 27's docs - see Slice 26's own entry). One task, frontend
+only, one commit (`4993f26`).
+
+A shape-and-position change on top of state that already existed, not
+a new state machine: `docked` (`kind === "ready" && !working &&
+!hasSticky && !panelOpen`) was already computed correctly and untouched
+here. `.statuspill` goes from an always-top-right pill that grows a
+label/clock/"+N" count inline to a fixed 34px circle anchored top-left
+(matching `.quickpanel-toggle`/`.health-stage__chevron`'s own circular-
+control convention). `.statuspill--docked` goes from a flush-right-edge
+sliver to a narrow pull-tab near the (now top-left) corner with a slow
+3.2s periodic tug (`statuspill-pull`) as its "grab me" affordance,
+replacing the proximity-to-the-edge cue that stopped applying once idle
+moved off the edge itself.
+
+The label/clock/overflow-count text that used to render inline
+(`.statuspill__expand` and its three children) is gone from the DOM
+entirely - that content already existed unchanged as rows in the
+click-to-expand detail panel, so the circle signals rather than
+duplicates. **Accessibility carry-over, worth flagging explicitly since
+it's easy to miss from the diff alone:** removing that inline text
+doesn't remove the information - `StatusBar.tsx`'s `aria-label` now
+carries exactly what used to render visibly (the label text, plus "…"
+while a clock would have been ticking) rather than the previous
+`docked ? "Ready" : kind === "ready" && !working ? "Ready" : undefined`,
+which only ever covered the two states that had no inline text to
+begin with. A screen reader announces the same information a sighted
+user could always get by reading the pill directly; it just can't get
+it that way anymore, since nothing renders inline now. Two now-dead
+pieces removed alongside: the `now`/`setInterval` ticking-clock state
+(confirmed via search that nothing else read `now` before removing it)
+and `@keyframes pill-pop` (confirmed its only caller was
+`.statuspill__label`, deleted in the same edit).
+
+**No plan corrections needed this task** - every string, CSS rule
+location, and cited precedent (the reduced-motion block's exact
+location, `--motion-scale`, `.quickpanel-toggle`'s 26px) matched the
+real files exactly on first check, unlike Slice 27's four gaps. Worth
+noting as the clean counterexample to that slice's own "read before
+write" lesson: this plan held up because it read the same way.
+
+**Final verification:**
+- `pytest tests -q`: **992 passed, 2 failed, 1 skipped** - baseline
+  unaffected (frontend-only change; ran anyway as a sanity check).
+- `mypy avg`: **690 errors** - unchanged.
+- `cd web && npm run build && npm run lint`: clean on the first
+  attempt.
+
+**Deferred:** every manual check the design spec's §3 calls for (idle's
+visible tug; the docked-to-circle morph landing in place, no jump
+across the screen; the accessible name matching what used to be
+visible; `prefers-reduced-motion` stopping the tug) - this sandbox has
+no live WebView2 session, the same standing limitation noted on every
+UI slice back through Slice 22.
+
+**All three slices pulled from `main` this session (26, 27, 28) are now
+complete on `development`.** No further specs or plans exist past
+Slice 28 as of this session - the next slice needs a fresh brainstorm →
+spec → plan before implementation can start.
+
+**Commit** (branch `development`, pushed): `4993f26`, plus this ledger
+entry.
