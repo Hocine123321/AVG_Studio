@@ -3454,42 +3454,39 @@ a:hover {
    sitting in a bar at the bottom. Border and tint carry the state, so the
    pill reads at a glance without being read. */
 
+/* Slice 28: circular and top-left by default (this IS the "active"
+   shape - working, a sticky notification, or the panel manually open,
+   the three cases that together make up "not docked") - `.statuspill--
+   docked` below overrides width/radius for the idle pull-tab instead of
+   this rule growing to fit a label anymore; there is no label rendered
+   inline in either state now; see the design spec §2 for why. */
 .statuspill {
   position: absolute;
   top: 14px;
-  right: 22px;
+  left: 22px;
   z-index: 20;
   display: flex;
   align-items: center;
-  padding: 7px 16px 7px 12px;
-  border-radius: 999px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
   border: 1.5px solid var(--pill);
   background: color-mix(in srgb, var(--pill) 12%, var(--panel));
   color: var(--pill);
-  font-size: 12.5px;
-  font-weight: 600;
   box-shadow: var(--shadow-sm);
   /* Never intercept a click meant for the content behind it - it reports,
-     it is not a control. */
+     it is not a control, EXCEPT while docked, which overrides this back
+     to `auto` below (spec's own "obvious click target" requirement,
+     unchanged from before this slice). */
   pointer-events: none;
-  /* Backstop for a label wide enough to make `.statuspill__expand`'s own
-     max-width (below) not the tightest constraint in play. The pill's
-     actual growing and shrinking is `.statuspill__expand`'s job, not this
-     rule's - `width: auto` cannot be transitioned directly, which is why
-     that element uses `max-width` as an animatable stand-in for it, with
-     the contents crossfading via `.statuspill__icon` and
-     `.statuspill__expand`'s own opacity below. `--motion-scale`
-     (Slice 12) and the reduced-motion block further down both govern every
-     animation this file adds, so the whole pill's motion is decided in two
-     places, not a dozen. */
-  max-width: 320px;
   transition:
     border-color calc(0.2s * var(--motion-scale)) ease-out,
     background-color calc(0.2s * var(--motion-scale)) ease-out,
     color calc(0.2s * var(--motion-scale)) ease-out,
     width calc(0.24s * var(--motion-scale)) ease-out,
-    padding calc(0.24s * var(--motion-scale)) ease-out,
-    right calc(0.24s * var(--motion-scale)) ease-out;
+    border-radius calc(0.24s * var(--motion-scale)) ease-out;
 }
 
 .statuspill--ready {
@@ -3509,32 +3506,38 @@ a:hover {
   padding: 10px 16px;
 }
 
-/* Slice 17 - the docked/active/finishing states from the design spec's §4.
-   Docked is a thin, glyph-free sliver flush with the right edge: `right`
-   moves the whole pill out to the viewport edge, and shrinking width/
-   padding while leaving the icon/expand/chevron content mounted (just
-   clipped by `overflow: hidden`) is the same "animate what's already
-   there, never mount/unmount" discipline the rest of this file already
-   uses for the check/dot/ring slot. `pointer-events` flips to `auto` here
-   specifically - the base `.statuspill` reports and is not a control, but
-   spec §4 asks the docked sliver to be "wide enough to be an obvious
-   click target", so this is the one state where the pill itself becomes
-   interactive rather than only the buttons inside it. */
+/* Slice 28: idle's own shape - a narrow pull-tab, near the corner but
+   deliberately not flush against it (spec §1 - the previous build's
+   `right: 0` put it flush with the edge; this removes that entirely
+   rather than mirroring it to `left: 0`). The gentle periodic tug
+   (`statuspill-pull`) is the "grab me" affordance that used to come from
+   sitting right at the edge - now that it doesn't, the pill needs to ask
+   for the click a different way. `pointer-events: auto` is unchanged
+   from before this slice: idle can still have something to open (a
+   queued-but-not-yet-running activity keeps `detailAvailable` true even
+   while `docked`), so this stays clickable rather than assuming idle
+   never has anything to show. */
 .statuspill--docked {
   width: 14px;
-  min-width: 14px;
-  padding: 0;
-  right: 0;
-  border-radius: 999px 0 0 999px;
+  border-radius: 999px;
   overflow: hidden;
   pointer-events: auto;
   cursor: pointer;
+  animation: statuspill-pull calc(3.2s * var(--motion-scale)) ease-in-out infinite;
 }
 
-.statuspill--docked .statuspill__icon,
-.statuspill--docked .statuspill__expand {
+.statuspill--docked .statuspill__icon {
   opacity: 0;
-  width: 0;
+}
+
+@keyframes statuspill-pull {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(3px);
+  }
 }
 
 /* The chevron button is normally a small icon-sized hit target; docked
@@ -3692,13 +3695,6 @@ a:hover {
   }
 }
 
-@keyframes pill-pop {
-  from {
-    opacity: 0;
-    transform: translateX(-4px) scale(0.96);
-  }
-}
-
 @keyframes avg-pulse {
   0%,
   100% {
@@ -3709,48 +3705,6 @@ a:hover {
     opacity: 0.45;
     transform: scale(0.86);
   }
-}
-
-/* The part of the pill that grows and shrinks: the label, the clock, and
-   the "+N" overflow count. `max-width` is the animatable stand-in for
-   `width: auto`, which cannot be transitioned directly - collapsed this is
-   zero-width and clipped by `overflow: hidden`, expanded it is wide enough
-   for anything the pill will realistically show, with `.statuspill`'s own
-   `max-width: 320px` above as the backstop beyond that. `margin-left`
-   grows alongside the width rather than the pill using a flex `gap`. A
-   `gap` does not collapse to zero along with the width, so it would leave
-   a fixed gap between the icon and nothing while the pill is collapsed. */
-.statuspill__expand {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  max-width: 0;
-  margin-left: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 0;
-  transition:
-    max-width calc(0.22s * var(--motion-scale)) ease-out,
-    margin-left calc(0.22s * var(--motion-scale)) ease-out,
-    opacity calc(0.16s * var(--motion-scale)) ease-out;
-}
-
-.statuspill__expand.is-expanded {
-  max-width: 270px;
-  margin-left: 9px;
-  opacity: 1;
-}
-
-.statuspill__label {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  animation: pill-pop calc(0.28s * var(--motion-scale)) ease-out;
-}
-
-.statuspill__clock,
-.statuspill__more {
-  opacity: 0.8;
 }
 
 /* Slice 17 - the chevron toggle and its detail panel (spec §5). The
@@ -3898,15 +3852,15 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .statuspill {
+  .statuspill,
+  .statuspill--docked {
     transition: none;
+    animation: none;
   }
 
   .statuspill__check,
   .statuspill__dot,
   .statuspill__ring,
-  .statuspill__expand,
-  .statuspill__label,
   .statuspill__icon,
   .statuspill__chevron {
     transition: none;
