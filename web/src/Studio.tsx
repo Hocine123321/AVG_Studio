@@ -762,27 +762,39 @@ export default function Studio({
               })}
             </div>
           )}
-          {(!selectedDef?.sub || selectedStatus === "failed") && (
-            <ArtifactDetail
-              phaseKey={selected}
-              record={record}
-              progress={selected === "render" && isCurrentTake ? progress : null}
-              failure={selected === "render" ? failure : null}
-              finished={selected === "render" && isCurrentTake ? finished : null}
-              project={project}
-              take={selectedTake}
-              isCurrentTake={isCurrentTake}
-              onCancel={onCancel}
-              takeId={selectedTakeId}
-              renderSubstate={selectedTakeId !== null ? substates[String(selectedTakeId)]?.render : undefined}
-              duration={formatDuration(record?.duration_ms)}
-              cost={
-                costTable
-                  ? formatUsd(projectSpend({ [selected]: { status: "done" } }, costTable, undefined))
-                  : null
-              }
-            />
-          )}
+          {/* Was gated to `!selectedDef?.sub || selectedStatus === "failed"` -
+              meaning Script and Render (the only two phases with `sub`)
+              never showed their real content unless failed, since the
+              subphase summary above already occupies this area for them in
+              every other state. That gate predates Slice 27 entirely
+              (`fac6b73`, well before this slice's own first commit) and made
+              every one of that slice's Task 5/6 changes - the partial
+              "segmenting into scenes" message, the render step labels, the
+              base-only note, the player itself - completely unreachable
+              through the UI for the two phases they were written for. The
+              subphase summary (a quick two-row status glance) and this
+              panel (the actual content) are complementary, not duplicative -
+              exactly what already happened for a failed take, now
+              unconditional. */}
+          <ArtifactDetail
+            phaseKey={selected}
+            record={record}
+            progress={selected === "render" && isCurrentTake ? progress : null}
+            failure={selected === "render" ? failure : null}
+            finished={selected === "render" && isCurrentTake ? finished : null}
+            project={project}
+            take={selectedTake}
+            isCurrentTake={isCurrentTake}
+            onCancel={onCancel}
+            takeId={selectedTakeId}
+            renderSubstate={selectedTakeId !== null ? substates[String(selectedTakeId)]?.render : undefined}
+            duration={formatDuration(record?.duration_ms)}
+            cost={
+              costTable
+                ? formatUsd(projectSpend({ [selected]: { status: "done" } }, costTable, undefined))
+                : null
+            }
+          />
         </div>
       </div>
 
