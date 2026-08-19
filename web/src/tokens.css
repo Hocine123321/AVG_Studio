@@ -4554,6 +4554,10 @@ a:hover {
    Same surface, border and radius as `.artifact-strip` above it, so the two
    read as one panel. Monospaced and scrolling INSIDE its own box: a log line
    is long and a run is hundreds of them, and neither may stretch the page. */
+.artifact-log-toggle {
+  margin-bottom: 14px;
+}
+
 .artifact-log {
   margin-top: 14px;
   border: 1px solid var(--line);
