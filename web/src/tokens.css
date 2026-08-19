@@ -438,6 +438,13 @@ a:hover {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* .statuspill (position: absolute) needs THIS as its containing block,
+     not the viewport. Missing before Slice 28 too - right: 22px happened
+     to land in open space at the content area's top-right regardless of
+     which element top/left actually resolved against, so nothing exposed
+     the gap. left: 22px with no positioned ancestor resolves against the
+     viewport instead, landing the pill directly on top of the Rail. */
+  position: relative;
 }
 
 .app-shell__content {
@@ -4547,6 +4554,10 @@ a:hover {
    Same surface, border and radius as `.artifact-strip` above it, so the two
    read as one panel. Monospaced and scrolling INSIDE its own box: a log line
    is long and a run is hundreds of them, and neither may stretch the page. */
+.artifact-log-toggle {
+  margin-bottom: 14px;
+}
+
 .artifact-log {
   margin-top: 14px;
   border: 1px solid var(--line);

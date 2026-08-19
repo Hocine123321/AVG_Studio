@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteTake, getCosts, getTakes, renameTake, resumeProject, videoUrl } from "./api";
+import { deleteTake, getCosts, getTakeLog, getTakes, renameTake, resumeProject, videoUrl } from "./api";
 import type {
   CostTable,
   PhaseRecord,
@@ -8,6 +8,7 @@ import type {
   RenderSubstate,
   ScriptSubstate,
   Take,
+  TakeLogTail,
   TakesResponse,
 } from "./api";
 import { formatUsd, projectSpend } from "./costs";
@@ -149,6 +150,71 @@ function displayStatuses(
     statuses.composite = resolvedRender === "done" ? "done" : "pending";
   }
   return statuses;
+}
+
+/** The take's run log - genuinely take-scoped, not phase-scoped (the same
+ * `GET .../takes/{id}/log` regardless of which phase you're viewing), but
+ * shown once per phase view since that's the panel in front of you.
+ *
+ * Used to live inside `PhaseArtifact`'s own strip, which meant two gaps:
+ * it vanished entirely for a phase with no artifacts yet (pending, or
+ * failed before writing anything - exactly when a log is most worth
+ * checking, since it can carry an error line no artifact ever will), and
+ * `PhaseArtifact` is never used for Render at all (Render's view lives
+ * here in `ArtifactDetail`, not through that shared shell), so Render had
+ * no way to reach its log in any state. Hoisted out to this one place so
+ * every phase gets it, unconditionally.
+ *
+ * `key`'d at the call site on both the take and the phase: this is the
+ * same file regardless of which phase you're viewing, but `PhaseArtifact`
+ * itself never reset its old local log state on a take switch either (a
+ * latent bug of its own, found while moving this) - keying on takeId too
+ * means switching takes always starts from a fresh, correctly-labelled
+ * fetch rather than possibly showing a stale take's lines under a new
+ * take's label.
+ */
+function TakeLogToggle({ projectId, takeId }: { projectId: string; takeId: number | null }) {
+  const [log, setLog] = useState<TakeLogTail | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
+
+  if (takeId === null) return null;
+
+  return (
+    <div className="artifact-log-toggle">
+      {/* Unaccented: the filled terracotta action on this screen is
+          Studio's own "Run again"/primary CTA, and a log toggle never
+          competes with it. */}
+      <button
+        type="button"
+        className="btn btn--sm"
+        onClick={() => {
+          setLogOpen((o) => !o);
+          if (log === null) {
+            getTakeLog(projectId, takeId)
+              .then(setLog)
+              .catch(() => setLog({ lines: [], truncated: false, total: 0 }));
+          }
+        }}
+      >
+        {logOpen ? "Hide log" : "Log"}
+      </button>
+      {logOpen &&
+        (log === null ? (
+          <p className="artifact-empty">Loading the log…</p>
+        ) : log.lines.length === 0 ? (
+          <p className="artifact-empty">No log for this take yet — nothing has run in it.</p>
+        ) : (
+          <div className="artifact-log">
+            {log.truncated && (
+              <p className="artifact-log__note">
+                Showing the last {log.lines.length} of {log.total} lines.
+              </p>
+            )}
+            <pre className="artifact-log__body">{log.lines.join("\n")}</pre>
+          </div>
+        ))}
+    </div>
+  );
 }
 
 function ArtifactDetail({
@@ -748,6 +814,7 @@ export default function Studio({
               Run again
             </button>
           </div>
+          <TakeLogToggle key={`${selectedTakeId}-${selected}`} projectId={project.id} takeId={selectedTakeId} />
           {selectedDef?.sub && (
             <div className="subphase" aria-label="Script sub-phases">
               {selectedDef.sub.map(({ key, label: subLabel }) => {
@@ -762,27 +829,39 @@ export default function Studio({
               })}
             </div>
           )}
-          {(!selectedDef?.sub || selectedStatus === "failed") && (
-            <ArtifactDetail
-              phaseKey={selected}
-              record={record}
-              progress={selected === "render" && isCurrentTake ? progress : null}
-              failure={selected === "render" ? failure : null}
-              finished={selected === "render" && isCurrentTake ? finished : null}
-              project={project}
-              take={selectedTake}
-              isCurrentTake={isCurrentTake}
-              onCancel={onCancel}
-              takeId={selectedTakeId}
-              renderSubstate={selectedTakeId !== null ? substates[String(selectedTakeId)]?.render : undefined}
-              duration={formatDuration(record?.duration_ms)}
-              cost={
-                costTable
-                  ? formatUsd(projectSpend({ [selected]: { status: "done" } }, costTable, undefined))
-                  : null
-              }
-            />
-          )}
+          {/* Was gated to `!selectedDef?.sub || selectedStatus === "failed"` -
+              meaning Script and Render (the only two phases with `sub`)
+              never showed their real content unless failed, since the
+              subphase summary above already occupies this area for them in
+              every other state. That gate predates Slice 27 entirely
+              (`fac6b73`, well before this slice's own first commit) and made
+              every one of that slice's Task 5/6 changes - the partial
+              "segmenting into scenes" message, the render step labels, the
+              base-only note, the player itself - completely unreachable
+              through the UI for the two phases they were written for. The
+              subphase summary (a quick two-row status glance) and this
+              panel (the actual content) are complementary, not duplicative -
+              exactly what already happened for a failed take, now
+              unconditional. */}
+          <ArtifactDetail
+            phaseKey={selected}
+            record={record}
+            progress={selected === "render" && isCurrentTake ? progress : null}
+            failure={selected === "render" ? failure : null}
+            finished={selected === "render" && isCurrentTake ? finished : null}
+            project={project}
+            take={selectedTake}
+            isCurrentTake={isCurrentTake}
+            onCancel={onCancel}
+            takeId={selectedTakeId}
+            renderSubstate={selectedTakeId !== null ? substates[String(selectedTakeId)]?.render : undefined}
+            duration={formatDuration(record?.duration_ms)}
+            cost={
+              costTable
+                ? formatUsd(projectSpend({ [selected]: { status: "done" } }, costTable, undefined))
+                : null
+            }
+          />
         </div>
       </div>
 
