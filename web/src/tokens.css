@@ -3461,16 +3461,20 @@ a:hover {
    sitting in a bar at the bottom. Border and tint carry the state, so the
    pill reads at a glance without being read. */
 
-/* Slice 28: circular and top-left by default (this IS the "active"
-   shape - working, a sticky notification, or the panel manually open,
-   the three cases that together make up "not docked") - `.statuspill--
-   docked` below overrides width/radius for the idle pull-tab instead of
-   this rule growing to fit a label anymore; there is no label rendered
-   inline in either state now; see the design spec §2 for why. */
+/* Circular and top-right by default (this IS the "active" shape -
+   working, a sticky notification, or the panel manually open, the three
+   cases that together make up "not docked") - `.statuspill--docked`
+   below overrides width/radius for the idle pull-tab instead of this
+   rule growing to fit a label anymore; there is no label rendered inline
+   in either state now; see the design spec §2 for why. Top-right, not
+   top-left: moved to the left briefly, then back per direct testing
+   feedback - the position itself was always the point of contention,
+   never the circular shape or the docked pull-tab behavior, both kept
+   as-is here. */
 .statuspill {
   position: absolute;
   top: 14px;
-  left: 22px;
+  right: 22px;
   z-index: 20;
   display: flex;
   align-items: center;
@@ -3513,17 +3517,18 @@ a:hover {
   padding: 10px 16px;
 }
 
-/* Slice 28: idle's own shape - a narrow pull-tab, near the corner but
-   deliberately not flush against it (spec §1 - the previous build's
-   `right: 0` put it flush with the edge; this removes that entirely
-   rather than mirroring it to `left: 0`). The gentle periodic tug
+/* Idle's own shape - a narrow pull-tab, near the corner but deliberately
+   not flush against it (the earlier build's `right: 0` put it flush with
+   the edge; this doesn't reintroduce that). The gentle periodic tug
    (`statuspill-pull`) is the "grab me" affordance that used to come from
    sitting right at the edge - now that it doesn't, the pill needs to ask
-   for the click a different way. `pointer-events: auto` is unchanged
-   from before this slice: idle can still have something to open (a
-   queued-but-not-yet-running activity keeps `detailAvailable` true even
-   while `docked`), so this stays clickable rather than assuming idle
-   never has anything to show. */
+   for the click a different way. Tug moves LEFT (`translateX(-3px)`),
+   toward the content - away from the right edge it's tucked into, same
+   "pull me into view" sense a left-edge tab would tug right. `pointer-
+   events: auto` is unchanged from before this slice: idle can still have
+   something to open (a queued-but-not-yet-running activity keeps
+   `detailAvailable` true even while `docked`), so this stays clickable
+   rather than assuming idle never has anything to show. */
 .statuspill--docked {
   width: 14px;
   border-radius: 999px;
@@ -3543,7 +3548,7 @@ a:hover {
     transform: translateX(0);
   }
   50% {
-    transform: translateX(3px);
+    transform: translateX(-3px);
   }
 }
 

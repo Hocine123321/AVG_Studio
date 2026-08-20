@@ -4,8 +4,8 @@ import { IconAlert, IconCheck, IconChevron, IconX } from "./Icons";
 import type { ActivityEvent } from "./useEvents";
 
 /**
- * The floating status pill: what the backend is doing, top-left of the
- * content area (Slice 28 - was top-right).
+ * The floating status pill: what the backend is doing, top-right of the
+ * content area.
  *
  * Every HTTP call registers itself in `activity.ts` (from the one wrapper in
  * `api.ts`, so nothing can be missing), and this names whatever is in flight
