@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import traceback
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,7 +78,9 @@ from pydantic import BaseModel, Field
 
 from avg.config import channels as channels_config
 from avg.config.channel_defaults import load_defaults
+from avg.config.settings import load_settings
 from avg.core.artifacts import ARTIFACTS, available, resolve, spec_for
+from avg.core.error_store import classify
 from avg.core.events import PhaseFailed, PipelineCancelled
 from avg.core.jobs import Job
 from avg.core.models import ProjectDoc, Take
@@ -87,7 +90,7 @@ from avg.core.settings_schema import (
     resolve_channel_settings,
     validate_value,
 )
-from avg.core.take_log import log_path_for
+from avg.core.take_log import TakeLog, log_path_for
 from avg.core.takes import clone_take, delete_take as _delete_take, estimate_seconds, migrate_to_takes, take_folder, take_root
 from avg.export.capcut import export_take
 from avg.pipeline.create import derive_aspect_ratio, save_project
@@ -652,12 +655,64 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
     cancel_token = CancellationToken()
     loop = asyncio.get_running_loop()
 
+    # One run log for THIS take - its own id, never `project.current_take_id`
+    # (which stays pointed at whichever take was current before this run
+    # even started: it "only advances when a take finishes", per
+    # avg.core.takes's own docstring, so while this run is in flight it
+    # would silently point at a DIFFERENT take's log file, or clobber take
+    # 1's history with a re-roll's entries). Built here, not inside
+    # `_worker`, matching avg.api.app's identical reasoning: a bad path
+    # fails the route loudly rather than vanishing in the background
+    # thread. This route previously constructed no TakeLog at all - every
+    # take created through it (every re-roll, new take, and
+    # settings-change re-run) had no run history on disk, ever, regardless
+    # of whether its phases succeeded - confirmed via a real write-then-
+    # read test before writing this fix, not assumed from the bug report.
+    # `verbose_log`, read the same tolerant way `avg.api.app`'s own
+    # `_app_values` closure does (that function is local to `create_app`,
+    # not importable - this replicates its exact fallback rather than
+    # reaching for a private closure): fresh off disk per run, since the
+    # setting is meant to take effect on the NEXT run without a restart,
+    # and a failure to read it must never block a take from starting.
+    try:
+        _verbose = bool(dict(load_settings(app_state.settings_path).values or {}).get("verbose_log"))
+    except Exception:  # noqa: BLE001 - same tolerance _app_values documents
+        _verbose = False
+    take_log = TakeLog(log_path_for(project, new_take.id), verbose=_verbose)
+
     async def _dispatch(event: Any) -> None:
         await app_state.manager.broadcast(event.model_dump(mode="json"))
 
+    def _log(event: Any) -> None:
+        """Log one event, and record it if it is a failure - the exact
+        same shape avg.api.app's own `_log` already uses for the other two
+        pipeline-run sites, so the log, the socket and the error panel
+        describe this run consistently too, not a third dialect."""
+        with suppress(Exception):
+            take_log.event(event.model_dump(mode="json"))
+        if isinstance(event, PhaseFailed):
+            with suppress(Exception):
+                app_state.error_store.record(
+                    severity=classify(kind=event.kind.value, status=None, source="pipeline"),
+                    source="pipeline",
+                    summary=f"{event.phase} failed: {event.message}",
+                    detail=event.detail or "",
+                    context={"project_id": event.project_id, "take_id": str(new_take.id), "phase": event.phase},
+                )
+
     def _worker() -> None:
+        # Every outbound provider call this run makes lands on this log -
+        # see avg.providers.transport.CURRENT_TAKE_LOG for why the handle
+        # is module-level rather than threaded through every provider.
+        # Imported here, matching this module's own established reason for
+        # every other local import: the registry/provider chain stays out
+        # of any API module's top-level import.
+        from avg.providers import transport as transport_mod  # noqa: PLC0415
+
+        transport_mod.CURRENT_TAKE_LOG = take_log
         success = True
         try:
+            take_log.info("job started", kind="pipeline", project=project.id, take=new_take.id, topic=project.title)
             for event in run_pipeline(
                 shadow_project,
                 channel=effective_channel,
@@ -673,6 +728,8 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
                 # on `project.takes[...]` before this callback ever runs -
                 # this just needs to write the ONE real `project.json`.
                 on_phase_change=lambda: save_project(project),
+                log=take_log,
+                errors=app_state.error_store,
                 # Without this a take run rendered with no lease at all, and
                 # a take is the "change a setting and re-run" flow - the most
                 # common way this app renders. Two children could overlap.
@@ -680,10 +737,29 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             ):
                 if isinstance(event, (PhaseFailed, PipelineCancelled)):
                     success = False
+                _log(event)
                 with suppress(Exception):
                     fut = asyncio.run_coroutine_threadsafe(_dispatch(event), loop)
                     fut.result()
+        except BaseException as exc:
+            # A worker-thread crash used to vanish here too - the same gap
+            # avg.api.app's own two sites already closed. Recorded, then
+            # re-raised: this observes, it does not swallow.
+            detail = "".join(traceback.format_exception(exc))
+            take_log.error(f"{type(exc).__name__}: {exc}", detail=detail)
+            with suppress(Exception):
+                app_state.error_store.record(
+                    severity="critical",
+                    source="pipeline",
+                    summary=f"pipeline worker crashed: {type(exc).__name__}: {exc}",
+                    detail=detail,
+                    context={"project_id": project.id, "take_id": str(new_take.id)},
+                )
+            raise
         finally:
+            take_log.info("job finished")
+            take_log.close()
+            transport_mod.CURRENT_TAKE_LOG = None
             # `shadow_project.phases` IS `new_take.phases` (shared by
             # reference), already up to date - only `master_output` needs
             # copying by hand, since `RenderPhase.run` only ever writes

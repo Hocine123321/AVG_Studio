@@ -29,7 +29,7 @@ from avg.api.app import create_app
 from avg.api.routes_takes import _folder_size_bytes, _sync_current_take
 from avg.config.channels import get_channel
 from avg.core.errors import ErrorKind
-from avg.core.events import PhaseFailed
+from avg.core.events import PhaseFailed, PhaseFinished
 from avg.core.models import PhaseRecord, ProjectDoc, Take
 from avg.core.takes import PHASE_ARTIFACTS, take_folder
 
@@ -763,3 +763,38 @@ def test_sync_current_take_derives_aspect_ratio_when_the_snapshot_has_none(paths
     _sync_current_take(project, take)
 
     assert project.aspect_ratio == "16:9"
+
+
+def test_create_take_writes_its_own_run_to_its_own_take_log(client, paths, monkeypatch):
+    """Reproduces the "log always says empty" bug report: `create_take`'s
+    worker (every re-roll, new take, and settings-change re-run) currently
+    dispatches events over the WebSocket only - it never constructs a
+    TakeLog at all, unlike avg.api.app's two pipeline-run sites. A take
+    created this way gets no run history on disk, ever, regardless of
+    whether its phases actually succeeded."""
+    release = threading.Event()
+
+    def _yields_one_event(project, *, channel, start_from=0, cancel_token=None, **kwargs):
+        release.wait(timeout=5)
+        yield PhaseFinished(project_id=project.id, phase="brief", duration_ms=1200)
+
+    monkeypatch.setattr("avg.api.routes_takes.run_pipeline", _yields_one_event)
+    _activate_channel(client)
+    project = _project(paths)
+    _seed_take1(project)
+    client.app.state.projects[project.id] = project
+
+    r = client.post(f"/api/projects/{project.id}/takes", headers=AUTH, json={"overrides": {"voice_id": "x"}})
+    assert r.status_code == 201
+    new_take_id = r.json()["id"]
+
+    job = client.app.state.jobs.get(project.id)
+    thread = job.thread if job is not None else None
+    release.set()
+    if thread is not None:
+        thread.join(timeout=5)
+
+    r = client.get(f"/api/projects/{project.id}/takes/{new_take_id}/log", headers=AUTH)
+    assert r.status_code == 200
+    assert len(r.json()["lines"]) > 0
+    assert any("phase_finished" in line for line in r.json()["lines"])
