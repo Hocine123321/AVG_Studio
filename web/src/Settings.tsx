@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { portToGlobal, type SettingSpec } from "./api";
 import HealthPanel from "./HealthPanel";
+import ModelsFieldGroups from "./ModelsFieldGroups";
 import ModelsPanel from "./ModelsPanel";
 import SettingsGroup from "./SettingsGroup";
 import { useSettingsData } from "./useSettingsData";
@@ -436,12 +437,21 @@ export default function Settings() {
                     lengthPreset={valueById("length_preset") || "60s"}
                   />
                 )}
-                <SettingsGroup
-                  title={g.label}
-                  specs={g.specs}
-                  ctx={ctx}
-                  active={activeGroup === g.group}
-                />
+                {g.group === "models" ? (
+                  <ModelsFieldGroups
+                    title={g.label}
+                    specs={g.specs}
+                    ctx={ctx}
+                    active={activeGroup === g.group}
+                  />
+                ) : (
+                  <SettingsGroup
+                    title={g.label}
+                    specs={g.specs}
+                    ctx={ctx}
+                    active={activeGroup === g.group}
+                  />
+                )}
               </div>
             ))
           )}

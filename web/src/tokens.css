@@ -2076,6 +2076,28 @@ a:hover {
   border-bottom: 0;
 }
 
+/* One phase's Primary/Backup/If-both-fail rows together, inside the
+   Models category's `.settings-group__list` card. A `.field-row`'s own
+   `:last-child` rule already drops the border on whichever slot is last
+   WITHIN this section (evaluated per-parent, same as everywhere else
+   `.field-row` is used) - only the section boundary itself needs its
+   own border, mirroring `.field-row`'s exact pattern one level up. */
+.models-phase-group {
+  border-bottom: 1px solid var(--line);
+}
+
+.models-phase-group:last-child {
+  border-bottom: 0;
+}
+
+.models-phase-group__title {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  margin: 0;
+  padding: 14px 22px 0;
+  color: var(--muted);
+}
+
 /* A neutral wash, not the accent - unsaved is a state every row can be in,
    not "the" action of this screen. */
 .field-row--dirty {
