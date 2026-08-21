@@ -677,6 +677,14 @@ export function getSettingsSchema(): Promise<SettingsSchemaResponse> {
   return apiGet<SettingsSchemaResponse>("/api/settings/schema");
 }
 
+export interface HardwareInfo {
+  cpu_count: number;
+}
+
+export function getHardwareInfo(): Promise<HardwareInfo> {
+  return apiGet<HardwareInfo>("/api/system/hardware");
+}
+
 /** `scope="global"` reads the app-wide defaults document directly (the
  * Settings screen's Global/Channel toggle, Slice 19 §3) instead of the
  * active channel's resolved view - omit it (or pass `"channel"`) for the

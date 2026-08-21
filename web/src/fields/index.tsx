@@ -55,10 +55,29 @@ export function Field({ spec, ctx, disabled }: FieldProps) {
   }
   // Chosen by id, not by type or source (Slice 29) - `fps` is `type="int"`
   // the same as several non-slider ints, and none of these four declare a
-  // `source`. `render_threads` is a fifth slider, checked separately
-  // (Task 4) since its upper bound depends on the machine's own core count.
+  // `source`.
   if (spec.id in SLIDER_BOUNDS) {
     return <Slider spec={spec} ctx={ctx} disabled={disabled} {...SLIDER_BOUNDS[spec.id]} />;
+  }
+  // A sixth id, kept out of SLIDER_BOUNDS: its upper bound is this
+  // machine's own core count, not a fixed constant. `?? 8` only covers
+  // the brief window before `GET /api/system/hardware` resolves (or, more
+  // rarely, a panel like NewTakePanel.tsx that never fetches hardware
+  // info at all) - the slider becomes accurate the moment that fetch
+  // lands, same render, no remount.
+  if (spec.id === "render_threads") {
+    const max = ctx.cpuCount ?? 8;
+    return (
+      <Slider
+        spec={spec}
+        ctx={ctx}
+        disabled={disabled}
+        min={0}
+        max={max}
+        step={Math.max(1, Math.round(max / 20))}
+        zeroLabel="Auto"
+      />
+    );
   }
   const Component = REGISTRY[spec.type];
   if (!Component) {

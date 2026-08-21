@@ -207,6 +207,16 @@ export default function NewTakePanel({
     keyErrors: {},
     onSetKey: () => {},
     onDeleteKey: () => {},
+    // `render_threads` is `scope="channel"`, so it CAN reach this panel via
+    // the `groups` filter below (unlike keys/keyBusy/keyErrors above, which
+    // genuinely never apply here) - just with the dispatcher's generic
+    // `?? 8` max fallback rather than the real core count, since this
+    // panel has no reason to fetch hardware info for the one slider that
+    // needs it. A per-take override of encoder thread count is rare
+    // enough, and 8 close enough to most machines, that fetching real
+    // cpuCount here isn't worth the extra request - flagging the tradeoff
+    // rather than asserting this can't happen at all.
+    cpuCount: null,
   };
 
   const groups = useMemo(() => {

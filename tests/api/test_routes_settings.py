@@ -672,3 +672,9 @@ def test_porting_copies_channel_values_and_no_secret(client):
 
 def test_porting_without_an_active_channel_is_refused(client):
     assert client.post("/api/settings/port-to-global", headers=AUTH).status_code == 400
+
+
+def test_hardware_endpoint_reports_a_positive_cpu_count(client):
+    r = client.get("/api/system/hardware", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["cpu_count"] >= 1

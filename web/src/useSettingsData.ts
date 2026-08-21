@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   deleteProviderKey,
   getChannels,
+  getHardwareInfo,
   getKeys,
   getSettingsSchema,
   getSettingsValues,
@@ -49,6 +50,7 @@ export function useSettingsData() {
   const [channels, setChannels] = useState<ChannelDoc[]>([]);
   const [keys, setKeys] = useState<Record<string, boolean>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [cpuCount, setCpuCount] = useState<number | null>(null);
 
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -65,14 +67,15 @@ export function useSettingsData() {
   const [keyErrors, setKeyErrors] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
-    Promise.all([getSettingsSchema(), getSettingsValues(), getChannels(), getKeys()])
-      .then(([schemaRes, valuesRes, channelsRes, keysRes]) => {
+    Promise.all([getSettingsSchema(), getSettingsValues(), getChannels(), getKeys(), getHardwareInfo()])
+      .then(([schemaRes, valuesRes, channelsRes, keysRes, hardwareRes]) => {
         setSchema(schemaRes.settings);
         setAppValues(valuesRes.app);
         setChannelValues(valuesRes.channel);
         setActiveChannelId(valuesRes.active_channel_id);
         setChannels(channelsRes.channels);
         setKeys(keysRes);
+        setCpuCount(hardwareRes.cpu_count);
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, []);
@@ -242,6 +245,7 @@ export function useSettingsData() {
     keyErrors,
     onSetKey: handleSetKey,
     onDeleteKey: handleDeleteKey,
+    cpuCount,
   };
 
   return {

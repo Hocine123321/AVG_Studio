@@ -175,6 +175,17 @@ async def get_settings_schema() -> dict:
     return {"settings": [s.model_dump() for s in SETTINGS]}
 
 
+@router.get("/api/system/hardware")
+async def get_hardware_info() -> dict[str, int]:
+    """The one machine fact `render_threads`'s slider needs client-side -
+    its own upper bound (Slice 29 design spec §2). Not folded into the
+    settings schema response: core count is a fact about this machine,
+    not a description of the setting, and the schema is otherwise the
+    same for every install.
+    """
+    return {"cpu_count": os.cpu_count() or 4}
+
+
 @router.get("/api/phases")
 async def get_phases() -> dict[str, Any]:
     """The pipeline's phases, in order, with what each one is for.

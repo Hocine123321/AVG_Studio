@@ -58,6 +58,11 @@ export interface SettingsCtx {
   keyErrors: Record<string, string | null>;
   onSetKey: (provider: string, key: string) => void;
   onDeleteKey: (provider: string) => void;
+
+  /** The machine's own core count (`GET /api/system/hardware`) -
+   * `render_threads`' slider needs it for its own upper bound (Slice 29);
+   * `null` until that one fetch resolves. Every other field ignores it. */
+  cpuCount: number | null;
 }
 
 export interface FieldProps {
