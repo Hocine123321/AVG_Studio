@@ -3,6 +3,7 @@ import type { SettingType } from "../api";
 import { BoolField, ChoiceField, FloatField, IntField, PathField, TextField } from "./Fields";
 import SecretField from "./SecretField";
 import ModelPicker from "../ModelPicker";
+import Slider from "../Slider";
 import type { FieldProps } from "./types";
 
 export type { FieldProps, SettingsCtx } from "./types";
@@ -24,6 +25,23 @@ const REGISTRY: Record<SettingType, ComponentType<FieldProps>> = {
   secret: SecretField,
 };
 
+/** Every slider except `render_threads`, whose upper bound is the
+ * machine's own core count and so can't live in a table keyed only by id
+ * - handled as its own check in `Field`, Task 4 (Slice 29). Step sizes
+ * are 5% of each range (design spec §2's own table); `fps`'s 2.25 and
+ * `captions_font_size`'s 4.8 are left un-rounded on purpose - a native
+ * `<input type="range">` step lands on the nearest multiple regardless,
+ * so a "clean" rounded number buys nothing a real fraction doesn't
+ * already give the same UX for. Verified all four ids and their default
+ * values against the real schema before writing this table, not assumed
+ * from the design spec's own numbers alone. */
+const SLIDER_BOUNDS: Record<string, { min: number; max: number; step: number; zeroLabel?: string }> = {
+  voice_stability: { min: 0, max: 1, step: 0.05 },
+  voice_speed: { min: 0.5, max: 2, step: 0.075 },
+  fps: { min: 15, max: 60, step: 2.25 },
+  captions_font_size: { min: 0, max: 96, step: 4.8, zeroLabel: "Auto-fit" },
+};
+
 export function Field({ spec, ctx, disabled }: FieldProps) {
   // `source` outranks `type`: a field whose options only exist at runtime
   // cannot be described by the catalogue, so the schema declares where they
@@ -34,6 +52,13 @@ export function Field({ spec, ctx, disabled }: FieldProps) {
   // `live_list:` kinds. The kind is the part after the colon.
   if (spec.source === "model_cache" || spec.source?.startsWith("live_list:")) {
     return <ModelPicker spec={spec} ctx={ctx} disabled={disabled} />;
+  }
+  // Chosen by id, not by type or source (Slice 29) - `fps` is `type="int"`
+  // the same as several non-slider ints, and none of these four declare a
+  // `source`. `render_threads` is a fifth slider, checked separately
+  // (Task 4) since its upper bound depends on the machine's own core count.
+  if (spec.id in SLIDER_BOUNDS) {
+    return <Slider spec={spec} ctx={ctx} disabled={disabled} {...SLIDER_BOUNDS[spec.id]} />;
   }
   const Component = REGISTRY[spec.type];
   if (!Component) {

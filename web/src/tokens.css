@@ -2098,6 +2098,57 @@ a:hover {
   color: var(--muted);
 }
 
+/* Every numeric setting with real bounds (design spec §2) - the same
+   cross-browser range-thumb-styling technique `.media-player__seek`
+   already established (Slice 27's custom players), not a second
+   invention of it. */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.slider__input {
+  flex: 1;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  outline-offset: 4px;
+}
+
+.slider__input::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.slider__input::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.slider__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.slider__value {
+  flex-shrink: 0;
+  min-width: 42px;
+  text-align: right;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
 /* A neutral wash, not the accent - unsaved is a state every row can be in,
    not "the" action of this screen. */
 .field-row--dirty {
