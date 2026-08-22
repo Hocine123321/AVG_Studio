@@ -57,14 +57,39 @@ export function ChoiceField({ spec, ctx, disabled }: FieldProps) {
   // entry "Not set"; give every choice field the same treatment here rather
   // than changing the schema.
   const options = (spec.choices ?? []).map((choice) => (choice === "" ? { value: "", label: "Not set" } : choice));
+
+  // A literal "custom" choice (Slice 29 - `visual_tone` already had this
+  // entry sitting in its own `choices` with no way to act on it;
+  // `font_family` gets one too) is an escape hatch, not a real value: the
+  // Select shows "custom" whenever the actual stored value isn't one of
+  // the OTHER choices, and a follow-up text field carries what the value
+  // really is. One fix serves both fields rather than a font-specific
+  // special case. `avg.core.settings_schema.validate_value` was fixed
+  // alongside this - it used to reject anything not literally IN
+  // `choices`, which would have silently 400'd every save from this new
+  // text field (and already did for visual_tone, before this existed).
+  const choices = spec.choices ?? [];
+  const hasCustomEscape = choices.includes("custom");
+  const isCustom = hasCustomEscape && !choices.filter((c) => c !== "custom").includes(value);
+
   return (
-    <Select
-      value={value}
-      options={options}
-      disabled={disabled}
-      ariaLabel={spec.label}
-      onChange={(next) => ctx.onCommit(spec, next)}
-    />
+    <div className={hasCustomEscape ? "field-choice-with-custom" : undefined}>
+      <Select
+        value={isCustom ? "custom" : value}
+        options={options}
+        disabled={disabled}
+        ariaLabel={spec.label}
+        onChange={(next) => ctx.onCommit(spec, next === "custom" ? "" : next)}
+      />
+      {isCustom && (
+        <DeferredInput
+          value={value === "custom" ? "" : value}
+          disabled={disabled}
+          placeholder="Enter a custom value"
+          onCommit={(raw) => ctx.onCommit(spec, raw)}
+        />
+      )}
+    </div>
   );
 }
 

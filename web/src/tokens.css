@@ -2149,6 +2149,15 @@ a:hover {
   color: var(--muted);
 }
 
+/* ChoiceField's "custom" escape hatch (Slice 29) - a small gap between
+   the Select and the revealed text field, not a full field-row of its
+   own. */
+.field-choice-with-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* A neutral wash, not the accent - unsaved is a state every row can be in,
    not "the" action of this screen. */
 .field-row--dirty {

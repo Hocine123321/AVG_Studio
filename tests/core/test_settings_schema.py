@@ -83,3 +83,47 @@ def test_no_reader_bypasses_the_resolver() -> None:
             if pattern.search(line):
                 offenders.append(f"{rel}:{lineno}")
     assert offenders == [], f"reads channel.settings directly, bypassing resolve_channel_settings: {offenders}"
+
+
+def test_validate_value_rejects_an_unlisted_choice_with_no_custom_escape() -> None:
+    from avg.core.settings_schema import SettingSpec, SettingValidationError, validate_value
+
+    spec = SettingSpec(
+        id="fake_choice",
+        group="creative",
+        label="Fake",
+        help="",
+        type="choice",
+        default="a",
+        scope="channel",
+        invalidates="brief",
+        choices=["a", "b"],
+    )
+    try:
+        validate_value(spec, "not-a-real-choice")
+        assert False, "expected SettingValidationError"
+    except SettingValidationError:
+        pass
+
+
+def test_validate_value_accepts_any_string_when_choices_declare_a_custom_escape() -> None:
+    """Reproduces a real, pre-existing bug found while implementing Slice
+    29 Task 5: visual_tone already ships a "custom" entry in its choices
+    with no way to act on it - selecting it and typing anything would
+    fail this exact check today, silently, since nothing in the app ever
+    exercised that path before Slice 29 gave ChoiceField a UI for it."""
+    from avg.core.settings_schema import SettingSpec, validate_value
+
+    spec = SettingSpec(
+        id="fake_choice_with_custom",
+        group="creative",
+        label="Fake",
+        help="",
+        type="choice",
+        default="a",
+        scope="channel",
+        invalidates="brief",
+        choices=["a", "b", "custom"],
+    )
+    assert validate_value(spec, "Bebas Neue") == "Bebas Neue"
+    assert validate_value(spec, "a") == "a"

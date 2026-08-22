@@ -389,12 +389,14 @@ SETTINGS: list[SettingSpec] = [
         group="captions",
         label="Font",
         help=(
-            "The GLOBAL font (family name or a .ttf/.otf path) shared by captions AND "
-            "takeover cards - one setting, one look. Empty uses the system default."
+            "The GLOBAL font shared by captions AND takeover cards - one setting, one "
+            "look. \"Custom\" accepts any family name or a .ttf/.otf path, for anything "
+            "not in this shortlist."
         ),
-        type="text",
+        type="choice",
         default="",
         scope="channel",
+        choices=["", "Arial", "Segoe UI", "Calibri", "Georgia", "Verdana", "Impact", "Times New Roman", "custom"],
         invalidates="screen_text",
     ),
     # --- overlay cards (Director II's focused/explainer cards and takeover
@@ -821,7 +823,19 @@ def validate_value(spec: SettingSpec, value: Any) -> Any:
             raise SettingValidationError(f"{spec.id!r}: expected text, got {value!r}")
         return value
     if spec.type == "choice":
-        if not isinstance(value, str) or value not in (spec.choices or []):
-            raise SettingValidationError(f"{spec.id!r}: {value!r} is not one of {spec.choices}")
-        return value
+        if not isinstance(value, str):
+            raise SettingValidationError(f"{spec.id!r}: expected text, got {value!r}")
+        if value in (spec.choices or []):
+            return value
+        # A "custom" entry in `choices` is an escape hatch, not a real
+        # value (Slice 29's ChoiceField gives it a UI - a follow-up text
+        # field for whatever the actual value is) - so anything else the
+        # user actually typed is what "custom" stands for here, not a
+        # rejection. Found as a real, pre-existing bug: `visual_tone`
+        # already shipped a "custom" choice with no way to act on it,
+        # silently broken by this exact strictness the whole time nothing
+        # in the app exercised that path.
+        if "custom" in (spec.choices or []):
+            return value
+        raise SettingValidationError(f"{spec.id!r}: {value!r} is not one of {spec.choices}")
     raise SettingValidationError(f"{spec.id!r}: unknown setting type {spec.type!r}")
