@@ -1240,3 +1240,89 @@ standing limitation noted on every UI slice back through Slice 22.
 
 **Commits** (branch `development`, pushed): `10bd735`, `70e1bf6`,
 `a76643f`, `8554261`, `c609b6b`, `315103a`, plus this ledger entry.
+
+---
+
+## Slice 30 — My Videos: performance, selection mode, export (2026-08-17)
+
+Implemented per `docs/superpowers/specs/2026-08-16-slice-30-myvideos-
+design.md` and `docs/superpowers/plans/2026-08-16-slice-30-myvideos-
+plan.md` (pulled onto `development` from `main` earlier this session -
+see Slice 26's own entry for the doc-pull pattern this follows). Three
+tasks, each verified and committed separately:
+
+1. `0f9c959` - memoized project cards, stabilized their callbacks
+2. `c823f5a` - explicit Select mode replaces hover-to-select
+3. `f3d45a6` - Export to CapCut and Open Folder from My Videos
+
+**This closes out the entire Slices 20-30 backlog** (`docs/reference/
+slice 20+ prompt.txt`) - the batch's own completion point, not just
+this one slice's.
+
+**1. Performance.** Root cause traced, not guessed (design spec §1):
+the continuous `GET /api/jobs` poll in `App.tsx` updates `jobs` state
+unconditionally once onboarded, cascading fresh `liveIds`/
+`gridProjects` references into `Home` every tick - every card in the
+grid was a re-render candidate on every poll, not just live ones.
+Virtualization was explicitly checked and found unwarranted (typical
+library sizes don't approach the threshold where it pays for itself) -
+the actual fix is `React.memo(ProjectCard)` plus stabilizing the three
+`App.tsx` callbacks it receives (`openProject`, `openAndRender`,
+`cancelRender`) with `useCallback`, since memoization compares nothing
+useful against callbacks that get a fresh identity every render. **One
+necessary addition beyond the plan's own three named functions:**
+`startRender` wasn't in its touched-list, but `openAndRender` calls it
+directly - left unmemoized, it would have kept giving `openAndRender`
+a fresh identity every render regardless of that function's own
+`useCallback` wrapper, silently defeating the whole point. Wrapped it
+too, after confirming it only closes over a stable setter and checking
+both its call sites.
+
+**2. Selection mode.** A Select/Done toggle (matching Archived's own
+on/off pattern) replaces hover-to-select entirely - not selecting,
+cards behave exactly as before; selecting, the same checkbox now spans
+the WHOLE cell (not a small centered dot) so clicking anywhere selects
+a card, with the visual badge moved to its own decoupled child element.
+**Plan correction:** its own captured CSS didn't match the real
+`.select-dot` block - assumed `--motion-scale`-based transitions that
+don't exist there (plain `0.15s`/`0.12s` durations; this component was
+apparently never retrofitted when `--motion-scale` landed in Slice 12).
+Preserved the real file's actual values rather than the plan's assumed
+ones; left that unrelated retrofit alone.
+
+**3. Export/Open Folder.** New `POST /api/projects/{id}/open-folder` -
+a third instance of the same `os.startfile` + `PYTEST_CURRENT_TEST`-
+skip + `suppress(Exception)` shape Slice 23's Logs button and
+`avg.export.capcut.export_take`'s own reveal already use, not a new
+pattern. Wired into `Home.tsx`'s select bar as two single-selection-
+only actions (bulk-firing several CapCut exports or Explorer windows
+is worse than the problem this fixes). **Two things checked rather
+than assumed:** `os` wasn't already imported in `routes_takes.py`
+(the plan flagged this as "very likely yes" without confirming), and
+`export_take_route` itself has no dedicated HTTP-layer test in
+`test_routes_takes.py` despite the plan's claim it "almost certainly"
+does - its underlying `export_take()` function is thoroughly tested
+(15 cases in `tests/export/test_capcut.py`), so left as a precision
+note rather than an unrelated scope expansion.
+
+**Final verification (Task 4):**
+- `pytest tests -q`: **999 passed, 2 failed, 1 skipped** - this
+  session's established 2-failure baseline, zero regressions across
+  all three tasks.
+- `mypy avg`: **690 errors** - unchanged, including two places this
+  slice deliberately improved on the plan's bare `-> dict:` return
+  types (matching the same fix pattern from Slice 29's Tasks 4 and 6)
+  to avoid growing it.
+- `cd web && npm run build && npm run lint`: clean at every task
+  checkpoint, all three on the first attempt.
+
+**Deferred / not done:** every manual check this slice's design spec
+calls for (Profiler-confirmed re-render reduction on a jobs-poll tick;
+Select mode's full-cell click target and badge visibility; Export to
+CapCut and Open Folder both firing correctly for exactly one selection
+and both disappearing for two or more) - this sandbox has no live
+WebView2 session, the same standing limitation noted on every UI slice
+back through Slice 22.
+
+**Commits** (branch `development`, pushed): `0f9c959`, `c823f5a`,
+`f3d45a6`, plus this ledger entry.
