@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { JobInfo, ProjectDoc } from "./api";
-import { archiveProjects, thumbnailUrl } from "./api";
+import { archiveProjects, exportTakeToCapcut, openProjectFolder, thumbnailUrl } from "./api";
 import type { ProgressEvent } from "./useEvents";
 import { IconFrame, IconStop } from "./Icons";
 import Overview from "./Overview";
@@ -365,6 +365,34 @@ export default function Home({
     });
   }
 
+  const [exporting, setExporting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function handleExport(projectId: string) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project || project.current_take_id == null) {
+      setActionError("This video has no completed take to export yet.");
+      return;
+    }
+    setExporting(true);
+    setActionError(null);
+    try {
+      await exportTakeToCapcut(projectId, project.current_take_id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleOpenFolder(projectId: string) {
+    try {
+      await openProjectFolder(projectId);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function applyArchive(archived: boolean) {
     if (visibleSelected.length === 0) return;
     setBusy(true);
@@ -509,11 +537,30 @@ export default function Home({
           <button type="button" className="btn" onClick={() => setSelected(new Set())} disabled={busy}>
             Clear
           </button>
+          {/* Export/Open Folder are single-target, not bulk (spec §3) -
+              firing several CapCut exports or several Explorer windows
+              from one click is worse than the problem this fixes. */}
+          {visibleSelected.length === 1 && (
+            <>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void handleExport(visibleSelected[0])}
+                disabled={exporting}
+              >
+                {exporting ? "Exporting…" : "Export to CapCut"}
+              </button>
+              <button type="button" className="btn" onClick={() => void handleOpenFolder(visibleSelected[0])}>
+                Open Folder
+              </button>
+            </>
+          )}
           {/* Archiving hides; it never deletes or moves a folder, so it needs
               no confirmation and stays a plain action. */}
           <button type="button" className="btn" onClick={() => applyArchive(!showArchived)} disabled={busy}>
             {busy ? "Working…" : showArchived ? "Restore" : "Archive"}
           </button>
+          {actionError && <span className="field-row__blocked">{actionError}</span>}
         </div>
       )}
     </div>

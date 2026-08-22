@@ -803,3 +803,28 @@ def test_create_take_writes_its_own_run_to_its_own_take_log(client, paths, monke
     assert r.status_code == 200
     assert len(r.json()["lines"]) > 0
     assert any("phase_finished" in line for line in r.json()["lines"])
+
+
+def test_open_project_folder_reveals_it_without_opening_explorer_under_pytest(client, paths, monkeypatch):
+    """Same spy technique as Slice 23's Logs-button test - a bare 200
+    can't distinguish a working PYTEST_CURRENT_TEST guard from a broken
+    one silently swallowed by suppress(Exception)."""
+    import os
+
+    project = _project(paths)
+    client.app.state.projects[project.id] = project
+
+    calls = []
+    monkeypatch.setattr(os, "startfile", lambda *a, **k: calls.append(a), raising=False)
+
+    r = client.post(f"/api/projects/{project.id}/open-folder", headers=AUTH)
+
+    assert r.status_code == 200
+    assert r.json()["opened"] == str(Path(project.folder))
+    assert calls == []
+
+
+def test_open_project_folder_requires_a_token(client, paths):
+    project = _project(paths)
+    client.app.state.projects[project.id] = project
+    assert client.post(f"/api/projects/{project.id}/open-folder").status_code == 401

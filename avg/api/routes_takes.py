@@ -65,6 +65,7 @@ comment for why it closes over `project`, not `shadow_project`.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import traceback
 from contextlib import suppress
@@ -865,6 +866,22 @@ async def export_take_route(project_id: str, take_id: int, request: Request) -> 
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return {"folder": str(folder)}
+
+
+@router.post("/api/projects/{project_id}/open-folder")
+async def open_project_folder_route(project_id: str, request: Request) -> dict[str, str]:
+    """Reveal a project's own folder in Explorer (Slice 30, My Videos'
+    per-video menu) - the same `os.startfile` + `PYTEST_CURRENT_TEST`
+    guard `avg.export.capcut.export_take` already uses to skip actually
+    launching Explorer under a test run, mirrored here rather than a
+    second convention for the identical need.
+    """
+    project = _get_project(request.app.state, project_id)
+    folder = Path(project.folder)
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        with suppress(Exception):
+            os.startfile(folder)  # type: ignore[attr-defined]  # Windows-only, by design
+    return {"opened": str(folder)}
 
 
 @router.get("/api/projects/{project_id}/takes/{take_id}/log")

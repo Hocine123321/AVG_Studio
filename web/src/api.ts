@@ -232,6 +232,21 @@ export function archiveProjects(ids: string[], archived: boolean): Promise<{ arc
   return apiPost<{ archived: boolean; ids: string[] }>("/api/projects/archive", { ids, archived });
 }
 
+/** Exports the take a project's OWN `current_take_id` points at, not
+ * necessarily whichever take a Studio session last viewed - "you export
+ * what this project currently treats as canonical" (see
+ * `avg.export.capcut`'s own module docstring for the take-scoped
+ * reasoning this mirrors from Studio's per-take export). */
+export function exportTakeToCapcut(projectId: string, takeId: number): Promise<{ folder: string }> {
+  return apiPost<{ folder: string }>(`/api/projects/${projectId}/takes/${takeId}/export`);
+}
+
+/** Reveals a project's own folder in Explorer - a no-op under pytest
+ * (`avg.api.routes_takes`'s own `PYTEST_CURRENT_TEST` guard). */
+export function openProjectFolder(projectId: string): Promise<{ opened: string }> {
+  return apiPost<{ opened: string }>(`/api/projects/${projectId}/open-folder`);
+}
+
 // ---- error log ----
 
 export type ErrorSeverity = "critical" | "needs_review" | "low";
