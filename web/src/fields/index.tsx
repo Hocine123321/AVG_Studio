@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 import type { SettingType } from "../api";
-import { BoolField, ChoiceField, FloatField, IntField, PathField, TextField } from "./Fields";
+import { BoolField, ChoiceField, FloatField, IntField, PathField, PersonalityField, TextField } from "./Fields";
 import SecretField from "./SecretField";
 import ModelPicker from "../ModelPicker";
 import Slider from "../Slider";
@@ -52,6 +52,9 @@ export function Field({ spec, ctx, disabled }: FieldProps) {
   // `live_list:` kinds. The kind is the part after the colon.
   if (spec.source === "model_cache" || spec.source?.startsWith("live_list:")) {
     return <ModelPicker spec={spec} ctx={ctx} disabled={disabled} />;
+  }
+  if (spec.source === "personality_presets") {
+    return <PersonalityField spec={spec} ctx={ctx} disabled={disabled} />;
   }
   // Chosen by id, not by type or source (Slice 29) - `fps` is `type="int"`
   // the same as several non-slider ints, and none of these four declare a

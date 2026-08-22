@@ -678,3 +678,11 @@ def test_hardware_endpoint_reports_a_positive_cpu_count(client):
     r = client.get("/api/system/hardware", headers=AUTH)
     assert r.status_code == 200
     assert r.json()["cpu_count"] >= 1
+
+
+def test_personality_presets_endpoint_lists_the_bundled_presets(client):
+    r = client.get("/api/personality-presets", headers=AUTH)
+    assert r.status_code == 200
+    presets = r.json()["presets"]
+    assert isinstance(presets, list)
+    assert len(presets) > 0

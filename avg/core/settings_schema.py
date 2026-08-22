@@ -645,12 +645,24 @@ SETTINGS: list[SettingSpec] = [
     SettingSpec(
         id="content_shape",
         group="creative",
-        label="Content shape",
+        label="Personality",
         help="The narrative/content template this channel follows.",
         type="text",
         default="documentary",
         scope="channel",
         invalidates="brief",
+        # Deliberately still `type="text"`, not `"choice"` - presets are
+        # enumerated by avg.pipeline.personality.load_presets(), which
+        # this module cannot import (avg/core/ sits below avg/pipeline/ in
+        # this app's layering; avg.config.legacy_import importing
+        # avg.core.models/takes is the established example of the allowed
+        # direction - confirmed by grep before writing this comment, not
+        # assumed - the reverse is not). Same shape as `voice_id`'s own
+        # `source="live_list:voice"`: the field keeps its declared type,
+        # `GET /api/personality-presets` (avg.api.routes_settings, the top
+        # layer, free to import both) is where the dynamic list actually
+        # gets computed.
+        source="personality_presets",
     ),
     SettingSpec(
         id="visual_tone",

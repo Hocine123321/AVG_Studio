@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import type { FieldProps } from "./types";
 import { DeferredInput } from "./DeferredInput";
 import Select from "../Select";
+import { getPersonalityPresets } from "../api";
 
 /**
  * The six ordinary field renderers, one per `SettingSpec.type` that isn't
@@ -98,6 +100,49 @@ export function ChoiceField({ spec, ctx, disabled }: FieldProps) {
 export function TextField({ spec, ctx, disabled }: FieldProps) {
   const value = String(ctx.getValue(spec) ?? "");
   return <DeferredInput value={value} disabled={disabled} onCommit={(raw) => ctx.onCommit(spec, raw)} />;
+}
+
+// ── Personality Field ───────────────────────────────────────
+
+/**
+ * `content_shape`'s picker - `source="personality_presets"`, fetched once
+ * per mount rather than pre-loaded into the schema response (the list is
+ * dynamic, per-install; the schema response is otherwise identical
+ * everywhere). Falls back to a plain `TextField` if the fetch fails or
+ * the bundle is somehow empty - never locks the user out of a setting
+ * they could always edit before, the same principle `source`'s own
+ * docstring in `avg.core.settings_schema` already states for
+ * `"model_cache"`.
+ */
+export function PersonalityField({ spec, ctx, disabled }: FieldProps) {
+  const [presets, setPresets] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    getPersonalityPresets()
+      .then((res) => setPresets(res.presets))
+      .catch(() => setPresets([]));
+  }, []);
+
+  if (presets === null || presets.length === 0) {
+    return <TextField spec={spec} ctx={ctx} disabled={disabled} />;
+  }
+
+  const value = String(ctx.getValue(spec) ?? "");
+  // A stale value (a preset removed since it was picked) still needs to
+  // show as something, not silently jump to whatever's first in the
+  // list - same reasoning ModelPicker.tsx already applies to a stale
+  // model id.
+  const options = presets.includes(value) || value === "" ? presets : [...presets, value];
+
+  return (
+    <Select
+      value={value}
+      options={options}
+      disabled={disabled}
+      ariaLabel={spec.label}
+      onChange={(next) => ctx.onCommit(spec, next)}
+    />
+  );
 }
 
 // ── Path Field ──────────────────────────────────────────────

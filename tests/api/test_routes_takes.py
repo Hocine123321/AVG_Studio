@@ -507,7 +507,12 @@ def test_override_dominant_over_an_earlier_reroll_target(client, paths, monkeypa
     assert r.status_code == 201
     body = r.json()
     assert body["rerolled_from"] is None
-    assert body["label"] == "Take 2 · content shape"
+    # Slice 29 Task 6 renamed content_shape's label "Content shape" ->
+    # "Personality" - this take label is built from spec.label.lower()
+    # (avg/api/routes_takes.py), so it correctly follows the rename here
+    # too, exactly the kind of "anywhere else spec.label surfaces" case
+    # the rename's own design spec flagged as worth confirming.
+    assert body["label"] == "Take 2 · personality"
 
 
 def test_auto_label_names_earliest_setting_and_counts_the_rest(client, paths, monkeypatch):

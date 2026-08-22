@@ -186,6 +186,20 @@ async def get_hardware_info() -> dict[str, int]:
     return {"cpu_count": os.cpu_count() or 4}
 
 
+@router.get("/api/personality-presets")
+async def get_personality_presets() -> dict[str, list[str]]:
+    """Every bundled personality preset's name - what `content_shape`'s
+    picker offers (Slice 29). Imported locally, matching this router's own
+    existing pattern for `render_substate`/`script_substate`: this route
+    file is the top layer, free to reach into `avg.pipeline`, but keeping
+    the import at the call site rather than module-level keeps that
+    visible for a router this thin.
+    """
+    from avg.pipeline.personality import load_presets  # noqa: PLC0415
+
+    return {"presets": sorted(load_presets())}
+
+
 @router.get("/api/phases")
 async def get_phases() -> dict[str, Any]:
     """The pipeline's phases, in order, with what each one is for.
