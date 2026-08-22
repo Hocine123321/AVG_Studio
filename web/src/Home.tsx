@@ -270,6 +270,7 @@ export default function Home({
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // A running row needs an actual percentage and message, which only ever
@@ -403,6 +404,18 @@ export default function Home({
             {showArchived ? "Back to library" : `Archived (${archivedCount})`}
           </button>
         )}
+        {/* An explicit mode, not hover-to-select (Slice 30 design spec §2) -
+            "Done" while active, matching Archived's own on/off pattern. */}
+        <button
+          type="button"
+          className={`btn${selectMode ? " btn--on" : ""}`}
+          onClick={() => {
+            setSelectMode((on) => !on);
+            setSelected(new Set());
+          }}
+        >
+          {selectMode ? "Done" : "Select"}
+        </button>
         <input
           className="home__search"
           placeholder="Search topics"
@@ -469,17 +482,20 @@ export default function Home({
           {gridProjects.map((project) => (
             <div key={project.id} className="project-cell">
               <ProjectCard project={project} onOpen={onOpen} onRender={onRender} />
-              <label
-                className={`select-dot${selected.has(project.id) ? " select-dot--on" : ""}`}
-                title={showArchived ? "Select to restore" : "Select to archive"}
-              >
-                <input
-                  type="checkbox"
-                  checked={selected.has(project.id)}
-                  onChange={() => toggleSelected(project.id)}
-                  aria-label={`Select ${project.title}`}
-                />
-              </label>
+              {selectMode && (
+                <label
+                  className={`select-dot${selected.has(project.id) ? " select-dot--on" : ""}`}
+                  title={showArchived ? "Select to restore" : "Select to archive"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(project.id)}
+                    onChange={() => toggleSelected(project.id)}
+                    aria-label={`Select ${project.title}`}
+                  />
+                  <span className="select-dot__badge" aria-hidden="true" />
+                </label>
+              )}
             </div>
           ))}
         </div>
