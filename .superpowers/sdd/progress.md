@@ -1103,3 +1103,140 @@ spec → plan before implementation can start.
 
 **Commit** (branch `development`, pushed): `4993f26`, plus this ledger
 entry.
+
+---
+
+## Slice 29 — Settings screen: Models grouping, Slider, pickers, Personality (2026-08-17)
+
+Implemented per `docs/superpowers/specs/2026-08-16-slice-29-settings-
+design.md` and `docs/superpowers/plans/2026-08-16-slice-29-settings-
+plan.md` (pulled onto `development` from `main` alongside Slice 26/27/28's
+docs earlier this session - see Slice 26's own entry). Six tasks, each
+verified and committed separately:
+
+1. `10bd735` - `FieldRow` extracted from `SettingsGroup` (pure refactor)
+2. `70e1bf6` - Models settings grouped by phase (`ModelsFieldGroups`)
+3. `a76643f` - real `Slider` control, 4 statically-bounded settings
+4. `8554261` - `render_threads` gets a hardware-aware slider
+5. `c609b6b` - Captions Font picker with a custom escape hatch
+6. `315103a` - Personality picker + label rename (final task)
+
+**Before any of this:** resolved a real tension between the design
+spec and the plan up front, not discovered mid-task. The design spec's
+§3 assumed Personality could become `type="choice"` with
+`choices=list(load_presets())` computed at schema-module-load time,
+needing "no new endpoint." Checked this against the actual codebase:
+`avg/core/` (where the schema lives) is documented in `README.md` as
+"knows about no other layer," and `avg.pipeline.personality` lives in
+`avg/pipeline/`, a layer above core - core cannot import from it.
+`avg/core/invalidation.py` already imports `avg.pipeline.registry`,
+which looked like a counter-example at first, but is itself a
+pre-existing violation of that documented rule, not a sanctioned
+precedent to extend. The plan had already caught this and pivoted to a
+`source`-based endpoint (Task 6) mirroring `voice_id`'s own pattern -
+confirmed its reasoning was right before proceeding, rather than either
+blindly following the design spec's infeasible original plan or
+blindly trusting the plan's correction without checking it myself.
+
+**1. `FieldRow` extraction.** No behavior change - a seam Task 2 needs.
+
+**2. Models grouping.** `ModelsFieldGroups` groups the flat spec list
+into one section per phase (Primary/Backup/If-both-fail together) via
+suffix-matching on id (`_model`/`_backup`/`_on_failure`). Verified
+against the complete real `group="models"` list (17 specs) before
+trusting the plan's classify logic - it initially looked like it might
+collide with similarly-suffixed `image_provider_backup`/
+`image_model_backup` fields, but those live in `group="images"`
+entirely, a category this component never receives. **Caught before
+shipping:** an early version fully replaced `SettingsGroup` for this
+category without reproducing its `<h2>` title/scrollspy-highlight
+wrapper - would have silently dropped the "Models" heading. Fixed by
+giving `ModelsFieldGroups` the same `title`/`active` props.
+
+**3. Real `Slider`.** Native `<input type="range">`, restyled - one
+control for `voice_stability`, `voice_speed`, `fps`, `captions_font_size`.
+**Plan citation corrected:** it credited "Slice 24's Quick Panel resize
+handle" for the cross-browser thumb-styling technique; that's a plain
+mouse-drag `<div>`, not a range input at all - checked before reusing
+the citation. The real (and only) precedent is `.media-player__seek`
+(Slice 27), credited instead.
+
+**4. `render_threads`.** A sixth, hardware-aware slider - new
+`GET /api/system/hardware` (`os.cpu_count() or 4`, matching every other
+such fallback in this codebase), `cpuCount` threaded through
+`SettingsCtx`. **Plan claim corrected, not just repeated:** it says
+per-take overrides "never include `render_threads` in practice" -
+checked this rather than trusting it; `NewTakePanel.tsx` filters to
+`scope="channel"` specs by group, and `render_threads` genuinely
+qualifies, so it CAN reach that panel (with a generic max-8 fallback,
+since that panel never fetches hardware info) - documented as a
+deliberate, low-stakes tradeoff instead of an asserted impossibility.
+**Also:** the plan's bare `-> dict:` return type on the new route would
+have added a 30th instance of an already-widespread pre-existing mypy
+gap in `routes_settings.py` (confirmed via `git stash`: 690 → 691).
+Used `dict[str, int]` instead, keeping mypy at the exact baseline - the
+same fix applied again in Task 6's route.
+
+**5. Captions Font picker.** `font_family` becomes `type="choice"` with
+a curated Windows-default shortlist plus `visual_tone`'s own existing
+"custom" escape-hatch pattern, generalized in `ChoiceField` rather than
+built font-specific. **Found and fixed a real, pre-existing bug the
+design spec flagged as "worth confirming" without confirming it:**
+`validate_value`'s `type="choice"` branch required the submitted value
+to be *exactly* one of `choices`, no exception - meaning `visual_tone`'s
+already-shipped "custom" entry has been silently unusable the entire
+time nothing exercised that path, and `font_family`'s new escape hatch
+would have inherited the identical bug on day one. Wrote a failing test
+proving the rejection, then fixed `validate_value` to accept any string
+when a field's `choices` declare a `"custom"` escape hatch - one fix,
+both fields, matching the frontend's own logic exactly.
+
+**6. Personality.** Label "Content shape" → "Personality"; id and every
+internal identifier unchanged (Slice 20's resolution, still applies).
+New `source="personality_presets"` + `GET /api/personality-presets`
+(top layer, free to import `avg.pipeline`) + `PersonalityField`
+(fetch-once, falls back to plain text on failure/empty bundle, same
+principle `source`'s own docstring states for `model_cache`). Real
+bundled presets confirmed: `documentary`, `news_report`,
+`zack_d_films` - matches the plan's own recollection exactly. **One
+genuine regression found and fixed, not a code bug:** the rename
+correctly propagates to `routes_takes.py`'s take-labeling feature,
+which builds a label from `spec.label.lower()` - "Take 2 · content
+shape" became, correctly, "Take 2 · personality". Updated the one test
+asserting the stale string rather than reverting the rename - exactly
+the "anywhere else `spec.label` surfaces" case the rename's own design
+spec asked to confirm.
+
+**Final verification (Task 7):**
+- `pytest tests -q`: **997 passed, 2 failed, 1 skipped** - this
+  session's established 2-failure baseline, zero regressions across
+  all six tasks (one genuine test-string update in Task 6, not a
+  regression - see above).
+- `mypy avg`: **690 errors** - unchanged throughout, including the two
+  places this session deliberately improved on the plan's own draft to
+  avoid growing it.
+- `cd web && npm run build && npm run lint`: clean at every task
+  checkpoint, all six on the first attempt.
+
+**Pattern worth naming again, extending Slice 27's:** every plan
+deviation found this slice was caught by tracing a specific, checkable
+claim against the real code (a layering rule, a validation function's
+actual strictness, a citation's actual existence, a test's actual
+expected string) before or immediately after applying a diff - never by
+assuming the plan's own confidence was sufficient. Two of six tasks
+(3, 4) needed a correction to something the plan merely asserted rather
+than verified; two others (2, 6) needed a correction to something the
+plan's diff simply didn't cover in full. Read-before-write, and
+verify-before-trusting-a-fix, both earned their keep again.
+
+**Deferred / not done:** every manual click-through this slice's design
+spec calls for (Models category shows five phase groups correctly; the
+sliders drag smoothly with the right bounds and zero-labels; Captions
+Font's Custom reveals a text field and persists a typed value;
+`render_threads`'s max matches the real machine's core count;
+Personality shows the three-preset picker and the "Personality" label
+everywhere) - this sandbox has no live WebView2 session, the same
+standing limitation noted on every UI slice back through Slice 22.
+
+**Commits** (branch `development`, pushed): `10bd735`, `70e1bf6`,
+`a76643f`, `8554261`, `c609b6b`, `315103a`, plus this ledger entry.
