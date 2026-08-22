@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import type { ProjectDoc } from "./api";
 import { thumbnailUrl } from "./api";
 
@@ -58,7 +58,7 @@ export interface ProjectCardProps {
  *
  * The empty state is a drawn frame icon rather than the `▤` glyph.
  */
-export default function ProjectCard({ project, onOpen, onRender }: ProjectCardProps) {
+function ProjectCardImpl({ project, onOpen, onRender }: ProjectCardProps) {
   const { state, failedPhase } = resolveState(project);
   const created = formatCreated(project.created);
   const [thumbBroken, setThumbBroken] = useState(false);
@@ -171,3 +171,15 @@ export default function ProjectCard({ project, onOpen, onRender }: ProjectCardPr
     </article>
   );
 }
+
+/**
+ * Wrapped in `React.memo` (Slice 30) - `Home`'s own re-renders (the
+ * continuous `GET /api/jobs` poll in `App.tsx` updates `jobs` state
+ * unconditionally, which cascades down regardless of whether anything
+ * about THIS card's own project changed) no longer force every card in
+ * the grid to re-render along with it, as long as its own props
+ * (`project`, `onOpen`, `onRender`) stay referentially stable - which
+ * `App.tsx`'s `useCallback` wrapping of `openProject`/`openAndRender`
+ * (Task 1) is what actually makes true, not this alone.
+ */
+export default React.memo(ProjectCardImpl);

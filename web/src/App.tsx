@@ -34,6 +34,16 @@ type Screen =
   | { name: "settings" }
   | { name: "health" };
 
+// "Latest opened", not latest created and not the current take within a
+// project (Slice 27 spec §1's explicit distinction) - every navigation-
+// to-Studio path goes through `openProject`, so recording it there covers
+// Home's card click, Create's onCreated, and Run again/Resume without
+// instrumenting each separately. Module scope, not component-local: a
+// pure constant needs no per-render re-declaration, and living here
+// removes any question of whether it belongs in a `useCallback`
+// dependency array below (Slice 30).
+const LAST_PROJECT_KEY = "avg.studio.lastProjectId";
+
 function withPhase(project: ProjectDoc, key: string, patch: Partial<PhaseRecord>): ProjectDoc {
   const existing: PhaseRecord = project.phases[key] ?? { status: "pending" };
   return { ...project, phases: { ...project.phases, [key]: { ...existing, ...patch } } };
@@ -223,30 +233,23 @@ export default function App() {
     };
   }, [settings?.onboarded, reloadJobs]);
 
-  async function startRender(id: string) {
+  const startRender = useCallback(async (id: string) => {
     setStartError(null);
     try {
       await apiPost(`/api/projects/${id}/render`);
     } catch (err) {
       setStartError(extractDetail(err instanceof Error ? err.message : String(err)));
     }
-  }
+  }, []);
 
-  function cancelRender(id: string) {
+  const cancelRender = useCallback((id: string) => {
     // Best-effort: the render's own terminal event (or its absence) is the
     // honest source of truth for whether it actually stopped, not this
     // request's resolution.
     apiPost(`/api/projects/${id}/cancel`).catch(() => {});
-  }
+  }, []);
 
-  // "Latest opened", not latest created and not the current take within a
-  // project (spec §1's explicit distinction) - every navigation-to-Studio
-  // path already goes through this one function, so recording it here
-  // covers Home's card click, Create's onCreated, and Run again/Resume
-  // (openAndRender, below) without instrumenting each separately.
-  const LAST_PROJECT_KEY = "avg.studio.lastProjectId";
-
-  function openProject(id: string) {
+  const openProject = useCallback((id: string) => {
     setStartError(null);
     setScreen({ name: "project", id });
     try {
@@ -254,7 +257,7 @@ export default function App() {
     } catch {
       // Best-effort - a UI convenience, never worth failing navigation over.
     }
-  }
+  }, []);
 
   /** The Studio rail item's own handler - opens whichever project was last
    * opened, confirming it still exists first (archived counts, since
@@ -290,10 +293,13 @@ export default function App() {
   /** What "Run again" (a done project) and "Resume" (a failed one) do:
    * open Studio AND immediately start a fresh render - distinct from Play
    * / Open, which only navigate. */
-  function openAndRender(id: string) {
-    openProject(id);
-    startRender(id);
-  }
+  const openAndRender = useCallback(
+    (id: string) => {
+      openProject(id);
+      startRender(id);
+    },
+    [openProject, startRender],
+  );
 
   // First-run gate. Nothing below this - not even the Rail or Transport,
   // per the brief's "no wizard chrome" - renders until onboarding either
