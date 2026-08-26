@@ -89,6 +89,17 @@
 
   --font-heading: "Caprasimo", Georgia, serif;
   --font-body: "Figtree", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  /* Referenced by .artifact-log__body (the take-log viewer) since that
+     rule was first written, but never actually defined - found during a
+     bug/inconsistency pass: an undefined custom property with no
+     fallback makes font-family fall back to its inherited value, so raw
+     log lines have been rendering in the ordinary body font the whole
+     time instead of a monospace one, silently. Windows-native, no
+     import, matching --font-body's own "self-hosted or system, never a
+     web-font ping" philosophy - Cascadia Mono/Consolas ship with Windows;
+     the rest cover other platforms this app doesn't target but the
+     sandbox that builds it sometimes does. */
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
 
   /* density — flipped wholesale by [data-density] */
   --pad: 26px;
@@ -787,35 +798,6 @@ a:hover {
   position: relative;
 }
 
-.chan-chip {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--line-2);
-  background: transparent;
-  color: var(--muted);
-  border-radius: 999px;
-  padding: 6px 15px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.16s, color 0.16s, border-color 0.16s;
-}
-
-.chan-chip:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.chan-chip--on {
-  border-color: transparent;
-  background: var(--accent-deep);
-  color: var(--accent-soft);
-}
-
-.chan-chip__count {
-  opacity: 0.55;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---- hero: a render in progress ---- */
 
 .hero {
@@ -1480,7 +1462,13 @@ a:hover {
   margin: 0 0 18px;
   padding: 14px 16px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  /* Was `var(--radius-md)` - never defined anywhere in :root (confirmed:
+     grepped every --radius* definition), so this rendered with square
+     corners the whole time, silently, since an undefined custom property
+     with no fallback just makes border-radius fall back to its own
+     initial value (0) rather than erroring. --radius-sm matches the
+     scale of other compact nested panels (e.g. .media-player, Slice 27). */
+  border-radius: var(--radius-sm);
   background: var(--surface);
 }
 
@@ -1899,7 +1887,6 @@ a:hover {
 
 /* A cancel was the user's choice, not a crash — never red. */
 .transport--cancelled .transport__label,
-.transport--idle .transport__label,
 .transport--offline .transport__label {
   color: var(--muted);
 }
@@ -3224,11 +3211,13 @@ a:hover {
 
 /* ---- compact theme quick-toggle ----
    A preference flip, not a destination. Half the height of a rail item so it
-   reads as secondary, same width so the rail column stays aligned. */
+   reads as secondary, same width so the rail column stays aligned. A small
+   filled accent disc (`.rail__toggle-disc`, an inner child span) carries the
+   actual circular shape now - this outer item doesn't need to be one itself. */
 
 .rail__item--mini {
   height: 28px;
-  border-radius: 10px;
+  border-radius: 999px;
   color: var(--dim);
 }
 
@@ -4052,15 +4041,15 @@ a:hover {
   text-decoration: underline;
 }
 
-/* ---- rail theme toggle, redesign form ----
-   A small filled accent disc rather than a ghost item - it reads as a
-   switch, which is what it is. */
-
-.rail__item--mini {
-  height: 28px;
-  border-radius: 999px;
-}
-
+/* Rail theme toggle's own filled accent disc (Rail.tsx's inner
+   `.rail__toggle-disc` span) - a small circle rather than a ghost item,
+   since it reads as a switch, which is what it is. The outer
+   `.rail__item--mini` itself is defined once, above (merged from a
+   second, later, conflicting declaration found during a bug/
+   inconsistency pass - the redesign that introduced this disc never
+   removed the item's own now-superseded 10px-radius version it was
+   replacing, so the two silently fought via cascade order rather than
+   either being cleaned up). */
 .rail__toggle-disc {
   width: 22px;
   height: 22px;
@@ -4675,7 +4664,11 @@ a:hover {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
-  color: var(--ink);
+  /* Was `var(--ink)` - never defined anywhere in this file (found during
+     a bug/inconsistency pass, same sweep as --font-mono above and
+     .subphase's --radius-md). --text is the established main-text-color
+     token used everywhere else. */
+  color: var(--text);
   white-space: pre;
 }
 
