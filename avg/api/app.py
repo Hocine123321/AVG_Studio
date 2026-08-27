@@ -71,7 +71,7 @@ from pydantic import BaseModel, Field
 from avg.config import channels as channels_config
 from avg.config.channel_defaults import default_channel_defaults_path, load_defaults
 from avg.config.quick_settings import default_quick_settings_path
-from avg.config.settings import SettingsDoc, default_settings_path, load_settings, save_settings, suggest_output_root
+from avg.config.settings import SettingsDoc, load_settings, save_settings, suggest_output_root
 from avg.config.settings import load_render_settings
 from avg.config.user_assets import default_errors_path, default_model_prefs_path, default_working_models_path
 from avg.core.error_store import ErrorStore, classify
@@ -87,7 +87,7 @@ from avg.core.settings_schema import (
     resolve_channel_settings,
     validate_value,
 )
-from avg.core.takes import take_folder, take_root
+from avg.core.takes import take_root
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project

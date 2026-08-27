@@ -59,7 +59,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-from avg.core.errors import AvgError, ErrorKind
+from avg.core.errors import AvgError
 from avg.providers.errors import POLICY, classify
 
 Mode = Literal["live", "record", "replay"]
