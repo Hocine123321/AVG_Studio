@@ -110,9 +110,3 @@ export function useActivities(): Activity[] {
 
   return activities;
 }
-
-/** mm:ss since `startedAt`, the format the status bar shows next to a label. */
-export function elapsedClock(startedAt: number, now: number): string {
-  const total = Math.max(0, Math.round((now - startedAt) / 1000));
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
