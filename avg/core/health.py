@@ -85,10 +85,11 @@ _CACHE = _Cache()
 # imported lazily by the render child rather than by this process.
 # (label, import name, distribution name, required)
 #
-# This covered four packages - FFmpeg, Pillow, moviepy, NumPy - which is
-# the render path and nothing else. A dependency check that only knows the
-# render path cannot answer "why won't it start", which is the question a
-# user opens this screen with.
+# This covers five non-core packages - Pillow, moviepy, NumPy, imageio-
+# ffmpeg, FFmpeg itself (checked elsewhere, as a binary, not a Python
+# import) - which is the render path and nothing else. A dependency check
+# that only knows the render path cannot answer "why won't it start",
+# which is the question a user opens this screen with.
 #
 # Import names differ from distribution names often enough to be worth
 # spelling out: PIL/Pillow, webview/pywebview, edge_tts/edge-tts.
@@ -101,9 +102,21 @@ _PACKAGES: tuple[tuple[str, str, str, bool], ...] = (
     ("httpx", "httpx", "httpx", True),
     # Rendering.
     ("Pillow", "PIL", "Pillow", True),
-    ("moviepy", "moviepy", "moviepy", True),
+    # moviepy and its own imageio-ffmpeg dependency are NOT in the shipped
+    # dependency set as of the size-reduction pass that removed them
+    # (a redundant ~31MB bundled ffmpeg binary, on top of the one this app
+    # already fetches itself via tools/fetch_ffmpeg.py, for a fallback
+    # engine "auto"/"ffmpeg" - the default for every fresh install - never
+    # actually needs). Reaching this render path at all now means either
+    # an explicit render_engine="moviepy" choice or the rare "auto"
+    # fallback for a case ffmpeg doesn't support; either way, avg.media.
+    # child.py's own ImportError handling turns a missing moviepy into a
+    # clear, actionable render-time message rather than a raw crash, so
+    # this being routinely absent is not itself something to call the app
+    # broken over the way pydub's own history (below) warns against.
+    ("moviepy", "moviepy", "moviepy", False),
     ("NumPy", "numpy", "numpy", True),
-    ("imageio-ffmpeg", "imageio_ffmpeg", "imageio-ffmpeg", True),
+    ("imageio-ffmpeg", "imageio_ffmpeg", "imageio-ffmpeg", False),
     # `pydub` is NOT optional, whatever this table said before 2026-07-29:
     # `avg/pipeline/phases/voice.py` imports it directly for assembly and
     # calls `remove_silences_core`, which imports it as well. There is no

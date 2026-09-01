@@ -67,6 +67,45 @@ def test_missing_output_is_reported_as_an_error_not_a_success(tmp_path, monkeypa
     assert not any(m[0] == "result" for m in sent)
 
 
+def test_a_missing_moviepy_becomes_a_clear_message_not_a_raw_traceback(tmp_path, monkeypatch):
+    """moviepy is an optional dependency (Slice 30 follow-up) - selected
+    explicitly via the render_engine setting, or reached as the "auto"
+    engine's own fallback for a case ffmpeg doesn't support. Either way,
+    an ImportError this deep in a spawned child process would otherwise
+    surface to the user as a bare "render child exited with code 1" or a
+    generic ErrorKind.bug (avg.media.engine.classify_exit's own fallback
+    for an unrecognised non-zero exit with no queued result) - neither
+    tells anyone what actually happened or how to fix it.
+    """
+    import avg.media.vendor.avg as vendor_avg
+    from avg.media.child import run_child
+
+    def _raise_missing_moviepy(**kw):
+        raise ModuleNotFoundError("No module named 'moviepy'", name="moviepy")
+
+    monkeypatch.setattr(vendor_avg, "render_project", _raise_missing_moviepy)
+
+    sent = []
+
+    class FakeQueue:
+        def put(self, msg):
+            sent.append(msg)
+
+        def close(self):
+            pass
+
+        def join_thread(self):
+            pass
+
+    with pytest.raises(ModuleNotFoundError):
+        run_child({"project_path": str(tmp_path)}, FakeQueue())
+
+    assert sent, "child reported nothing at all before re-raising"
+    assert sent[-1][0] == "error"
+    assert "moviepy" in sent[-1][1].lower()
+    assert "auto" in sent[-1][1].lower() or "ffmpeg" in sent[-1][1].lower()
+
+
 def test_render_always_emits_a_running_activity_event_first(tmp_path, monkeypatch):
     """Slice 17 §2: the status pill's feed. `running` is yielded before the
     child even starts, so the panel has something to show immediately."""

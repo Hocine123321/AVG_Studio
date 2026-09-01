@@ -6,7 +6,7 @@ dependencies = ["fastapi", "uvicorn[standard]", "pywebview", "pydantic>=2"]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy", "httpx"]
-media = ["numpy", "Pillow", "pydub", "moviepy"]
+media = ["numpy", "Pillow", "pydub"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

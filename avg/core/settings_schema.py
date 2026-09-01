@@ -623,7 +623,13 @@ SETTINGS: list[SettingSpec] = [
         id="render_engine",
         group="render",
         label="Render engine",
-        help="Which media pipeline renders the final video.",
+        help=(
+            'Which media pipeline renders the final video. "auto" (recommended) '
+            'uses ffmpeg and only falls back to moviepy for a case ffmpeg doesn\'t '
+            'support. moviepy is an optional install - if it isn\'t present, '
+            'picking it here (or hitting that rare fallback) fails with a clear '
+            "message rather than a crash, but the render itself won't complete."
+        ),
         type="choice",
         default="auto",
         scope="channel",

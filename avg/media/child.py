@@ -106,6 +106,28 @@ def run_child(kwargs: dict[str, Any], q: Any) -> None:
                 # lives there, and until Slice 9 all of it went nowhere.
                 with _captured_stderr(q):
                     vendor_avg.render_project(**kwargs)
+            except ImportError as exc:
+                # moviepy is optional (removed from the shipped dependency
+                # set as dead weight for the ~default install - it's an
+                # explicit render_engine="moviepy" choice, or the "auto"
+                # engine's own rare fallback for a case ffmpeg doesn't
+                # support). Left uncaught, this is exactly the kind of
+                # crash the comment above says to let propagate as a bare
+                # exit code - classify_exit's own fallback for an
+                # unrecognised non-zero exit with no queued result is a
+                # generic ErrorKind.bug, which tells nobody what happened
+                # or how to fix it. A targeted, still-fatal message instead:
+                # still crashes (still re-raised, still a non-zero exit),
+                # just with something real queued first.
+                if (getattr(exc, "name", "") or "").startswith("moviepy"):
+                    q.put((
+                        "error",
+                        "This channel's Render Engine is set to \"moviepy\", or the "
+                        "\"auto\" engine fell back to it, but the optional moviepy "
+                        "package isn't installed. Switch Render Engine to \"auto\" or "
+                        "\"ffmpeg\" in Settings, or install moviepy to use this option.",
+                    ))
+                raise
             finally:
                 vendor_avg.PROGRESS_SINK = None
 
