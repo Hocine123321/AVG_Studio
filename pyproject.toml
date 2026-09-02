@@ -2,10 +2,10 @@
 name = "avg-studio"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn[standard]", "pywebview", "pydantic>=2"]
+dependencies = ["fastapi", "uvicorn[standard]", "pywebview", "pydantic>=2", "httpx"]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy", "httpx"]
+dev = ["pytest", "ruff", "mypy"]
 media = ["numpy", "Pillow", "pydub"]
 
 [tool.pytest.ini_options]
