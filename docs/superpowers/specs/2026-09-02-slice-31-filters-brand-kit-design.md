@@ -1,7 +1,7 @@
 # Slice 31 — Filters + Brand Kit: Design
 
 **Goal:** close the two Director II gaps found by the legacy-parity
-comparison (`.superpowers/sdd/progress.md`, 2026-09-01) that most affect
+comparison (`.superpowers/sdd/progress.md`, 2026-09-02) that most affect
 the final video's look: per-scene external filter overlays, and a brand
 preset that actually changes the video instead of only labelling a
 prompt line. First of four ranked sub-slices toward legacy video-result

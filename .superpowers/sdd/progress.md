@@ -1364,7 +1364,7 @@ User ranked sub-slice order: (1) Filters + Brand Kit, (2) Recycling +
 Composite grids, (3) Chapters + cards, (4) Caption animation styles.
 
 **Sub-slice 1 spec written and committed:**
-`docs/superpowers/specs/2026-09-01-slice-31-filters-brand-kit-design.md`.
+`docs/superpowers/specs/2026-09-02-slice-31-filters-brand-kit-design.md`.
 Covers: `avg.pipeline.filters` catalog module for `Filters.metadata`'s
 own format; 3 new settings (`filters_intensity`/`allow`/`block`, group
 `"filters"`); Director II prompt filters section + anti-clutter cap
