@@ -1326,3 +1326,66 @@ back through Slice 22.
 
 **Commits** (branch `development`, pushed): `0f9c959`, `c823f5a`,
 `f3d45a6`, plus this ledger entry.
+
+## Slice 31 — Legacy video-result parity, sub-slice 1: Filters + Brand Kit (2026-09-02)
+
+**Context:** new direction from here — closing the gap between AVG
+Studio's rendered output and the legacy PowerShell app's, as close to
+parity as reasonable, rather than net-new features. Cloned
+`D:\AI_Video_Gen`'s GitHub mirror (`Hocine123321/AI_Video_Gen`) fresh
+into this sandbox for side-by-side comparison; not previously present
+here.
+
+**Comparison findings** (grep + read against both codebases' actual
+code, not assumed from README prose): 7 independent gaps affecting the
+rendered video, spanning `director.py`, `prompts.py`, `captions.py`,
+`visuals.py`:
+- Director II: no filters (render engine side is already vendored and
+  functional — `avg/media/vendor/avg.py`'s `_FILTER_CATALOG`/
+  `compose_filter_overlays`/`_apply_filter` are byte-identical to
+  legacy and unreachable only because nothing upstream writes a
+  per-scene `filter` field or ships `Assets/Filters/`); no brand kit
+  (settings exist — `brand_preset`, `overlay_accent1/2/highlight` — but
+  disconnected: the preset only labels a prompt line, never touches
+  colour, and carries no motion/grade bias); no Explainer takeover
+  cards (`Get-AiEditPlan` never ported, only deterministic Focused
+  cards exist); no chapter takeover cards.
+- Director I: no chapters/parts grouping (already known, confirmed).
+- Captions: `captions_animation_style` setting exists (`none`/`fade`/
+  `pop`) but `captions.py` hardcodes pop-in regardless; legacy has 6
+  mechanisms (+ rise/highlight/typewriter, entirely unported).
+- Visuals: image recycling pools and composite multi-scene grids both
+  confirmed absent (already known).
+- Checked and NOT gaps: `[pause]`/`[[focus]]`/`((question))` markers
+  and Director II's motion/ease/transition/grade vocabulary are both
+  already at full parity.
+
+User ranked sub-slice order: (1) Filters + Brand Kit, (2) Recycling +
+Composite grids, (3) Chapters + cards, (4) Caption animation styles.
+
+**Sub-slice 1 spec written and committed:**
+`docs/superpowers/specs/2026-09-01-slice-31-filters-brand-kit-design.md`.
+Covers: `avg.pipeline.filters` catalog module for `Filters.metadata`'s
+own format; 3 new settings (`filters_intensity`/`allow`/`block`, group
+`"filters"`); Director II prompt filters section + anti-clutter cap
+(≤25% of scenes, ≤2 per filter name) in `Director2Phase.run`;
+`AVG_FILTERS_DIR` env wiring in `environment.py` (assets land at
+`avg/assets/Filters/`, not the vendor default's `Assets/` — case
+collision risk on Windows, and off-convention); `CatalogOption.payload`
+parsing (the palette string already sits in `dynamic_options.txt`'s
+`brand_presets` entries, unparsed past `hint`); `resolve_brand`'s base
+palette becomes the selected preset instead of always
+`od.DEFAULT_BRAND`, existing accent/highlight settings staying as
+overrides on top; `_BRAND_STYLE_DEFAULTS` (motion/transitions/grade per
+preset, ported from `utilities.ps1`'s table + new entries for the 5
+presets legacy never had) feeding a rewritten style-bible block. One
+open decision resolved with the user during brainstorming: bundle the
+two legacy filter clips (`film_grain.mov`/`light_leak.mov`, ~28MB) into
+git rather than fetch-at-build-time or ship empty. `avg/media/vendor/`
+untouched throughout — nothing there needed to change.
+
+**Not yet done:** the plan (`superpowers:writing-plans`) — spec is
+pending the user's review before that starts. No implementation, no
+tests run this entry.
+
+**Commits** (branch `development`): pending — see next entry.
