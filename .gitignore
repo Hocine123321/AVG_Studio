@@ -10,6 +10,11 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+# `pip install .` byproducts - real now that pyproject.toml has a
+# [build-system] table (added this branch, for the Flatpak manifest's
+# `pip3 install --prefix=/app .` step).
+build/
+*.egg-info/
 
 # PowerShell
 *.ps1xml

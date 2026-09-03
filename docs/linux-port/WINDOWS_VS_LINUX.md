@@ -34,7 +34,7 @@ public API - the two are drop-in for each other at the call-site level.
 
 | Concern | Windows (`main`/`development`) | Linux (`linux-port`) |
 |---|---|---|
-| Base directories | `avg/config/settings.py` etc. read `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%\Documents`, `%USERPROFILE%\Videos` directly, inline, per call site | **New module** `avg/config/platform_paths.py`: `config_root()`, `cache_root()`, `documents_root()`, `videos_root()` - resolve `$XDG_CONFIG_HOME`, `$XDG_CACHE_HOME`, `$XDG_DOCUMENTS_DIR`, `$XDG_VIDEOS_DIR`. A Flatpak sandbox redirects the first three to `~/.var/app/<app-id>/...` automatically; `documents_root()`/`videos_root()` need `--filesystem=xdg-documents`/`--filesystem=xdg-videos` in the manifest (not yet written - see "Still open" below) |
+| Base directories | `avg/config/settings.py` etc. read `%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%\Documents`, `%USERPROFILE%\Videos` directly, inline, per call site | **New module** `avg/config/platform_paths.py`: `config_root()`, `cache_root()`, `documents_root()`, `videos_root()` - resolve `$XDG_CONFIG_HOME`, `$XDG_CACHE_HOME`, `$XDG_DOCUMENTS_DIR`, `$XDG_VIDEOS_DIR`. A Flatpak sandbox redirects the first three to `~/.var/app/<app-id>/...` automatically; `documents_root()`/`videos_root()` need `--filesystem=xdg-documents`/`--filesystem=xdg-videos`, both granted in `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` |
 | Key/secret storage | `avg/config/secrets.py`: DPAPI (`CryptProtectData`/`CryptUnprotectData` via `ctypes`, `crypt32.dll`) protects each value, current-user scope | **Same file, replaced internals.** `_linux_encryption_key()` sources a random Fernet key from the OS keyring (`keyring` package - GNOME Keyring or KWallet's Secret-Service-compat mode) instead of a DPAPI syscall; `_protect`/`_unprotect` are Fernet, not DPAPI. `get_key()`/`set_key()`/`has_key()`/`delete_key()`/`list_providers()`/`default_secrets_path()` - identical names, identical on-disk `secrets.dat` shape (JSON of provider → base64 ciphertext) |
 | Total RAM detection | Two private copies, `avg/pipeline/phases/visuals.py::_total_ram_gb` and `avg/api/app.py::_total_ram_gb`, both `GlobalMemoryStatusEx` via `ctypes` | **New shared module** `avg/core/sysinfo.py::total_ram_gb()` - reads `MemTotal` from `/proc/meminfo`. Both call sites now import it (`visuals.py` aliases it back to `_total_ram_gb` so existing test monkeypatches keep working) |
 | Reveal folder in file manager | Two duplicated blocks, `avg/export/capcut.py` and `avg/api/routes_settings.py`, both `os.startfile(path)` guarded by a `PYTEST_CURRENT_TEST` check | **New shared module** `avg/core/os_open.py::reveal_in_file_manager(path)` - `subprocess.Popen(["xdg-open", str(path)])`. Forwards to the OpenURI portal automatically under Flatpak; no manifest permission needed beyond what every Flatpak app gets |
@@ -46,6 +46,11 @@ public API - the two are drop-in for each other at the call-site level.
 | `UserAssets` root | `avg/config/user_assets.py::user_assets_root()` → `%USERPROFILE%\Documents\AVG Studio\UserAssets`, migrates from `%APPDATA%\AVG Studio` on first call if found | → `documents_root() / "AVG Studio" / "UserAssets"`, migrates from `config_root() / "AVG Studio"` on first call if found. Same `migrate_legacy_files()` function, untouched |
 | Project-library fallback | `avg/shell.py::resolve_output_root()` step 4 → `%USERPROFILE%\Videos\AVG Studio` | → `videos_root() / "AVG Studio"` |
 | Font-family stem extraction | `avg/pipeline/phases/_common.py::resolve_font_family_value()` used `Path(font).stem`, which only treats `\` as a separator on Windows | Manual separator-agnostic split (`font.replace("\\", "/").rsplit("/", 1)[-1]`, then strip the extension) - **kept on both branches**, not Linux-only: a channel document migrated or copied from a Windows install can still contain a Windows-style font path, so both builds need to parse it correctly. This is data-robustness, not platform code |
+| GUI window/rendering backend | `pywebview` with its default Windows backend (Edge WebView2) | `pywebview` with `gui="qt"` passed explicitly in `avg/shell.py::main()`, backed by `PySide6`+`PySide6-Addons` (pip-installable, self-contained - bundles their own Qt6 + QtWebEngine Chromium, no system webkit2gtk/GTK dependency). Chosen over GTK+WebKit2GTK: PySide6 is fully pip-installable with no OS-level GObject-introspection typelib dependency, which keeps the Flatpak build a plain `pip install` rather than needing `org.gnome.Platform`'s system WebKitGTK; Qt also matches the target desktop (KDE Plasma) better for window chrome/theming. Verified end-to-end on this branch: `pip install pyside6 qtpy`, then `webview.create_window()` + `webview.start(gui="qt")` under `QT_QPA_PLATFORM=offscreen` actually creates a window, runs its event loop, and exits cleanly |
+| Chromium's internal sandbox vs. Flatpak's own | N/A - no nested sandboxing on Windows | `--env=QTWEBENGINE_DISABLE_SANDBOX=1` in the Flatpak manifest's `finish-args`. Confirmed necessary by direct reproduction on this branch: without it, `webview.start(gui="qt")` fails with `Running as root without --no-sandbox is not supported` - Chromium's own sandbox refuses to nest inside another sandbox (bwrap). Flatpak's outer sandbox is already the real containment boundary for an app that only ever loads its own bundled UI from `127.0.0.1`, so disabling Chromium's inner one is not a meaningful security loss here |
+| ffmpeg/ffprobe discovery at runtime | PyInstaller-frozen build: `sys.frozen`/`sys._MEIPASS` is set, so `avg/media/environment.py::bundled_ffmpeg_dir()` finds the copy PyInstaller placed next to the exe | **Not frozen at all** - this branch doesn't use PyInstaller (see "Packaging shape" below), so `bundled_ffmpeg_dir()` naturally returns `None` and `ffmpeg_exe()`/`ffprobe_exe()` already fall back to bare `"ffmpeg"`/`"ffprobe"` (PATH lookup) with zero code changes. The Flatpak manifest installs `tools/fetch_ffmpeg.py`'s output straight to `/app/bin`, which is already on `PATH` for any Flatpak app - the existing not-frozen fallback path is what actually resolves them |
+| Packaging shape | `tools/build.py` + `avg.spec`: PyInstaller builds a frozen onefolder exe, then Inno Setup (`installer/avg.iss`) wraps it into an installer | **No PyInstaller.** `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` does a plain `pip3 install --prefix=/app .` of the `avg` package plus its declared dependencies, copies the pre-built `web/dist` next to wherever `avg` landed under `site-packages` (matching `avg/api/app.py`'s existing `WEB_DIST` path resolution, `parents[2]` from `avg/api/app.py` - verified end-to-end on this branch: real `pip install .` into a throwaway prefix, `WEB_DIST` resolved correctly, `create_app()` constructed successfully), and installs a two-line launcher script. `tools/build_flatpak.sh` is this branch's `Build Installer.bat`/`make_release.ps1` equivalent |
+| `pyproject.toml` packaging | No `[build-system]` table - `pip install .` had never actually been run on this repo before (Windows dev flow is PYTHONPATH-based; release flow is PyInstaller, which doesn't build a wheel). Still true on `main`/`development` | Added `[build-system]` + `[tool.setuptools.packages.find] include = ["avg*"]`, needed for the Flatpak manifest's `pip install .` step to work at all - without it, setuptools refuses with "Multiple top-level packages discovered in a flat-layout" (`web`, `avg`, `assets`, `vendor`, `packaging`, `installer` all sit at the repo root). This gap exists on the Windows build too and should probably be back-ported the same way `edge-tts`'s missing dependency was, independent of anything Linux-specific |
 | Missing `edge-tts` dependency | Not declared in either build's `pyproject.toml` before this branch found it (imported lazily by `avg/providers/voice/providers.py`, never added to `dependencies`) | Fixed here, should be back-ported to the Windows build's `pyproject.toml` too - this was never actually a Windows/Linux difference, just a pre-existing gap this port happened to surface |
 
 ---
@@ -80,23 +85,43 @@ public API - the two are drop-in for each other at the call-site level.
   a true no-op with no Linux equivalent to write, not maintained
   dual-platform logic.
 
+## Flatpak packaging files (no Windows equivalent at all)
+
+New in this branch, not a port of anything - Windows has an installer
+(`installer/avg.iss`) and a build script instead:
+
+- `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` - the manifest.
+- `packaging/flatpak/io.github.Hocine123321.AVGStudio.desktop` - app-grid launcher entry.
+- `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
+- `tools/build_flatpak.sh` - builds the frontend, then runs `flatpak-builder --install`. This branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent.
+
 ## Still open / not yet done on this branch
 
-Nothing here has Windows-side Linux-equivalent code yet - these are the
-remaining Flatpak-porting tasks, not Windows/Linux behavior diffs:
-
-- **pywebview GUI backend.** Needs GTK+WebKit2GTK (`org.gnome.Platform`
-  runtime) or Qt+QtWebEngine (`org.kde.Platform` runtime). Leaning Qt/KDE
-  runtime given the target desktop is KDE Plasma, not yet decided.
-- **Flatpak manifest itself** (`org.<id>.AVGStudio.yml` or similar) -
-  runtime/SDK choice, `--filesystem=xdg-documents`/`xdg-videos`
-  permissions for `documents_root()`/`videos_root()`, `--talk-name`s if
-  any turn out to be needed for the keyring backend beyond what the
-  Secret portal grants for free.
-- **Packaging shape for the Python app itself** inside the sandbox -
-  PyInstaller-built Linux ELF bundled as a Flatpak module (reuses
-  `tools/build.py`) vs. a from-source build via `flatpak-pip-generator`.
-- **`tools/build.py`/`tools/make_release.ps1`/`Build Installer.bat`** -
-  Windows-only build/installer scripts, not yet given a Linux/Flatpak
-  equivalent (`flatpak-builder` driven, presumably a new `tools/
-  make_flatpak.sh` or `tools/build.py flatpak` subcommand - not started).
+- **Not hermetic / not Flathub-submittable.** The manifest's `pip3 install`
+  and `tools/fetch_ffmpeg.py` steps both need network access during the
+  build (`--share=network` in `build-options`), which Flathub disallows.
+  A submittable version would need every pip dependency turned into a
+  pinned `sources:` entry (`flatpak-pip-generator`) and the ffmpeg
+  tarball's checksum vendored the same way, instead of fetched live. Not
+  attempted - this is a real chunk of extra work with no payoff until
+  Flathub distribution is actually the goal, and the manifest says so at
+  the top.
+- **Never built on a real machine yet.** Everything above was validated
+  as far as this sandboxed dev container allows: the manifest YAML
+  parses and its structure was inspected, the desktop file has its
+  required keys, the AppStream XML is well-formed, the build script's
+  shell syntax checks out, and the Python side was proven for real - an
+  actual `pip install .` into a throwaway prefix, the `web/dist`
+  placement logic, and `create_app()` constructing successfully against
+  that layout. `pywebview` + `PySide6` was also proven for real under
+  `QT_QPA_PLATFORM=offscreen` (window created, event loop ran, exited
+  clean) - but `flatpak-builder` itself was never run, because it isn't
+  installed in this container and its own runtime/SDK downloads are
+  well outside what this environment can reach. A real KDE Plasma
+  machine running `tools/build_flatpak.sh` is the next real test, and
+  the first one likely to surface something this couldn't catch (a
+  wrong permission, a missing runtime piece, GPU-specific QtWebEngine
+  behavior no software-rendering fallback exercises).
+- **No LICENSE file anywhere in this repo.** Blocks giving
+  `metainfo.xml`'s `project_license` a real value - currently
+  `LicenseRef-proprietary` as an honest placeholder, not a guess.

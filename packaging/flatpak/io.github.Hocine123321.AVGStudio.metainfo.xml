@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata. What GNOME Software / KDE Discover show for this
+  app - not required for "flatpak run", but required for it to show up
+  properly in an app grid, and for flatpak-builder's own repo
+  validation step further down the line.
+
+  project_license is LicenseRef-proprietary as a placeholder: no LICENSE
+  file exists anywhere in this repo yet (checked - none on this branch,
+  none on main/development either), so nothing here should claim MIT/
+  GPL/etc. on the project's behalf. Replace this once an actual license
+  is chosen; do not leave it here without checking.
+-->
+<component type="desktop-application">
+  <id>io.github.Hocine123321.AVGStudio</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <name>AVG Studio</name>
+  <summary>Turn a topic into a short-form or long-form video with AI</summary>
+  <description>
+    <p>
+      AVG Studio writes a brief and script from a topic, generates one
+      image per scene, synthesises narration, plans motion and captions,
+      and renders an mp4 - 9:16 short-form or 16:9 long-form.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.Hocine123321.AVGStudio.desktop</launchable>
+  <content_rating type="oars-1.1" />
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+</component>

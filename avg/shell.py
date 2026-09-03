@@ -388,7 +388,14 @@ def main() -> None:
             target=_warm_component_cache, daemon=True, name="avg-startup-check"
         ).start()
 
-    webview.start(_boot, private_mode=False)
+    # `gui="qt"` is explicit, not left to pywebview's auto-detection: this
+    # build only ever installs PySide6 (see pyproject.toml and
+    # docs/linux-port/WINDOWS_VS_LINUX.md's GUI-backend entry) and never
+    # installs PyGObject/webkit2gtk at all, so auto-detection would only
+    # ever land on qt anyway - being explicit means a future accidental
+    # `pip install pygobject` in the build environment can't silently
+    # change which backend actually runs.
+    webview.start(_boot, private_mode=False, gui="qt")
 
     for server, server_thread in started:
         server.should_exit = True

@@ -1,3 +1,21 @@
+[build-system]
+# No [build-system] table existed before this branch - nobody had ever
+# run `pip install .` on this repo; the Windows build always runs via
+# PYTHONPATH in dev (see CLAUDE.md's Commands) or via a PyInstaller
+# .spec file at release time, neither of which goes through a wheel
+# build at all. This branch's Flatpak manifest is the first thing that
+# actually needs `pip install .` to work, which surfaced the gap:
+# without packages.find below, setuptools refuses outright ("Multiple
+# top-level packages discovered in a flat-layout: ['web', 'avg',
+# 'assets', 'vendor', 'packaging', 'installer']") - it has no way to
+# guess that only avg/ is the installable package and the rest are
+# fixtures/assets/build output sitting at the repo root.
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["avg*"]
+
 [project]
 name = "avg-studio"
 version = "0.1.0"
@@ -16,6 +34,14 @@ dependencies = [
     # module's docstring and docs/linux-port/WINDOWS_VS_LINUX.md.
     "keyring",
     "cryptography",
+    # pywebview's GUI backend on this fork. PySide6/PySide6-Addons are
+    # fully self-contained pip wheels (bundle their own Qt6 + QtWebEngine
+    # Chromium, no system Qt/webkit2gtk needed) - see
+    # docs/linux-port/WINDOWS_VS_LINUX.md's GUI-backend entry for why this
+    # was chosen over GTK+WebKit2GTK. `avg.shell.main` passes gui="qt"
+    # explicitly so this is the only backend pywebview ever tries.
+    "pyside6",
+    "qtpy",
 ]
 
 [project.optional-dependencies]

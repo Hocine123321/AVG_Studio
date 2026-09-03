@@ -1,0 +1,151 @@
+# AVG Studio - Flatpak manifest.
+#
+# Builds this branch's Python app tree + a pre-built web/dist straight into
+# /app via pip, rather than bundling a PyInstaller-frozen binary. That
+# choice fell out of how avg/api/app.py and avg/media/environment.py
+# already resolve paths (see the two long comments below) - once those
+# resolve correctly from a plain `pip install .` layout, PyInstaller adds
+# a second, redundant packaging step for nothing. See
+# docs/linux-port/WINDOWS_VS_LINUX.md for the fuller writeup of this
+# decision and everything else that differs from the Windows build.
+#
+# Build (from repo root, on the linux-port branch):
+#   cd web && npm install && npm run build && cd ..
+#   flatpak-builder --user --install --force-clean build-dir \
+#       packaging/flatpak/io.github.Hocine123321.AVGStudio.yml
+#   flatpak run io.github.Hocine123321.AVGStudio
+# Or just: tools/build_flatpak.sh
+#
+# Prerequisite runtimes (one-time):
+#   flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
+#
+# NOT hermetic / NOT Flathub-submittable as-is: the `avg-studio` module
+# below runs `pip3 install` and `tools/fetch_ffmpeg.py` (a network
+# download) during the build, gated on --share=network in build-options.
+# Flathub requires every build input pre-declared as a `sources:` entry
+# with a pinned URL+checksum (no network during the sandboxed build) -
+# reaching that would mean generating a `flatpak-pip-generator` module
+# list for every pip dependency and vendoring the ffmpeg tarball's exact
+# checksum as a `sources:` entry instead of fetching it in a
+# build-command. Left as the simpler, working, personal-build path;
+# flagged here so it isn't mistaken for a finished Flathub submission.
+
+id: io.github.Hocine123321.AVGStudio
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+command: avg-studio
+
+finish-args:
+  # Window + rendering. fallback-x11 covers non-Wayland Plasma sessions
+  # (or XWayland) - QtWebEngine's own Wayland support has enough rough
+  # edges upstream that a working X11 fallback is worth keeping even on
+  # a Wayland-default distro.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU acceleration for QtWebEngine's compositor. Without it, Chromium
+  # falls back to software rendering (confirmed working, just slower) -
+  # see the QRhiGles2/Vulkan fallback messages this branch's manual
+  # pywebview+PySide6 smoke test produced without a GPU available.
+  - --device=dri
+  # This app's own outbound calls to Groq/Gemini/ElevenLabs/HuggingFace/
+  # Pollinations/etc. The loopback FastAPI+WebSocket connection between
+  # the embedded browser and avg/api/app.py needs no permission at all -
+  # that traffic never leaves the sandbox's own network namespace.
+  - --share=network
+  # avg.config.secrets' keyring backend (GNOME Keyring, or KWallet in
+  # Secret-Service-compatibility mode - see that module's docstring).
+  # Grants exactly this one D-Bus name via Flatpak's proxy, not raw
+  # session-bus access.
+  - --talk-name=org.freedesktop.secrets
+  # avg.config.platform_paths.documents_root() / videos_root() - the
+  # UserAssets root and the project-library fallback location
+  # respectively. Both portal-mediated: the user picks/confirms the
+  # folder via a portal dialog on first access, same as any other
+  # sandboxed app reaching real host folders outside its private data
+  # dirs (~/.var/app/<id>/{config,data,cache}, granted automatically,
+  # need nothing listed here).
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-videos
+  # Chromium's own internal sandbox refuses to initialise inside an
+  # already-sandboxed (bwrap) process - confirmed directly: running
+  # pywebview's qt backend under this exact runtime combination without
+  # this variable set fails with "Running as root without --no-sandbox
+  # is not supported" (Chromium treats the container's default user as
+  # uid 0 the same way it treats a real root shell). Flatpak's own
+  # sandbox is already doing the containment; nesting Chromium's on top
+  # is redundant, not an additional real boundary, for an app that has
+  # no untrusted-content model in the first place (it only ever loads
+  # its own bundled UI from 127.0.0.1).
+  - --env=QTWEBENGINE_DISABLE_SANDBOX=1
+
+modules:
+  - name: avg-studio
+    buildsystem: simple
+    build-options:
+      build-args:
+        # Needed for `pip3 install` (PySide6/PySide6-Addons alone is a
+        # sizeable download) and tools/fetch_ffmpeg.py's BtbN release
+        # fetch. See the hermetic-build note at the top of this file for
+        # what a Flathub-submittable version would do instead.
+        - --share=network
+    sources:
+      # Local checkout. Swap for a `git` source (url + matching commit/
+      # tag) when building from CI or anywhere other than this working
+      # tree - see the commented alternative below.
+      - type: dir
+        path: ../..
+      # - type: git
+      #   url: https://github.com/Hocine123321/AVG_Studio.git
+      #   branch: linux-port
+    build-commands:
+      # 1. The app itself + every declared dependency (pyproject.toml) -
+      #    straight into /app, no venv (there is nothing else on this
+      #    Python's path to isolate from inside the sandbox).
+      - pip3 install --no-cache-dir --prefix=/app .
+
+      # 2. web/dist next to wherever `avg` actually landed under
+      #    site-packages. avg/api/app.py's WEB_DIST constant is
+      #    `Path(__file__).resolve().parents[2] / "web" / "dist"` -
+      #    two levels up from avg/api/app.py, which in a source
+      #    checkout is the repo root (web/ sits next to avg/), but
+      #    after `pip install .` is site-packages itself. This mirrors
+      #    that same "web/ sits next to avg/" shape one level deeper,
+      #    rather than changing WEB_DIST's resolution (which the
+      #    Windows build's frozen-exe layout also depends on staying
+      #    exactly as it is).
+      - |
+        set -e
+        SITE_PACKAGES=$(python3 -c "import avg, pathlib; print(pathlib.Path(avg.__file__).resolve().parent.parent)")
+        mkdir -p "$SITE_PACKAGES/web"
+        cp -r web/dist "$SITE_PACKAGES/web/dist"
+
+      # 3. ffmpeg/ffprobe onto /app/bin, which is already on PATH for
+      #    every Flatpak app. avg/media/environment.py's ffmpeg_exe()/
+      #    ffprobe_exe() only look for a *bundled* binary when
+      #    `sys.frozen` is set (PyInstaller); this build sets no such
+      #    flag, so both already fall back to bare "ffmpeg"/"ffprobe" -
+      #    PATH lookup - with zero code changes needed. Same is true of
+      #    the vendored legacy engine's own bare `["ffmpeg", ...]`
+      #    subprocess calls (avg/media/vendor/, protected, never
+      #    edited).
+      - python3 tools/fetch_ffmpeg.py --dest /app/bin
+
+      # 4. Launcher. QTWEBENGINE_DISABLE_SANDBOX is also set as a
+      #    finish-arg env var above (belt and suspenders - some Chromium
+      #    startup code reads it before Flatpak's own env injection is
+      #    guaranteed to have taken effect in every code path).
+      - |
+        install -Dm755 /dev/stdin /app/bin/avg-studio << 'LAUNCHER'
+        #!/bin/sh
+        exec python3 -m avg.shell
+        LAUNCHER
+
+      # 5. Desktop entry, AppStream metadata, icon - what makes this
+      #    show up properly in an app grid / software center rather than
+      #    being launchable only via `flatpak run`.
+      - install -Dm644 packaging/flatpak/io.github.Hocine123321.AVGStudio.desktop /app/share/applications/io.github.Hocine123321.AVGStudio.desktop
+      - install -Dm644 packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml /app/share/metainfo/io.github.Hocine123321.AVGStudio.metainfo.xml
+      - install -Dm644 assets/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.Hocine123321.AVGStudio.svg
+      - install -Dm644 assets/icon.png /app/share/icons/hicolor/512x512/apps/io.github.Hocine123321.AVGStudio.png

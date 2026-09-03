@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AVG Studio
+Comment=Turn a topic into a short-form or long-form video with AI
+Exec=avg-studio
+Icon=io.github.Hocine123321.AVGStudio
+Categories=AudioVideo;Video;
+Terminal=false
+StartupNotify=true
