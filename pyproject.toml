@@ -7,15 +7,15 @@ dependencies = [
     "uvicorn[standard]",
     "pywebview",
     "pydantic>=2",
-    # Not Windows/Linux-specific - genuinely missing before this branch.
+    # Missing from the Windows build's pyproject.toml too - not a
+    # Linux-port thing, just genuinely undeclared before this branch.
     # avg/providers/voice/providers.py imports this lazily (see its
     # docstring) but nothing declared it as an actual dependency.
     "edge-tts",
-    # Linux only: avg.config.secrets' DPAPI replacement. Unused (never
-    # imported) on Windows, which keeps using ctypes/crypt32 directly -
-    # see that module's docstring.
-    "keyring; sys_platform == 'linux'",
-    "cryptography; sys_platform == 'linux'",
+    # avg.config.secrets' key-storage backend on this fork - see that
+    # module's docstring and docs/linux-port/WINDOWS_VS_LINUX.md.
+    "keyring",
+    "cryptography",
 ]
 
 [project.optional-dependencies]

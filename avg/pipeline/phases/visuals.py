@@ -13,11 +13,11 @@ mid-render on this hardware (see that module's docstring and this repo's
 `dev-machine-8gb` memory note). This phase applies the identical rule
 (<=8GB -> 2 workers, else 4) to its own image-generation worker pool. It
 restates the constant rather than importing `RenderSettings` because this
-phase has no `config.json` path to read from - just `ctx` - and RAM
-detection has no shared helper in this codebase yet (`avg.api.app`'s own
-`_total_ram_gb` is the same kind of small, per-layer copy, not something
-`avg.pipeline` may import from `avg.api` - that dependency would run
-backwards).
+phase has no `config.json` path to read from - just `ctx`. RAM detection
+itself comes from `avg.core.sysinfo.total_ram_gb` (imported here as
+`_total_ram_gb`, its old name, so existing test monkeypatches keep
+working) - `avg.api.app` uses the same shared function now, rather than
+each layer carrying its own copy.
 
 **One image failing must not kill the phase** (this task's other named
 invariant). Each scene's `provider.generate()` call is wrapped individually
@@ -51,13 +51,13 @@ list_image_files` sorts by to pick the project grid's thumbnail) plus
 
 from __future__ import annotations
 
-import ctypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
 from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
+from avg.core.sysinfo import total_ram_gb as _total_ram_gb
 from avg.pipeline.phase import PhaseContext
 from avg.pipeline.phases._common import read_json, render_dir, script_dir, write_json
 from avg.providers.images.base import ImageProvider
@@ -87,36 +87,11 @@ _LOW_RAM_GB_CEILING = 8.0
 _LOW_RAM_WORKERS = 2
 _DEFAULT_WORKERS = 4
 
-
-def _total_ram_gb() -> float:
-    """Best-effort total physical RAM in GB.
-
-    Windows-only, via `GlobalMemoryStatusEx` - mirrors `avg.api.app.
-    _total_ram_gb`'s identical approach (psutil is not a dependency of this
-    package; pulling it in for one number isn't worth it). Falls back to
-    8.0 - this project's own dev machine - on any failure, which keeps the
-    low-resource path active rather than silently assuming a big machine.
-    """
-    try:
-        class _MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
-
-        stat = _MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))  # type: ignore[attr-defined]
-        return stat.ullTotalPhys / (1024**3)
-    except Exception:
-        return 8.0
+# `_total_ram_gb` is imported under its old private name, not called as
+# `sysinfo.total_ram_gb()` inline, so `tests/pipeline/test_phases_media.py`'s
+# `monkeypatch.setattr("avg.pipeline.phases.visuals._total_ram_gb", ...)`
+# keeps working unchanged - it patches this module's attribute, and `run`
+# below calls the bare module-level name, not a qualified one.
 
 
 def _worker_cap(total_ram_gb: float) -> int:

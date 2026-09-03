@@ -1,101 +1,101 @@
-"""Reproduce `vendor/ffmpeg/` - the ffmpeg build the installer ships.
+"""Reproduce `vendor/ffmpeg/` - the ffmpeg build the Flatpak ships.
 
-`vendor/` is gitignored (128 MB has no business in git), so this script is
-how anyone else - a teammate, CI, this machine after a clean checkout -
-gets it back before running `tools/build.py`.
+`vendor/` is gitignored (packaging a build that size has no business in
+git), so this script is how anyone else - a teammate, CI, this machine
+after a clean checkout - gets it back before running `tools/build.py`.
 
-Downloads the BtbN "shared" LGPL win64 build (shared, not static, because
-the static build lacks the separate `avdevice` DLL some ffmpeg builds
-split out) and keeps only what actually needs to ship:
+Pulls BtbN's (github.com/BtbN/FFmpeg-Builds) `linux64-gpl` release: a
+fully static build where `ffmpeg`/`ffprobe` are single self-contained
+binaries with no `.so` files to hunt down or ship alongside them. Chosen
+over the "lgpl" variant for parity with what BtbN documents as their most
+complete/tested Linux build; this app's ffmpeg usage (encode/decode
+common containers and codecs, burn subtitles) needs nothing GPL-only
+licensing would otherwise block, so the distinction has no practical
+effect here beyond which asset is more reliably static.
 
-- `ffmpeg.exe`, `ffprobe.exe`
-- every DLL next to them in the release's `bin/` folder, INCLUDING
-  `avdevice-*.dll` - nothing in this app captures a camera or microphone
-  through it, but both `ffmpeg.exe` and `ffprobe.exe` are linked against it
-  and die instantly with `0xC0000135` (DLL not found) if it's missing.
-- `ffplay.exe` is deliberately dropped - it is not used anywhere in this
-  app and there is no reason to ship a 128 MB build's third executable.
+`ffplay` is deliberately dropped - it is not used anywhere in this app
+and there is no reason to ship a 100+ MB build's third executable.
+
+The Windows build (`main`/`development`) fetches a different asset
+(`win64-lgpl-shared.zip`, shared not static, plus every DLL next to the
+two executables) with its own copy of this script - see
+`docs/linux-port/WINDOWS_VS_LINUX.md`.
 
 Usage:
-    python tools/fetch_ffmpeg.py [--dest vendor/ffmpeg] [--keep-zip]
+    python tools/fetch_ffmpeg.py [--dest vendor/ffmpeg] [--keep-archive]
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
+import tarfile
 import tempfile
 import urllib.request
-import zipfile
 from pathlib import Path
 
-RELEASE_URL = (
-    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
-    "ffmpeg-master-latest-win64-lgpl-shared.zip"
-)
+_ASSET_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
 
-REQUIRED_EXES = ("ffmpeg.exe", "ffprobe.exe")
-EXCLUDED_EXES = ("ffplay.exe",)
+_REQUIRED_EXES = ("ffmpeg", "ffprobe")
+_EXCLUDED_EXES = ("ffplay",)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DEST = REPO_ROOT / "vendor" / "ffmpeg"
 
 
-def _download(url: str, dest_zip: Path) -> None:
+def _download(url: str, dest_file: Path) -> None:
     print(f"Downloading {url}", file=sys.stderr)
-    with urllib.request.urlopen(url) as response, open(dest_zip, "wb") as out:
+    with urllib.request.urlopen(url) as response, open(dest_file, "wb") as out:
         shutil.copyfileobj(response, out)
-    print(f"  -> {dest_zip} ({dest_zip.stat().st_size / 1_048_576:.1f} MiB)", file=sys.stderr)
+    print(f"  -> {dest_file} ({dest_file.stat().st_size / 1_048_576:.1f} MiB)", file=sys.stderr)
 
 
-def _extract_bin(zip_path: Path, dest_dir: Path) -> list[str]:
-    """Pull every file out of the release's `bin/` folder into `dest_dir`.
+def _extract_tar_bin(archive_path: Path, dest_dir: Path) -> list[str]:
+    """Pull `ffmpeg`/`ffprobe` out of the release tarball's `bin/` folder.
 
-    Skips `EXCLUDED_EXES`. Returns the list of file names written.
+    Every extracted file gets its executable bit set - `tarfile` preserves
+    the mode bits the archive itself carries, which is normally enough,
+    but this is cheap insurance against a build that didn't set them and a
+    silent "Permission denied" the first time this app tries to run one.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     written: list[str] = []
-    with zipfile.ZipFile(zip_path) as zf:
-        bin_members = [
-            info for info in zf.infolist()
-            if not info.is_dir() and "/bin/" in info.filename.replace("\\", "/")
-        ]
+    with tarfile.open(archive_path, mode="r:xz") as tf:
+        bin_members = [m for m in tf.getmembers() if m.isfile() and "/bin/" in m.name]
         if not bin_members:
             raise RuntimeError(
-                "no 'bin/' folder found inside the release zip - "
+                "no 'bin/' folder found inside the release tarball - "
                 "the archive layout may have changed"
             )
-        for info in bin_members:
-            name = Path(info.filename).name
-            if name in EXCLUDED_EXES:
+        for member in bin_members:
+            name = Path(member.name).name
+            if name in _EXCLUDED_EXES:
                 continue
             target = dest_dir / name
-            with zf.open(info) as src, open(target, "wb") as out:
-                shutil.copyfileobj(src, out)
+            extracted = tf.extractfile(member)
+            if extracted is None:
+                continue
+            with extracted, open(target, "wb") as out:
+                shutil.copyfileobj(extracted, out)
+            os.chmod(target, 0o755)
             written.append(name)
     return written
 
 
-def fetch_ffmpeg(dest: Path = DEFAULT_DEST, keep_zip: bool = False) -> Path:
+def fetch_ffmpeg(dest: Path = DEFAULT_DEST, keep_archive: bool = False) -> Path:
     with tempfile.TemporaryDirectory(prefix="avg-fetch-ffmpeg-") as tmp:
-        tmp_zip = Path(tmp) / "ffmpeg-release.zip"
-        _download(RELEASE_URL, tmp_zip)
-        written = _extract_bin(tmp_zip, dest)
-        if keep_zip:
-            kept = dest.parent / tmp_zip.name
-            shutil.copy2(tmp_zip, kept)
-            print(f"Kept zip at {kept}", file=sys.stderr)
+        tmp_archive = Path(tmp) / "ffmpeg-master-latest-linux64-gpl.tar.xz"
+        _download(_ASSET_URL, tmp_archive)
+        written = _extract_tar_bin(tmp_archive, dest)
+        if keep_archive:
+            kept = dest.parent / tmp_archive.name
+            shutil.copy2(tmp_archive, kept)
+            print(f"Kept archive at {kept}", file=sys.stderr)
 
-    missing_exes = [name for name in REQUIRED_EXES if name not in written]
-    if missing_exes:
-        raise RuntimeError(f"release zip did not contain: {missing_exes}")
-
-    has_avdevice = any(name.lower().startswith("avdevice-") for name in written)
-    if not has_avdevice:
-        raise RuntimeError(
-            "no avdevice-*.dll found in the release - ffmpeg.exe/ffprobe.exe "
-            "will die at launch with 0xC0000135 without it"
-        )
+    missing = [name for name in _REQUIRED_EXES if name not in written]
+    if missing:
+        raise RuntimeError(f"release archive did not contain: {missing}")
 
     print(f"Wrote {len(written)} files to {dest}:", file=sys.stderr)
     for name in sorted(written):
@@ -107,10 +107,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dest", type=Path, default=DEFAULT_DEST,
                          help="Destination folder (default: vendor/ffmpeg)")
-    parser.add_argument("--keep-zip", action="store_true",
-                         help="Keep the downloaded zip next to --dest for inspection")
+    parser.add_argument("--keep-archive", action="store_true",
+                         help="Keep the downloaded archive next to --dest for inspection")
     args = parser.parse_args()
-    fetch_ffmpeg(dest=args.dest, keep_zip=args.keep_zip)
+    fetch_ffmpeg(dest=args.dest, keep_archive=args.keep_archive)
 
 
 if __name__ == "__main__":

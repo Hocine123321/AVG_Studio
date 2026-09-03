@@ -49,8 +49,8 @@ from pathlib import Path
 # or the bundled folder is somehow missing): PATH is left untouched and bare
 # lookups keep working exactly as they do today.
 
-_FFMPEG_EXE_NAME = "ffmpeg.exe"
-_FFPROBE_EXE_NAME = "ffprobe.exe"
+_FFMPEG_EXE_NAME = "ffmpeg"
+_FFPROBE_EXE_NAME = "ffprobe"
 
 
 @lru_cache(maxsize=1)
@@ -73,13 +73,13 @@ def bundled_ffmpeg_dir() -> Path | None:
 
 
 def ffmpeg_exe() -> str:
-    """Absolute path to the bundled `ffmpeg.exe` when frozen, else `"ffmpeg"`."""
+    """Absolute path to the bundled `ffmpeg` when frozen, else `"ffmpeg"`."""
     d = bundled_ffmpeg_dir()
     return str(d / _FFMPEG_EXE_NAME) if d is not None else "ffmpeg"
 
 
 def ffprobe_exe() -> str:
-    """Absolute path to the bundled `ffprobe.exe` when frozen, else `"ffprobe"`."""
+    """Absolute path to the bundled `ffprobe` when frozen, else `"ffprobe"`."""
     d = bundled_ffmpeg_dir()
     return str(d / _FFPROBE_EXE_NAME) if d is not None else "ffprobe"
 

@@ -76,9 +76,9 @@ def resolve_output_root() -> Path:
       3. The legacy folder, if it actually exists - keeps the dev machine and
          anyone upgrading from the PowerShell app working before their first
          onboarding.
-      4. `%USERPROFILE%/Videos/AVG Studio` on Windows, `$XDG_VIDEOS_DIR/AVG
-         Studio` (falling back to `~/Videos`) on Linux - where a user
-         expects their videos to be, and created on demand.
+      4. `$XDG_VIDEOS_DIR/AVG Studio` (falling back to `~/Videos`) - where
+         a user expects their videos to be, and created on demand. The
+         Windows build's equivalent is `%USERPROFILE%/Videos/AVG Studio`.
     """
     # Imported here, not at module scope: `avg.config.settings` pulls in
     # pydantic, and this module's whole point is that nothing heavy runs

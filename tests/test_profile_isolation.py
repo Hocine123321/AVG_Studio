@@ -1,4 +1,4 @@
-"""The suite cannot reach the developer's real `%APPDATA%/AVG Studio`.
+"""The suite cannot reach the developer's real `~/.config/AVG Studio`.
 
 `create_app`'s path overrides are the *intended* isolation mechanism, but
 they are opt-in: a test that omits one silently gets the real user profile,
@@ -8,11 +8,12 @@ test modules build a client without the override and any of them could have
 written to the real document the moment one of them touched
 `settings_source="global"`.
 
-The fix is in `tests/conftest.py`, which repoints `%APPDATA%` and
-`%LOCALAPPDATA%` for the whole session. These tests are what stops that
-fixture being quietly deleted or narrowed later: they assert the property
-the fixture exists to provide, for every document the app owns, rather than
-asserting the fixture's implementation.
+The fix is in `tests/conftest.py`, which repoints `$XDG_CONFIG_HOME`,
+`$XDG_CACHE_HOME`, `$XDG_DOCUMENTS_DIR` and `$XDG_VIDEOS_DIR` for the whole
+session. These tests are what stops that fixture being quietly deleted or
+narrowed later: they assert the property the fixture exists to provide,
+for every document the app owns, rather than asserting the fixture's
+implementation.
 """
 
 from __future__ import annotations
@@ -30,16 +31,15 @@ def _real_app_folders() -> list[Path]:
 
     Read from `Path.home()` rather than the environment, because the
     environment is precisely what the fixture has redirected. The check is
-    against `AVG Studio` specifically rather than against `AppData` as a
-    whole, because the redirect target is itself a `TemporaryDirectory`,
-    and on Windows that lands under `%LOCALAPPDATA%\\Temp` - inside AppData
-    but nowhere near the real documents. What must be unreachable is the
-    app's own folder, not the whole profile.
+    against `AVG Studio` specifically rather than against `.config` as a
+    whole, because the redirect target is itself a `TemporaryDirectory`
+    somewhere under the real `/tmp` - nowhere near the real documents.
+    What must be unreachable is the app's own folder, not the whole profile.
     """
     home = Path.home()
     return [
-        home / "AppData" / "Roaming" / "AVG Studio",
-        home / "AppData" / "Local" / "AVG Studio",
+        home / ".config" / "AVG Studio",
+        home / ".cache" / "AVG Studio",
         home / "Documents" / "AVG Studio",
     ]
 
@@ -63,9 +63,9 @@ def test_every_default_document_path_avoids_the_real_profile() -> None:
             assert folder != path and folder not in path.parents, (
                 f"{label} resolves to {path}, inside the developer's real "
                 f"AVG Studio folder at {folder}. The session fixture in "
-                f"tests/conftest.py that redirects %APPDATA% has stopped "
-                f"working, and this suite can now read and overwrite their "
-                f"own settings, channels and secrets."
+                f"tests/conftest.py that redirects $XDG_CONFIG_HOME etc. has "
+                f"stopped working, and this suite can now read and "
+                f"overwrite their own settings, channels and secrets."
             )
 
 
@@ -84,10 +84,11 @@ def test_the_redirected_profile_is_writable() -> None:
 
 
 def test_all_variables_are_set() -> None:
-    # Every resolver falls back to `Path.home() / "AppData" / ...` (or, for
-    # avg.config.user_assets, `Path.home() / "Documents" / ...`) when its
+    # Every resolver falls back to `Path.home() / ".config"` etc. (or, for
+    # avg.config.user_assets, `Path.home() / "Documents"`) when its
     # variable is unset, which would defeat the redirect entirely, so the
-    # fixture must leave all three populated rather than deleted.
-    assert os.environ.get("APPDATA")
-    assert os.environ.get("LOCALAPPDATA")
-    assert os.environ.get("USERPROFILE")
+    # fixture must leave all four populated rather than deleted.
+    assert os.environ.get("XDG_CONFIG_HOME")
+    assert os.environ.get("XDG_CACHE_HOME")
+    assert os.environ.get("XDG_DOCUMENTS_DIR")
+    assert os.environ.get("XDG_VIDEOS_DIR")

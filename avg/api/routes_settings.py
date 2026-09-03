@@ -56,6 +56,7 @@ from avg.config.settings import load_settings, save_settings
 from avg.core import costs, health
 from avg.core.errors import AvgError
 from avg.core.events import ActivityEvent
+from avg.core.os_open import reveal_in_file_manager
 from avg.core.settings_schema import (
     KEY_PROVIDER_IDS,
     SETTINGS,
@@ -1125,13 +1126,13 @@ async def get_health_report(request: Request, refresh: bool = False, deep: bool 
 
 @router.post("/api/health/open-logs")
 async def open_logs_folder(request: Request) -> dict:
-    """Reveals the folder holding `errors.json` in Explorer - the App
-    Health screen's Logs button. Same `os.startfile` + pytest-skip +
+    """Reveals the folder holding `errors.json` in the OS file manager -
+    the App Health screen's Logs button. Same pytest-skip +
     swallow-failures shape as `avg.export.capcut.export_take`'s existing
-    Explorer reveal, not a new one - opens the containing folder, not the
-    file itself, for the same reason: `os.startfile` on a `.json` file
-    launches whatever program Windows associates with that extension, not
-    Explorer.
+    reveal, via the same shared `avg.core.os_open.reveal_in_file_manager`
+    - opens the containing folder, not the file itself, for the same
+    reason: opening a `.json` file directly launches whatever program the
+    OS associates with that extension, not a file manager.
 
     Creates the folder first if it doesn't exist yet - a fresh install
     with no recorded errors has never had a reason to create it, and a
@@ -1140,9 +1141,7 @@ async def open_logs_folder(request: Request) -> dict:
     """
     folder = request.app.state.error_store.path.parent
     folder.mkdir(parents=True, exist_ok=True)
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        with suppress(Exception):
-            os.startfile(folder)  # type: ignore[attr-defined]  # Windows-only, by design
+    reveal_in_file_manager(folder)
     return {"opened": str(folder)}
 
 

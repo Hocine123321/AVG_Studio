@@ -46,13 +46,12 @@ a neighbour.
 from __future__ import annotations
 
 import csv
-import os
 import re
 import shutil
-from contextlib import suppress
 from pathlib import Path
 
 from avg.core.models import ProjectDoc
+from avg.core.os_open import reveal_in_file_manager
 from avg.core.takes import take_root
 from avg.pipeline.phases._common import read_json, strip_delivery_markers
 
@@ -219,10 +218,11 @@ def export_take(project: ProjectDoc, take_id: int) -> Path:
     re-raising - a caller must never find a folder that looks complete but
     is missing a file this function was supposed to write.
 
-    Opens the destination folder in Explorer (`os.startfile`) once the
-    export succeeds - skipped, silently, under pytest (`PYTEST_CURRENT_TEST`
-    is set by pytest itself for the duration of every test), so the test
-    suite never pops 40 Explorer windows.
+    Opens the destination folder in the OS file manager
+    (`avg.core.os_open.reveal_in_file_manager`) once the export succeeds -
+    skipped, silently, under pytest (`PYTEST_CURRENT_TEST` is set by
+    pytest itself for the duration of every test), so the test suite
+    never pops 40 file-manager windows.
     """
     take = next((t for t in project.takes if t.id == take_id), None)
     if take is None:
@@ -278,8 +278,6 @@ def export_take(project: ProjectDoc, take_id: int) -> Path:
         shutil.rmtree(dest, ignore_errors=True)
         raise
 
-    if "PYTEST_CURRENT_TEST" not in os.environ:
-        with suppress(Exception):
-            os.startfile(dest)  # type: ignore[attr-defined]  # Windows-only, by design
+    reveal_in_file_manager(dest)
 
     return dest

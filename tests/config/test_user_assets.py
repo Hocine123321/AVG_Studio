@@ -1,31 +1,13 @@
-import sys
 from pathlib import Path
-
-import pytest
 
 from avg.config.user_assets import user_assets_root
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="USERPROFILE is a Windows-only env var")
-def test_default_root_is_under_documents(monkeypatch, tmp_path):
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    assert user_assets_root() == tmp_path / "Documents" / "AVG Studio" / "UserAssets"
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="USERPROFILE is a Windows-only env var")
-def test_falls_back_to_home_when_userprofile_unset(monkeypatch, tmp_path):
-    monkeypatch.delenv("USERPROFILE", raising=False)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert user_assets_root() == tmp_path / "Documents" / "AVG Studio" / "UserAssets"
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG_DOCUMENTS_DIR is a Linux-only env var")
 def test_default_root_is_under_xdg_documents_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DOCUMENTS_DIR", str(tmp_path))
     assert user_assets_root() == tmp_path / "AVG Studio" / "UserAssets"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG_DOCUMENTS_DIR is a Linux-only env var")
 def test_falls_back_to_home_documents_when_xdg_documents_dir_unset(monkeypatch, tmp_path):
     monkeypatch.delenv("XDG_DOCUMENTS_DIR", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -184,24 +166,6 @@ def test_manifest_appends_across_two_migration_passes(tmp_path):
     assert len(manifest["events"]) == 2
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="USERPROFILE/APPDATA are Windows-only env vars")
-def test_user_assets_root_triggers_migration_from_appdata(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    appdata = tmp_path / "appdata"
-    old_avg = appdata / "AVG Studio"
-    old_avg.mkdir(parents=True)
-    (old_avg / "settings.json").write_text('{"schema_version": 1}', encoding="utf-8")
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("APPDATA", str(appdata))
-
-    root = user_assets_root()
-
-    assert root == home / "Documents" / "AVG Studio" / "UserAssets"
-    assert (root / "Config" / "settings.json").read_text(encoding="utf-8") == '{"schema_version": 1}'
-    assert not (old_avg / "settings.json").exists()
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG_DOCUMENTS_DIR/XDG_CONFIG_HOME are Linux-only env vars")
 def test_user_assets_root_triggers_migration_from_xdg_config_home(monkeypatch, tmp_path):
     documents = tmp_path / "documents"
     config = tmp_path / "config"
@@ -231,19 +195,6 @@ def test_default_model_prefs_path_is_under_config(monkeypatch, tmp_path):
     assert user_assets_module.default_model_prefs_path() == tmp_path / "Config" / "model_prefs.json"
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="APPDATA/USERPROFILE are Windows-only env vars")
-def test_default_working_models_path_stays_at_appdata_not_userassets(monkeypatch, tmp_path):
-    appdata = tmp_path / "appdata"
-    monkeypatch.setenv("APPDATA", str(appdata))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path / "somewhere_else"))
-
-    path = user_assets_module.default_working_models_path()
-
-    assert path == appdata / "AVG Studio" / "working_models.json"
-    assert "UserAssets" not in path.parts
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="XDG_CACHE_HOME/XDG_DOCUMENTS_DIR are Linux-only env vars")
 def test_default_working_models_path_stays_at_xdg_cache_not_userassets(monkeypatch, tmp_path):
     cache = tmp_path / "cache"
     monkeypatch.setenv("XDG_CACHE_HOME", str(cache))

@@ -1,8 +1,6 @@
 import base64
 import json
 
-import pytest
-
 from avg.config import secrets
 
 
@@ -36,7 +34,7 @@ def test_tampered_ciphertext_returns_none_rather_than_raising(tmp_path):
 
     store = json.loads(path.read_text(encoding="utf-8"))
     ciphertext = bytearray(base64.b64decode(store["groq"]))
-    ciphertext[-3] ^= 0xFF  # flip a byte deep in the DPAPI blob's MAC/payload
+    ciphertext[-3] ^= 0xFF  # flip a byte deep in the ciphertext's MAC/payload
     store["groq"] = base64.b64encode(bytes(ciphertext)).decode("ascii")
     path.write_text(json.dumps(store), encoding="utf-8")
 
@@ -113,68 +111,6 @@ def test_corrupt_json_store_yields_no_providers_rather_than_raising(tmp_path):
 
     assert secrets.list_providers(path) == []
     assert secrets.get_key("groq", path) is None
-
-
-class TestReadLegacySecrets:
-    def test_absent_legacy_file_yields_empty_dict(self, tmp_path):
-        result = secrets.read_legacy_secrets(tmp_path / "does_not_exist.json")
-        assert result == {}
-
-    def test_reads_back_a_dpapi_blob_written_in_the_legacy_hex_format(self, tmp_path):
-        # Mirrors ConvertFrom-SecureString's on-disk shape: hex-encoded
-        # DPAPI blob of the UTF-16LE plaintext, one key per provider.
-        encrypted = secrets._protect("legacy-plaintext-key".encode("utf-16-le"))
-        assert encrypted is not None
-        legacy_path = tmp_path / "secrets.json"
-        legacy_path.write_text(
-            json.dumps({"groq": encrypted.hex()}), encoding="utf-8"
-        )
-
-        result = secrets.read_legacy_secrets(legacy_path)
-        assert result == {"groq": "legacy-plaintext-key"}
-
-    def test_skips_nested_non_provider_entries_like_fallbacks(self, tmp_path):
-        encrypted = secrets._protect("legacy-plaintext-key".encode("utf-16-le"))
-        legacy_path = tmp_path / "secrets.json"
-        legacy_path.write_text(
-            json.dumps({"groq": encrypted.hex(), "fallbacks": {"groq": "abc123"}}),
-            encoding="utf-8",
-        )
-
-        result = secrets.read_legacy_secrets(legacy_path)
-        assert result == {"groq": "legacy-plaintext-key"}
-
-    def test_skips_entries_that_are_not_valid_hex_without_raising(self, tmp_path):
-        legacy_path = tmp_path / "secrets.json"
-        legacy_path.write_text(json.dumps({"groq": "not-hex-zzz"}), encoding="utf-8")
-
-        result = secrets.read_legacy_secrets(legacy_path)
-        assert result == {}
-
-    def test_corrupt_legacy_json_yields_empty_dict_rather_than_raising(self, tmp_path):
-        legacy_path = tmp_path / "secrets.json"
-        legacy_path.write_text("{ not valid json", encoding="utf-8")
-
-        assert secrets.read_legacy_secrets(legacy_path) == {}
-
-
-@pytest.mark.skipif(
-    not secrets.LEGACY_SECRETS_PATH.exists(),
-    reason="legacy D:\\AI_Video_Gen install not present on this machine",
-)
-def test_reads_the_real_legacy_secrets_file_on_this_dev_machine():
-    """Answers the program spec's open spike question directly: can
-    Python's DPAPI decrypt what the PowerShell app actually wrote on disk?
-    Only runs on a machine that still has the legacy install."""
-    result = secrets.read_legacy_secrets()
-    # Not asserting *which* providers decrypt (that's a per-machine fact
-    # recorded in the task report) - just that this never raises and only
-    # ever yields non-empty decrypted strings.
-    assert isinstance(result, dict)
-    for provider, value in result.items():
-        assert isinstance(provider, str)
-        assert isinstance(value, str)
-        assert value != ""
 
 
 def test_default_secrets_path_is_under_user_assets_secrets(monkeypatch, tmp_path):

@@ -19,3 +19,8 @@ installer/AVG-Setup.exe
 .venv-linux/
 web/node_modules/
 web/dist/
+
+# Vendored ffmpeg build - fetched by tools/fetch_ffmpeg.py, not committed
+# (100+ MB either platform's build). The Windows build's copy of this
+# ignore rule lives in that build's own .gitignore.
+vendor/ffmpeg/

@@ -54,7 +54,6 @@ none of that chain is reachable from `probe`.
 from __future__ import annotations
 
 import asyncio
-import ctypes
 import hmac
 import threading
 import traceback
@@ -88,6 +87,7 @@ from avg.core.settings_schema import (
     validate_value,
 )
 from avg.core.takes import take_root
+from avg.core.sysinfo import total_ram_gb as _total_ram_gb
 from avg.media.thumbnails import IMAGE_EXTENSIONS, default_cache_dir, list_image_files, thumbnail_for
 from avg.media.environment import render_workspace
 from avg.pipeline.create import new_project, save_project
@@ -212,38 +212,6 @@ WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 # with whatever it has. Generous: the scan is local filesystem work and this
 # is a ceiling, not a delay anyone normally pays.
 _LIBRARY_WAIT_S = 30.0
-
-
-def _total_ram_gb() -> float:
-    """Best-effort total physical RAM in GB, for `load_render_settings`'s RAM gates.
-
-    Windows-only (this project targets Windows exclusively) via
-    `GlobalMemoryStatusEx` - psutil is not one of this package's
-    dependencies, and pulling it in just for this one number is not worth
-    it. Falls back to 8.0 (this project's own dev machine) if the call
-    fails for any reason, which keeps the low-resource render paths active
-    rather than silently assuming a big machine.
-    """
-    try:
-        class _MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
-
-        stat = _MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))  # type: ignore[attr-defined]
-        return stat.ullTotalPhys / (1024**3)
-    except Exception:
-        return 8.0
 
 
 def _library_bytes(projects: Iterable[ProjectDoc]) -> int:
