@@ -97,13 +97,14 @@ markers) and applies the scene-frequency cap alone. Extended to:
    []}` immediately, before either candidate source runs (matches legacy
    exactly: the Explainer AI call itself is skipped, not just its
    output).
-2. Build Focused candidates exactly as today, but route any candidate
-   whose text exceeds `_FOCUSED_MAX_CHARS` (already declared in this file
-   — a constant with a full explanatory comment, wired to nothing) to
-   `element: "explainer"` instead of `"focused"`. This is not new
-   behaviour invented for this sub-slice — it is finishing a fix a prior
-   slice already started and left unconnected, discovered while reading
-   this exact function for this design.
+2. Build Focused candidates exactly as today — no change needed here.
+   Correction from an earlier pass of this design: a long Focused card's
+   text is **already** routed to the `explainer` visual template
+   (`avg.media.overlays._vendor_spec`, `_FOCUSED_MAX_CHARS = 30`, active
+   and called from `render_layers` today) at render time, regardless of
+   which sub-slice ships. That rendering nuance needs nothing from this
+   sub-slice; only the *new* Explainer card source (§3, an AI pick
+   independent of card length) is this sub-slice's work.
 3. Append Explainer candidates from step 3 (§3) when `explainer_enabled`.
 4. Merge by scene: one card per scene, **Focused wins** — ported exactly
    from `Export-CardPlan`'s own dedup ("a question hook beats a concept
@@ -140,9 +141,8 @@ Director-I-shaped `parts` entry into a takeover node closes the loop this
 design's central claim rests on; `build_explainer_prompt`'s budget formula
 and skip-at-zero; `_build_card_plan`'s merge (focused wins on a shared
 scene, cap applies to the merged set, `takeover_cards_enabled=False`
-short-circuits both sources, a long focused question routes to
-`element:"explainer"`). No frontend test runner (`CLAUDE.md`) — no new
-settings UI beyond existing `bool` field renderers.
+short-circuits both sources). No frontend test runner (`CLAUDE.md`) — no
+new settings UI beyond existing `bool` field renderers.
 
 ## 7. Out of scope
 
