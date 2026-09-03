@@ -1417,3 +1417,29 @@ untouched — recycling only changes what's in `images/` before render
 starts.
 
 **Not yet done:** the plan — spec pending review before that starts.
+
+## Slice 31, sub-slice 2 — Image Recycling: plan (2026-09-02)
+
+**Plan written and committed:**
+`docs/superpowers/plans/2026-09-02-slice-31-recycling-plan.md`. 4 tasks,
+TDD, one commit each: (1) pool storage under
+`UserAssets/ReusableImages/` + `recycle_enabled`/`recycle_ratio`
+settings, (2) `build_scene_segmentation_prompt` pool-aware wording
+(off/partial/all, ported verbatim from `Invoke-SceneSegmentation`), (3)
+`ScriptPhase.run` wiring — snapshot + prompt call + pick normalisation +
+contract enforcement, (4) `VisualsPhase.run` recycled-job resolution
+(copy + validity check + fallback-to-generation).
+
+Caught during planning (not visible from the spec's prose, only from
+tracing the exact existing boolean logic in `VisualsPhase.run`): the
+current "nothing succeeded, try the backup provider" check is
+`not any(r.ok for r in results.values())`, which is `True` both when
+everything failed AND when nothing was attempted (`any([])` is `False`
+either way). A 100%-recycle run with zero generation jobs would have
+silently triggered a pointless fallback-provider attempt. Task 4 gates
+the check on `jobs` being non-empty.
+
+**Not yet done:** implementation of either sub-slice 1 or 2 - both are
+spec+plan only. Next: sub-slice 3 (Chapters + takeover cards) or
+sub-slice 4 (Caption animation styles), per the ranked backlog, still
+spec+plan-first per this session's standing instruction.
