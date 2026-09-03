@@ -76,12 +76,14 @@ def resolve_output_root() -> Path:
       3. The legacy folder, if it actually exists - keeps the dev machine and
          anyone upgrading from the PowerShell app working before their first
          onboarding.
-      4. `%USERPROFILE%/Videos/AVG Studio` - where a Windows user expects
-         their videos to be, and created on demand.
+      4. `%USERPROFILE%/Videos/AVG Studio` on Windows, `$XDG_VIDEOS_DIR/AVG
+         Studio` (falling back to `~/Videos`) on Linux - where a user
+         expects their videos to be, and created on demand.
     """
     # Imported here, not at module scope: `avg.config.settings` pulls in
     # pydantic, and this module's whole point is that nothing heavy runs
     # before the window is on screen. See `main`.
+    from avg.config.platform_paths import videos_root  # noqa: PLC0415
     from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings  # noqa: PLC0415
 
     override = os.environ.get("AVG_OUTPUT_ROOT", "").strip()
@@ -94,7 +96,7 @@ def resolve_output_root() -> Path:
 
     if LEGACY_OUTPUT_ROOT.is_dir():
         return LEGACY_OUTPUT_ROOT
-    fallback = Path.home() / "Videos" / "AVG Studio"
+    fallback = videos_root() / "AVG Studio"
     fallback.mkdir(parents=True, exist_ok=True)
     return fallback
 

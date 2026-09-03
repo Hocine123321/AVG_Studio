@@ -44,23 +44,23 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
+from avg.config.platform_paths import cache_root, config_root, documents_root
+
 
 def user_assets_root() -> Path:
     """`Documents/AVG Studio/UserAssets` - the one root every default in
     this module, and every sibling `default_*_path()` across
     `avg.config`, is composed from.
 
-    Falls back to `Path.home()` if `USERPROFILE` is somehow unset (never
-    true on a real Windows session, but keeps this callable in
-    stripped-down environments), matching every other `default_*_path()`
-    in this codebase's treatment of `APPDATA`/`LOCALAPPDATA`. Triggers
-    `migrate_legacy_files` on every call - see that function for why a
-    stateless, filesystem-driven idempotency check is safe to run this
-    often.
+    `documents_root()` resolves `%USERPROFILE%\\Documents` on Windows and
+    `$XDG_DOCUMENTS_DIR` (falling back to `~/Documents`) on Linux - see
+    `avg.config.platform_paths` for why callers never branch on platform
+    themselves. Triggers `migrate_legacy_files` on every call - see that
+    function for why a stateless, filesystem-driven idempotency check is
+    safe to run this often.
     """
-    base = os.environ.get("USERPROFILE") or str(Path.home())
-    root = Path(base) / "Documents" / "AVG Studio" / "UserAssets"
-    old_base = Path(os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")) / "AVG Studio"
+    root = documents_root() / "AVG Studio" / "UserAssets"
+    old_base = config_root() / "AVG Studio"
     migrate_legacy_files(old_base, root)
     return root
 
@@ -185,11 +185,15 @@ def default_model_prefs_path() -> Path:
 
 
 def default_working_models_path() -> Path:
-    """`%APPDATA%/AVG Studio/working_models.json` - deliberately NOT under
-    `UserAssets`. `avg.core.model_cache.ModelCache`'s document: which
-    models a probe has actually proven working, replaced wholesale on
+    """`%APPDATA%/AVG Studio/working_models.json` on Windows,
+    `$XDG_CACHE_HOME/AVG Studio/working_models.json` on Linux - deliberately
+    NOT under `UserAssets`. `avg.core.model_cache.ModelCache`'s document:
+    which models a probe has actually proven working, replaced wholesale on
     every sweep. A cache, not user data - see this module's docstring for
-    why caches stay where they were.
+    why caches stay where they were. Windows keeps the historical `%APPDATA%`
+    (roaming config, not `%LOCALAPPDATA%`) location unchanged; Linux resolves
+    it as the cache it actually is via `cache_root()` rather than mirroring
+    that Windows quirk literally.
 
     Independent of `default_settings_path` on purpose: before this slice
     both were composed from the same `%APPDATA%/AVG Studio` base by
@@ -198,5 +202,4 @@ def default_working_models_path() -> Path:
     pulled this cache into `UserAssets` the moment `default_settings_path`
     moved, had this stayed a shortcut off it instead of its own function.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "working_models.json"
+    return cache_root() / "AVG Studio" / "working_models.json"

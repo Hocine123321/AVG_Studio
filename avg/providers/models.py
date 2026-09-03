@@ -27,16 +27,19 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Callable
 
+from avg.config.platform_paths import cache_root
+
 
 def default_cache_path() -> Path:
-    """`%APPDATA%/AVG Studio/model_cache.json`.
+    """`%APPDATA%/AVG Studio/model_cache.json` on Windows,
+    `$XDG_CACHE_HOME/AVG Studio/model_cache.json` on Linux.
 
-    Falls back to `~/AppData/Roaming` if `APPDATA` is somehow unset,
-    mirroring `avg.config.settings.default_settings_path` and
-    `avg.config.secrets.default_secrets_path`.
+    Windows keeps its historical `%APPDATA%` (roaming config) location
+    unchanged. Linux resolves it via `cache_root()` instead of mirroring
+    that literally - this file is a derived, rebuildable cache (see this
+    module's docstring), which is exactly what `$XDG_CACHE_HOME` is for.
     """
-    base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(base) / "AVG Studio" / "model_cache.json"
+    return cache_root() / "AVG Studio" / "model_cache.json"
 
 
 def _load_cache(path: Path) -> dict[str, list[str]]:

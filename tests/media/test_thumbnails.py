@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -151,7 +152,15 @@ def test_cache_never_writes_into_the_project_folder(tmp_path):
     assert not any(project.folder.rglob("*.jpg"))
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="LOCALAPPDATA is a Windows-only env var")
 def test_default_cache_dir_is_under_localappdata(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert default_cache_dir() == tmp_path / "AVG Studio" / "thumbs"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="XDG_CACHE_HOME is a Linux-only env var")
+def test_default_cache_dir_is_under_xdg_cache_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
 
     assert default_cache_dir() == tmp_path / "AVG Studio" / "thumbs"

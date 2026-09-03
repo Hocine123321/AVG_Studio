@@ -2,7 +2,21 @@
 name = "avg-studio"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["fastapi", "uvicorn[standard]", "pywebview", "pydantic>=2"]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pywebview",
+    "pydantic>=2",
+    # Not Windows/Linux-specific - genuinely missing before this branch.
+    # avg/providers/voice/providers.py imports this lazily (see its
+    # docstring) but nothing declared it as an actual dependency.
+    "edge-tts",
+    # Linux only: avg.config.secrets' DPAPI replacement. Unused (never
+    # imported) on Windows, which keeps using ctypes/crypt32 directly -
+    # see that module's docstring.
+    "keyring; sys_platform == 'linux'",
+    "cryptography; sys_platform == 'linux'",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy", "httpx"]

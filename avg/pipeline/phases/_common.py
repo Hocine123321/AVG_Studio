@@ -232,8 +232,20 @@ def resolve_font_family_value(font: str) -> str:
     # like the vendored engine's own global-font resolution
     # (`avg.media.vendor.avg`'s `cmd_caption_burn`: "for a path, use its
     # stem"). A bare family name (the common case) passes through as-is.
+    #
+    # Stem extraction is done by hand rather than via `pathlib.Path(font)
+    # .stem`: `Path` only treats `\` as a separator on Windows, so a
+    # Windows-style font path (`C:\Windows\Fonts\Montserrat-Bold.ttf`) read
+    # on Linux - a channel document synced or migrated from a Windows
+    # install, or simply typed that way - would otherwise be treated as
+    # one giant filename instead of a path, and never get its directories
+    # stripped. Normalising both separators by hand keeps this rule
+    # identical on every platform this app runs on, matching the actual
+    # intent ("last path component minus extension") rather than either
+    # OS's specific separator convention.
     if font.lower().endswith((".ttf", ".otf")):
-        return Path(font).stem
+        stem = font.replace("\\", "/").rsplit("/", 1)[-1]
+        return stem.rsplit(".", 1)[0]
     return font
 
 

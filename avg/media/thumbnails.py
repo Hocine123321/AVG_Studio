@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from avg.core.models import ProjectDoc
@@ -56,13 +57,20 @@ _EXTRACT_TIMEOUT_SECONDS = 30
 
 
 def default_cache_dir() -> Path:
-    """`%LOCALAPPDATA%/AVG Studio/thumbs` - the one place this module writes.
+    """`%LOCALAPPDATA%/AVG Studio/thumbs` on Windows,
+    `$XDG_CACHE_HOME/AVG Studio/thumbs` on Linux - the one place this
+    module writes.
 
-    Falls back to `~/AppData/Local` if `LOCALAPPDATA` is somehow unset
-    (never true on a real user's Windows session, but keeps this callable
-    in stripped-down environments) rather than raising.
+    Falls back to `~/AppData/Local` / `~/.cache` respectively if the
+    relevant env var is somehow unset, rather than raising. Kept as a
+    local `sys.platform` branch rather than importing
+    `avg.config.platform_paths` - this module has no existing dependency
+    on `avg/config/` and this is the only place that would need one.
     """
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
     return Path(base) / "AVG Studio" / "thumbs"
 
 

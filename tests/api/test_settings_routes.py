@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from avg.api.app import create_app
-from avg.config.settings import load_settings
+from avg.config.settings import LEGACY_OUTPUT_ROOT, load_settings
 
 
 @pytest.fixture
@@ -80,6 +80,10 @@ def test_scan_route_counts_projects_in_an_arbitrary_folder(tmp_path, client):
     assert r.json() == {"project_count": 0}
 
 
+@pytest.mark.skipif(
+    not LEGACY_OUTPUT_ROOT.is_dir(),
+    reason="only this project's dev machine has the real legacy library",
+)
 def test_scan_route_counts_real_legacy_projects(client):
     # Exercises the route against the real legacy library rather than a
     # synthetic fixture (this project's dev machine has one, read-only - see
