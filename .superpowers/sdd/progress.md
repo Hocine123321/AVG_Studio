@@ -1443,3 +1443,28 @@ the check on `jobs` being non-empty.
 spec+plan only. Next: sub-slice 3 (Chapters + takeover cards) or
 sub-slice 4 (Caption animation styles), per the ranked backlog, still
 spec+plan-first per this session's standing instruction.
+
+## Slice 31, sub-slice 3 — Chapters + Explainer/Focused Cards: spec (2026-09-02)
+
+**Spec written and committed:**
+`docs/superpowers/specs/2026-09-02-slice-31-chapters-cards-design.md`.
+Read `Get-AiVideoMap`'s chapters path, `Get-AiEditPlan`, and
+`Export-CardPlan` in full (`modules/ai.ps1`). Major finding: the
+RENDERING side of chapter takeover cards is already fully wired and
+untouched by this sub-slice — `build_timeline` already turns a
+`video_map.json["parts"]` entry into a takeover node,
+`avg.media.overlays.render_layers` already draws every takeover node as
+`chapters_takeover_cards`, and the vendored `render_chapters_takeover_cards`/
+`render_explainer` both already exist. The entire gap is upstream:
+nothing writes `parts`, nothing calls an Explainer AI planner. Also
+found `_FOCUSED_MAX_CHARS` in `director.py` - a constant with a full
+explanatory comment for routing an overlong Focused card to the
+`explainer` element, declared but never actually used - finishing that
+wiring is now part of this spec's card-plan merge task, not new scope
+invented here.
+
+Three new settings: `takeover_cards_enabled` (master switch - AVG
+Studio currently has NONE, Focused cards are unconditional today),
+`chapters_enabled`, `explainer_enabled`.
+
+**Not yet done:** the plan - spec pending review before that starts.
