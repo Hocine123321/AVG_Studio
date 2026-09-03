@@ -1389,3 +1389,31 @@ pending the user's review before that starts. No implementation, no
 tests run this entry.
 
 **Commits** (branch `development`): pending — see next entry.
+
+## Slice 31, sub-slice 2 — Image Recycling: spec (2026-09-02)
+
+**Scoping decision:** composite multi-scene grids (the other half of this
+sub-slice's original ranking) dropped from the parity effort entirely —
+user's explicit call after a scope check showed the two features are only
+loosely coupled in legacy (one interaction point: 100% recycle forces
+`composite_layout=1x1`) and each is independently sized comparably to all
+of sub-slice 1. Recycling alone is the sub-slice from here on.
+
+**Spec written and committed:**
+`docs/superpowers/specs/2026-09-02-slice-31-recycling-design.md`. Read
+`Invoke-SceneSegmentation` (`modules/ai.ps1`) and the B2.15 recycle-copy
+block (`modules/visuals.ps1`) in full, not summarized from README/comments
+— covers: a new global, hand-maintained pool
+(`UserAssets/ReusableImages/images.json`, no in-app editor — legacy never
+had one either); `recycle_enabled`/`recycle_ratio` settings; a per-project
+pool snapshot written fresh on every Script run; the segmentation prompt's
+pool-aware wording (ported verbatim from the three-mode `$jobLine`/
+`$imageRule`); post-parse pick normalisation (loose-match/strict-rewrite,
+out-of-range drop, `"all"`-mode force-fill, `"partial"`-mode soft-cap
+logging via `ProgressEvent`, never trimming); Visuals-phase resolution
+(copy verbatim + image-validity check, falling back to generation using
+the pool entry's own description on any failure). `avg/media/vendor/`
+untouched — recycling only changes what's in `images/` before render
+starts.
+
+**Not yet done:** the plan — spec pending review before that starts.
