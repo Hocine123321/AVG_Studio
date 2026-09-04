@@ -1487,3 +1487,30 @@ intermediate state between them doesn't pass tests.
 spec+plan only so far. Next: sub-slice 4 (Caption animation styles),
 the last of the four ranked sub-slices, still spec+plan-first per this
 session's standing instruction.
+
+## Slice 31, sub-slice 4 — Caption Animation Styles: spec (2026-09-02)
+
+**Scope correction vs this session's earlier characterization:** memory
+called this a "quick win" (setting exists, captions.py hardcodes
+pop-in). True as far as it goes, but reading python/avg.py's
+animated_text/reveal_text/highlight_text found legacy actually has SIX
+animation mechanisms, not the three already in the schema
+(none/fade/pop) - rise/highlight/typewriter don't exist yet. Two of
+those (highlight, typewriter) need per-word timing data AVG Studio's
+_group_cues already discards (collapses a word chunk into one
+{start,end,text} cue). Real data-flow change, not just a settings
+wire-up - moderately larger than "quick win" but still the smallest of
+the four sub-slices.
+
+**Spec written and committed:**
+`docs/superpowers/specs/2026-09-02-slice-31-caption-animations-design.md`.
+Covers: captions_animation_style's choices list growing to 6; _group_cues
+keeping a per-word `words` list per cue; a new _animated_text dispatcher
+ported line-for-line from legacy's three source functions (pop/fade
+unchanged in spirit, rise needs simple position math - not font-metric
+text measurement - highlight/typewriter need a new ASS-colour-tag
+helper and a fixed accent constant, not a new setting).
+
+**Not yet done:** the plan - spec pending review. This is the last of
+the four ranked sub-slices; all four now have written specs, three have
+plans (Caption Animation Styles' plan is next).
