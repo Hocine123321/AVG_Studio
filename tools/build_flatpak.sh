@@ -48,18 +48,27 @@ command -v flatpak >/dev/null 2>&1 || fail "flatpak is not installed. On CachyOS
 command -v flatpak-builder >/dev/null 2>&1 || fail "flatpak-builder is not installed. On CachyOS/Arch: sudo pacman -S flatpak-builder"
 
 if ! flatpak remote-list | grep -q '^flathub'; then
-  fail "no 'flathub' remote configured. Run:
-  flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
+  echo "==> adding flathub remote"
+  flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 fi
 
-if ! flatpak info "org.kde.Platform//${RUNTIME_VERSION}" >/dev/null 2>&1; then
-  fail "org.kde.Platform//${RUNTIME_VERSION} is not installed. Run:
-  flatpak install flathub org.kde.Platform//${RUNTIME_VERSION} org.kde.Sdk//${RUNTIME_VERSION}"
-fi
-if ! flatpak info "org.kde.Sdk//${RUNTIME_VERSION}" >/dev/null 2>&1; then
-  fail "org.kde.Sdk//${RUNTIME_VERSION} is not installed. Run:
-  flatpak install flathub org.kde.Platform//${RUNTIME_VERSION} org.kde.Sdk//${RUNTIME_VERSION}"
-fi
+# Installed directly rather than just reported as missing: this exact
+# failure was hit twice running this script by hand (org.kde.Platform
+# not installed, told to run the install command, still not installed
+# next run) - whatever the actual reason (forgotten step, the install
+# command itself failing silently, something else), a script whose
+# whole job is "make this build" should not depend on a second manual
+# step succeeding invisibly in between two runs of it. `flatpak install`
+# is idempotent (a no-op if already present) and its own output - not a
+# canned message here - is what actually explains a real failure (wrong
+# version pinned, network problem, disk space), so failures now surface
+# with flatpak's real error instead of this script's guess at one.
+for ref in "org.kde.Platform//${RUNTIME_VERSION}" "org.kde.Sdk//${RUNTIME_VERSION}"; do
+  if ! flatpak info "$ref" >/dev/null 2>&1; then
+    echo "==> installing $ref"
+    flatpak install --noninteractive flathub "$ref"
+  fi
+done
 
 if [ "$SKIP_WEB_BUILD" -eq 0 ]; then
   command -v npm >/dev/null 2>&1 || fail "npm is not installed (needed to build web/). On CachyOS/Arch: sudo pacman -S npm, or pass --skip-web-build if web/dist already exists."
