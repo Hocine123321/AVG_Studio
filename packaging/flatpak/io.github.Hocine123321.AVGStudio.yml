@@ -61,11 +61,17 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
-  # GPU acceleration for QtWebEngine's compositor. Without it, Chromium
-  # falls back to software rendering (confirmed working, just slower) -
-  # see the QRhiGles2/Vulkan fallback messages this branch's manual
-  # pywebview+PySide6 smoke test produced without a GPU available.
-  - --device=dri
+  # No --device=dri: QtWebEngine falls back to software rendering
+  # (confirmed working - the QRhiGles2/Vulkan fallback messages this
+  # branch's manual pywebview+PySide6 smoke test produced without a GPU
+  # available, see docs/linux-port/WINDOWS_VS_LINUX.md). Left out
+  # deliberately to skip the org.freedesktop.Platform.GL.default(+extra)/
+  # VAAPI.Intel/openh264 extension downloads --device=dri triggers at
+  # install time (~350-400 MiB) - a real, sizeable cost for an app
+  # that's a form-heavy UI wrapping a local API, not a 3D/gaming
+  # workload. Add `--device=dri` back if the embedded browser feels
+  # sluggish in practice; this is a one-line, easily-reversed tradeoff,
+  # not an architectural one.
   # This app's own outbound calls to Groq/Gemini/ElevenLabs/HuggingFace/
   # Pollinations/etc. The loopback FastAPI+WebSocket connection between
   # the embedded browser and avg/api/app.py needs no permission at all -

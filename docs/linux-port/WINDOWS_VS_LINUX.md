@@ -126,6 +126,48 @@ New in this branch, not a port of anything - Windows has an installer
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
 - `tools/build_flatpak.sh` - builds the frontend, then runs `flatpak-builder --install`. This branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent.
 
+## Size budget
+
+Asked for directly, so recorded rather than left as tribal knowledge.
+Real figures (Flathub listings + this branch's own downloads), not
+estimates, as of this write-up:
+
+| Item | Size | Shared/one-time, or private to this app? |
+|---|---|---|
+| `org.freedesktop.Platform//25.08` | 241 MiB | Shared across every Flatpak using it |
+| `org.freedesktop.Sdk//25.08` | ~500-600 MiB | Build-time only - never in the shipped app |
+| `GL.default`+`GL.default-extra`+`VAAPI.Intel`+`openh264` | ~350-400 MiB | Would be shared, but **not installed** - see below |
+| `PySide6`+`PySide6-Addons` (pip, at build time) | ~280-300 MiB | Bundled into `/app`, private to this app |
+| ffmpeg static build | ~120 MiB | Bundled into `/app`, private to this app |
+
+Considered and rejected: switching the GUI backend to GTK+WebKit2GTK
+for size. Checked against real Flathub numbers rather than assumed -
+`org.gnome.Platform` pulls a comparable ~350-500 MiB of runtime weight,
+plus the same GL/VAAPI/codec extension row above either way. The one
+real structural difference is that WebKitGTK ships inside the GNOME
+runtime (shared across GNOME-ecosystem apps) where PySide6's
+QtWebEngine is bundled privately per-app - but for a single first
+install the totals roughly wash out. Reversing the GUI-backend decision
+again for an unclear win, onto a completely unverified path (see the
+GUI-backend row above - the Qt path was smoke-tested for real; GTK
+never was), isn't a good trade.
+
+Cut instead: `--device=dri` removed from `finish-args`. That single
+permission is what triggers the entire GL/VAAPI/openh264 row above at
+install time (~350-400 MiB) - QtWebEngine falls back to software
+rendering without it, already confirmed working in this branch's
+pywebview+PySide6 smoke test. A real, safe cut for an app that's a
+form-heavy UI wrapping a local API, not a 3D/gaming workload. One line
+to reverse (`--device=dri` back in the manifest) if the embedded
+browser turns out sluggish in practice on real hardware.
+
+Not reduced, not attempted: PySide6/PySide6-Addons' own bundled
+QtWebEngine (~280-300 MiB) and the ffmpeg static build (~120 MiB) are
+both real, load-bearing weight with no smaller substitute in either
+case (see their own divergence-table rows above for why each was
+chosen) - the size budget's actual floor, not something left on the
+table.
+
 ## Corrected after real-machine testing: runtime was over-specified
 
 The manifest originally targeted `org.kde.Platform`/`org.kde.Sdk`, on the
