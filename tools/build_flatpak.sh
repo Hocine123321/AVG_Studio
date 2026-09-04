@@ -47,6 +47,11 @@ echo "==> checking prerequisites"
 command -v flatpak >/dev/null 2>&1 || fail "flatpak is not installed. On CachyOS/Arch: sudo pacman -S flatpak"
 command -v flatpak-builder >/dev/null 2>&1 || fail "flatpak-builder is not installed. On CachyOS/Arch: sudo pacman -S flatpak-builder"
 
+if ! flatpak remote-list | grep -q '^flathub'; then
+  fail "no 'flathub' remote configured. Run:
+  flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo"
+fi
+
 if ! flatpak info "org.kde.Platform//${RUNTIME_VERSION}" >/dev/null 2>&1; then
   fail "org.kde.Platform//${RUNTIME_VERSION} is not installed. Run:
   flatpak install flathub org.kde.Platform//${RUNTIME_VERSION} org.kde.Sdk//${RUNTIME_VERSION}"
