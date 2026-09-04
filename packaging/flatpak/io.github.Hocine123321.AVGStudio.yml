@@ -52,6 +52,12 @@ runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: avg-studio
+# Named explicitly rather than left as flatpak-builder's default
+# ("master") - "stable" is what `tools/build_flatpak.sh`'s installer
+# path passes to `flatpak build-bundle`, and what shows up in
+# `flatpak list`/`flatpak run` for anyone the resulting .flatpak file
+# gets handed to.
+default-branch: stable
 
 finish-args:
   # Window + rendering. fallback-x11 covers non-Wayland Plasma sessions

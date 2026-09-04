@@ -124,7 +124,19 @@ New in this branch, not a port of anything - Windows has an installer
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` - the manifest.
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.desktop` - app-grid launcher entry.
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
-- `tools/build_flatpak.sh` - builds the frontend, then runs `flatpak-builder --install`. This branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent.
+- `tools/build_flatpak.sh` - interactive (`select`-based) menu with two
+  actions, matching two different real needs rather than one script
+  trying to be both: **Refresh app** (`flatpak-builder --user --install`,
+  no `--force-clean` - fast incremental rebuild against the existing
+  `build-dir` cache, for "I changed code, let me try it again") and
+  **Build installer** (`--force-clean` then `flatpak build-bundle` into
+  a single `flatpak-dist/AVGStudio.flatpak` file - what actually
+  corresponds to the Windows build's `AVG-Setup.exe`, something to hand
+  to someone else who runs `flatpak install --user AVGStudio.flatpak`
+  with no manifest, no flatpak-builder, no clone of this repo at all).
+  Also takes `--refresh`/`--build-installer` directly to skip the menu.
+  This branch's `Build Installer.bat`/`tools/make_release.ps1`
+  equivalent.
 
 ## Size budget
 

@@ -44,3 +44,10 @@ dist/
 # (100+ MB either platform's build). The Windows build's copy of this
 # ignore rule lives in that build's own .gitignore.
 vendor/ffmpeg/
+
+# tools/build_flatpak.sh scratch/output - flatpak-builder's own build
+# cache and the exported repo + .flatpak bundle "Build installer"
+# produces. Regenerated, not committed - same reasoning as build/ above.
+build-dir/
+flatpak-dist/
+.flatpak-builder/
