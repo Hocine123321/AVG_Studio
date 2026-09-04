@@ -126,6 +126,31 @@ New in this branch, not a port of anything - Windows has an installer
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
 - `tools/build_flatpak.sh` - builds the frontend, then runs `flatpak-builder --install`. This branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent.
 
+## Corrected after real-machine testing: runtime was over-specified
+
+The manifest originally targeted `org.kde.Platform`/`org.kde.Sdk`, on the
+reasoning that Qt + a KDE Plasma target desktop meant KDE integration
+would be better. Actually building it on a real machine surfaced the
+real cost of that choice: `org.kde.Sdk` is a full C++/Qt *development*
+toolchain (compiler, Qt/KDE Frameworks headers, cmake) plus several
+multimedia extensions (`org.freedesktop.Platform.GL.default`,
+`.VAAPI.Intel`, `.openh264`) pulled in alongside it - a large first-time
+download for a build whose every `build-commands` step is `pip install`
+plus file copies. Nothing here compiles anything, and PySide6/
+PySide6-Addons (see the GUI-backend row above) already bundle their own
+private Qt6 + QtWebEngine, so nothing links against system Qt at all,
+KDE or otherwise. Desktop icons, portals, and theming are unaffected by
+which base runtime is chosen either way - none of that reasoning
+actually held up.
+
+Switched to `org.freedesktop.Platform`/`org.freedesktop.Sdk//25.08` - a
+strict subset of what `org.kde.Platform` pulls in (KDE's runtime is
+itself built on top of the freedesktop one), so nothing this app
+actually uses is lost, and the base install shrinks from KDE's
+runtime+SDK to freedesktop's ~241 MiB `Platform` image. `24.08` was
+considered and rejected - it goes EOL 2026-09-08, days away as of this
+write-up; `25.08` has security support into 2027.
+
 ## Still open / not yet done on this branch
 
 - **Not hermetic / not Flathub-submittable.** The manifest's `pip3 install`
@@ -137,22 +162,21 @@ New in this branch, not a port of anything - Windows has an installer
   attempted - this is a real chunk of extra work with no payoff until
   Flathub distribution is actually the goal, and the manifest says so at
   the top.
-- **Never built on a real machine yet.** Everything above was validated
-  as far as this sandboxed dev container allows: the manifest YAML
-  parses and its structure was inspected, the desktop file has its
-  required keys, the AppStream XML is well-formed, the build script's
-  shell syntax checks out, and the Python side was proven for real - an
-  actual `pip install .` into a throwaway prefix, the `web/dist`
-  placement logic, and `create_app()` constructing successfully against
-  that layout. `pywebview` + `PySide6` was also proven for real under
-  `QT_QPA_PLATFORM=offscreen` (window created, event loop ran, exited
-  clean) - but `flatpak-builder` itself was never run, because it isn't
-  installed in this container and its own runtime/SDK downloads are
-  well outside what this environment can reach. A real KDE Plasma
-  machine running `tools/build_flatpak.sh` is the next real test, and
-  the first one likely to surface something this couldn't catch (a
-  wrong permission, a missing runtime piece, GPU-specific QtWebEngine
-  behavior no software-rendering fallback exercises).
+- **Currently being tested on a real machine (in progress).** Everything
+  in this container was validated as far as a sandboxed dev container
+  allows - manifest YAML/structure, desktop file keys, AppStream XML
+  well-formedness, build script shell syntax, and the Python side for
+  real (`pip install .` into a throwaway prefix, `web/dist` placement,
+  `create_app()` constructing successfully, `pywebview`+`PySide6`
+  actually creating a window and running its event loop under
+  `QT_QPA_PLATFORM=offscreen`) - but `flatpak-builder` itself was never
+  run here; this container has neither the tool nor a path to the
+  runtime downloads. First real run (CachyOS/KDE Plasma) found
+  `flatpak-builder` itself wasn't installed, then the runtime/SDK
+  weren't - both now fixed (`build_flatpak.sh` checks and installs each
+  itself) - and surfaced the `org.kde.Platform` → `org.freedesktop.Platform`
+  correction above. Still not confirmed: an actual completed build and a
+  working launched window on real hardware.
 - **No LICENSE file anywhere in this repo.** Blocks giving
   `metainfo.xml`'s `project_license` a real value - currently
   `LicenseRef-proprietary` as an honest placeholder, not a guess.

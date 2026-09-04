@@ -9,6 +9,22 @@
 # docs/linux-port/WINDOWS_VS_LINUX.md for the fuller writeup of this
 # decision and everything else that differs from the Windows build.
 #
+# Runtime is org.freedesktop.Platform, not org.kde.Platform, despite the
+# GUI being Qt on a KDE Plasma target desktop - deliberately. An earlier
+# version of this manifest used org.kde.Platform/org.kde.Sdk on the
+# theory that it would give better KDE integration; it doesn't, and
+# pulls in a full C++/Qt *development* toolchain (compiler, Qt/KDE
+# Frameworks headers, cmake) this build never touches - every
+# build-command below is `pip install` plus file copies, nothing here
+# compiles anything. PySide6/PySide6-Addons (see pyproject.toml) bundle
+# their own private Qt6 + QtWebEngine, so nothing here links against
+# system Qt at all, KDE or otherwise; desktop icons/portals/theming are
+# unaffected by which base runtime is chosen either way. Switching to
+# the generic runtime is a strict subset of what org.kde.Platform pulls
+# in (org.kde.Platform is itself built on top of org.freedesktop.Platform)
+# - nothing this app actually uses is lost, and the base install shrinks
+# from KDE's runtime+SDK to freedesktop's ~241 MiB Platform image.
+#
 # Build (from repo root, on the linux-port branch):
 #   cd web && npm install && npm run build && cd ..
 #   flatpak-builder --user --install --force-clean build-dir \
@@ -16,8 +32,9 @@
 #   flatpak run io.github.Hocine123321.AVGStudio
 # Or just: tools/build_flatpak.sh
 #
-# Prerequisite runtimes (one-time):
-#   flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9
+# Prerequisite runtimes (one-time; tools/build_flatpak.sh does this for
+# you automatically now):
+#   flatpak install flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 #
 # NOT hermetic / NOT Flathub-submittable as-is: the `avg-studio` module
 # below runs `pip3 install` and `tools/fetch_ffmpeg.py` (a network
@@ -31,9 +48,9 @@
 # flagged here so it isn't mistaken for a finished Flathub submission.
 
 id: io.github.Hocine123321.AVGStudio
-runtime: org.kde.Platform
-runtime-version: '6.9'
-sdk: org.kde.Sdk
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
 command: avg-studio
 
 finish-args:
