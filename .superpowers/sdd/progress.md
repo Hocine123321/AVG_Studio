@@ -1514,3 +1514,34 @@ helper and a fixed accent constant, not a new setting).
 **Not yet done:** the plan - spec pending review. This is the last of
 the four ranked sub-slices; all four now have written specs, three have
 plans (Caption Animation Styles' plan is next).
+
+## Slice 31, sub-slice 4 — Caption Animation Styles: plan (2026-09-02)
+
+**Plan written and committed:**
+`docs/superpowers/plans/2026-09-02-slice-31-caption-animations-plan.md`.
+3 tasks: (1) extend captions_animation_style's choices to all 6, (2) six
+_animated_text mechanisms ported line-for-line (pop/fade/rise/highlight/
+typewriter/none) + _group_cues keeping per-word data, (3) wire into
+ScreenTextPhase.run.
+
+Caught during planning: test_captions_ass_header_matches_the_real_schema
+asserts the pop override with NO captions_animation_style set - only
+ever passed because of the exact bug this sub-slice fixes. Task 3 fixes
+that test FIRST, in its own commit, before the real wiring lands, so
+the wiring commit's diff stays clean. Also caught: legacy's highlight/
+typewriter arithmetic assumes raw millisecond word timing; AVG Studio's
+word timing is in seconds throughout (_synthetic_word_timings' own
+docstring) - centisecond/ms scaling in the port is *100/*1000, not
+legacy's /10 and identity, or it would be off by 3 orders of magnitude.
+
+**All four ranked sub-slices now have complete spec+plan pairs, none
+implemented:**
+1. Filters + Brand Kit
+2. Image Recycling (composite grids dropped from scope)
+3. Chapters + Explainer/Focused Cards
+4. Caption Animation Styles
+
+Next real step per the original backlog: resolve the DPAPI shim
+regression, then either PR Slice 30 to main, or begin implementing
+sub-slice 1 first (subagent-driven, per each plan's own header) -
+awaiting direction.
