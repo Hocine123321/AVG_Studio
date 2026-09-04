@@ -152,14 +152,26 @@ again for an unclear win, onto a completely unverified path (see the
 GUI-backend row above - the Qt path was smoke-tested for real; GTK
 never was), isn't a good trade.
 
-Cut instead: `--device=dri` removed from `finish-args`. That single
-permission is what triggers the entire GL/VAAPI/openh264 row above at
-install time (~350-400 MiB) - QtWebEngine falls back to software
-rendering without it, already confirmed working in this branch's
-pywebview+PySide6 smoke test. A real, safe cut for an app that's a
-form-heavy UI wrapping a local API, not a 3D/gaming workload. One line
-to reverse (`--device=dri` back in the manifest) if the embedded
-browser turns out sluggish in practice on real hardware.
+Cut instead: `--device=dri` removed from `finish-args`. **First attempt
+at this was wrong about the mechanism, corrected after a real run
+proved it** - removing `--device=dri` alone did not stop the GL/VAAPI/
+codec row from downloading, because those are "related refs" flatpak
+installs alongside the base runtime *by default* whenever
+`org.freedesktop.Platform` itself is installed, independent of what any
+app's finish-args request (this is a known, if surprising, upstream
+behaviour - see flatpak/flatpak#3004). `--device=dri` only controls
+whether the app is *permitted* to use GL/DRI once already installed,
+not whether `flatpak install` downloads it in the first place. The
+actual fix is `flatpak install --no-related`, now what
+`tools/build_flatpak.sh` uses for both the Platform and Sdk install.
+Safe specifically because `--device=dri` is *also* gone from the
+manifest - the app never asks to use hardware GL/VAAPI at runtime
+either, and software rendering was already confirmed working with none
+of these extensions present at all.
+
+One line to reverse (`--device=dri` back in the manifest, drop
+`--no-related` from the script) if the embedded browser turns out
+sluggish in practice on real hardware.
 
 Not reduced, not attempted: PySide6/PySide6-Addons' own bundled
 QtWebEngine (~280-300 MiB) and the ffmpeg static build (~120 MiB) are

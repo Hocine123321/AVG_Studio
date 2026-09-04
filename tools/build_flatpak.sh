@@ -65,10 +65,25 @@ fi
 # actually explains a real failure (wrong version pinned, network
 # problem, disk space), so failures now surface with flatpak's real
 # error instead of this script's guess at one.
+#
+# --no-related: verified against a real run, not assumed. Removing
+# --device=dri from the manifest's finish-args (see that file) did NOT
+# stop GL.default(+extra)/VAAPI.Intel/Platform.codecs-extra/Locale from
+# being downloaded here - those are "related refs" flatpak installs
+# alongside the base runtime BY DEFAULT on a plain `flatpak install
+# org.freedesktop.Platform`, independent of what any app's finish-args
+# request (confirmed: flatpak/flatpak#3004 describes exactly this
+# behaviour upstream). --device=dri only controls whether the app is
+# *permitted* to use GL/DRI once installed, not whether this install
+# step downloads it. --no-related is the flag that actually skips them.
+# Safe here specifically because --device=dri is already gone from the
+# manifest - the app never asks to use hardware GL/VAAPI at runtime
+# either, and software rendering was already confirmed working without
+# any of these present at all.
 for ref in "org.freedesktop.Platform//${RUNTIME_VERSION}" "org.freedesktop.Sdk//${RUNTIME_VERSION}"; do
   if ! flatpak info "$ref" >/dev/null 2>&1; then
-    echo "==> installing $ref"
-    flatpak install --noninteractive flathub "$ref"
+    echo "==> installing $ref (--no-related: skipping GL/VAAPI/codec/locale extras this app doesn't use)"
+    flatpak install --noninteractive --no-related flathub "$ref"
   fi
 done
 
