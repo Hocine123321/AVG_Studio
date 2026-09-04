@@ -217,6 +217,49 @@ runtime+SDK to freedesktop's ~241 MiB `Platform` image. `24.08` was
 considered and rejected - it goes EOL 2026-09-08, days away as of this
 write-up; `25.08` has security support into 2027.
 
+## Real-machine bug: pip-install site-packages resolution shadowed by CWD
+
+Found on a real `flatpak-builder` run - the first one to get all the way
+through `pip3 install --prefix=/app .` and every dependency download,
+failing at the very next step: `cp: cannot copy a directory, 'web/dist',
+into itself, '/run/build/avg-studio/web/dist/dist'`.
+
+The manifest's `web/dist` placement step used to do
+`SITE_PACKAGES=$(python3 -c "import avg, pathlib; print(pathlib.Path
+(avg.__file__).resolve().parent.parent)")`. That step's CWD is the
+source checkout itself (the module's `type: dir` source), which
+contains a real `avg/` directory - and `python3 -c` prepends CWD to
+`sys.path[0]` ahead of everything else, so `import avg` silently
+resolved to the *source* copy instead of the one `pip install` had just
+placed under `/app/lib/python3.13/site-packages/avg/`. `SITE_PACKAGES`
+became the checkout root instead, and the follow-up `cp -r web/dist
+"$SITE_PACKAGES/web/dist"` tried to copy `web/dist` into itself.
+
+This exact bug had already been dodged once, not fixed, during this
+branch's own container-side verification of this same build-command
+(this doc's "Packaging shape" row above) - that check ran its
+equivalent `import avg` test from `/tmp` specifically to avoid the CWD
+problem, which proved the *logic* worked but never exercised the CWD
+flatpak-builder actually uses, so the bug shipped anyway.
+
+Fixed twice, differently, once each real occurrence was reproduced and
+confirmed directly rather than assumed:
+
+- **Build time** (the actual failure): `SITE_PACKAGES` is now found via
+  a filesystem glob against what `pip install` actually wrote to disk
+  (`find /app/lib -mindepth 1 -maxdepth 1 -type d -name 'python3.*'`),
+  not by importing anything - sidesteps the whole class of bug rather
+  than depending on any particular Python import-resolution behaviour.
+- **Runtime launcher** (`python3 -m avg.shell`, same class of bug in
+  principle, much lower real risk - Flatpak's own filesystem sandboxing
+  means an arbitrary host CWD generally isn't even visible inside the
+  sandbox unless explicitly granted, which this manifest doesn't):
+  `-P` added (PEP 706 - don't prepend CWD/script-dir to `sys.path`).
+  Verified directly: `python3 -c "import avg"` from a directory
+  containing a real, installed `avg` package's source tree resolves to
+  the wrong copy; `python3 -P -c` from the identical directory resolves
+  correctly.
+
 ## Still open / not yet done on this branch
 
 - **Not hermetic / not Flathub-submittable.** The manifest's `pip3 install`
@@ -241,8 +284,11 @@ write-up; `25.08` has security support into 2027.
   `flatpak-builder` itself wasn't installed, then the runtime/SDK
   weren't - both now fixed (`build_flatpak.sh` checks and installs each
   itself) - and surfaced the `org.kde.Platform` → `org.freedesktop.Platform`
-  correction above. Still not confirmed: an actual completed build and a
-  working launched window on real hardware.
+  correction above, plus the CWD-shadowing bug in the section right
+  above this one. Still not confirmed: an actual completed build and a
+  working launched window on real hardware - the CWD fix is unverified
+  beyond this container's own reproduction of the failure; it hasn't
+  yet been run through `flatpak-builder` for real.
 - **No LICENSE file anywhere in this repo.** Blocks giving
   `metainfo.xml`'s `project_license` a real value - currently
   `LicenseRef-proprietary` as an honest placeholder, not a guess.

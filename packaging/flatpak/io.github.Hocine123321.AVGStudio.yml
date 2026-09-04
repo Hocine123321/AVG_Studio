@@ -144,9 +144,28 @@ modules:
       #    rather than changing WEB_DIST's resolution (which the
       #    Windows build's frozen-exe layout also depends on staying
       #    exactly as it is).
+      #
+      #    Found via a filesystem glob against what pip actually wrote
+      #    to disk, NOT `python3 -c "import avg..."` - a real build hit
+      #    exactly the bug that would have caused: this step's CWD is
+      #    the source checkout, which itself contains a real avg/
+      #    directory, and `python3 -c` prepends CWD to sys.path ahead of
+      #    everything else, so `import avg` silently resolved to the
+      #    *source* copy instead of the installed one - SITE_PACKAGES
+      #    became the checkout root, and `cp -r web/dist
+      #    "$SITE_PACKAGES/web/dist"` tried to copy web/dist into
+      #    itself. Reproduced directly: `cd <a dir containing avg/> &&
+      #    python3 -c "import avg; print(avg.__file__)"` finds the local
+      #    one even with a real, correctly-installed copy in
+      #    site-packages, `python3 -P` (PEP 706, disables the CWD/script-
+      #    dir sys.path entry) resolves it correctly from the identical
+      #    CWD - but this glob avoids the whole class of bug rather than
+      #    depending on any particular Python import-resolution behaviour
+      #    (CWD or otherwise) at all.
       - |
         set -e
-        SITE_PACKAGES=$(python3 -c "import avg, pathlib; print(pathlib.Path(avg.__file__).resolve().parent.parent)")
+        SITE_PACKAGES=$(find /app/lib -mindepth 1 -maxdepth 1 -type d -name 'python3.*')/site-packages
+        test -d "$SITE_PACKAGES/avg" || { echo "pip install did not create $SITE_PACKAGES/avg - aborting" >&2; exit 1; }
         mkdir -p "$SITE_PACKAGES/web"
         cp -r web/dist "$SITE_PACKAGES/web/dist"
 
@@ -165,10 +184,18 @@ modules:
       #    finish-arg env var above (belt and suspenders - some Chromium
       #    startup code reads it before Flatpak's own env injection is
       #    guaranteed to have taken effect in every code path).
+      #
+      #    -P (PEP 706): don't prepend CWD to sys.path. Same class of bug
+      #    as the SITE_PACKAGES fix above, at runtime instead of build
+      #    time - if whatever directory the app happens to be launched
+      #    from contains its own avg/ (unlikely, but was exactly the
+      #    build-time failure mode, just in a different directory), this
+      #    stops `-m avg.shell` from silently resolving it instead of the
+      #    real installed package.
       - |
         install -Dm755 /dev/stdin /app/bin/avg-studio << 'LAUNCHER'
         #!/bin/sh
-        exec python3 -m avg.shell
+        exec python3 -P -m avg.shell
         LAUNCHER
 
       # 5. Desktop entry, AppStream metadata, icon - what makes this
