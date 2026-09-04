@@ -1468,3 +1468,22 @@ Studio currently has NONE, Focused cards are unconditional today),
 `chapters_enabled`, `explainer_enabled`.
 
 **Not yet done:** the plan - spec pending review before that starts.
+
+## Slice 31, sub-slice 3 — Chapters + Explainer/Focused Cards: plan (2026-09-02)
+
+**Plan written and committed:**
+`docs/superpowers/plans/2026-09-02-slice-31-chapters-cards-plan.md`. 4
+tasks: (1) 3 settings, (2) Director I chapters/parts (prompt + response
+normalization + video_map["parts"] — integration test proves
+build_timeline needed zero changes), (3) Explainer AI call
+(build_explainer_prompt + Director2Phase wiring, best-effort/never
+fails the phase), (4) _build_card_plan merge (Focused wins dedup, cap
+applies to merged set). Tasks 3+4 are verified and committed together
+(noted explicitly in the plan) — Task 3's Director2Phase change calls
+_build_card_plan with keyword args Task 4's signature adds, so an
+intermediate state between them doesn't pass tests.
+
+**Not yet done:** implementation of sub-slices 1-3 — all three are
+spec+plan only so far. Next: sub-slice 4 (Caption animation styles),
+the last of the four ranked sub-slices, still spec+plan-first per this
+session's standing instruction.
