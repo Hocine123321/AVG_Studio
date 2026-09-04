@@ -25,6 +25,21 @@ installer/AVG-Setup.exe
 web/node_modules/
 web/dist/
 
+# Windows build outputs - CLAUDE.md already documented these as
+# "gitignored, regenerated not committed", but no actual .gitignore
+# entry ever existed for them, so all three had been committed since
+# early history: a full Windows venv (.venv-build/, 262MB, 7949 files)
+# and two PyInstaller output trees (AVG APP/, dist/, 433MB/1294 files
+# each). Removed from this branch's tree (linux-port has no use for any
+# of the three - the Linux equivalents are .venv-linux/, already
+# ignored above, and this branch doesn't use PyInstaller at all, see
+# docs/linux-port/WINDOWS_VS_LINUX.md's "Packaging shape" entry).
+# Untouched on main/development, where they're still real build outputs
+# even though they were never meant to be committed there either.
+.venv-build/
+AVG APP/
+dist/
+
 # Vendored ffmpeg build - fetched by tools/fetch_ffmpeg.py, not committed
 # (100+ MB either platform's build). The Windows build's copy of this
 # ignore rule lives in that build's own .gitignore.

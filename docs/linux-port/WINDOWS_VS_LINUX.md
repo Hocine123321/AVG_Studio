@@ -85,6 +85,37 @@ public API - the two are drop-in for each other at the call-site level.
   a true no-op with no Linux equivalent to write, not maintained
   dual-platform logic.
 
+## Removed from this branch: committed Windows build outputs
+
+None of this was intentional - found by inspection after a report that
+`tools/build_flatpak.sh` "did nothing" (still being diagnosed; unrelated
+to this). While checking the tree for anything else Windows-specific
+sitting around, three directories turned out to be tracked in git despite
+CLAUDE.md already documenting all three as "gitignored, regenerated not
+committed" - no `.gitignore` entry for any of them had ever actually
+existed:
+
+| Path | What it was | Tracked files | Size |
+|---|---|---|---|
+| `.venv-build/` | A full **committed Windows virtualenv** - Python interpreter, every pip dependency, compiled `.pyd` files | 7,949 | 262 MB |
+| `AVG APP/` | PyInstaller onefolder output - the runnable Windows app tree | 1,295 | 433 MB |
+| `dist/` | A second PyInstaller output tree | 1,294 | 433 MB |
+
+All three removed from `linux-port`'s tree (`git rm`) and added to
+`.gitignore` here for real. Untouched on `main`/`development` - this is
+that pre-existing gap surfacing, not a Linux-specific problem, and fixing
+it there is a separate call for whoever owns that branch.
+
+**This does not shrink `.git` itself.** `git rm` stops these from being
+in every future checkout of `linux-port` from this commit forward, but
+~1.1GB of blob data for them still lives in the branch's history (shared
+with `main`/`development`, since they were committed before this branch
+diverged) and still gets transferred on a fresh clone. Actually reclaiming
+that needs history rewriting (`git filter-repo` or equivalent) - a much
+bigger, disruptive operation (rewrites every commit hash from that point
+forward, needs a force-push, breaks any other clone's history) that
+nobody has asked for yet and this doc isn't recommending unprompted.
+
 ## Flatpak packaging files (no Windows equivalent at all)
 
 New in this branch, not a port of anything - Windows has an installer
