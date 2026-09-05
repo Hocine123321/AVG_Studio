@@ -151,6 +151,7 @@ estimates, as of this write-up:
 | `GL.default`+`GL.default-extra`+`VAAPI.Intel`+`openh264` | ~350-400 MiB | Would be shared, but **not installed** - see below |
 | `PySide6`+`PySide6-Addons` (pip, at build time) | ~280-300 MiB | Bundled into `/app`, private to this app |
 | ffmpeg static build | ~120 MiB | Bundled into `/app`, private to this app |
+| `mit-krb5` (built from source) | a few MiB | Bundled into `/app`, private to this app - required, not optional (see the real-machine-bug section below) |
 
 Considered and rejected: switching the GUI backend to GTK+WebKit2GTK
 for size. Checked against real Flathub numbers rather than assumed -
@@ -216,6 +217,64 @@ actually uses is lost, and the base install shrinks from KDE's
 runtime+SDK to freedesktop's ~241 MiB `Platform` image. `24.08` was
 considered and rejected - it goes EOL 2026-09-08, days away as of this
 write-up; `25.08` has security support into 2027.
+
+## Real-machine bug: PySide6.QtNetwork needs libgssapi_krb5, runtime doesn't ship it
+
+First actual `flatpak run` of a successfully built app - got through the
+build, installed, launched, and immediately failed:
+
+```
+[pywebview] QT cannot be loaded
+...
+ImportError: libgssapi_krb5.so.2: cannot open shared object file: No such file or directory
+[pywebview] GTK cannot be loaded
+...
+ModuleNotFoundError: No module named 'gi'
+webview.errors.WebViewException: You must have either QT or GTK with Python extensions installed in order to use pywebview.
+```
+
+Two things happening at once here, both expected once read closely: (1)
+pywebview honoured `gui="qt"` first, as instructed, and only fell back
+to trying GTK once Qt's import itself failed - GTK failing too is by
+design (`gi`/PyGObject was never installed, see the GUI-backend
+decision above); (2) the *reason* Qt's import failed is unrelated to
+anything this branch chose - PySide6's own official manylinux wheels
+dynamically link `PySide6.QtNetwork` against `libgssapi_krb5.so.2`
+(MIT Kerberos/GSSAPI), and neither `org.freedesktop.Platform` nor
+`org.kde.Platform` ship that library in the *runtime* image (only in
+their much larger `Sdk` images, build-time only). Nothing in this app
+uses Kerberos - the dependency is baked into the wheel Qt for Python
+themselves publish.
+
+Confirmed as a known, reproducible upstream gap before treating it as
+one: an flatpak/flatpak bug report (#5103) reproduces the identical
+failure with a from-scratch minimal manifest (`pip3 install --prefix=
+/app PySide6` against `org.freedesktop.Platform`, nothing else) - not
+specific to this app or this manifest. `io.qt.qtwebengine.BaseApp`
+(Flathub's own project for packaging QtWebEngine) carries a dedicated
+`mit-krb5` module for exactly this reason.
+
+Fixed by adding that same module, sourced from `io.qt.qtwebengine.
+BaseApp`'s own currently-in-use module definition rather than
+improvised or copied from an outdated blog post: `krb5-1.22.1` (current
+MIT Kerberos stable as of this write-up, not the older `1.21.3` an
+otherwise-correct two-year-old blog post about this same issue used),
+URL and sha256 taken directly from a merged PR in that repo. Builds
+from source (`./configure --prefix=/app --disable-static --enable-
+shared && make && make install`) rather than extracting a distro
+package - matches the reference exactly rather than improvising a
+lighter-seeming alternative for an issue this deep in Qt's own binary
+dependencies. Module order (before `avg-studio`) doesn't affect
+correctness - neither module's build depends on the other's output,
+`libgssapi_krb5.so.2` is only needed at *runtime* import, not at pip-
+install time - it's there for readability.
+
+Not independently re-verified by downloading and re-hashing the tarball
+in this container - `kerberos.org` isn't a domain this environment can
+reach. The URL+checksum are sourced from Flathub's own actively-
+maintained repository for this exact purpose, which is the strongest
+verification practically available here; flagging the limitation
+rather than overclaiming "verified."
 
 ## Real-machine bug: pip-install site-packages resolution shadowed by CWD
 

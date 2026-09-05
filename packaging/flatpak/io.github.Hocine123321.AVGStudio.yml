@@ -110,6 +110,35 @@ finish-args:
   - --env=QTWEBENGINE_DISABLE_SANDBOX=1
 
 modules:
+  # PySide6's manylinux wheels dynamically link PySide6.QtNetwork against
+  # libgssapi_krb5.so.2 (MIT Kerberos/GSSAPI) - a library that neither
+  # org.freedesktop.Platform nor org.kde.Platform ship in the runtime
+  # (only in their much larger Sdk images, build-time only). Nothing in
+  # this app uses Kerberos; the dependency is just baked into the
+  # official PySide6 wheel build. Confirmed as a known, reproducible gap
+  # via an upstream flatpak/flatpak minimal-repro bug report (#5103) -
+  # not something specific to this manifest - and confirmed as the exact
+  # reason `pywebview`'s qt backend failed to import on a real build of
+  # this branch (ImportError: libgssapi_krb5.so.2: cannot open shared
+  # object file), which is what this module exists to fix.
+  #
+  # Built from source rather than extracted from a distro package: the
+  # source+checksum below is the *exact* module Flathub's own
+  # io.qt.qtwebengine.BaseApp (the project that exists specifically to
+  # package QtWebEngine for Flatpak) uses for the identical problem -
+  # not improvised, matched to a maintained, production-used reference.
+  - name: mit-krb5
+    buildsystem: simple
+    sources:
+      - type: archive
+        url: https://kerberos.org/dist/krb5/1.22/krb5-1.22.1.tar.gz
+        sha256: 1a8832b8cad923ebbf1394f67e2efcf41e3a49f460285a66e35adec8fa0053af
+    build-commands:
+      - cd src && autoreconf -i
+      - cd src && ./configure --prefix=/app --disable-static --enable-shared
+      - cd src && make -j$(nproc)
+      - cd src && make install
+
   - name: avg-studio
     buildsystem: simple
     build-options:
