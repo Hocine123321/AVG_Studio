@@ -297,11 +297,13 @@ Expected: FAIL — `KeyError: 'parts'` (the key doesn't exist in
 ### Step 2.2 — implement
 
 In `avg/pipeline/prompts.py`, add `import math` to the top-of-file
-imports. Replace:
+imports. Anchor on `import re` alone, not the line after it — if sub-slice
+1 (Filters + Brand Kit) has already landed, that next line reads `from
+dataclasses import dataclass, field`, not `from dataclasses import
+dataclass`, and a two-line match would fail to find its anchor. Replace:
 
 ```python
 import re
-from dataclasses import dataclass
 ```
 
 with:
@@ -309,7 +311,6 @@ with:
 ```python
 import math
 import re
-from dataclasses import dataclass
 ```
 
 Replace `build_director1_prompt`'s signature and body. Replace:
@@ -466,10 +467,32 @@ Return ONLY a JSON object, no preamble, no markdown fences:
  "notes":"one line on your structural reasoning"}}"""
 ```
 
-In `avg/pipeline/phases/director.py`, add `_normalize_part_entry` directly
-after `_normalize_zoom_word`:
+In `avg/pipeline/phases/director.py`, replace:
 
 ```python
+def _normalize_zoom_word(entry: object) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+    scene_num = _coerce_int(entry.get("scene"))
+    word = str(entry.get("word") or "").strip()
+    if scene_num is None or scene_num < 1 or not word:
+        return None
+    return {"scene": scene_num, "word": word}
+```
+
+with:
+
+```python
+def _normalize_zoom_word(entry: object) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+    scene_num = _coerce_int(entry.get("scene"))
+    word = str(entry.get("word") or "").strip()
+    if scene_num is None or scene_num < 1 or not word:
+        return None
+    return {"scene": scene_num, "word": word}
+
+
 def _normalize_part_entry(entry: object, valid_scenes: set[int]) -> dict | None:
     """One `parts[]` entry from Director I's chapters-mode response,
     reduced to the flat shape `build_timeline` already reads
@@ -689,17 +712,14 @@ def test_director2_explainer_failure_degrades_to_no_cards(tmp_path, monkeypatch)
         "grade": {"look": "none"},
         "scenes": [{"scene": i, "motion": {}, "transition_in": "cut"} for i in range(1, 7)],
     })
-
-    def _raise(*args, **kwargs):
-        raise RuntimeError("provider unavailable")
-
     calls = _QueueGenerator([direction_reply])
-    original_call = calls.__call__
 
     def _flaky(*args, **kwargs):
+        # args[1] is the phase key (generate_text(prompt, phase, *, config)) -
+        # let the real director2 call through, fail only the explainer one.
         if args and args[1] == "director2_explainer":
             raise RuntimeError("provider unavailable")
-        return original_call(*args, **kwargs)
+        return calls(*args, **kwargs)
 
     monkeypatch.setattr(director_module, "generate_text", _flaky)
 
@@ -790,37 +810,20 @@ def _normalize_explainer_card(entry: object, valid_scenes: set[int]) -> dict | N
     return {"element": "explainer", "scene": scene_num, "text": text, "accent": _ACCENT}
 ```
 
-Replace `Director2Phase.run`'s body from `inputs = creative_inputs(ctx)`
-through the `card_plan = _build_card_plan(scenes)` line. Replace:
+Do **not** touch `Director2Phase.run`'s opening (`inputs =
+creative_inputs(ctx)` through `result = generate_text(...)`) — leave it
+exactly as it is. Sub-slice 1 (Filters + Brand Kit), earlier in the
+execution order, already edits that exact block (adding its own `settings
+= ctx.channel_values` and extra `build_director2_prompt` arguments for
+filters); re-matching it here would either fail outright once sub-slice 1
+has landed, or silently create a duplicate `settings` binding if it
+somehow still matched. This task only needs `ctx.channel_values`, and it
+can read that directly at the point it's actually needed, with no
+dependency on anything sub-slice 1 does or doesn't add earlier in the
+function.
 
-```python
-        scene_texts = [str(scene.get("text") or "") for scene in scenes if isinstance(scene, dict)]
-        valid_scenes = set(range(1, len(scene_texts) + 1))
-        inputs = creative_inputs(ctx)
-
-        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Planning motion and grade..."))
-        prompt = build_director2_prompt(inputs, scene_texts)
-        result = generate_text(prompt, "director2", config=ctx.router)
-```
-
-with:
-
-```python
-        scene_texts = [str(scene.get("text") or "") for scene in scenes if isinstance(scene, dict)]
-        valid_scenes = set(range(1, len(scene_texts) + 1))
-        inputs = creative_inputs(ctx)
-        settings = ctx.channel_values
-
-        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Planning motion and grade..."))
-        prompt = build_director2_prompt(inputs, scene_texts)
-        result = generate_text(prompt, "director2", config=ctx.router)
-```
-
-(This only pulls `settings = ctx.channel_values` earlier so both this
-call and the explainer call below share it — no other change in this
-hunk.)
-
-Then replace the card-plan build site. Replace:
+Replace only the card-plan build site — untouched by every other
+sub-slice, safe to anchor on regardless of execution order:
 
 ```python
         card_plan = _build_card_plan(scenes)
@@ -830,6 +833,7 @@ Then replace the card-plan build site. Replace:
 with:
 
 ```python
+        settings = ctx.channel_values
         takeover_cards_enabled = bool(settings.get("takeover_cards_enabled", True))
         explainer_enabled = bool(settings.get("explainer_enabled", False))
 
@@ -1073,7 +1077,35 @@ set rather than Focused alone."
 
 ---
 
-## Self-review (performed while writing this plan)
+## Self-review (performed while writing this plan, revised 2026-09-05)
+
+**Two cross-plan collisions found on lead-dev review, after this plan
+was first written, and fixed here:** this sub-slice is ranked third,
+meaning sub-slice 1 (Filters + Brand Kit) is expected to have already
+landed on `development` by the time this plan runs — but the plan's own
+`avg/pipeline/prompts.py` and `avg/pipeline/phases/director.py` edits
+were originally verified only against today's pristine baseline, not
+against what those files look like *after* sub-slice 1's own edits.
+
+1. Task 2's `import math` addition originally anchored on a two-line
+   block including `from dataclasses import dataclass` — sub-slice 1
+   changes that exact line to `from dataclasses import dataclass, field`,
+   so the anchor would never match once sub-slice 1 has run. Fixed:
+   anchor on the single `import re` line instead, which neither sub-slice
+   touches.
+2. Task 3 originally re-matched `Director2Phase.run`'s opening block
+   (`inputs = creative_inputs(ctx)` through `result = generate_text(...)`)
+   to insert its own `settings = ctx.channel_values` — sub-slice 1
+   already edits that exact block for its own `filters_intensity`
+   plumbing, so the match would fail post-sub-slice-1 (or, worse, might
+   partially coincide and produce a duplicate binding). Fixed: Task 3 no
+   longer touches that block at all; it reads `ctx.channel_values` fresh,
+   locally, inside the untouched-by-everyone card-plan build site it was
+   already anchored on for its main change.
+
+Neither of these was visible from reading this plan in isolation — they
+only show up when cross-referencing every plan touching the same file,
+which is exactly why this pass happened.
 
 **Spec coverage** — §1 → Task 1, §2 → Task 2, §3 → Tasks 3+4, §4 → Task
 4, §5 (data/schema) → covered across all four, §6 (testing) → each

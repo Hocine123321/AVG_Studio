@@ -126,7 +126,7 @@ section header and add near the other captions-module-level tests, or a
 new section just above it — match whatever's closest in the file):
 
 ```python
-def test_group_cues_keeps_each_cues_own_words(monkeypatch):
+def test_group_cues_keeps_each_cues_own_words():
     from avg.pipeline.phases.captions import _group_cues
 
     words = [
@@ -307,10 +307,20 @@ def _group_cues(words: list[dict], max_words: int = _MAX_WORDS_PER_CUE) -> list[
     return cues
 ```
 
-Add the remaining helpers and `_animated_text` directly after `_ass_escape`,
-before `_group_cues`:
+Replace:
 
 ```python
+def _ass_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+```
+
+with:
+
+```python
+def _ass_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
 def _res_scale(width: int, height: int) -> float:
     """Pixel distances scale against a 1920px reference long edge, the
     same reference `_CAP_REF_LONG_EDGE` names in legacy - so `rise`'s
@@ -548,7 +558,15 @@ def test_screen_text_phase_none_style_has_no_override_at_all(tmp_path, monkeypat
     dialogue_lines = [line for line in content.splitlines() if line.startswith("Dialogue:")]
     assert dialogue_lines  # sanity: there is at least one cue
     for line in dialogue_lines:
-        text_field = line.split(",,", 1)[1]
+        # A Dialogue line is Layer,Start,End,Style,Name,MarginL,MarginR,
+        # MarginV,Effect,Text - both Name and Effect are empty, so ",,"
+        # appears TWICE (Style|Name and Effect|Text boundaries). Only the
+        # LAST one actually precedes the text field - split(",,", 1) (from
+        # the left) would instead cut at the Style|Name boundary and leave
+        # "MarginL,MarginR,MarginV,,Text" as "the text field", which
+        # trivially never starts with "{" regardless of what
+        # _dialogue_line actually wrote. rsplit is the fix.
+        text_field = line.rsplit(",,", 1)[1]
         assert not text_field.startswith("{")  # no ASS override block at all
 
 
@@ -646,7 +664,22 @@ sub-slice; captions.py hardcoded pop-in regardless until now."
 
 ---
 
-## Self-review (performed while writing this plan)
+## Self-review (performed while writing this plan, revised 2026-09-05)
+
+**A test-correctness bug caught on lead-dev review, after this plan was
+first written:** `test_screen_text_phase_none_style_has_no_override_at_all`
+originally isolated a Dialogue line's text field with
+`line.split(",,", 1)[1]`. An ASS Dialogue line is
+`Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text`, and both
+`Name` and `Effect` are empty here — so the literal string contains `",,"`
+**twice** (once at the Style|Name boundary, once at the Effect|Text
+boundary). `split(",,", 1)` finds the *first* occurrence (Style|Name) and
+would have handed the assertion `"MarginL,MarginR,MarginV,,Text"`, which
+never starts with `"{"` regardless of what `_dialogue_line` actually
+wrote — the test would have passed even if `"none"` still carried the pop
+override, silently testing nothing. Fixed with `rsplit(",,", 1)`, which
+correctly isolates everything after the *last* `",,"` — the actual text
+field.
 
 **Spec coverage** — §1 → Task 1, §2 → Task 2 (`_group_cues`), §3 → Task 2
 (`_animated_text` + helpers), §4 → Task 3, §5 (data/schema) → covered

@@ -1545,3 +1545,71 @@ Next real step per the original backlog: resolve the DPAPI shim
 regression, then either PR Slice 30 to main, or begin implementing
 sub-slice 1 first (subagent-driven, per each plan's own header) -
 awaiting direction.
+
+## Lead-dev review pass: sub-slices 2-4 specs + plans (2026-09-05)
+
+Requested review of sub-slices 2-4's specs and plans for precision/
+correctness before any implementation starts. Found and fixed real
+defects — not style nits, things that would have broken execution or
+produced wrong runtime behavior:
+
+**Cross-plan collisions** (sub-slice 3's plan touches files sub-slice 1
+also touches, and sub-slice 3 runs AFTER sub-slice 1 in the intended
+order — its replace-blocks were only ever verified against the pristine
+baseline, not against sub-slice-1-already-applied):
+- `avg/pipeline/prompts.py`'s `import math` anchor included
+  `from dataclasses import dataclass` as its second line - sub-slice 1
+  changes that exact line to `..., field`, so the match would fail
+  post-sub-slice-1. Fixed: anchor on the single `import re` line only.
+- `avg/pipeline/phases/director.py`'s Task 3 re-matched
+  `Director2Phase.run`'s opening block, which sub-slice 1 already edits
+  for its own `filters_intensity` plumbing. Fixed: Task 3 no longer
+  touches that block at all - reads `ctx.channel_values` fresh, locally,
+  inside the untouched card-plan build site it already anchored on.
+- Verified both fixes by actually applying stand-ins of sub-slice 1's
+  real edits to a scratch copy, then applying sub-slice 3's fixed
+  replace-blocks on top, then running `py_compile` on the result - not
+  just reasoned about, mechanically confirmed.
+
+**A closure bug in the Recycling plan's own Task 4** (VisualsPhase.run):
+the original text redefined `total = len(jobs) + len(recycled)` directly.
+`_generate_all` is a closure defined after `total` and reads it by
+reference for its own internal per-scene progress percentage - redefining
+`total` itself would have silently capped that percentage below 100% for
+any run with at least one recycled scene. Fixed: `total` keeps its
+original meaning (generation-job count, exactly what `_generate_all`
+needs); a new `scene_count` variable is used for the four downstream
+reads that actually mean "every scene in the video."
+
+**A test-correctness bug in the Caption Animations plan's Task 3**: the
+`"none"`-style test isolated a Dialogue line's text field with
+`line.split(",,", 1)[1]`. An ASS Dialogue line has TWO `",,"`
+occurrences (empty Name field, empty Effect field) - `split` (from the
+left) cut at the wrong one, so the assertion would have passed
+regardless of whether `_dialogue_line` actually carried an override.
+Fixed with `rsplit(",,", 1)`.
+
+**Anchor-precision inconsistencies** (three "add this near X" prose
+instructions, and one "replace the whole function" instruction with no
+shown "old" text, all replaced with exact anchored `Replace: <old> with:
+<new>` blocks matching every other step in these plans - a fresh
+implementer should never have to independently locate a boundary).
+
+**Minor test-code cleanups**: removed one dead function and one
+unnecessarily roundabout `object.__call__` reference in a mocked-failure
+test; removed one unused `monkeypatch` fixture parameter.
+
+**Verification method**: for every fix, directly `content.count()`-
+checked the exact anchor text against the real current files (not just
+re-read and reasoned about it), and `py_compile`'d the resulting file
+after applying each plan's replace-blocks programmatically to a scratch
+copy - including the sub-slice-1-then-sub-slice-3 sequential scenario.
+
+**Not fixed, flagged only (out of the requested 2-4 scope):** sub-slice
+1's own Task 1 settings-schema anchor has the same class of fragility in
+the *reverse* direction (assumes sub-slice 3 has NOT already run) - not
+broken in the intended 1→2→3→4 order, so left alone, but noted for
+whoever eventually touches sub-slice 1's plan again.
+
+All three plans re-committed with revised self-review sections
+documenting each finding inline.

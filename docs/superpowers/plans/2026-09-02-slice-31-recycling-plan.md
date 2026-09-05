@@ -414,8 +414,78 @@ keyword argument 'recycle_pool'`.
 ### Step 2.2 — implement
 
 In `avg/pipeline/prompts.py`, replace the whole
-`build_scene_segmentation_prompt` function (signature through its closing
-`{narration}\"\"\"`) with:
+`build_scene_segmentation_prompt` function. Replace:
+
+```python
+def build_scene_segmentation_prompt(
+    inputs: CreativeInputs,
+    narration: str,
+    *,
+    min_scenes: int = 3,
+    max_scenes: int = 15,
+    exact_scene_count: int = 0,
+    extra_style_guide: str = "",
+) -> str:
+    """Phase 1 / Pass 2's prompt: split the finished narration into scenes
+    and write one image prompt per scene. Ported from
+    `Invoke-SceneSegmentation`'s default (non-recycle-pool) path — pool
+    stitching is a separate reuse feature this task does not port.
+
+    `extra_style_guide` is an opaque slot (mirrors `SceneCtx` in the old
+    prompt, which came from a `scene_descriptions.md` context file this
+    task has no copy of) for any additional visual-style prose a caller
+    wants appended after the resolved `visual_tone` text.
+    """
+    tone_text = resolve_visual_tone(inputs.visual_tone)
+    style_lock = inputs.style_lock.strip()
+    style_tail = f" Append this style tag verbatim at the end: {style_lock}" if style_lock else ""
+    count_rule = build_scene_count_rule(min_scenes, max_scenes, exact_scene_count)
+
+    style_guide_lines = [f"Visual tone: {tone_text}"] if tone_text else []
+    if extra_style_guide:
+        style_guide_lines.append(extra_style_guide)
+    style_guide = "\n".join(style_guide_lines) if style_guide_lines else "No specific visual style constraints."
+
+    return f"""=== VISUAL STYLE GUIDE ===
+{style_guide}
+
+=== TASK ===
+Topic: "{inputs.topic}"
+Image aspect ratio: {inputs.aspect_ratio}
+
+Below is a finished narration. Split it into scenes and write one image prompt per scene.
+
+{count_rule}
+
+ABSOLUTE RULE — the narration is FINAL:
+- Reproduce every word EXACTLY as written, in the original order.
+- Do NOT reword, rewrite, shorten, expand, summarise, or fix anything.
+- Do NOT add or drop a single word.
+- Preserve any [pause], [[double square]] and ((double parenthesis)) markers exactly where
+  they appear. They are delivery cues, not typos.
+- Concatenating your scene texts in order must reproduce the narration verbatim.
+
+For each scene also write:
+- an Image line: ONE concrete visual subject suited to a {inputs.aspect_ratio} frame. Describe what
+  is literally seen — no metaphors, no text-in-image.{style_tail}
+- a Label: one or two words naming the scene's job (Hook, Reveal, Context, Payoff, ...).
+
+Output EXACTLY this structure for every scene, in order, and nothing else:
+
+@@SCENE@@
+<the verbatim narration words for this scene>
+@@IMAGE@@
+<the image prompt>
+@@LABEL@@
+<the label>
+
+No preamble, no commentary, no markdown, no code fences, no numbering.
+
+=== NARRATION TO SPLIT ===
+{narration}"""
+```
+
+with:
 
 ```python
 def build_scene_segmentation_prompt(
@@ -1138,9 +1208,20 @@ convention `oxlint`'s Python-adjacent tooling — actually `ruff`/whatever
 this file's existing imports already follow — check the top of the file
 and slot in accordingly rather than guessing an order).
 
-Add near `_scenes_json_path`, after it:
+Replace:
 
 ```python
+def _scenes_json_path(ctx: PhaseContext) -> Path:
+    return script_dir(ctx) / "scenes.json"
+```
+
+with:
+
+```python
+def _scenes_json_path(ctx: PhaseContext) -> Path:
+    return script_dir(ctx) / "scenes.json"
+
+
 _RECYCLE_TOKEN_RE = re.compile(r"^\[RECYCLE #(\d+)\]$")
 
 
@@ -1171,7 +1252,7 @@ def _is_valid_image(path: Path) -> bool:
         return False
 
 
-def _resolve_recycled_scene(index: int, pool_snapshot: list, images_dir: Path, scene: int) -> "_SceneResult | None":
+def _resolve_recycled_scene(index: int, pool_snapshot: list, images_dir: Path, scene: int) -> _SceneResult | None:
     """Copy the pool image `[RECYCLE #index]` names straight to
     `images/{scene:03d}.png`, no provider call — or `None` if the
     snapshot/file/validity check fails, in which case the caller falls
@@ -1191,11 +1272,12 @@ def _resolve_recycled_scene(index: int, pool_snapshot: list, images_dir: Path, s
     return _SceneResult(scene=scene, ok=True, file=out_path.name)
 ```
 
-(`_scenes_json_path` needs to already be defined above this point in the
-file — it is; this block goes directly after it, before `_SceneResult`'s
-own class definition needs to exist first for the type hint to resolve at
-runtime as a string literal, which is why it's quoted above — no import
-ordering problem.)
+`_SceneResult` (the `@dataclass` a few lines below `_scenes_json_path`)
+is referenced here before its own definition — safe without quoting it as
+a string literal, since `from __future__ import annotations` is already
+active at the top of this file (every annotation in it is lazily
+evaluated), matching how the rest of the file already writes
+`_SceneResult` unquoted elsewhere.
 
 Now replace `VisualsPhase.run`'s opening section. Replace:
 
@@ -1280,8 +1362,19 @@ with:
         transport = ctx.router if isinstance(ctx.router, Transport) else None
         provider = _build_provider(provider_name, transport)
 
-        total = len(jobs) + len(recycled)
-        workers = max(1, min(_worker_cap(_total_ram_gb()), len(jobs)))
+        total = len(jobs)
+        workers = max(1, min(_worker_cap(_total_ram_gb()), total))
+        # `scene_count` (not `total`) is every downstream completeness
+        # count from here on - `total`/`workers` stay exactly what they
+        # were before this task (generation-job count only), because
+        # `_generate_all` below is a CLOSURE that reads `total` by
+        # reference: redefining `total` itself to include `recycled`
+        # would silently cap its own internal progress percentage below
+        # 100% for any run with at least one recycled scene (`done` can
+        # never reach a `total` that counts scenes `_generate_all` never
+        # touches). This was caught by tracing the closure, not visible
+        # from reading `run()`'s top-level statements in isolation.
+        scene_count = len(jobs) + len(recycled)
 
         ctx.emit(
             ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {len(jobs)} image(s)...")
@@ -1366,11 +1459,81 @@ with:
         ok_count = sum(1 for r in results.values() if r.ok)
 ```
 
-Everything after this point (`if ok_count == 0: ...`,
-`if ok_count < total: ...`, the manifest/index write, the final
-`ProgressEvent`) reads `results`/`total`/`ok_count` exactly as it already
-does — no further change needed; `total` now correctly means "every
-scene, recycled or generated" everywhere it's read downstream.
+Finally, replace the four remaining `total` reads below this point —
+every one of them means "every scene in the video," which is
+`scene_count`, not `total` (`total` stays the generation-job count
+`_generate_all` itself needs — see the comment on `scene_count`'s own
+definition above). Replace:
+
+```python
+            message = f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}"
+```
+
+with:
+
+```python
+            message = f"Visuals: all {scene_count} scene(s) failed on {provider_name}/{model} - {detail}"
+```
+
+Replace:
+
+```python
+        if ok_count < total:
+            # A partial set of images is a finished phase with a worse video:
+            # the missing scenes repeat their neighbour's image (see
+            # `index_entries`). Worth recording - it is the reason a video
+            # has a picture on screen twice in a row.
+            report_degradation(
+                ctx,
+                f"Visuals: {total - ok_count} of {total} scene(s) had no image; "
+                "each repeats the nearest one instead.",
+            )
+```
+
+with:
+
+```python
+        if ok_count < scene_count:
+            # A partial set of images is a finished phase with a worse video:
+            # the missing scenes repeat their neighbour's image (see
+            # `index_entries`). Worth recording - it is the reason a video
+            # has a picture on screen twice in a row.
+            report_degradation(
+                ctx,
+                f"Visuals: {scene_count - ok_count} of {scene_count} scene(s) had no image; "
+                "each repeats the nearest one instead.",
+            )
+```
+
+Replace:
+
+```python
+        write_json(rdir / "index.json", index_entries(results, total))
+```
+
+with:
+
+```python
+        write_json(rdir / "index.json", index_entries(results, scene_count))
+```
+
+Replace:
+
+```python
+                message=f"Visuals complete: {ok_count}/{total} image(s) generated.",
+```
+
+with:
+
+```python
+                message=f"Visuals complete: {ok_count}/{scene_count} image(s) generated.",
+```
+
+(The `f"Visuals: all {total} scene(s) failed..."` line inside the
+`ok_count == 0` branch happens to equal `scene_count` there too — `ok_count
+== 0` is only reachable when `recycled` is empty, since `recycled` only
+ever holds successes — but using `scene_count` throughout is the
+consistently correct read, not a coincidence to rely on.)
 
 ### Step 4.4 — run to verify pass
 
@@ -1379,7 +1542,7 @@ Expected: PASS, including every pre-existing `VisualsPhase` test — none of
 them write a `recycle_pool.json` or an `image_prompt` matching the
 canonical token, so `pool_snapshot` is always `[]` and every scene takes
 the same path it did before this task (`recycled` stays empty, `jobs`
-unchanged, `total = len(jobs) + 0`).
+unchanged, `scene_count == total` when nothing is recycled).
 
 Then the whole suite:
 
@@ -1422,6 +1585,24 @@ costly) fallback attempt for a run that never needed the image provider in
 the first place. Task 4 gates the check on `jobs` being non-empty — a
 one-line fix caught only by reading the exact boolean logic, not visible
 from the spec's higher-level description of "resolve a recycled scene."
+
+**A second closure-related bug caught on lead-dev review of this plan
+(2026-09-05), after it was first written:** the original Step 4.3 text
+redefined `total = len(jobs) + len(recycled)` directly. `_generate_all`
+is a closure defined *after* `total`/`workers` are computed and reads
+`total` by reference for its own internal per-scene progress percentage
+and message. Redefining `total` itself would silently cap that
+percentage below 100% for any run with at least one recycled scene
+(`done` inside `_generate_all` can only ever count generation jobs, never
+recycled ones, so it can never reach a `total` that also counts
+recycled scenes). Fixed: `total` keeps its original meaning and code
+(generation-job count only, exactly as `_generate_all` needs); a new
+`scene_count = len(jobs) + len(recycled)` variable is used for the four
+downstream reads that actually mean "every scene in the video" (the
+all-failed message, the degradation check, `index_entries`, and the
+final completion message). This is exactly the kind of bug invisible
+from reading `run()`'s top-level statements — it only shows up when you
+trace which variables a nested closure captures and when.
 
 **Placeholder scan:** no "TBD"/"similar to Task N" anywhere above; every
 step carries real code or an exact shell command. Task 4's "check the
