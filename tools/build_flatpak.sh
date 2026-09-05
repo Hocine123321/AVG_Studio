@@ -121,7 +121,27 @@ build_web() {
 
 run_refresh() {
   step "Refreshing local install (incremental build, no --force-clean)"
-  flatpak-builder --user --install "$BUILD_DIR" "$MANIFEST"
+  # A previous build that failed or was interrupted partway through
+  # (like the one that hit the CWD-shadowing bug this branch just fixed)
+  # leaves build-dir's assembled /app tree in a state flatpak-builder
+  # won't just resume into on its own - it demands an explicit
+  # --force-clean rather than guess whether that's safe. Automatic
+  # recovery: try the fast incremental path first, and only if it fails
+  # for *this specific* reason, retry once with --force-clean - a normal
+  # failure (a real build error) still stops here and is shown as-is,
+  # not silently retried into a second, unrelated failure.
+  local log
+  log="$(mktemp)"
+  if flatpak-builder --user --install "$BUILD_DIR" "$MANIFEST" 2>&1 | tee "$log"; then
+    rm -f "$log"
+  elif grep -q "is not empty" "$log"; then
+    rm -f "$log"
+    warn "build-dir left over from an earlier failed/interrupted build - retrying with --force-clean"
+    flatpak-builder --user --install --force-clean "$BUILD_DIR" "$MANIFEST"
+  else
+    rm -f "$log"
+    die "flatpak-builder failed - see output above"
+  fi
   printf '\n'
   ok "Refreshed."
   printf '%sThis does NOT launch the app - run it with:%s\n' "${DIM}" "${RESET}"
