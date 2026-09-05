@@ -42,10 +42,23 @@ dependencies = [
     # explicitly so this is the only backend pywebview ever tries.
     "pyside6",
     "qtpy",
+    # Same category of gap as edge-tts above, found the same way (a real
+    # `pip install .` with no extras - the first one this repo has ever
+    # had, on any platform): avg/providers/transport.py and every
+    # provider base class (text/images/voice) import this directly for
+    # every live HTTP call this app makes. It was declared only under
+    # dev (presumably because FastAPI's TestClient also happens to need
+    # it), which happened to mask this on every platform until now -
+    # the Windows dev/build venv always installs with [dev] extras too,
+    # so it was always present there by coincidence, never because it
+    # was correctly declared as what it actually is: a hard runtime
+    # requirement, not a test tool. Should be back-ported the same way
+    # edge-tts was.
+    "httpx",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "mypy", "httpx"]
+dev = ["pytest", "ruff", "mypy"]
 media = ["numpy", "Pillow", "pydub"]
 
 [tool.pytest.ini_options]
