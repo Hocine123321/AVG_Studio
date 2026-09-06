@@ -152,8 +152,34 @@ modules:
       # Local checkout. Swap for a `git` source (url + matching commit/
       # tag) when building from CI or anywhere other than this working
       # tree - see the commented alternative below.
+      #
+      # `skip:` matters more than it looks for a `dir` source
+      # specifically: per flatpak-builder's own manifest schema, "dir"
+      # sources "don't currently support caching, so they will be
+      # rebuilt each time" - unlike archive/git sources, there is no way
+      # to make "Refresh app" skip re-running this module's
+      # build-commands when nothing relevant changed, full stop. What
+      # `skip` DOES control is how much gets copied into the sandbox
+      # before that unavoidable rebuild even starts - without it, every
+      # refresh was copying .venv-linux (hundreds of MB), build-dir
+      # (this build's own scratch output, growing the source tree with
+      # every previous run), flatpak-dist, node_modules, .git, and every
+      # __pycache__ along with the actual source. None of that is
+      # optional-nice-to-have here; the reason "Refresh app" has felt
+      # like a full clean build every time - see
+      # docs/linux-port/WINDOWS_VS_LINUX.md's dev-loop entry for the
+      # real fix, which is tools/dev_serve_linux.py, not this list.
       - type: dir
         path: ../..
+        skip:
+          - .git
+          - .venv-linux
+          - build-dir
+          - flatpak-dist
+          - .flatpak-builder
+          - vendor/ffmpeg
+          - web/node_modules
+          - __pycache__
       # - type: git
       #   url: https://github.com/Hocine123321/AVG_Studio.git
       #   branch: linux-port
@@ -161,7 +187,20 @@ modules:
       # 1. The app itself + every declared dependency (pyproject.toml) -
       #    straight into /app, no venv (there is nothing else on this
       #    Python's path to isolate from inside the sandbox).
-      - pip3 install --no-cache-dir --prefix=/app .
+      #
+      #    Not --no-cache-dir: that flag was forcing a full re-download
+      #    of every wheel (PySide6/PySide6-Addons alone is ~280-300MB)
+      #    on every single refresh, even when pyproject.toml's
+      #    dependency list hadn't changed at all. pip's own cache
+      #    persists across builds the same way flatpak-builder's ccache
+      #    does (both live under the build sandbox's persistent state,
+      #    not the ephemeral per-build source copy) - dropping this
+      #    flag lets an unchanged dependency set be installed from
+      #    cache instead of re-fetched from PyPI. Does not, and cannot,
+      #    avoid re-running this build-commands list itself - see the
+      #    `skip:` comment above for why that part is unavoidable for a
+      #    `dir` source.
+      - pip3 install --prefix=/app .
 
       # 2. web/dist next to wherever `avg` actually landed under
       #    site-packages. avg/api/app.py's WEB_DIST constant is

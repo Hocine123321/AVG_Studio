@@ -128,16 +128,25 @@ New in this branch, not a port of anything - Windows has an installer
 - `tools/build_flatpak.sh` - interactive (`select`-based) menu with two
   actions, matching two different real needs rather than one script
   trying to be both: **Refresh app** (`flatpak-builder --user --install`,
-  no `--force-clean` - fast incremental rebuild against the existing
-  `build-dir` cache, for "I changed code, let me try it again") and
-  **Build installer** (`--force-clean` then `flatpak build-bundle` into
-  a single `flatpak-dist/AVGStudio.flatpak` file - what actually
-  corresponds to the Windows build's `AVG-Setup.exe`, something to hand
-  to someone else who runs `flatpak install --user AVGStudio.flatpak`
-  with no manifest, no flatpak-builder, no clone of this repo at all).
-  Also takes `--refresh`/`--build-installer` directly to skip the menu.
-  This branch's `Build Installer.bat`/`tools/make_release.ps1`
-  equivalent.
+  no `--force-clean` - reuses `mit-krb5`'s cached build and skips
+  needless bwrap teardown, though `avg-studio`'s own module always
+  rebuilds regardless, see the dev-loop entry below for why and what to
+  use instead for fast iteration) and **Build installer**
+  (`--force-clean` then `flatpak build-bundle` into a single
+  `flatpak-dist/AVGStudio.flatpak` file - what actually corresponds to
+  the Windows build's `AVG-Setup.exe`, something to hand to someone else
+  who runs `flatpak install --user AVGStudio.flatpak` with no manifest,
+  no flatpak-builder, no clone of this repo at all). Also takes
+  `--refresh`/`--build-installer` directly to skip the menu. This
+  branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent -
+  **not** its `tools/_dev_serve.py` equivalent, which is the next entry.
+- `tools/dev_serve_linux.py` - the actual equivalent of the Windows
+  build's fast dev loop (`tools/_dev_serve.py`). No packaging step at
+  all - bare `uvicorn.run(create_app(...))`, opened in a regular
+  browser tab. Use this while iterating on `avg/`/`web/` code;
+  `tools/build_flatpak.sh` answers a different question (does the
+  actual sandboxed package still work) and was never going to be fast
+  for this one - see the dev-loop entry below.
 
 ## Size budget
 
@@ -218,6 +227,60 @@ actually uses is lost, and the base install shrinks from KDE's
 runtime+SDK to freedesktop's ~241 MiB `Platform` image. `24.08` was
 considered and rejected - it goes EOL 2026-09-08, days away as of this
 write-up; `25.08` has security support into 2027.
+
+## "Refresh app" is slow, and that's structural, not a bug to chase
+
+Reported directly: repeat `tools/build_flatpak.sh` refreshes felt like a
+full clean build every time, re-downloading things a previous run had
+already fetched, and were nowhere near the Windows build's dev-loop
+speed. Two separate things were actually going on.
+
+**The `avg-studio` module can never be incrementally rebuilt, by
+flatpak-builder's own design.** Its source is `type: dir` (`path: ../..`
+- this working tree). flatpak-builder's own manifest schema documents
+directory sources explicitly: *"directory sources don't currently
+support caching, so they will be rebuilt each time"* - unlike `archive`
+or `git` sources, there is no hash-based skip-if-unchanged for this
+module, full stop. No manifest option changes that. `mit-krb5` (an
+`archive` source with a pinned URL+checksum) does NOT have this
+limitation and was already being cached/skipped correctly across
+repeat builds before this fix - it was never part of the slowness.
+
+**What actually was fixable, and is fixed:** two real, avoidable sources
+of waste in `avg-studio`'s own rebuild, neither related to the `dir`
+source limitation above:
+- `pip3 install --no-cache-dir --prefix=/app .` was forcing a full
+  re-download of every wheel (PySide6/PySide6-Addons alone ~280-300MB)
+  on every refresh, even when `pyproject.toml`'s dependency list hadn't
+  changed at all. `--no-cache-dir` removed - pip's own cache persists
+  across builds the same way flatpak-builder's ccache does, so an
+  unchanged dependency set now installs from cache instead of
+  re-fetching from PyPI.
+- The `dir` source had no `skip:` list, so every refresh was copying
+  `.venv-linux` (hundreds of MB), `build-dir` (this build's own scratch
+  output - a previous build's leftovers growing the *next* build's
+  source tree), `flatpak-dist`, `web/node_modules`, `.git`, and every
+  `__pycache__` into the sandbox, on top of the actual source. Added a
+  `skip:` list excluding all of it. Doesn't touch the "must rebuild"
+  limitation above; does substantially cut what gets copied and hashed
+  before that unavoidable rebuild starts.
+
+**The real fix is a different tool, not a faster manifest.** The
+Windows build's own fast dev loop (`tools/_dev_serve.py`) was never
+rebuilding `AVG-Setup.exe` either - it runs `uvicorn` directly against
+source with zero packaging step, opened in a regular browser tab. This
+branch's `Build Installer.bat` equivalent was always going to be a
+full-repackage operation; comparing "Refresh app"'s speed to it was
+comparing the wrong two things. **`tools/dev_serve_linux.py`** is the
+actual equivalent of the Windows dev loop: same pattern (bare
+`uvicorn.run(create_app(...))`, `avg.shell`'s pywebview/Qt layer never
+even imported), adapted only in its `output_root` default
+(`avg.shell.resolve_output_root()` instead of a hardcoded `D:\...`
+path). Verified directly in this container: starts, serves a real
+HTTP 200, on a source layout without any Flatpak packaging involved at
+all. `tools/build_flatpak.sh` is for the question only it can answer -
+does the actual sandboxed package still work (permissions, the bundled
+Qt/krb5 resolution) - not for iterating on `avg/`/`web/` code.
 
 ## Real-machine bug: PySide6.QtNetwork needs libgssapi_krb5, runtime doesn't ship it
 
