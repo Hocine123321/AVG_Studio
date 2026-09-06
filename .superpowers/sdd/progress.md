@@ -1389,3 +1389,50 @@ pending the user's review before that starts. No implementation, no
 tests run this entry.
 
 **Commits** (branch `development`): pending — see next entry.
+
+## Slice 31 legacy-parity work ported to linux-port (2026-09-06)
+
+Branched from `development` at `8f6686e` (right after the Filters+Brand
+Kit spec's date fix, before its plan and before any of the other three
+sub-slices existed). User asked for all four sub-slices' specs+plans to
+be ported here, adapted for this branch specifically — read
+`docs/linux-port/WINDOWS_VS_LINUX.md` first, then verified every claim
+against a real clone of both branches rather than assuming the doc was
+exhaustive for this purpose.
+
+**Confirmed via direct `diff` against a fresh `development` clone:**
+`avg/pipeline/`, `avg/core/`, `avg/media/overlays.py`, `avg/media/preview.py`,
+`avg/api/routes_preview.py` are byte-identical between branches. Only
+`avg/media/environment.py` (ffmpeg exe-name constants only —
+`bundled_ffmpeg_dir()`'s own frozen/dev logic is untouched), `avg/config/
+user_assets.py` (now built on `platform_paths.documents_root()`/
+`cache_root()` instead of hardcoded `%USERPROFILE%`/`%APPDATA%`, but same
+function names/shapes), `avg/pipeline/phases/visuals.py` and `_common.py`
+(RAM detection and font-stem extraction only, neither in a region any of
+these four sub-slices touch) differ at all.
+
+**A real, previously-undocumented packaging bug found while porting Task
+1 of Filters+Brand Kit:** `avg/assets/` (no `__init__.py`, not a
+discoverable sub-package) is not copied by a genuine `pip install .` on
+this branch - reproduced directly in a scratch venv. Every existing
+caller of `avg.pipeline.personality.assets_dir()` (brand presets, video
+tones, personality presets) has been silently degrading to an empty
+catalogue in any real Flatpak build made from this branch, today,
+unrelated to anything in Slice 31 - `_load_bundled_catalog`'s tolerant
+`OSError` handling means it fails silently, not loudly. Fixed and
+verified end-to-end (real install, before/after) as a new Task 1B in the
+ported Filters+Brand Kit plan, since Filters' own new binary assets
+would have inherited the exact same gap otherwise.
+
+**Ported so far:** Filters+Brand Kit spec (edited in place — it already
+existed here from the fork, adapted §1/§4/§7/§9 for Linux, everything
+else unchanged since the design itself never depended on Windows
+specifics) and plan (new — didn't exist here, ported from development's
+plan with Task 1B inserted, environment.py's Task 2 needing no functional
+change, and every `Verify with`/`Run:` command switched from the Windows
+sandbox's ctypes-shim `.venv-linux` to this branch's own native venv,
+confirmed working by actually running the full suite that way (996
+passed, 1 skipped, no shim of any kind).
+
+**Not yet ported:** Recycling, Chapters+Cards, Caption Animation Styles
+specs+plans - in progress, same branch, same session.

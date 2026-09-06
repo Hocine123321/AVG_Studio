@@ -1,4 +1,4 @@
-# Slice 31 — Filters + Brand Kit: Design
+# Slice 31 — Filters + Brand Kit: Design (Linux port)
 
 **Goal:** close the two Director II gaps found by the legacy-parity
 comparison (`.superpowers/sdd/progress.md`, 2026-09-02) that most affect
@@ -7,11 +7,27 @@ preset that actually changes the video instead of only labelling a
 prompt line. First of four ranked sub-slices toward legacy video-result
 parity (chapters/cards and caption animation styles follow later).
 
+**Linux port note (added 2026-09-06):** this design was originally
+written against `main`/`development` (Windows) and is ported here
+unchanged in substance. `avg/pipeline/`, `avg/core/`, and
+`avg/media/overlays.py` — everything this design actually touches —
+are byte-identical between branches; confirmed directly (`diff` against
+a fresh clone of both), not assumed. The only two things adjusted below
+are §1's asset-location reasoning (Linux filesystems are case-sensitive,
+so the specific collision risk the Windows version cites doesn't apply
+here — the underlying reason to still avoid the vendor's default path
+does) and §4's packaging note (`tools/build.py`'s PyInstaller step has
+no Linux equivalent; this branch packages via
+`packaging/flatpak/io.github.Hocine123321.AVGStudio.yml`'s `pip install
+.` instead — which turns out to matter a lot more than a passing
+mention, see §4). Everything else applies exactly as written. See
+`docs/linux-port/WINDOWS_VS_LINUX.md` for this platform's own general
+Windows/Linux translation notes.
+
 ## 1. Filters — assets and catalog
 
 Bundle the two legacy clips verbatim at `avg/assets/Filters/` (matching
-the existing `avg/assets/` convention, not the vendor default's
-`Assets/` casing — see §4):
+the existing `avg/assets/` convention):
 `film_grain.mov`, `light_leak.mov` (ProRes 4444, `yuva444p10le`, ~28MB
 total, copied byte-for-byte from `D:\AI_Video_Gen\Assets\Filters\`) plus
 `Filters.metadata`, its own small format —
@@ -75,17 +91,49 @@ dead code, just unreachable without an upstream writer).
 `avg/media/vendor/avg.py`'s `_filters_root()` defaults to
 `os.environ.get("AVG_FILTERS_DIR")` or a path two directories up from
 the vendor file itself (`avg/media/Assets/Filters` here) — a relic of
-the old repo's flat layout, and vendor/ is never edited. Rather than
-placing assets at that default (case-colliding with `avg/assets/` on
-Windows' case-insensitive filesystem, and outside the established
-`avg/assets/` convention), `avg/media/environment.py` sets
-`os.environ["AVG_FILTERS_DIR"]` to the packaged `avg/assets/Filters`
-path before the render child spawns — the same place it already sets
-`PATH`/`IMAGEIO_FFMPEG_EXE` (lines 99/109). One line, no vendor edit.
+the old repo's flat layout (predates this codebase's `avg/media/`
+split entirely), and vendor/ is never edited. That default is simply
+the wrong directory regardless of platform — it isn't a sibling of
+`avg/assets/` at all, it's a level deeper, under `avg/media/`. (The
+Windows version of this design also flags a same-directory-different-
+case collision risk between `avg/assets/` and `avg/Assets/`; Linux
+filesystems are case-sensitive, so that specific risk doesn't apply
+here — the two would simply be different, non-colliding paths. The
+underlying reason to still not rely on the vendor's own default path
+resolution is unaffected: it resolves to the wrong directory either
+way.) `avg/media/environment.py` sets `os.environ["AVG_FILTERS_DIR"]`
+to the packaged `avg/assets/Filters` path before the render child
+spawns — the same place it already sets `PATH`/`IMAGEIO_FFMPEG_EXE`
+(`prepend_to_path()`, lines 99/109 on this branch too — confirmed
+identical). One line, no vendor edit.
 
-Packaging: confirm `avg/assets/Filters/*.mov` is picked up by
-`tools/build.py`'s PyInstaller spec the same way `avg/assets/*.txt`
-already is (plan-level check, not a design decision).
+**Packaging (Linux): a real, pre-existing gap found while writing this
+port, not a "confirm" checkbox.** This branch has no PyInstaller step at
+all — packaging is `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml`
+running a plain `pip3 install --prefix=/app .` (`docs/linux-port/
+WINDOWS_VS_LINUX.md`'s "Packaging shape" row). Reproduced directly in this
+sandbox: a real, non-editable `pip install .` into a throwaway prefix
+does **not** copy `avg/assets/` at all — not the two new filter clips this
+design adds, but the *already-existing* `dynamic_options.txt`/
+`personality.txt` too. `pyproject.toml`'s `[tool.setuptools.packages.find]`
+only tells setuptools which `.py`-package directories exist; it says
+nothing about non-Python data files, and no `package_data`/
+`include_package_data`+`MANIFEST.in` entry exists to say so. Confirmed by
+checking a real install's `site-packages/avg/` tree: `assets/` is absent
+entirely.
+
+This is not something this sub-slice introduced and not something it can
+responsibly paper over by only fixing its own two files — every caller of
+`avg.pipeline.personality.assets_dir()` (brand presets, video tones,
+personality presets, and now filters) is already silently broken in any
+real Flatpak build made from this branch as it stands today, catalog
+reads degrading to empty rather than crashing (per `_load_bundled_catalog`'s
+own tolerant `OSError` handling) — which makes it worse to leave
+unfixed, not better: a silent empty catalog gives no error to notice.
+Fixing `pyproject.toml`'s packaging to include `avg/assets/**` (and,
+once this sub-slice lands, its own `Filters/*.mov`) is a prerequisite
+for this design's assets to reach a packaged build at all, and belongs
+in this sub-slice's plan as its own task, not a footnote.
 
 ## 5. Brand Kit — palette actually drives colour
 
@@ -150,6 +198,7 @@ back to today's label-only line rather than fabricating a style.
 | `avg/pipeline/phases/director.py` | Filter validation + anti-clutter cap in `Director2Phase.run` |
 | `avg/media/overlays.py` | `resolve_brand(..., preset_payload=...)` |
 | `avg/media/environment.py` | Sets `AVG_FILTERS_DIR` before child spawn |
+| `pyproject.toml` | Package data fix (§4) — prerequisite, not new to this sub-slice's own feature scope, but blocking for it to reach a packaged build |
 | `avg/media/vendor/*` | **Untouched** |
 
 `direction_plan.json` scenes gain an optional `"filter"` key —
@@ -183,3 +232,8 @@ field renderers already handle, so no new component.
 - Chapters/parts grouping, chapter/explainer takeover cards, image
   recycling, composite grids, caption animation styles — later ranked
   sub-slices.
+- Full Flatpak packaging hardening (pinned/vendored sources for a
+  Flathub-submittable build, per `docs/linux-port/WINDOWS_VS_LINUX.md`'s
+  own "Still open" section) — §4's packaging fix is scoped to the one
+  gap that blocks this sub-slice specifically (`avg/assets/` not
+  reaching an installed build at all), not a general packaging audit.
