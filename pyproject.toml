@@ -16,6 +16,15 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["avg*"]
 
+[tool.setuptools.package-data]
+# avg/assets/ (dynamic_options.txt, personality.txt, and Filters/ once
+# Task 1 lands) has no __init__.py - it isn't a discoverable Python
+# sub-package, so packages.find above never sees it and never carries
+# its data along. package-data, keyed to the PARENT package `avg`, is
+# the standard way to include non-Python files that live inside a
+# package directory without being a package themselves.
+avg = ["assets/*", "assets/Filters/*"]
+
 [project]
 name = "avg-studio"
 version = "0.1.0"
