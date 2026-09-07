@@ -53,6 +53,7 @@ public API - the two are drop-in for each other at the call-site level.
 | `pyproject.toml` packaging | No `[build-system]` table - `pip install .` had never actually been run on this repo before (Windows dev flow is PYTHONPATH-based; release flow is PyInstaller, which doesn't build a wheel). Still true on `main`/`development` | Added `[build-system]` + `[tool.setuptools.packages.find] include = ["avg*"]`, needed for the Flatpak manifest's `pip install .` step to work at all - without it, setuptools refuses with "Multiple top-level packages discovered in a flat-layout" (`web`, `avg`, `assets`, `vendor`, `packaging`, `installer` all sit at the repo root). This gap exists on the Windows build too and should probably be back-ported the same way `edge-tts`'s missing dependency was, independent of anything Linux-specific |
 | Missing `edge-tts` dependency | Not declared in either build's `pyproject.toml` before this branch found it (imported lazily by `avg/providers/voice/providers.py`, never added to `dependencies`) | Fixed here, should be back-ported to the Windows build's `pyproject.toml` too - this was never actually a Windows/Linux difference, just a pre-existing gap this port happened to surface |
 | Missing `httpx` dependency | Declared only under `[project.optional-dependencies].dev`, despite being imported directly by `avg/providers/transport.py` and every provider base class (text/images/voice) for every live HTTP call this app makes - a hard runtime requirement, not a test tool. Masked on every platform until now: the Windows dev/build venv always installs with `[dev]` extras too (see CLAUDE.md's Commands), so `httpx` was always present there by coincidence. Found the same way as `edge-tts` above - a real `pip install .` with no extras, the first one this repo has ever had run against it on any platform, surfaced by an actual `flatpak run` crashing with `No module named 'httpx'` after the krb5 fix let the app get that far | Moved to the main `dependencies` list. Same back-port recommendation as `edge-tts` - checked every other third-party import in `avg/` against `pyproject.toml` after finding this one (via an AST walk over every `.py` file, not by inspection) and found no further gaps |
+| GUI dependency grouping | `pywebview` sits in the main `dependencies` list, undifferentiated from everything else | Split into a `gui` extra (`pywebview`, `pyside6`, `qtpy`) alongside the existing `dev`/`media` extras. Nothing outside `avg/shell.py` imports any of the three (confirmed via the same AST-walk import audit used for the `httpx` gap) - the Flatpak manifest installs `.[gui]` explicitly (the packaged app genuinely needs the native window), while `tools/dev_serve_linux.py`'s local dev venv installs plain `.[dev]` and skips ~280-300MB of PySide6/PySide6-Addons it never touches. Enabled by `avg/shell.py`'s `import webview` being made lazy in the same change - see the "Refresh app is slow" section below for why that mattered |
 
 ---
 
@@ -126,27 +127,30 @@ New in this branch, not a port of anything - Windows has an installer
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.desktop` - app-grid launcher entry.
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
 - `tools/build_flatpak.sh` - interactive (`select`-based) menu with two
-  actions, matching two different real needs rather than one script
-  trying to be both: **Refresh app** (`flatpak-builder --user --install`,
-  no `--force-clean` - reuses `mit-krb5`'s cached build and skips
-  needless bwrap teardown, though `avg-studio`'s own module always
-  rebuilds regardless, see the dev-loop entry below for why and what to
-  use instead for fast iteration) and **Build installer**
-  (`--force-clean` then `flatpak build-bundle` into a single
-  `flatpak-dist/AVGStudio.flatpak` file - what actually corresponds to
-  the Windows build's `AVG-Setup.exe`, something to hand to someone else
-  who runs `flatpak install --user AVGStudio.flatpak` with no manifest,
-  no flatpak-builder, no clone of this repo at all). Also takes
-  `--refresh`/`--build-installer` directly to skip the menu. This
-  branch's `Build Installer.bat`/`tools/make_release.ps1` equivalent -
-  **not** its `tools/_dev_serve.py` equivalent, which is the next entry.
+  actions: **Launch from source** (sets up/reuses a local editable-
+  install dev venv, builds `web/`, runs `tools/dev_serve_linux.py` - no
+  Flatpak involved at all, this branch's `Build Installer.bat`
+  equivalent of *not building the installer* for day-to-day iteration)
+  and **Build flatpak package** (`--force-clean` build, `--install`ed
+  locally and `--repo=`'d in the same pass, then `flatpak build-bundle`
+  into a single `flatpak-dist/AVGStudio.flatpak` file - what actually
+  corresponds to running the Windows build's `Build Installer.bat` for
+  real, producing something to hand to someone else who runs `flatpak
+  install --user AVGStudio.flatpak` with no manifest, no
+  flatpak-builder, no clone of this repo at all). Also takes
+  `--launch`/`--build-package` directly to skip the menu. Originally
+  shipped as **Refresh app**/**Build installer** (a fast-incremental-
+  install action plus a separate bundle-only action) - collapsed to
+  the current two once `tools/dev_serve_linux.py` existed to actually
+  be the fast option and made "refresh but don't bundle" pointless as
+  its own choice; see the dev-loop entry below for why.
 - `tools/dev_serve_linux.py` - the actual equivalent of the Windows
   build's fast dev loop (`tools/_dev_serve.py`). No packaging step at
   all - bare `uvicorn.run(create_app(...))`, opened in a regular
   browser tab. Use this while iterating on `avg/`/`web/` code;
-  `tools/build_flatpak.sh` answers a different question (does the
-  actual sandboxed package still work) and was never going to be fast
-  for this one - see the dev-loop entry below.
+  `tools/build_flatpak.sh`'s package option answers a different
+  question (does the actual sandboxed package still work) and was
+  never going to be fast for this one - see the dev-loop entry below.
 
 ## Size budget
 
@@ -158,7 +162,7 @@ estimates, as of this write-up:
 |---|---|---|
 | `org.freedesktop.Platform//25.08` | 241 MiB | Shared across every Flatpak using it |
 | `org.freedesktop.Sdk//25.08` | ~500-600 MiB | Build-time only - never in the shipped app |
-| `GL.default`+`GL.default-extra`+`VAAPI.Intel`+`openh264` | ~350-400 MiB | Would be shared, but **not installed** - see below |
+| `GL.default`+`GL.default-extra`+`VAAPI.Intel`+`openh264` | ~350-400 MiB | Shared across every Flatpak using them - **installed**, reversed after real usage, see below |
 | `PySide6`+`PySide6-Addons` (pip, at build time) | ~280-300 MiB | Bundled into `/app`, private to this app |
 | ffmpeg static build | ~120 MiB | Bundled into `/app`, private to this app |
 | `mit-krb5` (built from source) | a few MiB | Bundled into `/app`, private to this app - required, not optional (see the real-machine-bug section below) |
@@ -175,26 +179,29 @@ again for an unclear win, onto a completely unverified path (see the
 GUI-backend row above - the Qt path was smoke-tested for real; GTK
 never was), isn't a good trade.
 
-Cut instead: `--device=dri` removed from `finish-args`. **First attempt
-at this was wrong about the mechanism, corrected after a real run
-proved it** - removing `--device=dri` alone did not stop the GL/VAAPI/
-codec row from downloading, because those are "related refs" flatpak
-installs alongside the base runtime *by default* whenever
-`org.freedesktop.Platform` itself is installed, independent of what any
-app's finish-args request (this is a known, if surprising, upstream
-behaviour - see flatpak/flatpak#3004). `--device=dri` only controls
-whether the app is *permitted* to use GL/DRI once already installed,
-not whether `flatpak install` downloads it in the first place. The
-actual fix is `flatpak install --no-related`, now what
-`tools/build_flatpak.sh` uses for both the Platform and Sdk install.
-Safe specifically because `--device=dri` is *also* gone from the
-manifest - the app never asks to use hardware GL/VAAPI at runtime
-either, and software rendering was already confirmed working with none
-of these extensions present at all.
-
-One line to reverse (`--device=dri` back in the manifest, drop
-`--no-related` from the script) if the embedded browser turns out
-sluggish in practice on real hardware.
+`--device=dri`: cut, then reversed after real usage proved the cut
+wrong. First removed from `finish-args` to skip the GL/VAAPI/codec row
+above (~350-400 MiB). That attempt was also wrong about the mechanism
+at first - removing `--device=dri` alone didn't stop the row from
+downloading during the bare-runtime prerequisite install, because
+"related refs" install alongside a runtime *by default* regardless of
+any app's finish-args (flatpak/flatpak#3004); `flatpak install
+--no-related` (what `tools/build_flatpak.sh` uses for the Platform/Sdk
+prerequisite step) is what actually controls that step specifically.
+None of that ended up mattering for the app's own install, though:
+running the actual packaged app without `--device=dri` meant
+QtWebEngine's entire Chromium engine ran on the CPU software
+rasterizer for every frame, every repaint, every scroll - measured
+directly at ~60% constant CPU usage and visibly laggy for the whole
+time the app was open. `--device=dri` is back in `finish-args`.
+`--no-related` stays on the bare-runtime prerequisite step regardless
+(harmless either way - `flatpak-builder --install`, not that step, is
+what actually pulls the GL extension in now, since it doesn't pass
+`--no-related` and the app's own finish-args ask for `--device=dri`).
+Hardware-accelerated rendering was never really optional for an app
+whose entire UI is an embedded browser engine; the ~350-400 MiB was
+the wrong thing to optimize away, and real usage is what proved it,
+not a hunch.
 
 Not reduced, not attempted: PySide6/PySide6-Addons' own bundled
 QtWebEngine (~280-300 MiB) and the ffmpeg static build (~120 MiB) are
@@ -281,6 +288,35 @@ HTTP 200, on a source layout without any Flatpak packaging involved at
 all. `tools/build_flatpak.sh` is for the question only it can answer -
 does the actual sandboxed package still work (permissions, the bundled
 Qt/krb5 resolution) - not for iterating on `avg/`/`web/` code.
+
+**Outcome: `tools/build_flatpak.sh`'s menu changed to match.** "Refresh
+app" (fast-ish incremental install, no bundle) and "Build installer"
+(force-clean, bundle only) were two flavors of the same underlying
+operation - once `tools/dev_serve_linux.py` existed to actually be the
+fast option, keeping a separate "install locally but don't bundle"
+choice around had no real purpose left. Collapsed to **Launch from
+source** (`tools/dev_serve_linux.py`, via an automatically managed
+local dev venv - the option now covers the venv setup this section
+used to describe as a manual prerequisite) and **Build flatpak
+package** (the old "Build installer" logic, now also `--install`ing
+locally in the same pass as exporting the bundle, so it answers both
+"does the package work" and "give me a file to share" in one run).
+
+**A second real bug surfaced building this:** `tools/dev_serve_linux.py`
+imports `resolve_output_root` from `avg.shell`, and `avg/shell.py` had
+`import webview` at module scope - Python has no way to import *part*
+of a module, so pulling in one unrelated function forced the entire
+`avg.shell` module to load, including pywebview, which the whole point
+of `dev_serve_linux.py` was to avoid needing at all. Reproduced
+directly (`ModuleNotFoundError: No module named 'webview'` from a
+`.[dev]`-only venv that correctly never installed it) before fixing:
+`import webview` moved to be lazy inside the two functions that
+actually use it (`main`, `_Api.browse_folder`) - the same lazy-import
+pattern this codebase already uses for `edge_tts` (see
+`avg/providers/voice/providers.py`), not a new one invented for this.
+Verified end to end afterward, not just re-read: a full `--launch` run
+in this container - fresh venv, real `npm install`/`npm run build`,
+server start - reached a real HTTP 200.
 
 ## Real-machine bug: PySide6.QtNetwork needs libgssapi_krb5, runtime doesn't ship it
 

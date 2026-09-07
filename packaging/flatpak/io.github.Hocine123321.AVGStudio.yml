@@ -67,17 +67,17 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
-  # No --device=dri: QtWebEngine falls back to software rendering
-  # (confirmed working - the QRhiGles2/Vulkan fallback messages this
-  # branch's manual pywebview+PySide6 smoke test produced without a GPU
-  # available, see docs/linux-port/WINDOWS_VS_LINUX.md). Left out
-  # deliberately to skip the org.freedesktop.Platform.GL.default(+extra)/
-  # VAAPI.Intel/openh264 extension downloads --device=dri triggers at
-  # install time (~350-400 MiB) - a real, sizeable cost for an app
-  # that's a form-heavy UI wrapping a local API, not a 3D/gaming
-  # workload. Add `--device=dri` back if the embedded browser feels
-  # sluggish in practice; this is a one-line, easily-reversed tradeoff,
-  # not an architectural one.
+  # --device=dri: re-added after real usage - "no GPU access" meant
+  # QtWebEngine's entire Chromium engine ran on the CPU software
+  # rasterizer for every frame, every repaint, every scroll. Measured
+  # directly: ~60% constant CPU usage and visibly laggy for the whole
+  # time the app was open. This was flagged as a real possibility when
+  # the permission was first dropped for size (~350-400 MiB - see
+  # docs/linux-port/WINDOWS_VS_LINUX.md's size-budget section) and the
+  # tradeoff explicitly said to reverse it if this happened. It did.
+  # Hardware-accelerated rendering is not optional for an app that
+  # embeds a full browser engine as its entire UI, not a footnote.
+  - --device=dri
   # This app's own outbound calls to Groq/Gemini/ElevenLabs/HuggingFace/
   # Pollinations/etc. The loopback FastAPI+WebSocket connection between
   # the embedded browser and avg/api/app.py needs no permission at all -
@@ -188,6 +188,12 @@ modules:
       #    straight into /app, no venv (there is nothing else on this
       #    Python's path to isolate from inside the sandbox).
       #
+      #    `.[gui]`, not bare `.`: pyproject.toml splits pywebview/
+      #    pyside6/qtpy into a `gui` extra (nothing outside avg/shell.py
+      #    needs them - see that extra's own comment), so the packaged
+      #    app - which genuinely needs the native window, unlike
+      #    tools/dev_serve_linux.py - has to ask for it explicitly.
+      #
       #    Not --no-cache-dir: that flag was forcing a full re-download
       #    of every wheel (PySide6/PySide6-Addons alone is ~280-300MB)
       #    on every single refresh, even when pyproject.toml's
@@ -200,7 +206,7 @@ modules:
       #    avoid re-running this build-commands list itself - see the
       #    `skip:` comment above for why that part is unavoidable for a
       #    `dir` source.
-      - pip3 install --prefix=/app .
+      - pip3 install --prefix=/app ".[gui]"
 
       # 2. web/dist next to wherever `avg` actually landed under
       #    site-packages. avg/api/app.py's WEB_DIST constant is

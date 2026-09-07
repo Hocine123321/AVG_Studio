@@ -23,7 +23,6 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
-    "pywebview",
     "pydantic>=2",
     # Missing from the Windows build's pyproject.toml too - not a
     # Linux-port thing, just genuinely undeclared before this branch.
@@ -34,14 +33,6 @@ dependencies = [
     # module's docstring and docs/linux-port/WINDOWS_VS_LINUX.md.
     "keyring",
     "cryptography",
-    # pywebview's GUI backend on this fork. PySide6/PySide6-Addons are
-    # fully self-contained pip wheels (bundle their own Qt6 + QtWebEngine
-    # Chromium, no system Qt/webkit2gtk needed) - see
-    # docs/linux-port/WINDOWS_VS_LINUX.md's GUI-backend entry for why this
-    # was chosen over GTK+WebKit2GTK. `avg.shell.main` passes gui="qt"
-    # explicitly so this is the only backend pywebview ever tries.
-    "pyside6",
-    "qtpy",
     # Same category of gap as edge-tts above, found the same way (a real
     # `pip install .` with no extras - the first one this repo has ever
     # had, on any platform): avg/providers/transport.py and every
@@ -60,6 +51,30 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy"]
 media = ["numpy", "Pillow", "pydub"]
+# The native-window UI stack - pywebview plus its Qt backend on this
+# fork. Split out from the base `dependencies` list, not bundled in
+# unconditionally: avg.api.app (the FastAPI server, every provider,
+# every pipeline phase) never imports webview/pyside6/qtpy at all - only
+# avg.shell does, and only avg.shell needs them. Kept together as a real
+# runtime requirement of the *packaged app* (the Flatpak manifest
+# installs `.[gui]` explicitly, not bare `.` - see that manifest), but
+# tools/dev_serve_linux.py's whole point is running avg.api.app directly
+# with none of this, so a local dev install (`pip install -e ".[dev]"`)
+# no longer has to pull down PySide6/PySide6-Addons (~280-300MB, this
+# fork's single largest dependency) just to serve the UI in a browser
+# tab. Confirmed via the same AST-walk-based import audit used to catch
+# the httpx gap: nothing outside avg/shell.py imports any of these three.
+gui = [
+    # PySide6/PySide6-Addons are fully self-contained pip wheels (bundle
+    # their own Qt6 + QtWebEngine Chromium, no system Qt/webkit2gtk
+    # needed) - see docs/linux-port/WINDOWS_VS_LINUX.md's GUI-backend
+    # entry for why this was chosen over GTK+WebKit2GTK. `avg.shell.main`
+    # passes gui="qt" explicitly so this is the only backend pywebview
+    # ever tries.
+    "pywebview",
+    "pyside6",
+    "qtpy",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -33,6 +33,14 @@ The legacy layout (`output_root = D:\\AI_Video_Gen\\output`, with
 grew it, but this app ships as an installer meant to be carried to another
 PC where that drive may not exist. See `resolve_output_root` for the order it
 tries and why.
+
+`import webview` is lazy (inside `main` and `_Api.browse_folder`, not at
+module scope) so this module can be imported for its other functions -
+`resolve_output_root` in particular - without pywebview installed at
+all. `tools/dev_serve_linux.py` depends on this directly: its whole
+point is running `avg.api.app.create_app` with none of this module's
+GUI weight, and Python has no way to import *part* of a module - any
+name from `avg.shell` executes every top-level import in it first.
 """
 
 from __future__ import annotations
@@ -47,8 +55,6 @@ import urllib.request
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-import webview
 
 if TYPE_CHECKING:
     # Only for the `started` annotation in `main` below - never imported at
@@ -142,6 +148,8 @@ class _Api:
         `FOLDER_DIALOG` alias, which this pywebview version warns on) is the
         same dialog under its current name.
         """
+        import webview  # noqa: PLC0415 - see this module's docstring: lazy on purpose
+
         result = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
         if not result:
             return None
@@ -270,6 +278,8 @@ def main() -> None:
     happen behind a window that already looks like the app rather than
     behind nothing.
     """
+    import webview  # noqa: PLC0415 - see this module's docstring: lazy on purpose
+
     window = webview.create_window(
         "AVG Studio",
         html=splash_html(),
