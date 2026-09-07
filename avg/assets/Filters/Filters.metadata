@@ -1,0 +1,44 @@
+# =============================================================================
+# AVG FILTERS CATALOG  (B2.18.3 — alpha video effect overlays)
+#
+# Filters are short ALPHA (transparent) VIDEO clips — the "fire", "flashback",
+# "light leak", "glitch", "flash" type effects popular YouTubers drop on top of
+# a shot. AVG composites them AS AN OVERLAY, only during the scene they belong
+# to (they never replace the scene). Director 2 (the AI editor) picks which fits
+# each scene by the description below; you can also pin one to a scene manually
+# (Settings > Output > AI Graphics > Filters > Manual overrides).
+#
+# ASSET FORMAT — ProRes 4444 (.mov) with a real transparency (alpha) channel:
+#   * ProRes 4444  .mov   (pix_fmt yuva444p10le)   <- the format to use
+#   Most stock "overlay" / "VFX" packs ship as ProRes 4444 .mov with alpha; that
+#   is why this is the format (VP9/WebM alpha clips are hard to find).
+#   A plain MP4 has NO alpha and will show as an opaque rectangle -- don't use it.
+#   To make one from a transparent source in ffmpeg:
+#     ffmpeg -i in.mov -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le fire.mov
+#   Drop the .mov files in this folder (Assets\Filters\).
+#   Any size/aspect is fine -- AVG cover-scales each clip to the video and loops
+#   it to fill the scene. Keep clips short (0.5-3s); they loop automatically.
+#
+# ONE FILTER PER LINE.  Format (first delimiter wins):
+#   <name> | <natural-language description> | <file.mov>
+#   <name> : <description>            (no file yet -- catalogued but inert)
+# Lines starting with '#' and blank lines are ignored.
+#
+#   name        the id the AI + the allow/block/override lists use.
+#   description what Director 2 reads to decide when the effect fits a scene --
+#               write it in plain language (mood + when to use it).
+#   file        the alpha .mov (ProRes 4444) in this folder.
+#
+# Global controls live in Settings > Output > AI Graphics > Filters:
+#   intensity 0-100  = overlay opacity + how freely the AI uses them (0 = off)
+#   allow / block    = which filter names the AI may / may not use
+#   overrides        = pin a specific filter to a specific scene number
+#
+# More examples to add once you have the .mov assets (remove the leading '# '):
+# fire       | Intense, high-energy, danger or hype. Roaring flames.            | fire.mov
+# glitch     | Digital malfunction, shock reveal, tech/hacker moments.          | glitch.mov
+# =============================================================================
+
+# ── Starter set (bundled AVG-generated ProRes 4444 assets — active) ───────────
+film_grain | Old-film grain with subtle flicker. Flashbacks, documentaries, archival/vintage, memory beats. | film_grain.mov
+light_leak | Warm light bloom drifting across frame. Emotional beats, nostalgia, soft transitions.          | light_leak.mov

@@ -127,3 +127,15 @@ def test_validate_value_accepts_any_string_when_choices_declare_a_custom_escape(
     )
     assert validate_value(spec, "Bebas Neue") == "Bebas Neue"
     assert validate_value(spec, "a") == "a"
+
+
+def test_filters_settings_exist_with_expected_defaults() -> None:
+    by_id = {s.id: s for s in SETTINGS}
+    assert by_id["filters_intensity"].default == 50
+    assert by_id["filters_intensity"].type == "int"
+    assert by_id["filters_intensity"].group == "filters"
+    assert by_id["filters_allow"].default == ""
+    assert by_id["filters_block"].default == ""
+    for setting_id in ("filters_intensity", "filters_allow", "filters_block"):
+        assert by_id[setting_id].scope == "channel"
+        assert by_id[setting_id].invalidates == "director2"

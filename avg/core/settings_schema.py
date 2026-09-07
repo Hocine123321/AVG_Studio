@@ -446,6 +446,43 @@ SETTINGS: list[SettingSpec] = [
         scope="channel",
         invalidates="director2",
     ),
+    # --- filter overlays (Director II's optional per-scene clips) ---
+    SettingSpec(
+        id="filters_intensity",
+        group="filters",
+        label="Filter intensity",
+        help=(
+            "How freely Director II reaches for a filter overlay clip on a scene "
+            "(0 = off entirely, 50 = occasionally, 100 = freely)."
+        ),
+        type="int",
+        default=50,
+        scope="channel",
+        invalidates="director2",
+    ),
+    SettingSpec(
+        id="filters_allow",
+        group="filters",
+        label="Allowed filters",
+        help=(
+            "Comma-separated filter names Director II may choose from. Empty allows "
+            "every cataloged filter."
+        ),
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="director2",
+    ),
+    SettingSpec(
+        id="filters_block",
+        group="filters",
+        label="Blocked filters",
+        help="Comma-separated filter names Director II may never choose.",
+        type="text",
+        default="",
+        scope="channel",
+        invalidates="director2",
+    ),
     # --- voice provider and options ---
     SettingSpec(
         id="voice_provider",
