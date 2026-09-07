@@ -109,6 +109,61 @@ def prepend_to_path() -> None:
     os.environ["IMAGEIO_FFMPEG_EXE"] = str(d / _FFMPEG_EXE_NAME)
 
 
+# ── Filter overlay clips ────────────────────────────────────
+#
+# `avg.media.vendor.avg._filters_root()` resolves the bundled filter clips
+# from `os.environ["AVG_FILTERS_DIR"]`, falling back to a path relative to
+# the vendor file itself that assumed the legacy repo's flat layout
+# (`Assets/Filters` two directories up from `python/avg.py`) - wrong here,
+# and vendor/ is never edited to fix it. This section is the one place
+# that resolves the real bundled location (`avg/assets/Filters`, matching
+# `avg.pipeline.personality.assets_dir()`'s convention) and sets the env
+# var so the vendored resolver finds it without ever needing to change.
+#
+# Two callers, both idempotent (`os.environ.setdefault`) because either
+# can run first depending on how a render was reached:
+#   - `avg.pipeline.phases.director.Director2Phase.run` needs the catalogue
+#     BEFORE Director II's own prompt is built (same process, no child
+#     spawned yet).
+#   - `avg.media.engine.MediaEngine.render` needs it before the render
+#     child spawns, in case a render is ever triggered without Director II
+#     having run first in the same process (e.g. `tools/_dev_serve.py`
+#     against an already-planned project).
+
+
+@lru_cache(maxsize=1)
+def filters_dir() -> Path:
+    """Directory holding the bundled filter overlay clips
+    (`avg/assets/Filters`), in both a dev checkout and a frozen build.
+
+    Independent duplicate of `avg.pipeline.personality.assets_dir()`'s
+    exact technique - `avg/media/` may not import `avg/pipeline/`, the
+    same reason `bundled_ffmpeg_dir()` above duplicates rather than shares
+    its own frozen/dev resolution. The `sys.frozen` branch is inert on
+    this branch specifically (never frozen - no PyInstaller here, see
+    `docs/linux-port/WINDOWS_VS_LINUX.md`'s "Packaging shape") and always
+    falls through to the dev-checkout return below; kept rather than
+    removed, matching `bundled_ffmpeg_dir()`'s own precedent immediately
+    above of leaving the same dead-but-harmless branch in place rather
+    than forking the function's shape between platforms.
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate = Path(meipass) / "avg" / "assets" / "Filters"
+            if candidate.is_dir():
+                return candidate
+    return Path(__file__).resolve().parent.parent / "assets" / "Filters"
+
+
+def ensure_filters_dir_env() -> None:
+    """Set `AVG_FILTERS_DIR` once, idempotently, so `avg.media.vendor.avg`'s
+    `_filters_root()` finds the bundled clips regardless of which entry
+    point reaches it first. Safe to call more than once and from more than
+    one place - see the module note above."""
+    os.environ.setdefault("AVG_FILTERS_DIR", str(filters_dir()))
+
+
 # ── Console windows ─────────────────────────────────────────
 #
 # A GUI process on Windows has no console. When it launches a console

@@ -10,6 +10,8 @@ render ever run left a full copy of the project in %TEMP% permanently.
 
 from __future__ import annotations
 
+import os
+
 from avg.media.environment import render_workspace
 
 
@@ -72,3 +74,27 @@ def test_master_output_is_never_carried_in(tmp_path):
 
     with render_workspace(project) as workspace:
         assert not (workspace / "master_output.mp4").exists()
+
+
+def test_filters_dir_dev_checkout_points_at_bundled_copy():
+    from avg.media import environment
+
+    d = environment.filters_dir()
+    assert (d / "Filters.metadata").is_file()
+    assert (d / "film_grain.mov").is_file()
+
+
+def test_ensure_filters_dir_env_sets_the_variable(monkeypatch):
+    from avg.media import environment
+
+    monkeypatch.delenv("AVG_FILTERS_DIR", raising=False)
+    environment.ensure_filters_dir_env()
+    assert os.environ["AVG_FILTERS_DIR"] == str(environment.filters_dir())
+
+
+def test_ensure_filters_dir_env_never_clobbers_an_explicit_value(monkeypatch):
+    from avg.media import environment
+
+    monkeypatch.setenv("AVG_FILTERS_DIR", "/some/test/override")
+    environment.ensure_filters_dir_env()
+    assert os.environ["AVG_FILTERS_DIR"] == "/some/test/override"
