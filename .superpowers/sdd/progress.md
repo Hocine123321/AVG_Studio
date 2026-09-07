@@ -1436,3 +1436,38 @@ passed, 1 skipped, no shim of any kind).
 
 **Not yet ported:** Recycling, Chapters+Cards, Caption Animation Styles
 specs+plans - in progress, same branch, same session.
+
+## Slice 31 sub-slice 2 (Image Recycling) ported to linux-port (2026-09-06)
+
+Spec: reworded §1's location paragraph only (the underlying code already
+calls the platform-abstracted `user_assets_root()`, so nothing there
+needed to change - just stopped the prose from presenting the Windows
+path as if it were universal). Everything else unchanged.
+
+Plan: every replace-block applies unchanged except the two touching
+`avg/config/user_assets.py` (base-directory resolution differs, function
+shape doesn't). Verified end-to-end, not just diffed: applied every
+edit to a scratch clone, then actually imported every touched module
+under this branch's real venv - `avg.config.user_assets`,
+`avg.config.recycle_pool`, `avg.core.settings_schema`,
+`avg.pipeline.prompts`, `avg.pipeline.phases.writing`,
+`avg.pipeline.phases.visuals` all clean, `default_reusable_images_dir()`
+correctly resolving to `~/Documents/AVG Studio/UserAssets/ReusableImages`
+via this branch's `documents_root()`.
+
+**A real bug found only by mechanically applying the plan, present on
+the Windows original too, not introduced by porting:** Task 4's
+instruction to extend `visuals.py`'s imports was loose prose ("find the
+current import block and add..."), not an anchored replace. Applied
+literally, it produces `NameError: name 're' is not defined` at import
+time (`_RECYCLE_TOKEN_RE = re.compile(...)` executes before `import re`
+if the addition lands in the wrong spot, which "somewhere near the top"
+doesn't rule out). Fixed here with an exact anchor - note the Linux and
+Windows anchors DIFFER (Windows still has `import ctypes` at that exact
+spot for the old RAM-detection code; Linux replaced it with
+`from avg.core.sysinfo import total_ram_gb as _total_ram_gb` further
+down) - copying one branch's anchor onto the other would not have
+matched either. Also fixed on `development` (commit `574170e`), since
+the bug pre-dates this porting work entirely.
+
+**Not yet ported:** Chapters+Cards, Caption Animation Styles.
