@@ -548,21 +548,44 @@ def build_director_style_bible(
 - emotional arc: {emotional_arc}{brand_line}"""
 
 
+def _filters_section(filter_catalog: dict[str, str], intensity: int) -> str:
+    """The optional "AVAILABLE FILTERS" block `build_director2_prompt`
+    appends - empty (never rendered) when there is nothing to offer, so a
+    channel with `filters_intensity == 0` or an empty/fully-blocked
+    catalogue gets a byte-identical prompt to before this feature existed.
+    Frequency wording mirrors the three-tier phrasing `Get-AiDirectionPlan`
+    used for the same `Config.edit.filters.intensity` value."""
+    if not filter_catalog:
+        return ""
+    if intensity >= 75:
+        frequency = "freely — use one on any scene that would benefit"
+    elif intensity >= 40:
+        frequency = "occasionally — only on scenes where it clearly earns its place"
+    else:
+        frequency = "sparingly — only on the one or two scenes that most need it"
+    lines = "\n".join(f"- {name}: {desc}" for name, desc in filter_catalog.items())
+    return f"""
+
+AVAILABLE FILTERS (optional overlay clips baked over the finished scene — use them {frequency}):
+{lines}
+For a scene that should carry one, add "filter": "<name>" (the exact catalog name, lowercase). Most scenes should have none."""
+
+
 def build_director2_prompt(
     inputs: CreativeInputs,
     scene_texts: list[str],
     *,
     personality: dict[str, PersonalityPreset] | None = None,
     emotional_arc: str = "",
+    filter_catalog: dict[str, str] | None = None,
+    filters_intensity: int = 50,
 ) -> str:
     """Phase 5 (Director II)'s motion/grade prompt: opens with
     `build_director_style_bible`'s style-bible fragment, then asks for a
     per-scene camera move/transition and one overall colour grade for the
-    whole video. Ported (simplified - no brand motion-feel table, no
-    external filters catalogue, both a separate, later concern - see
-    `avg.pipeline.phases.director`'s identical simplification note) from
-    the corresponding section of `Get-AiDirectionPlan`
-    (`D:\\AI_Video_Gen\\modules\\ai.ps1`).
+    whole video, and - when `filter_catalog` is non-empty - an optional
+    per-scene filter overlay clip. Ported from the corresponding section of
+    `Get-AiDirectionPlan` (`D:\\AI_Video_Gen\\modules\\ai.ps1`).
 
     The vocabulary below (motion types, ease curves, transitions, grade
     looks) is deliberately a closed set - `avg.pipeline.phases.director`
@@ -571,6 +594,8 @@ def build_director2_prompt(
     lists."""
     style_bible = build_director_style_bible(inputs, personality=personality, emotional_arc=emotional_arc)
     numbered = "\n".join(f'[{i + 1}] "{text}"' for i, text in enumerate(scene_texts))
+    filters_section = _filters_section(filter_catalog or {}, filters_intensity)
+    scene_filter_field = ',"filter":"..."' if filters_section else ""
 
     return f"""You are the DIRECTOR / EDITOR of a short AI-generated video built from still images with
 narration. Think like a bold human editor: your goal is to make THIS video feel special and
@@ -597,8 +622,9 @@ For EACH scene choose:
 Also choose ONE overall grade (colour look) for the whole video that fits the style bible:
 - grade.look: none | warm | cool | cinematic | noir | vibrant | soft
 The SAME grade applies to every scene (set it once at top level).
+{filters_section}
 
 Return ONLY a JSON object, no preamble, no markdown fences. Schema:
 {{"version":1,"grade":{{"look":"..."}},
- "scenes":[{{"scene":<int>,"motion":{{"type":"...","intensity":0.5,"ease":"ease_out_cubic"}},"transition_in":"..."}}]}}
+ "scenes":[{{"scene":<int>,"motion":{{"type":"...","intensity":0.5,"ease":"ease_out_cubic"}}{scene_filter_field},"transition_in":"..."}}]}}
 Every scene number above MUST appear exactly once."""

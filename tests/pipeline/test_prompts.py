@@ -224,6 +224,47 @@ def test_brand_preset_label_present_not_raw_hex_in_style_bible():
     assert "#" not in text
 
 
+def test_director2_prompt_omits_filters_section_when_catalog_is_empty():
+    from avg.pipeline.prompts import build_director2_prompt
+
+    prompt = build_director2_prompt(_inputs(), ["Scene one."], filter_catalog={})
+    assert "AVAILABLE FILTERS" not in prompt
+
+
+def test_director2_prompt_omits_filters_section_when_catalog_is_none():
+    from avg.pipeline.prompts import build_director2_prompt
+
+    prompt = build_director2_prompt(_inputs(), ["Scene one."])
+    assert "AVAILABLE FILTERS" not in prompt
+
+
+def test_director2_prompt_lists_every_cataloged_filter():
+    from avg.pipeline.prompts import build_director2_prompt
+
+    catalog = {
+        "film_grain": "Old-film grain with subtle flicker.",
+        "light_leak": "Warm light bloom drifting across frame.",
+    }
+    prompt = build_director2_prompt(_inputs(), ["Scene one."], filter_catalog=catalog)
+    assert "AVAILABLE FILTERS" in prompt
+    assert "film_grain: Old-film grain with subtle flicker." in prompt
+    assert "light_leak: Warm light bloom drifting across frame." in prompt
+    assert '"filter"' in prompt  # schema line mentions the optional field
+
+
+@pytest.mark.parametrize(
+    "intensity,expected_word",
+    [(90, "freely"), (50, "occasionally"), (10, "sparingly")],
+)
+def test_director2_prompt_filter_frequency_scales_with_intensity(intensity, expected_word):
+    from avg.pipeline.prompts import build_director2_prompt
+
+    prompt = build_director2_prompt(
+        _inputs(), ["Scene one."], filter_catalog={"film_grain": "desc"}, filters_intensity=intensity
+    )
+    assert expected_word in prompt
+
+
 @pytest.mark.parametrize(
     "builder",
     [
