@@ -1192,21 +1192,35 @@ literal `"[RECYCLE #1]"` string sent to the provider as a real prompt).
 
 ### Step 4.3 — implement
 
-In `avg/pipeline/phases/visuals.py`, extend the imports. Find the current
-top-of-file import block and add:
+In `avg/pipeline/phases/visuals.py`, replace:
 
 ```python
-import re
-import shutil
+from __future__ import annotations
 
-from PIL import Image
+import ctypes
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+
+from avg.core.errors import AvgError, ErrorKind, report_degradation
 ```
 
-(placed with the other standard-library imports at the top, `PIL` grouped
-with third-party imports below them, matching whatever import-grouping
-convention `oxlint`'s Python-adjacent tooling — actually `ruff`/whatever
-this file's existing imports already follow — check the top of the file
-and slot in accordingly rather than guessing an order).
+with:
+
+```python
+from __future__ import annotations
+
+import ctypes
+import re
+import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+
+from PIL import Image
+
+from avg.core.errors import AvgError, ErrorKind, report_degradation
+```
 
 Replace:
 
