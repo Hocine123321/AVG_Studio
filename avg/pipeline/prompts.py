@@ -183,6 +183,101 @@ def resolve_brand_preset_label(
     return opt.label
 
 
+# Ported from `$script:BRAND_STYLE_DEFAULTS`
+# (`D:\AI_Video_Gen\modules\utilities.ps1`): a brand preset carries a full
+# LOOK (motion feel, transition palette, colour grade), not just colours -
+# this is what turns "changing the brand only recolours" into "a different
+# brand feels like a different video." The five entries below are the
+# legacy app's own, verbatim. The other five keys
+# (wireframe_ink/tiktok_viral/vsauce_curiosity/academic_editorial/
+# tactical_terminal) are presets this app added that legacy never had -
+# profiles written to match each one's own palette/label in
+# `avg/assets/dynamic_options.txt`, checked against the same closed
+# `_VALID_TRANSITIONS`/`_VALID_GRADE_LOOKS` vocabularies
+# `avg.pipeline.phases.director` validates a model's own choices against.
+_BRAND_STYLE_DEFAULTS: dict[str, dict[str, str]] = {
+    "modern_dark": {
+        "motion": "balanced push-ins with occasional slow drifts",
+        "transitions": "cut, crossfade",
+        "grade": "cinematic",
+    },
+    "neon_cyber": {
+        "motion": "punchy fast pushes and quick pans, high energy",
+        "transitions": "cut, whip, slide_left",
+        "grade": "vibrant",
+    },
+    "warm_organic": {
+        "motion": "gentle slow drifts and soft zoom-ins, unhurried",
+        "transitions": "crossfade, dip, fade",
+        "grade": "warm",
+    },
+    "clean_light": {
+        "motion": "minimal, precise, mostly slow zoom-ins",
+        "transitions": "cut, fade",
+        "grade": "soft",
+    },
+    "luxury_gold": {
+        "motion": "slow, deliberate, elegant push-ins",
+        "transitions": "crossfade, dip",
+        "grade": "cinematic",
+    },
+    "wireframe_ink": {
+        "motion": "minimal, precise, mostly static holds with slow pans",
+        "transitions": "cut, fade",
+        "grade": "none",
+    },
+    "tiktok_viral": {
+        "motion": "fast punchy pushes and quick cuts, high energy",
+        "transitions": "cut, whip, slide_left",
+        "grade": "vibrant",
+    },
+    "vsauce_curiosity": {
+        "motion": "measured pushes with the occasional quick zoom on a reveal",
+        "transitions": "crossfade, cut",
+        "grade": "cool",
+    },
+    "academic_editorial": {
+        "motion": "minimal, precise, mostly slow zoom-ins",
+        "transitions": "cut, fade",
+        "grade": "soft",
+    },
+    "tactical_terminal": {
+        "motion": "sharp fast pushes and quick pans, high-alert energy",
+        "transitions": "cut, whip",
+        "grade": "noir",
+    },
+}
+
+_BRAND_STYLE_FALLBACK: dict[str, str] = {
+    "motion": "balanced push-ins with occasional drifts",
+    "transitions": "cut, crossfade",
+    "grade": "none",
+}
+
+
+def resolve_brand_style_bible(
+    value: str,
+    catalog: dict[str, dict[str, CatalogOption]] | None = None,
+) -> dict[str, str]:
+    """`{"motion", "transitions", "grade"}` for a `brand_preset` id: the
+    built-in profile in `_BRAND_STYLE_DEFAULTS` (or `_BRAND_STYLE_FALLBACK`
+    for a blank/unrecognised id), overridden per-key by the preset's own
+    catalogue payload when it carries `motion=`/`transitions=`/`grade=` -
+    ported from `Get-BrandStyleProfile`
+    (`D:\\AI_Video_Gen\\modules\\utilities.ps1`). Never returns a dict
+    missing any of the three keys."""
+    v = (value or "").strip()
+    base = dict(_BRAND_STYLE_DEFAULTS.get(v, _BRAND_STYLE_FALLBACK))
+    options = (catalog or _load_bundled_catalog()).get("brand_presets", {})
+    opt = options.get(v)
+    if opt is not None:
+        for key in ("motion", "transitions", "grade"):
+            override = opt.payload.get(key, "").strip()
+            if override:
+                base[key] = override
+    return base
+
+
 def _duration_phrase(seconds: int) -> str:
     """`"30 seconds"` / `"1 minute"` / `"3 minutes"` - matches the legacy
     `$durStr` computation exactly, including the `>= 120` (not `> 60`)
@@ -560,19 +655,25 @@ def build_director_style_bible(
 ) -> str:
     """The "VIDEO STYLE (the creative bible)" block Director II's
     motion/grade prompt opens with, ported from the corresponding section
-    of `ai.ps1`'s Director 2 prompt builder. Only the style-bible fragment
-    is ported here (motion/transition/grade primitives, filters, and the
-    per-brand motion-feel table are a separate, larger Director II
-    implementation task, not this one)."""
+    of `ai.ps1`'s Director 2 prompt builder, including the per-brand
+    motion-feel table (`resolve_brand_style_bible`)."""
     preset = get_preset(inputs.content_shape, personality)
     tone_text = resolve_visual_tone(inputs.visual_tone)
     brand_label = resolve_brand_preset_label(inputs.brand_preset)
-    brand_line = f"\n- brand: {brand_label}" if brand_label else ""
+    brand_section = ""
+    if brand_label:
+        bible = resolve_brand_style_bible(inputs.brand_preset)
+        brand_section = (
+            f"\n- brand: {brand_label}"
+            f"\n- brand motion feel: {bible['motion']}"
+            f"\n- brand transitions: {bible['transitions']}"
+            f"\n- brand grade: {bible['grade']}"
+        )
 
     return f"""VIDEO STYLE (the creative bible — keep the whole piece feeling consistent with this):
 - personality: {preset.description or preset.name}
 - visual tone: {tone_text}
-- emotional arc: {emotional_arc}{brand_line}"""
+- emotional arc: {emotional_arc}{brand_section}"""
 
 
 def _filters_section(filter_catalog: dict[str, str], intensity: int) -> str:
@@ -615,7 +716,8 @@ def build_director2_prompt(
     filters_intensity: int = 50,
 ) -> str:
     """Phase 5 (Director II)'s motion/grade prompt: opens with
-    `build_director_style_bible`'s style-bible fragment, then asks for a
+    `build_director_style_bible`'s style-bible fragment (now including the
+    brand's own motion-feel/transitions/grade bias), then asks for a
     per-scene camera move/transition and one overall colour grade for the
     whole video, and - when `filter_catalog` is non-empty - an optional
     per-scene filter overlay clip. Ported from the corresponding section of

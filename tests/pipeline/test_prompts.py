@@ -34,6 +34,12 @@ KNOWN_TONE_ID = "documentary_cinematic"
 KNOWN_TONE_SNIPPET = "grounded cinematic realism"  # start of the bundled hint text
 
 
+def _parse_catalog_for_test(raw: str):
+    from avg.pipeline.prompts import _parse_catalog
+
+    return _parse_catalog(raw)
+
+
 # ── personality.py ───────────────────────────────────────────────────────
 
 def test_bundled_personality_file_parses_all_three_presets():
@@ -222,6 +228,72 @@ def test_brand_preset_label_present_not_raw_hex_in_style_bible():
     text = build_director_style_bible(_inputs())
     assert "Modern Dark" in text
     assert "#" not in text
+
+
+def test_resolve_brand_style_bible_known_preset_matches_legacy_defaults():
+    from avg.pipeline.prompts import resolve_brand_style_bible
+
+    bible = resolve_brand_style_bible("neon_cyber")
+    assert bible["motion"] == "punchy fast pushes and quick pans, high energy"
+    assert bible["transitions"] == "cut, whip, slide_left"
+    assert bible["grade"] == "vibrant"
+
+
+def test_resolve_brand_style_bible_unknown_id_returns_the_fallback():
+    from avg.pipeline.prompts import resolve_brand_style_bible
+
+    bible = resolve_brand_style_bible("some_id_that_does_not_exist")
+    assert bible == {
+        "motion": "balanced push-ins with occasional drifts",
+        "transitions": "cut, crossfade",
+        "grade": "none",
+    }
+
+
+def test_resolve_brand_style_bible_blank_id_returns_the_fallback():
+    from avg.pipeline.prompts import resolve_brand_style_bible
+
+    assert resolve_brand_style_bible("")["grade"] == "none"
+
+
+def test_resolve_brand_style_bible_every_preset_in_the_bundled_catalog_resolves():
+    # Every id catalog() actually ships must produce a full, valid bible -
+    # including the 5 presets this app added that legacy never had.
+    from avg.pipeline.prompts import resolve_brand_style_bible
+
+    catalog = load_catalog()
+    for preset_id in catalog["brand_presets"]:
+        bible = resolve_brand_style_bible(preset_id)
+        assert bible["motion"]
+        assert bible["transitions"]
+        assert bible["grade"]
+
+
+def test_resolve_brand_style_bible_payload_override_wins_over_the_default():
+    catalog = _parse_catalog_for_test(
+        "## CATEGORY: brand_presets\n"
+        "## OPTION: modern_dark | Modern Dark | motion=totally different motion;grade=noir\n"
+    )
+    from avg.pipeline.prompts import resolve_brand_style_bible
+
+    bible = resolve_brand_style_bible("modern_dark", catalog)
+    assert bible["motion"] == "totally different motion"
+    assert bible["grade"] == "noir"
+    # transitions wasn't overridden - the built-in default still applies.
+    assert bible["transitions"] == "cut, crossfade"
+
+
+def test_style_bible_text_includes_the_brand_motion_and_grade():
+    inputs = _inputs(brand_preset="neon_cyber")
+    text = build_director_style_bible(inputs)
+    assert "brand motion feel: punchy fast pushes and quick pans, high energy" in text
+    assert "brand grade: vibrant" in text
+
+
+def test_style_bible_text_has_no_brand_lines_when_brand_preset_is_blank():
+    inputs = _inputs(brand_preset="")
+    text = build_director_style_bible(inputs)
+    assert "brand" not in text
 
 
 def test_director2_prompt_omits_filters_section_when_catalog_is_empty():
