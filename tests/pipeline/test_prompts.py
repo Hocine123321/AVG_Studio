@@ -238,6 +238,18 @@ def test_director2_prompt_omits_filters_section_when_catalog_is_none():
     assert "AVAILABLE FILTERS" not in prompt
 
 
+def test_director2_prompt_omits_filters_section_when_intensity_is_zero():
+    """Regression: 0 is documented as 'off entirely', not merely the
+    sparsest wording tier - a non-empty catalog must not leak into the
+    prompt just because intensity dropped below the 'sparingly' cutoff."""
+    from avg.pipeline.prompts import build_director2_prompt
+
+    prompt = build_director2_prompt(
+        _inputs(), ["Scene one."], filter_catalog={"film_grain": "desc"}, filters_intensity=0
+    )
+    assert "AVAILABLE FILTERS" not in prompt
+
+
 def test_director2_prompt_lists_every_cataloged_filter():
     from avg.pipeline.prompts import build_director2_prompt
 

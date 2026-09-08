@@ -554,8 +554,15 @@ def _filters_section(filter_catalog: dict[str, str], intensity: int) -> str:
     channel with `filters_intensity == 0` or an empty/fully-blocked
     catalogue gets a byte-identical prompt to before this feature existed.
     Frequency wording mirrors the three-tier phrasing `Get-AiDirectionPlan`
-    used for the same `Config.edit.filters.intensity` value."""
-    if not filter_catalog:
+    used for the same `Config.edit.filters.intensity` value.
+
+    `intensity <= 0` is a hard "off entirely" per the setting's own help
+    text, not merely the sparsest tier of "sparingly" wording - the plan's
+    first draft only varied the frequency phrase by intensity and never
+    actually suppressed the section at 0, which is a real, user-visible
+    difference: an "off" channel calling out available filters at all
+    invites the model to use one anyway."""
+    if not filter_catalog or intensity <= 0:
         return ""
     if intensity >= 75:
         frequency = "freely — use one on any scene that would benefit"

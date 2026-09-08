@@ -391,6 +391,63 @@ def test_director2_caps_card_frequency_to_roughly_one_per_three_scenes(tmp_path,
     assert len(card_plan["cards"]) == 2  # floor(6/3)
 
 
+def test_director2_prompt_receives_the_eligible_filter_catalog(tmp_path, monkeypatch):
+    """filters_allow/filters_block narrow what reaches the prompt; a
+    blocked name never appears even if cataloged."""
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(
+        director_module,
+        "load_filter_catalog",
+        lambda force=True: {
+            "film_grain": {"name": "film_grain", "desc": "Old-film grain.", "vf_file": "film_grain.mov"},
+            "light_leak": {"name": "light_leak", "desc": "Warm light bloom.", "vf_file": "light_leak.mov"},
+        },
+    )
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+
+    reply = json.dumps({"grade": {"look": "none"}, "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut"}]})
+    fake = _QueueGenerator([reply])
+    monkeypatch.setattr(director_module, "generate_text", fake)
+
+    project = _project(tmp_path)
+    channel = _channel({"filters_block": "light_leak"})
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {})
+    _write_scenes(ctx, ["Scene one text."])
+
+    director_module.Director2Phase().run(ctx)
+
+    prompt = fake.calls[0][1]
+    assert "film_grain" in prompt
+    assert "light_leak" not in prompt
+
+
+def test_director2_prompt_has_no_filters_section_when_intensity_is_zero(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(
+        director_module,
+        "load_filter_catalog",
+        lambda force=True: {"film_grain": {"name": "film_grain", "desc": "Old-film grain.", "vf_file": "x.mov"}},
+    )
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+
+    reply = json.dumps({"grade": {"look": "none"}, "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut"}]})
+    fake = _QueueGenerator([reply])
+    monkeypatch.setattr(director_module, "generate_text", fake)
+
+    project = _project(tmp_path)
+    channel = _channel({"filters_intensity": 0})
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {})
+    _write_scenes(ctx, ["Scene one text."])
+
+    director_module.Director2Phase().run(ctx)
+
+    assert "AVAILABLE FILTERS" not in fake.calls[0][1]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # ScreenTextPhase
 # ═══════════════════════════════════════════════════════════════════════

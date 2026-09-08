@@ -109,6 +109,8 @@ from avg.pipeline.phases._common import (
     script_dir,
     write_json,
 )
+from avg.media.environment import ensure_filters_dir_env
+from avg.media.vendor.avg import load_filter_catalog
 from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt
 from avg.providers.text.router import generate as generate_text
 
@@ -361,6 +363,32 @@ _CARD_SCENE_DIVISOR = 3
 _ACCENT = "accent1"
 
 
+def _filter_catalog() -> dict[str, str]:
+    """`{name: description}` for every cataloged filter clip, or `{}` if
+    none exist yet (empty catalogue is a clean no-op - see
+    `avg.pipeline.prompts._filters_section`).
+
+    `force=True` on every call: `load_filter_catalog`'s module-level cache
+    lives in the protected vendor file and would otherwise return a stale
+    catalogue read under a different `AVG_FILTERS_DIR` (a real risk across
+    tests, which routinely monkeypatch the env var to a temp catalogue).
+    """
+    ensure_filters_dir_env()
+    return {entry["name"]: entry["desc"] for entry in load_filter_catalog(force=True).values()}
+
+
+def _eligible_filters(catalog: dict[str, str], allow: str, block: str) -> dict[str, str]:
+    """`catalog` narrowed by the channel's `filters_allow`/`filters_block`
+    CSV settings (case-insensitive; blank allow means "everything not
+    blocked")."""
+    allow_set = {n.strip().lower() for n in allow.split(",") if n.strip()}
+    block_set = {n.strip().lower() for n in block.split(",") if n.strip()}
+    eligible = {name: desc for name, desc in catalog.items() if name.lower() not in block_set}
+    if allow_set:
+        eligible = {name: desc for name, desc in eligible.items() if name.lower() in allow_set}
+    return eligible
+
+
 
 
 def _coerce_float(value: object, default: float) -> float:
@@ -572,9 +600,22 @@ class Director2Phase:
         scene_texts = [str(scene.get("text") or "") for scene in scenes if isinstance(scene, dict)]
         valid_scenes = set(range(1, len(scene_texts) + 1))
         inputs = creative_inputs(ctx)
+        settings = ctx.channel_values
+
+        filters_intensity = _coerce_int(settings.get("filters_intensity"))
+        if filters_intensity is None:
+            filters_intensity = 50
+        filters_intensity = max(0, min(100, filters_intensity))
+        eligible_filters = _eligible_filters(
+            _filter_catalog(),
+            str(settings.get("filters_allow") or ""),
+            str(settings.get("filters_block") or ""),
+        )
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Planning motion and grade..."))
-        prompt = build_director2_prompt(inputs, scene_texts)
+        prompt = build_director2_prompt(
+            inputs, scene_texts, filter_catalog=eligible_filters, filters_intensity=filters_intensity
+        )
         result = generate_text(prompt, "director2", config=ctx.router)
 
         try:
