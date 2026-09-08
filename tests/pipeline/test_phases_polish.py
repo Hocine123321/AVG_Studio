@@ -448,6 +448,117 @@ def test_director2_prompt_has_no_filters_section_when_intensity_is_zero(tmp_path
     assert "AVAILABLE FILTERS" not in fake.calls[0][1]
 
 
+def test_direction_plan_carries_a_valid_per_scene_filter(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(
+        director_module,
+        "load_filter_catalog",
+        lambda force=True: {"film_grain": {"name": "film_grain", "desc": "d", "vf_file": "x.mov"}},
+    )
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+    reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut", "filter": "film_grain"}],
+    })
+    monkeypatch.setattr(director_module, "generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["Scene one."])
+    director_module.Director2Phase().run(ctx)
+
+    plan = read_json(render_dir(ctx) / "direction_plan.json")
+    assert plan["scenes"][0]["filter"] == "film_grain"
+
+
+def test_direction_plan_drops_a_filter_name_the_catalog_never_offered(tmp_path, monkeypatch):
+    """A model naming a filter it wasn't given (hallucinated, or offered
+    under an old catalog before a rename) must never reach the render -
+    the vendored compositor would just skip an unrecognised name, but a
+    stale one is still worth degrading here rather than passing through."""
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(director_module, "load_filter_catalog", lambda force=True: {})
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+    reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut", "filter": "made_up_name"}],
+    })
+    monkeypatch.setattr(director_module, "generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["Scene one."])
+    director_module.Director2Phase().run(ctx)
+
+    plan = read_json(render_dir(ctx) / "direction_plan.json")
+    assert "filter" not in plan["scenes"][0]
+
+
+def test_direction_plan_caps_filter_use_to_at_most_a_quarter_of_scenes(tmp_path, monkeypatch):
+    """8 scenes, every one naming a valid filter - the 25% cap must keep
+    only 2 (floor(8 * 0.25))."""
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(
+        director_module,
+        "load_filter_catalog",
+        lambda force=True: {"film_grain": {"name": "film_grain", "desc": "d", "vf_file": "x.mov"}},
+    )
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+    reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [
+            {"scene": i + 1, "motion": {}, "transition_in": "cut", "filter": "film_grain"} for i in range(8)
+        ],
+    })
+    monkeypatch.setattr(director_module, "generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, [f"Scene {i}." for i in range(8)])
+    director_module.Director2Phase().run(ctx)
+
+    plan = read_json(render_dir(ctx) / "direction_plan.json")
+    filtered = [s for s in plan["scenes"] if "filter" in s]
+    assert len(filtered) == 2
+
+
+def test_direction_plan_caps_a_single_filter_name_to_two_scenes(tmp_path, monkeypatch):
+    """6 scenes (well under the 25% scene cap at this count would allow 1 -
+    use a catalog with two names and a generous intensity note so the
+    per-NAME cap, not the per-scene cap, is what's under test): every scene
+    requests the SAME filter name - at most 2 may keep it even though the
+    scene-fraction cap alone would allow more names to spread across."""
+    from avg.pipeline.phases import director as director_module
+
+    monkeypatch.setattr(
+        director_module,
+        "load_filter_catalog",
+        lambda force=True: {"film_grain": {"name": "film_grain", "desc": "d", "vf_file": "x.mov"}},
+    )
+    monkeypatch.setattr(director_module, "ensure_filters_dir_env", lambda: None)
+    # 12 scenes: the 25% cap allows 3, so this proves the per-name cap (2)
+    # is the one that actually bites here, not the scene-fraction cap.
+    reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [
+            {"scene": i + 1, "motion": {}, "transition_in": "cut", "filter": "film_grain"} for i in range(12)
+        ],
+    })
+    monkeypatch.setattr(director_module, "generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, [f"Scene {i}." for i in range(12)])
+    director_module.Director2Phase().run(ctx)
+
+    plan = read_json(render_dir(ctx) / "direction_plan.json")
+    filtered = [s for s in plan["scenes"] if "filter" in s]
+    assert len(filtered) == 2
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # ScreenTextPhase
 # ═══════════════════════════════════════════════════════════════════════

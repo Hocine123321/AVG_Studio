@@ -360,6 +360,13 @@ _DEFAULT_GRADE_LOOK = "none"
 # frequency budget) so cards punctuate a video rather than saturating it.
 _CARD_SCENE_DIVISOR = 3
 
+# Same anti-clutter budget `Get-AiDirectionPlan` applied to filter overlays:
+# at most a quarter of the video's scenes may carry one, and no single
+# filter name may cover more than two scenes, so a model that likes one
+# filter can't saturate the whole video with it.
+_FILTER_SCENE_FRACTION = 0.25
+_FILTER_MAX_PER_NAME = 2
+
 _ACCENT = "accent1"
 
 
@@ -398,11 +405,21 @@ def _coerce_float(value: object, default: float) -> float:
         return default
 
 
-def _normalize_direction_entry(entry: object, grade: dict, valid_scenes: set[int]) -> dict | None:
+def _normalize_direction_entry(
+    entry: object, grade: dict, valid_scenes: set[int], valid_filters: frozenset[str] = frozenset()
+) -> dict | None:
     """One `scenes[]` entry from the model, sanitized against the plan's
     closed vocabularies, or `None` if it names no scene that actually
     exists in the finished script. `grade` is shared by every scene (the
-    plan sets it once at top level - see module docstring)."""
+    plan sets it once at top level - see module docstring).
+
+    `filter` is CATALOGUE data, not a closed vocabulary like motion/ease/
+    transition/grade - `valid_filters` is the eligible catalogue's own key
+    set (`avg.pipeline.phases.director._eligible_filters`), not a hardcoded
+    constant. An empty `valid_filters` (feature off, or nothing eligible)
+    means the key is never added regardless of what the model said - the
+    anti-clutter cap in `Director2Phase.run` still runs afterward and may
+    drop it further."""
     if not isinstance(entry, dict):
         return None
     scene_num = _coerce_int(entry.get("scene"))
@@ -423,12 +440,47 @@ def _normalize_direction_entry(entry: object, grade: dict, valid_scenes: set[int
     if transition_in not in _VALID_TRANSITIONS:
         transition_in = _DEFAULT_TRANSITION
 
-    return {
+    result = {
         "scene": scene_num,
         "motion": {"type": mtype, "intensity": intensity, "ease": ease},
         "transition_in": transition_in,
         "grade": grade,
     }
+    if valid_filters:
+        filt = str(entry.get("filter") or "").strip().lower()
+        if filt and filt in valid_filters:
+            result["filter"] = filt
+    return result
+
+
+def _cap_filter_use(scenes_out: list[dict], total_scenes: int) -> None:
+    """Enforce the anti-clutter budget in place, walking scenes in order:
+    at most `_FILTER_SCENE_FRACTION` of all scenes keep a filter, and at
+    most `_FILTER_MAX_PER_NAME` scenes keep any one filter name. Excess
+    entries lose the key entirely (not set to `None`) - matches every
+    other optional per-scene field in this codebase, which is absent, not
+    null, when there is nothing to say.
+
+    `max(1, ...)`: a bare `int(total_scenes * _FILTER_SCENE_FRACTION)`
+    floors to 0 for any video under 4 scenes, which would silently forbid
+    a filter on every short video regardless of what Director II or the
+    channel's filters_intensity asked for - a real conflict this plan's
+    own test suite caught (test_direction_plan_carries_a_valid_per_scene_
+    filter uses a single scene and expects its one valid filter to
+    survive). The floor is a soft budget against clutter on longer videos,
+    not a hard ban on shorter ones."""
+    max_scenes = max(1, int(total_scenes * _FILTER_SCENE_FRACTION))
+    per_name: dict[str, int] = {}
+    used = 0
+    for scene in scenes_out:
+        name = scene.get("filter")
+        if not name:
+            continue
+        if used >= max_scenes or per_name.get(name, 0) >= _FILTER_MAX_PER_NAME:
+            del scene["filter"]
+            continue
+        per_name[name] = per_name.get(name, 0) + 1
+        used += 1
 
 
 def _build_card_plan(scenes: list[dict]) -> dict:
@@ -629,11 +681,14 @@ class Director2Phase:
             look = _DEFAULT_GRADE_LOOK
         grade = {"look": look}
 
+        valid_filters = frozenset(eligible_filters)
         scenes_out = [
             normalized
             for entry in (parsed.get("scenes") or [])
-            if (normalized := _normalize_direction_entry(entry, grade, valid_scenes)) is not None
+            if (normalized := _normalize_direction_entry(entry, grade, valid_scenes, valid_filters)) is not None
         ]
+        if scenes_out:
+            _cap_filter_use(scenes_out, len(scene_texts))
         if not scenes_out:
             # Nothing usable survived - degrade to one safe default entry per
             # existing scene, matching Director I's identical leniency (this
