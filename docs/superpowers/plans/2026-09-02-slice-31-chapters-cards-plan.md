@@ -790,10 +790,78 @@ with:
 from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt, build_explainer_prompt
 ```
 
-Add `_normalize_explainer_card` directly after `_normalize_direction_entry`
-(the Director II section's own normalizer):
+In `avg/pipeline/phases/director.py`, replace:
 
 ```python
+def _normalize_direction_entry(entry: object, grade: dict, valid_scenes: set[int]) -> dict | None:
+    """One `scenes[]` entry from the model, sanitized against the plan's
+    closed vocabularies, or `None` if it names no scene that actually
+    exists in the finished script. `grade` is shared by every scene (the
+    plan sets it once at top level - see module docstring)."""
+    if not isinstance(entry, dict):
+        return None
+    scene_num = _coerce_int(entry.get("scene"))
+    if scene_num is None or scene_num not in valid_scenes:
+        return None
+
+    motion_in = entry.get("motion") if isinstance(entry.get("motion"), dict) else {}
+    mtype = str(motion_in.get("type") or _DEFAULT_MOTION).strip().lower()
+    if mtype not in _VALID_MOTION:
+        mtype = _DEFAULT_MOTION
+    intensity = _coerce_float(motion_in.get("intensity"), 0.5)
+    intensity = max(0.0, min(1.0, intensity))
+    ease = str(motion_in.get("ease") or _DEFAULT_EASE).strip().lower()
+    if ease not in _VALID_EASE:
+        ease = _DEFAULT_EASE
+
+    transition_in = str(entry.get("transition_in") or _DEFAULT_TRANSITION).strip().lower()
+    if transition_in not in _VALID_TRANSITIONS:
+        transition_in = _DEFAULT_TRANSITION
+
+    return {
+        "scene": scene_num,
+        "motion": {"type": mtype, "intensity": intensity, "ease": ease},
+        "transition_in": transition_in,
+        "grade": grade,
+    }
+```
+
+with:
+
+```python
+def _normalize_direction_entry(entry: object, grade: dict, valid_scenes: set[int]) -> dict | None:
+    """One `scenes[]` entry from the model, sanitized against the plan's
+    closed vocabularies, or `None` if it names no scene that actually
+    exists in the finished script. `grade` is shared by every scene (the
+    plan sets it once at top level - see module docstring)."""
+    if not isinstance(entry, dict):
+        return None
+    scene_num = _coerce_int(entry.get("scene"))
+    if scene_num is None or scene_num not in valid_scenes:
+        return None
+
+    motion_in = entry.get("motion") if isinstance(entry.get("motion"), dict) else {}
+    mtype = str(motion_in.get("type") or _DEFAULT_MOTION).strip().lower()
+    if mtype not in _VALID_MOTION:
+        mtype = _DEFAULT_MOTION
+    intensity = _coerce_float(motion_in.get("intensity"), 0.5)
+    intensity = max(0.0, min(1.0, intensity))
+    ease = str(motion_in.get("ease") or _DEFAULT_EASE).strip().lower()
+    if ease not in _VALID_EASE:
+        ease = _DEFAULT_EASE
+
+    transition_in = str(entry.get("transition_in") or _DEFAULT_TRANSITION).strip().lower()
+    if transition_in not in _VALID_TRANSITIONS:
+        transition_in = _DEFAULT_TRANSITION
+
+    return {
+        "scene": scene_num,
+        "motion": {"type": mtype, "intensity": intensity, "ease": ease},
+        "transition_in": transition_in,
+        "grade": grade,
+    }
+
+
 def _normalize_explainer_card(entry: object, valid_scenes: set[int]) -> dict | None:
     """One `cards[]` entry from the Explainer AI response, or `None` if it
     names no valid scene or has no text. Same shape `_build_card_plan`
