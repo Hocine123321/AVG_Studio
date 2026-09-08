@@ -111,7 +111,7 @@ from avg.pipeline.phases._common import (
 )
 from avg.media.environment import ensure_filters_dir_env
 from avg.media.vendor.avg import load_filter_catalog
-from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt
+from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt, load_catalog
 from avg.providers.text.router import generate as generate_text
 
 
@@ -614,6 +614,12 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
     try:
         width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)  # type: ignore[no-untyped-call]
         settings = ctx.channel_values
+        brand_preset_id = str(settings.get("brand_preset") or "")
+        preset_payload = None
+        if brand_preset_id:
+            option = load_catalog().get("brand_presets", {}).get(brand_preset_id)
+            if option is not None:
+                preset_payload = option.payload
         return write_layers(
             Path(ctx.project.folder),
             edit_plan,
@@ -624,6 +630,7 @@ def _draw_overlay_assets(ctx: PhaseContext, rdir: Path, edit_plan: dict[str, Any
             str(settings.get("overlay_accent1") or ""),
             str(settings.get("overlay_accent2") or ""),
             str(settings.get("overlay_highlight") or ""),
+            preset_payload,
         )
     except Exception as exc:  # noqa: BLE001 - see docstring
         message = f"Overlay assets could not be drawn ({exc}); the render will composite without cards."

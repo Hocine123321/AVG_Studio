@@ -85,7 +85,13 @@ def _vendor_spec(entry: dict[str, Any], brand: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def resolve_brand(font: str = "", accent1: str = "", accent2: str = "", highlight: str = "") -> dict[str, Any]:
+def resolve_brand(
+    font: str = "",
+    accent1: str = "",
+    accent2: str = "",
+    highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """The ONE brand resolver, shared by a real render (`render_layers`
     below, via Director II) and a settings preview
     (`avg.media.preview._draw_to_png`) - so an overlay setting changes the
@@ -102,13 +108,30 @@ def resolve_brand(font: str = "", accent1: str = "", accent2: str = "", highligh
     has no channel to read from beyond the request body) can call this
     with exactly the same values a debounced settings change carries.
 
-    Every argument left blank keeps the library's own `DEFAULT_BRAND`
-    value - a setting that has never been touched must draw exactly as it
-    did before this function existed.
+    `preset_payload` (the selected `brand_preset`'s own catalogue payload -
+    `bg`/`panel`/`panel_stroke`/`text`/`text2`/`accent1`/`accent2`/
+    `highlight`/`font_path`/`font_bold_path`, resolved by
+    `avg.pipeline.prompts.load_catalog` at the call site, never here) is
+    the new BASE palette, applied over `DEFAULT_BRAND` before the explicit
+    arguments below - so `font`/`accent1`/`accent2`/`highlight` still win
+    when a channel has set them by hand, exactly as before. `None`/`{}`
+    behaves exactly as it always has: `DEFAULT_BRAND` untouched.
+
+    Every argument left blank keeps whichever value is already in `brand`
+    at that point - a setting that has never been touched must draw
+    exactly as it did before this function existed.
     """
     from avg.media.vendor import overlay_design as od
 
     brand: dict[str, Any] = dict(od.DEFAULT_BRAND)
+    if preset_payload:
+        for key in (
+            "bg", "panel", "panel_stroke", "text", "text2",
+            "accent1", "accent2", "highlight", "font_path", "font_bold_path",
+        ):
+            value = preset_payload.get(key, "").strip()
+            if value:
+                brand[key] = value
     if font:
         # The brand carries font PATHS, not family names; a family name is
         # all this app's settings have, so it is only useful when it happens
@@ -134,6 +157,7 @@ def render_layers(
     accent1: str = "",
     accent2: str = "",
     highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """One `{png, start, end}` row per drawable layer.
 
@@ -145,7 +169,7 @@ def render_layers(
     """
     from avg.media.vendor import overlay_design as od
 
-    brand = resolve_brand(font, accent1, accent2, highlight)
+    brand = resolve_brand(font, accent1, accent2, highlight, preset_payload)
 
     overlays_dir = Path(project_folder) / "overlays"
     overlays_dir.mkdir(parents=True, exist_ok=True)
@@ -211,6 +235,7 @@ def write_layers(
     accent1: str = "",
     accent2: str = "",
     highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
 ) -> int:
     """Render the layers and write `render/_final_layers.json`.
 
@@ -220,7 +245,7 @@ def write_layers(
     combined path with nothing to combine.
     """
     layers = render_layers(
-        project_folder, edit_plan, scene_timings, width, height, font, accent1, accent2, highlight
+        project_folder, edit_plan, scene_timings, width, height, font, accent1, accent2, highlight, preset_payload
     )
     if not layers:
         return 0

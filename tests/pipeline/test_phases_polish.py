@@ -149,6 +149,54 @@ def test_draw_overlay_assets_inherits_accent_colors_from_the_app_wide_defaults(t
     assert (accent1, accent2, highlight) == ("#e08a4e", "#aebf92", "#ffffff")
 
 
+def test_draw_overlay_assets_resolves_the_brand_presets_payload(tmp_path, monkeypatch):
+    from avg.pipeline.phases.director import _draw_overlay_assets
+
+    monkeypatch.setattr("avg.media.vendor.avg._target_size", lambda ar, se: (1080, 1920))
+    captured: list[tuple] = []
+    monkeypatch.setattr("avg.media.overlays.write_layers", lambda *args: captured.append(args) or 1)
+
+    project = _project(tmp_path)
+    channel = _channel({"brand_preset": "neon_cyber"})
+    ctx, _ = _ctx(project, channel=channel)
+    ctx.channel_values = resolve_channel_settings(channel.settings, {})
+    rdir = render_dir(ctx)
+    rdir.mkdir(parents=True, exist_ok=True)
+
+    _draw_overlay_assets(ctx, rdir, {"overlays": []})
+
+    preset_payload = captured[0][9]
+    assert preset_payload["bg"] == "#050014"
+    assert preset_payload["accent1"] == "#00F0FF"
+
+
+def test_draw_overlay_assets_with_no_brand_preset_passes_none(tmp_path, monkeypatch):
+    """Regression: brand_preset's SettingSpec defaults to 'modern_dark',
+    not blank - _ctx(project)'s default channel therefore always resolves
+    a real preset id (the plan's own test assumed an unreachable "no
+    brand_preset set" state). Exercising the actual empty-value branch
+    means setting channel_values['brand_preset'] to '' directly, which is
+    the one way that branch is ever reached - a raw dict channel_values
+    built by hand rather than through resolve_channel_settings, or a
+    future SettingSpec default change."""
+    from avg.pipeline.phases.director import _draw_overlay_assets
+
+    monkeypatch.setattr("avg.media.vendor.avg._target_size", lambda ar, se: (1080, 1920))
+    captured: list[tuple] = []
+    monkeypatch.setattr("avg.media.overlays.write_layers", lambda *args: captured.append(args) or 1)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    ctx.channel_values["brand_preset"] = ""
+    rdir = render_dir(ctx)
+    rdir.mkdir(parents=True, exist_ok=True)
+
+    _draw_overlay_assets(ctx, rdir, {"overlays": []})
+
+    assert captured[0][9] is None
+
+
+
 def test_edit_plan_derives_from_the_card_plan():
     """One owner for a card's text. card_plan.json decides what a card says;
     edit_plan.json is the same information in the shape cmd_overlay_render

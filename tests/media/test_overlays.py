@@ -186,3 +186,27 @@ def test_a_long_question_is_not_truncated_into_an_ellipsis(tmp_path):
     assert short["element"] == "focused"
     assert long["element"] == "explainer"
     assert long["headline"] == "Why were lighthouses painted in stripes?"
+
+
+def test_resolve_brand_uses_the_preset_payload_as_its_base():
+    from avg.media.overlays import resolve_brand
+
+    brand = resolve_brand(preset_payload={"bg": "#111111", "accent1": "#ABCDEF"})
+    assert brand["bg"] == "#111111"
+    assert brand["accent1"] == "#ABCDEF"
+    # A key the payload didn't carry keeps the library's own default.
+    assert brand["highlight"] == "#FFD93D"
+
+
+def test_resolve_brand_explicit_accent_still_wins_over_the_preset_payload():
+    from avg.media.overlays import resolve_brand
+
+    brand = resolve_brand(accent1="#00FF00", preset_payload={"accent1": "#ABCDEF"})
+    assert brand["accent1"] == "#00FF00"
+
+
+def test_resolve_brand_with_no_preset_payload_is_unchanged_from_before():
+    from avg.media.overlays import resolve_brand
+    from avg.media.vendor import overlay_design as od
+
+    assert resolve_brand() == dict(od.DEFAULT_BRAND)
