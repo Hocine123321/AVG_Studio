@@ -1471,3 +1471,23 @@ matched either. Also fixed on `development` (commit `574170e`), since
 the bug pre-dates this porting work entirely.
 
 **Not yet ported:** Chapters+Cards, Caption Animation Styles.
+
+## Slice 31 sub-slice 3 (Chapters + Cards) ported to linux-port (2026-09-06)
+
+Zero functional changes needed - `avg/pipeline/phases/director.py`,
+`avg/pipeline/prompts.py`, `avg/core/settings_schema.py` are
+byte-identical between branches (confirmed by diff). Only header/test-
+command updates. Verified end-to-end against a scratch clone under this
+branch's real venv: all three settings register, `_normalize_part_entry`
+correctly computes `after_scene` from a scene list, `_build_card_plan`'s
+master gate correctly returns no cards when disabled.
+
+While verifying, converted one more loose "add directly after X"
+placement instruction (`_normalize_explainer_card`) to an exact anchored
+block, matching the fix already applied to the sibling
+`_normalize_part_entry` insertion during the original Windows-side
+review - missed on that first pass, caught here. Applied the identical
+fix to the Windows plan on `development` too for consistency
+(commit `2b85c64`).
+
+**Not yet ported:** Caption Animation Styles - last of the four.
