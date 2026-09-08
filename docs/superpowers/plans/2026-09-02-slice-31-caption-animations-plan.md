@@ -237,10 +237,17 @@ Expected: FAIL — `ImportError: cannot import name '_animated_text'`
 
 ### Step 2.2 — implement
 
-In `avg/pipeline/phases/captions.py`, add two new constants directly
-after `_POP_IN_OVERRIDE`:
+In `avg/pipeline/phases/captions.py`, replace:
 
 ```python
+_POP_IN_OVERRIDE = r"{\fscx65\fscy65\t(0,90,0.7,\fscx108\fscy108)\t(90,190,\fscx100\fscy100)}"
+```
+
+with:
+
+```python
+_POP_IN_OVERRIDE = r"{\fscx65\fscy65\t(0,90,0.7,\fscx108\fscy108)\t(90,190,\fscx100\fscy100)}"
+
 # The highlight/typewriter accent - a FIXED colour, not a setting,
 # matching legacy's own `_HIGHLIGHT_ACCENT` constant exactly (bright
 # yellow). Porting it as a new brand-driven setting would be scope past
