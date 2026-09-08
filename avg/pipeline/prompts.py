@@ -34,7 +34,7 @@ owns preset parsing; this module owns assembly.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -55,11 +55,36 @@ _OPTION_RE = re.compile(r"^##\s*OPTION:\s*(?P<rest>.*)$")
 
 @dataclass(frozen=True, slots=True)
 class CatalogOption:
-    """One `## OPTION: id | Label | hint` row from `dynamic_options.txt`."""
+    """One `## OPTION: id | Label | hint` row from `dynamic_options.txt`.
+
+    `payload` is `hint` re-parsed as `key=value;key=value` pairs, when it
+    looks like that shape - `brand_presets`' hint carries a real colour/
+    style payload (see `resolve_brand_style_bible`, `Task 8`'s
+    `resolve_brand`), while every other category's hint is prose a `key=`
+    token would never appear in. A malformed token (no `=`) is skipped,
+    never raised - matches the legacy `Set-BrandPresetProperty` parser's
+    own tolerance. Categories whose hint is prose degrade to `{}`."""
 
     id: str
     label: str
     hint: str
+    payload: dict[str, str] = field(default_factory=dict)
+
+
+def _parse_payload(raw: str) -> dict[str, str]:
+    """`"key=value;key=value"` -> `{"key": "value", ...}`. A token with no
+    `=` (ordinary prose, not a payload) is skipped rather than raising -
+    this is what lets `_parse_catalog` call it unconditionally for every
+    option's hint, prose or not."""
+    payload: dict[str, str] = {}
+    for token in raw.split(";"):
+        if "=" not in token:
+            continue
+        key, _, value = token.partition("=")
+        key = key.strip()
+        if key:
+            payload[key] = value.strip()
+    return payload
 
 
 def _parse_catalog(raw: str) -> dict[str, dict[str, CatalogOption]]:
@@ -80,7 +105,9 @@ def _parse_catalog(raw: str) -> dict[str, dict[str, CatalogOption]]:
             opt_id = parts[0]
             label = parts[1] if len(parts) > 1 else opt_id
             hint = parts[2] if len(parts) > 2 else ""
-            catalog[current][opt_id] = CatalogOption(id=opt_id, label=label, hint=hint)
+            catalog[current][opt_id] = CatalogOption(
+                id=opt_id, label=label, hint=hint, payload=_parse_payload(hint)
+            )
     return catalog
 
 

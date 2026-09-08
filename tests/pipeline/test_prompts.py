@@ -418,3 +418,31 @@ def test_word_budget_scales_with_duration(duration_seconds, expected):
 def test_narration_prompt_default_word_bounds_scale_with_duration():
     text = build_narration_prompt(_inputs(duration_seconds=120))
     assert "240 to 300 words" in text
+
+
+def test_load_catalog_parses_a_brand_presets_payload_into_a_dict():
+    catalog = load_catalog()
+    modern_dark = catalog["brand_presets"]["modern_dark"]
+    assert modern_dark.payload["bg"] == "#0B0F1A"
+    assert modern_dark.payload["accent1"] == "#FF4D6D"
+    assert modern_dark.payload["panel"] == "rgba(15,22,36,0.88)"
+
+
+def test_video_tone_options_get_an_empty_payload_not_a_crash():
+    # video_tone's hint is prose, not key=value pairs - payload must
+    # degrade to {} rather than raising on the first token with no '='.
+    catalog = load_catalog()
+    tone = catalog["video_tone"]["documentary_cinematic"]
+    assert tone.payload == {}
+
+
+def test_option_payload_tolerates_a_malformed_token(tmp_path):
+    catalog_file = tmp_path / "catalog.txt"
+    catalog_file.write_text(
+        "## CATEGORY: brand_presets\n"
+        "## OPTION: broken | Broken | bg=#111111;not_a_pair;accent1=#222222\n",
+        encoding="utf-8",
+    )
+    catalog = load_catalog(catalog_file)
+    opt = catalog["brand_presets"]["broken"]
+    assert opt.payload == {"bg": "#111111", "accent1": "#222222"}
