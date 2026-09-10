@@ -139,3 +139,15 @@ def test_filters_settings_exist_with_expected_defaults() -> None:
     for setting_id in ("filters_intensity", "filters_allow", "filters_block"):
         assert by_id[setting_id].scope == "channel"
         assert by_id[setting_id].invalidates == "director2"
+
+
+def test_recycle_settings_exist_with_expected_defaults() -> None:
+    by_id = {s.id: s for s in SETTINGS}
+    assert by_id["recycle_enabled"].default is True
+    assert by_id["recycle_enabled"].type == "bool"
+    assert by_id["recycle_ratio"].default == 70
+    assert by_id["recycle_ratio"].type == "int"
+    for setting_id in ("recycle_enabled", "recycle_ratio"):
+        assert by_id[setting_id].group == "images"
+        assert by_id[setting_id].scope == "channel"
+        assert by_id[setting_id].invalidates == "script"

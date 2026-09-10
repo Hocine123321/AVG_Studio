@@ -57,13 +57,15 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     group's `voice_trim_aggressiveness` and
     `voice_max_removable_silence_pct`, and 67 after Slice 25 added
     `kb_intensity`, and 70 after Slice 31 sub-slice 1 added the `filters`
-    group's `filters_intensity`, `filters_allow` and `filters_block`. The
+    group's `filters_intensity`, `filters_allow` and `filters_block`, and
+    72 after Slice 31 sub-slice 2 added the `images` group's
+    `recycle_enabled` and `recycle_ratio`. The
     count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 70
+    assert len(SETTINGS) == 72
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

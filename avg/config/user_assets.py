@@ -203,3 +203,14 @@ def default_working_models_path() -> Path:
     moved, had this stayed a shortcut off it instead of its own function.
     """
     return cache_root() / "AVG Studio" / "working_models.json"
+
+
+def default_reusable_images_dir() -> Path:
+    """`Documents/AVG Studio/UserAssets/ReusableImages` - the hand-
+    maintained image recycling pool `avg.config.recycle_pool.
+    read_recyclable_pool` reads (`images.json` plus the image files
+    themselves). No in-app editor exists for this folder in either app
+    version - see `docs/superpowers/specs/2026-09-02-slice-31-recycling-
+    design.md` §1.
+    """
+    return user_assets_root() / "ReusableImages"

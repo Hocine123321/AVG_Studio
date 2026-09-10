@@ -642,6 +642,34 @@ SETTINGS: list[SettingSpec] = [
         choices=["low", "medium", "high"],
         invalidates="visuals",
     ),
+    # --- image recycling (reuse a verified pool image instead of generating) ---
+    SettingSpec(
+        id="recycle_enabled",
+        group="images",
+        label="Image recycling",
+        help=(
+            "Reuse verified images from the pool "
+            "(Documents/AVG Studio/UserAssets/ReusableImages) to cut API usage. "
+            "A no-op if the pool is empty."
+        ),
+        type="bool",
+        default=True,
+        scope="channel",
+        invalidates="script",
+    ),
+    SettingSpec(
+        id="recycle_ratio",
+        group="images",
+        label="Recycled image ratio",
+        help=(
+            "Target % of scenes to reuse from the pool (needs enough images in it). "
+            "0 turns recycling off; 100 reuses every scene and generates nothing."
+        ),
+        type="int",
+        default=70,
+        scope="channel",
+        invalidates="script",
+    ),
     # --- render engine and quality ---
     SettingSpec(
         id="render_threads",

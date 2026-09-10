@@ -204,3 +204,8 @@ def test_default_working_models_path_stays_at_xdg_cache_not_userassets(monkeypat
 
     assert path == cache / "AVG Studio" / "working_models.json"
     assert "UserAssets" not in path.parts
+
+
+def test_default_reusable_images_dir_is_at_the_userassets_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(user_assets_module, "user_assets_root", lambda: tmp_path)
+    assert user_assets_module.default_reusable_images_dir() == tmp_path / "ReusableImages"
