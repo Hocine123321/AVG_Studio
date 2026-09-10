@@ -59,6 +59,7 @@ def _draw_to_png(
     accent1: str = "",
     accent2: str = "",
     highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
 ) -> bytes:
     """One drawn layer as PNG bytes, or `b""`.
 
@@ -80,7 +81,7 @@ def _draw_to_png(
     from avg.media.vendor import overlay_design as od  # noqa: PLC0415
 
     try:
-        brand = resolve_brand(font, accent1, accent2, highlight)
+        brand = resolve_brand(font, accent1, accent2, highlight, preset_payload)
         image = od.render_overlay(spec, width, height, brand)  # type: ignore[no-untyped-call]
     except Exception:  # noqa: BLE001 - an unknown element, or a bad colour, is "nothing to show"
         return b""
@@ -99,9 +100,10 @@ def overlay_png(
     accent1: str = "",
     accent2: str = "",
     highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
 ) -> bytes:
     """One overlay, drawn exactly as the render would draw it."""
-    return _draw_to_png(spec, width, height, font, accent1, accent2, highlight)
+    return _draw_to_png(spec, width, height, font, accent1, accent2, highlight, preset_payload)
 
 
 def takeover_png(
@@ -113,6 +115,7 @@ def takeover_png(
     accent1: str = "",
     accent2: str = "",
     highlight: str = "",
+    preset_payload: dict[str, str] | None = None,
 ) -> bytes:
     """One takeover card, drawn exactly as the render would draw it.
 
@@ -127,6 +130,7 @@ def takeover_png(
         accent1,
         accent2,
         highlight,
+        preset_payload,
     )
 
 

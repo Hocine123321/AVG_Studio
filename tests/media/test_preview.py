@@ -79,6 +79,26 @@ def test_the_preview_and_a_real_render_resolve_the_brand_through_one_function():
     assert _calls_resolve_brand(overlays.render_layers)
 
 
+def test_overlay_png_passes_preset_payload_through_to_resolve_brand(monkeypatch):
+    """`preset_payload` is a new trailing parameter, not a re-derivation -
+    proves it reaches `resolve_brand` unchanged rather than being dropped
+    somewhere in `_draw_to_png`'s plumbing."""
+    from avg.media import preview
+
+    captured = {}
+
+    def fake_resolve_brand(font, accent1, accent2, highlight, preset_payload=None):
+        captured["preset_payload"] = preset_payload
+        return {}
+
+    monkeypatch.setattr("avg.media.overlays.resolve_brand", fake_resolve_brand)
+    monkeypatch.setattr("avg.media.vendor.overlay_design.render_overlay", lambda spec, w, h, brand: None)
+
+    preview.overlay_png({"element": "focused"}, 100, 100, preset_payload={"bg": "#111111"})
+
+    assert captured["preset_payload"] == {"bg": "#111111"}
+
+
 def test_the_sample_sentence_is_fixed_and_shared():
     """One constant, so the voice preview always says the same thing and
     the panel can quote it."""

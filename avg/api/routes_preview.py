@@ -125,6 +125,12 @@ class OverlayPreview(BaseModel):
     font: str = ""
     accent1: str = ""
     accent2: str = ""
+    #: The channel's `brand_preset` catalogue id (raw, same as the above) -
+    #: resolved to its palette payload in the route below, same
+    #: `avg.pipeline.prompts.load_catalog` call `_draw_overlay_assets` makes
+    #: for a real render, so a brand-preset colour change previews exactly
+    #: as it will render (Slice 14's "one resolver" rule, extended).
+    brand_preset: str = ""
     highlight: str = ""
 
 
@@ -137,6 +143,7 @@ class TakeoverPreview(BaseModel):
     accent1: str = ""
     accent2: str = ""
     highlight: str = ""
+    brand_preset: str = ""
 
 
 class VoicePreview(BaseModel):
@@ -338,6 +345,19 @@ async def preview_caption(body: CaptionPreview, request: Request) -> Response:
     return _png_or_503(data)
 
 
+def _preset_payload(brand_preset: str) -> dict[str, str] | None:
+    """`body.brand_preset`'s catalogue payload, or `None` - the same lookup
+    `avg.pipeline.phases.director._draw_overlay_assets` makes for a real
+    render, so a preview and the render it previews can never disagree
+    about a brand preset's colours again (Slice 14's "one resolver" rule)."""
+    from avg.pipeline.prompts import load_catalog  # noqa: PLC0415
+
+    if not brand_preset:
+        return None
+    option = load_catalog().get("brand_presets", {}).get(brand_preset)
+    return option.payload if option is not None else None
+
+
 @router.post("/api/preview/overlay")
 async def preview_overlay(body: OverlayPreview, request: Request) -> Response:
     """Free: one PIL draw by the render's own overlay code. No lock - see
@@ -347,7 +367,15 @@ async def preview_overlay(body: OverlayPreview, request: Request) -> Response:
     inside `overlay_png` -> `avg.media.overlays.resolve_brand`, the same
     function a real render calls (Slice 14 review, Important 4)."""
     data = await asyncio.to_thread(
-        overlay_png, body.spec, body.width, body.height, body.font, body.accent1, body.accent2, body.highlight
+        overlay_png,
+        body.spec,
+        body.width,
+        body.height,
+        body.font,
+        body.accent1,
+        body.accent2,
+        body.highlight,
+        _preset_payload(body.brand_preset),
     )
     return _png_or_503(data)
 
@@ -366,6 +394,7 @@ async def preview_takeover(body: TakeoverPreview, request: Request) -> Response:
         body.accent1,
         body.accent2,
         body.highlight,
+        _preset_payload(body.brand_preset),
     )
     return _png_or_503(data)
 

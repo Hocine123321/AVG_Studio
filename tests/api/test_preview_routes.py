@@ -80,6 +80,37 @@ def test_a_takeover_preview_is_free_and_needs_no_confirmation(client):
     assert res.status_code == 200
 
 
+def test_preview_overlay_resolves_a_named_brand_preset(client):
+    """A named brand_preset (previously a field OverlayPreview did not even
+    have, so FastAPI would silently drop it) must reach resolve_brand
+    without raising - the unit-level resolve_brand tests already prove the
+    palette itself is correct; this proves the wiring reaches it."""
+    response = client.post(
+        "/api/preview/overlay",
+        json={"spec": {"element": "focused", "headline": "Hi"}, "brand_preset": "neon_cyber"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+
+
+def test_preview_overlay_with_no_brand_preset_still_works(client):
+    response = client.post(
+        "/api/preview/overlay",
+        json={"spec": {"element": "focused", "headline": "Hi"}},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+
+
+def test_preview_takeover_resolves_a_named_brand_preset(client):
+    response = client.post(
+        "/api/preview/takeover",
+        json={"headline": "A headline", "sub": "and a sub", "brand_preset": "neon_cyber"},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+
+
 def test_an_elevenlabs_voice_preview_refuses_without_confirmation(client, monkeypatch):
     """The rule that keeps a keystroke from costing money. Enforced on the
     BACKEND, so it holds regardless of what the frontend does.
