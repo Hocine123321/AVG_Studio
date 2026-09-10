@@ -521,11 +521,22 @@ def build_scene_segmentation_prompt(
     max_scenes: int = 15,
     exact_scene_count: int = 0,
     extra_style_guide: str = "",
+    recycle_pool: list[dict] | None = None,
+    recycle_ratio: int = 0,
 ) -> str:
     """Phase 1 / Pass 2's prompt: split the finished narration into scenes
-    and write one image prompt per scene. Ported from
-    `Invoke-SceneSegmentation`'s default (non-recycle-pool) path — pool
-    stitching is a separate reuse feature this task does not port.
+    and write one image prompt per scene — or, for a scene a pool image
+    genuinely fits, the canonical `[RECYCLE #k]` token instead. Ported
+    from `Invoke-SceneSegmentation` (`D:\\AI_Video_Gen\\modules\\ai.ps1`),
+    including its pool-stitching path.
+
+    Mode is derived here, not passed in as a separate flag (legacy's
+    `RecycleMode` parameter): `"off"` when `recycle_pool` is empty/`None`
+    or `recycle_ratio <= 0`, `"all"` at `>= 100` (every scene must
+    recycle, no prompts written at all), else `"partial"` (the model's own
+    judgement, guided by `recycle_ratio`). `"off"` mode's prompt is
+    BYTE-IDENTICAL to before this parameter existed — pool wording only
+    ever appears when there is something to stitch.
 
     `extra_style_guide` is an opaque slot (mirrors `SceneCtx` in the old
     prompt, which came from a `scene_descriptions.md` context file this
@@ -542,14 +553,59 @@ def build_scene_segmentation_prompt(
         style_guide_lines.append(extra_style_guide)
     style_guide = "\n".join(style_guide_lines) if style_guide_lines else "No specific visual style constraints."
 
+    pool = recycle_pool or []
+    use_pool = bool(pool) and recycle_ratio > 0
+    mode = "all" if (use_pool and recycle_ratio >= 100) else ("partial" if use_pool else "off")
+
+    pool_section = ""
+    job_line = "Below is a finished narration. Split it into scenes and write one image prompt per scene."
+    image_rule = (
+        f"- an Image line: ONE concrete visual subject suited to a {inputs.aspect_ratio} frame. Describe what\n"
+        f"  is literally seen — no metaphors, no text-in-image.{style_tail}\n"
+    )
+    pool_rules = ""
+    image_schema_hint = "<the image prompt>"
+
+    if mode != "off":
+        pool_lines = "\n".join(f"#{entry['index']}: {entry['description']}" for entry in pool)
+        pool_section = f"\n\n=== RE-USABLE IMAGE POOL (#k : description) ===\n{pool_lines}\n"
+        image_schema_hint = "<the image prompt, or [RECYCLE #k]>"
+        pool_rules = (
+            "- Only use image numbers (#k) that appear in the pool above.\n"
+            "- The same pool image MAY serve more than one scene; each scene gets at most one.\n"
+        )
+        if mode == "all":
+            job_line = (
+                "Below is a finished narration. Split it into scenes and assign each scene a re-usable image."
+            )
+            image_rule = (
+                "- an Image line: ALWAYS the token [RECYCLE #k] naming the pool image that fits this scene best.\n"
+                "  This video re-uses ONLY pooled images — no new images will be generated — so EVERY scene must\n"
+                "  get a [RECYCLE #k]. When nothing fits well, still pick the nearest. Never write a description.\n"
+            )
+        else:
+            image_rule = (
+                "- an Image line, which is ONE of:\n"
+                "    [RECYCLE #k]  — when a pool image GENUINELY fits this scene. Re-using a good match saves\n"
+                "                    generation, but a FORCED match looks worse than a fresh image, so only\n"
+                f"                    re-use on a strong, obvious fit. Re-use at most {recycle_ratio}% of the scenes.\n"
+                f"    a prompt      — otherwise: ONE concrete visual subject suited to a {inputs.aspect_ratio} frame,\n"
+                f"                    describing what is literally seen. No metaphors, no text-in-image.{style_tail}\n"
+                "  Decide this scene by scene, in order, from the first scene to the last.\n"
+            )
+            job_line = (
+                "Below is a finished narration. Split it into scenes, re-use pool images where they genuinely "
+                "fit, and write an image prompt for every other scene."
+            )
+
     return f"""=== VISUAL STYLE GUIDE ===
-{style_guide}
+{style_guide}{pool_section}
 
 === TASK ===
 Topic: "{inputs.topic}"
 Image aspect ratio: {inputs.aspect_ratio}
 
-Below is a finished narration. Split it into scenes and write one image prompt per scene.
+{job_line}
 
 {count_rule}
 
@@ -562,16 +618,14 @@ ABSOLUTE RULE — the narration is FINAL:
 - Concatenating your scene texts in order must reproduce the narration verbatim.
 
 For each scene also write:
-- an Image line: ONE concrete visual subject suited to a {inputs.aspect_ratio} frame. Describe what
-  is literally seen — no metaphors, no text-in-image.{style_tail}
-- a Label: one or two words naming the scene's job (Hook, Reveal, Context, Payoff, ...).
-
+{image_rule}- a Label: one or two words naming the scene's job (Hook, Reveal, Context, Payoff, ...).
+{pool_rules}
 Output EXACTLY this structure for every scene, in order, and nothing else:
 
 @@SCENE@@
 <the verbatim narration words for this scene>
 @@IMAGE@@
-<the image prompt>
+{image_schema_hint}
 @@LABEL@@
 <the label>
 

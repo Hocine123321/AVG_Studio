@@ -492,6 +492,63 @@ def test_narration_prompt_default_word_bounds_scale_with_duration():
     assert "240 to 300 words" in text
 
 
+def test_segmentation_prompt_is_unchanged_with_no_pool():
+    from avg.pipeline.prompts import build_scene_segmentation_prompt
+
+    prompt = build_scene_segmentation_prompt(_inputs(), "Some narration.")
+    assert "RE-USABLE IMAGE POOL" not in prompt
+    assert "<the image prompt>" in prompt
+    assert "[RECYCLE" not in prompt
+
+
+def test_segmentation_prompt_is_unchanged_when_ratio_is_zero():
+    from avg.pipeline.prompts import build_scene_segmentation_prompt
+
+    pool = [{"index": 1, "description": "A warm sunset."}]
+    prompt = build_scene_segmentation_prompt(
+        _inputs(), "Some narration.", recycle_pool=pool, recycle_ratio=0
+    )
+    assert "RE-USABLE IMAGE POOL" not in prompt
+
+
+def test_segmentation_prompt_partial_mode_lists_the_pool_and_ratio():
+    from avg.pipeline.prompts import build_scene_segmentation_prompt
+
+    pool = [{"index": 1, "description": "A warm sunset."}, {"index": 2, "description": "A city skyline."}]
+    prompt = build_scene_segmentation_prompt(
+        _inputs(), "Some narration.", recycle_pool=pool, recycle_ratio=40
+    )
+    assert "RE-USABLE IMAGE POOL" in prompt
+    assert "#1: A warm sunset." in prompt
+    assert "#2: A city skyline." in prompt
+    assert "Re-use at most 40% of the scenes." in prompt
+    assert "<the image prompt, or [RECYCLE #k]>" in prompt
+    assert "assign each scene a re-usable image" not in prompt  # that's "all" mode's job line
+
+
+def test_segmentation_prompt_all_mode_forces_every_scene_to_recycle():
+    from avg.pipeline.prompts import build_scene_segmentation_prompt
+
+    pool = [{"index": 1, "description": "A warm sunset."}]
+    prompt = build_scene_segmentation_prompt(
+        _inputs(), "Some narration.", recycle_pool=pool, recycle_ratio=100
+    )
+    assert "ALWAYS the token [RECYCLE #k]" in prompt
+    assert "EVERY scene must" in prompt
+    assert "Never write a description." in prompt
+
+
+def test_segmentation_prompt_pool_rules_only_appear_when_pool_is_active():
+    from avg.pipeline.prompts import build_scene_segmentation_prompt
+
+    pool = [{"index": 1, "description": "A warm sunset."}]
+    prompt = build_scene_segmentation_prompt(
+        _inputs(), "Some narration.", recycle_pool=pool, recycle_ratio=50
+    )
+    assert "Only use image numbers (#k) that appear in the pool above." in prompt
+    assert "MAY serve more than one scene" in prompt
+
+
 def test_load_catalog_parses_a_brand_presets_payload_into_a_dict():
     catalog = load_catalog()
     modern_dark = catalog["brand_presets"]["modern_dark"]
