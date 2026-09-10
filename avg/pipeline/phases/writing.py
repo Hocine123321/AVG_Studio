@@ -62,6 +62,8 @@ app's "legacy blind mode".
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -78,6 +80,7 @@ from avg.pipeline.phases._common import (
     strip_code_fence,
     write_json,
 )
+from avg.config.recycle_pool import read_recyclable_pool
 from avg.pipeline.prompts import (
     build_brief_prompt,
     build_narration_prompt,
@@ -246,6 +249,45 @@ def _normalize_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
+_RECYCLE_PICK_RE = re.compile(r"(?i)\[?\s*recycle\s*#?\s*(\d+)\s*\]?")
+_CANONICAL_RECYCLE_RE = re.compile(r"^\[RECYCLE #\d+\]$")
+
+
+def _normalize_recycle_picks(scenes: list[dict], pool_size: int) -> None:
+    """Mutates each scene's `image_prompt` in place: a loosely-written
+    recycle pick ("Use [RECYCLE #3]", "[recycle #3]", "RECYCLE #3")
+    becomes the canonical `"[RECYCLE #3]"` token every downstream reader
+    (`avg.pipeline.phases.visuals`) expects; an out-of-range pick is
+    stripped instead, leaving whatever prose (if any) came with it. Only
+    called when pool mode is active — `pool_size` is always > 0 then.
+    Ported from `Invoke-SceneSegmentation`'s own post-parse normalisation
+    (`D:\\AI_Video_Gen\\modules\\ai.ps1`)."""
+    for scene in scenes:
+        match = _RECYCLE_PICK_RE.search(scene["image_prompt"])
+        if not match:
+            continue
+        k = int(match.group(1))
+        if 1 <= k <= pool_size:
+            scene["image_prompt"] = f"[RECYCLE #{k}]"
+        else:
+            scene["image_prompt"] = _RECYCLE_PICK_RE.sub("", scene["image_prompt"]).strip()
+
+
+def _force_fill_all_mode(scenes: list[dict], pool_size: int) -> None:
+    """`"all"` mode's hard contract: every scene not already carrying a
+    valid `[RECYCLE #k]` after `_normalize_recycle_picks` is force-filled
+    by cycling the pool round-robin. Always succeeds — `"all"` mode
+    requires a non-empty pool to have been entered in the first place.
+    Ported from the `$rr % $poolCount` force-fill in `ai.ps1`."""
+    n = 0
+    for scene in scenes:
+        if _CANONICAL_RECYCLE_RE.match(scene["image_prompt"]):
+            continue
+        k = (n % pool_size) + 1
+        n += 1
+        scene["image_prompt"] = f"[RECYCLE #{k}]"
+
+
 @dataclass(frozen=True, slots=True)
 class ScriptPhase:
     id: int = 1
@@ -278,9 +320,28 @@ class ScriptPhase:
             raise AvgError(ErrorKind.bug, "script phase: pass 1 produced no narration text")
 
         # ── Pass 2: verbatim segmentation ───────────────────────────────
+        settings = ctx.channel_values
+        try:
+            recycle_ratio = int(settings.get("recycle_ratio", 70))
+        except (TypeError, ValueError):
+            recycle_ratio = 70
+        recycle_ratio = max(0, min(100, recycle_ratio))
+        pool_snapshot: list[dict] = []
+        if bool(settings.get("recycle_enabled", True)) and recycle_ratio > 0:
+            pool = read_recyclable_pool()
+            pool_snapshot = [
+                {"index": i + 1, "file": entry["file"], "description": entry["description"]}
+                for i, entry in enumerate(pool)
+            ]
+
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=50, message="Segmenting into scenes..."))
         segmentation_prompt = build_scene_segmentation_prompt(
-            inputs, narration, min_scenes=_MIN_SCENES, max_scenes=_MAX_SCENES
+            inputs,
+            narration,
+            min_scenes=_MIN_SCENES,
+            max_scenes=_MAX_SCENES,
+            recycle_pool=pool_snapshot,
+            recycle_ratio=recycle_ratio,
         )
         segmentation_result = generate_text(segmentation_prompt, "script_segmentation", config=ctx.router)
         scenes = parse_scene_blocks(segmentation_result.text)
@@ -299,6 +360,31 @@ class ScriptPhase:
 
         sdir = script_dir(ctx)
         sdir.mkdir(parents=True, exist_ok=True)
+
+        # ── Image recycling: pick normalisation + contract enforcement ──
+        # Reading the pool and building the prompt happened above, before
+        # Pass 2's call - see the pool-aware segmentation_prompt already
+        # built. This block only sanitises what the model sent back.
+        if pool_snapshot:
+            write_json(sdir / "recycle_pool.json", pool_snapshot)
+            _normalize_recycle_picks(scenes, len(pool_snapshot))
+            if recycle_ratio >= 100:
+                _force_fill_all_mode(scenes, len(pool_snapshot))
+            else:
+                used = sum(1 for s in scenes if _CANONICAL_RECYCLE_RE.match(s["image_prompt"]))
+                cap = int(len(scenes) * recycle_ratio / 100)
+                if used > cap:
+                    ctx.emit(
+                        ProgressEvent(
+                            project_id=ctx.project.id,
+                            percent=90,
+                            message=(
+                                f"Recycled {used}/{len(scenes)} scene(s), over the {recycle_ratio}% "
+                                "guidance - kept (trimming would leave a scene with no image prompt)."
+                            ),
+                        )
+                    )
+
         (sdir / "narration.txt").write_text(narration, encoding="utf-8")
         write_json(
             sdir / "scenes.json",

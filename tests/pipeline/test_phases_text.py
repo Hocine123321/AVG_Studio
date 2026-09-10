@@ -656,3 +656,139 @@ def test_the_script_prompt_carries_the_research(tmp_path):
 
     assert "Striped for contrast." in read_research(tmp_path)
     assert read_research(tmp_path / "elsewhere") == ""
+
+
+def test_script_phase_writes_no_recycle_snapshot_when_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/x.jpg", "description": "d"}],
+    )
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS]))
+
+    project = _project(tmp_path)
+    channel = _channel({"recycle_enabled": False})
+    ctx, _ = _ctx(project, channel=channel)
+    ScriptPhase().run(ctx)
+
+    assert not (script_dir(ctx) / "recycle_pool.json").exists()
+
+
+def test_script_phase_writes_no_recycle_snapshot_when_pool_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr("avg.pipeline.phases.writing.read_recyclable_pool", lambda: [])
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)  # recycle_enabled defaults True, ratio defaults 70
+    ScriptPhase().run(ctx)
+
+    assert not (script_dir(ctx) / "recycle_pool.json").exists()
+
+
+def test_script_phase_writes_the_recycle_snapshot_when_pool_is_active(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    ScriptPhase().run(ctx)
+
+    snapshot = read_json(script_dir(ctx) / "recycle_pool.json")
+    assert snapshot == [{"index": 1, "file": "/tmp/sunset.jpg", "description": "A warm sunset."}]
+
+
+def test_script_phase_segmentation_prompt_receives_the_pool(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    fake = _QueueGenerator([NARRATION, SCENE_BLOCKS])
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", fake)
+
+    project = _project(tmp_path)
+    channel = _channel({"recycle_ratio": 40})
+    ctx, _ = _ctx(project, channel=channel)
+    ScriptPhase().run(ctx)
+
+    segmentation_prompt = fake.calls[1][1]  # [0] is Pass 1 (narration)
+    assert "A warm sunset." in segmentation_prompt
+    assert "Re-use at most 40% of the scenes." in segmentation_prompt
+
+
+def test_script_phase_normalizes_a_loosely_written_recycle_pick(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    loose_blocks = SCENE_BLOCKS.replace(
+        "A weathered bronze mechanism glowing under lantern light", "Use [recycle #1] for this one"
+    )
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, loose_blocks])
+    )
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    ScriptPhase().run(ctx)
+
+    scenes = read_json(script_dir(ctx) / "scenes.json")
+    assert scenes[0]["image_prompt"] == "[RECYCLE #1]"
+
+
+def test_script_phase_drops_an_out_of_range_recycle_pick(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    bad_blocks = SCENE_BLOCKS.replace(
+        "A weathered bronze mechanism glowing under lantern light", "[RECYCLE #99]"
+    )
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, bad_blocks]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    ScriptPhase().run(ctx)
+
+    scenes = read_json(script_dir(ctx) / "scenes.json")
+    assert scenes[0]["image_prompt"] == ""
+
+
+def test_script_phase_all_mode_force_fills_every_scene(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    monkeypatch.setattr("avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, SCENE_BLOCKS]))
+
+    project = _project(tmp_path)
+    channel = _channel({"recycle_ratio": 100})
+    ctx, _ = _ctx(project, channel=channel)
+    ScriptPhase().run(ctx)
+
+    scenes = read_json(script_dir(ctx) / "scenes.json")
+    assert all(s["image_prompt"] == "[RECYCLE #1]" for s in scenes)
+
+
+def test_script_phase_partial_mode_emits_an_event_when_over_the_guided_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.read_recyclable_pool",
+        lambda: [{"file": "/tmp/sunset.jpg", "description": "A warm sunset."}],
+    )
+    both_recycled = SCENE_BLOCKS.replace(
+        "A weathered bronze mechanism glowing under lantern light", "[RECYCLE #1]"
+    ).replace("Ancient gears turning in golden light", "[RECYCLE #1]")
+    monkeypatch.setattr(
+        "avg.pipeline.phases.writing.generate_text", _QueueGenerator([NARRATION, both_recycled])
+    )
+
+    project = _project(tmp_path)
+    # ratio=10 on 2 scenes -> cap is 0, so even one recycled scene is "over".
+    channel = _channel({"recycle_ratio": 10})
+    ctx, events = _ctx(project, channel=channel)
+    ScriptPhase().run(ctx)
+
+    scenes = read_json(script_dir(ctx) / "scenes.json")
+    assert scenes[0]["image_prompt"] == "[RECYCLE #1]"  # kept, not trimmed
+    assert any("over the 10% guidance" in getattr(e, "message", "") for e in events)
