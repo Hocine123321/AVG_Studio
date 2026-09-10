@@ -151,3 +151,17 @@ def test_recycle_settings_exist_with_expected_defaults() -> None:
         assert by_id[setting_id].group == "images"
         assert by_id[setting_id].scope == "channel"
         assert by_id[setting_id].invalidates == "script"
+
+
+def test_card_settings_exist_with_expected_defaults() -> None:
+    by_id = {s.id: s for s in SETTINGS}
+    assert by_id["takeover_cards_enabled"].default is True
+    assert by_id["chapters_enabled"].default is False
+    assert by_id["explainer_enabled"].default is False
+    for setting_id in ("takeover_cards_enabled", "chapters_enabled", "explainer_enabled"):
+        assert by_id[setting_id].type == "bool"
+        assert by_id[setting_id].group == "overlay"
+        assert by_id[setting_id].scope == "channel"
+    assert by_id["chapters_enabled"].invalidates == "director1"
+    assert by_id["takeover_cards_enabled"].invalidates == "director2"
+    assert by_id["explainer_enabled"].invalidates == "director2"
