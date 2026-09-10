@@ -51,9 +51,13 @@ list_image_files` sorts by to pick the project grid's thumbnail) plus
 
 from __future__ import annotations
 
+import re
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+
+from PIL import Image
 
 from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
@@ -115,6 +119,56 @@ def _images_dir(ctx: PhaseContext) -> Path:
 
 def _scenes_json_path(ctx: PhaseContext) -> Path:
     return script_dir(ctx) / "scenes.json"
+
+
+_RECYCLE_TOKEN_RE = re.compile(r"^\[RECYCLE #(\d+)\]$")
+
+
+def _recycle_pool_path(ctx: PhaseContext) -> Path:
+    return script_dir(ctx) / "recycle_pool.json"
+
+
+def _pool_entry(index: int, pool_snapshot: list) -> dict | None:
+    """The `recycle_pool.json` snapshot's own 1-indexed entry for
+    `index`, or `None` for an out-of-range/malformed one."""
+    if not isinstance(pool_snapshot, list) or index < 1 or index > len(pool_snapshot):
+        return None
+    entry = pool_snapshot[index - 1]
+    return entry if isinstance(entry, dict) else None
+
+
+def _is_valid_image(path: Path) -> bool:
+    """A real, openable image file - Pillow's own `verify()`, which checks
+    the file isn't corrupt/truncated/not-an-image without decoding full
+    pixel data. Ported from legacy's `Test-ValidImageFile`: a corrupt or
+    non-image pool entry must fall back to generation, never poison a
+    render."""
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_recycled_scene(index: int, pool_snapshot: list, images_dir: Path, scene: int) -> _SceneResult | None:
+    """Copy the pool image `[RECYCLE #index]` names straight to
+    `images/{scene:03d}.png`, no provider call — or `None` if the
+    snapshot/file/validity check fails, in which case the caller falls
+    back to generation. Ported from the B2.15 recycle-copy block
+    (`D:\\AI_Video_Gen\\modules\\visuals.ps1`)."""
+    entry = _pool_entry(index, pool_snapshot)
+    if entry is None:
+        return None
+    src = Path(str(entry.get("file") or ""))
+    if not src.is_file() or not _is_valid_image(src):
+        return None
+    out_path = images_dir / f"{scene:03d}.png"
+    try:
+        shutil.copy2(src, out_path)
+    except OSError:
+        return None
+    return _SceneResult(scene=scene, ok=True, file=out_path.name)
 
 
 @dataclass
@@ -245,15 +299,40 @@ class VisualsPhase:
         if not isinstance(scenes, list) or not scenes:
             raise AvgError(ErrorKind.bug, "visuals phase: no finished scenes.json to generate images from")
 
+        images_dir = _images_dir(ctx)
+        images_dir.mkdir(parents=True, exist_ok=True)
+        pool_snapshot = read_json(_recycle_pool_path(ctx))
+        if not isinstance(pool_snapshot, list):
+            pool_snapshot = []
+
         jobs: list[tuple[int, str]] = []
+        recycled: dict[int, _SceneResult] = {}
         for i, scene in enumerate(scenes, start=1):
             if not isinstance(scene, dict):
                 continue
             prompt = str(scene.get("image_prompt") or scene.get("text") or "").strip()
+            recycle_match = _RECYCLE_TOKEN_RE.match(prompt)
+            if recycle_match:
+                k = int(recycle_match.group(1))
+                result = _resolve_recycled_scene(k, pool_snapshot, images_dir, i)
+                if result is not None:
+                    recycled[i] = result
+                    continue
+                # Resolution failed (bad index / missing / corrupt file) -
+                # fall back to generation, using a pool description as
+                # inspiration rather than a blank scene, same choice
+                # legacy makes. Prefer the SPECIFIC entry the model named
+                # (its own description, when the index was valid but the
+                # file was missing/corrupt); when the index itself was out
+                # of range there IS no such entry, so fall back further to
+                # the pool's first entry - still richer than nothing, just
+                # no longer tied to the (nonexistent) requested index.
+                entry = _pool_entry(k, pool_snapshot) or (pool_snapshot[0] if pool_snapshot else None)
+                prompt = str((entry or {}).get("description") or "").strip()
             if not prompt:
                 prompt = f"{ctx.project.title}, scene {i}"
             jobs.append((i, prompt))
-        if not jobs:
+        if not jobs and not recycled:
             raise AvgError(ErrorKind.bug, "visuals phase: scenes.json had no usable scene entries")
 
         settings = ctx.channel_values
@@ -264,13 +343,23 @@ class VisualsPhase:
         transport = ctx.router if isinstance(ctx.router, Transport) else None
         provider = _build_provider(provider_name, transport)
 
-        images_dir = _images_dir(ctx)
-        images_dir.mkdir(parents=True, exist_ok=True)
-
         total = len(jobs)
         workers = max(1, min(_worker_cap(_total_ram_gb()), total))
+        # `scene_count` (not `total`) is every downstream completeness
+        # count from here on - `total`/`workers` stay exactly what they
+        # were before this task (generation-job count only), because
+        # `_generate_all` below is a CLOSURE that reads `total` by
+        # reference: redefining `total` itself to include `recycled`
+        # would silently cap its own internal progress percentage below
+        # 100% for any run with at least one recycled scene (`done` can
+        # never reach a `total` that counts scenes `_generate_all` never
+        # touches). This was caught by tracing the closure, not visible
+        # from reading `run()`'s top-level statements in isolation.
+        scene_count = len(jobs) + len(recycled)
 
-        ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {total} image(s)..."))
+        ctx.emit(
+            ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {len(jobs)} image(s)...")
+        )
 
         def _generate_all(prov: ImageProvider, mdl: str) -> dict[int, _SceneResult]:
             """One full pass over every scene with one provider."""
@@ -296,18 +385,21 @@ class VisualsPhase:
                     )
             return out
 
-        results = _generate_all(provider, model)
+        gen_results = _generate_all(provider, model)
 
         primary_provider_name = provider_name
         primary_kind_label = ""
         fell_back = False
-        if not any(r.ok for r in results.values()):
+        if jobs and not any(r.ok for r in gen_results.values()):
             # Exactly once, never chained - the same rule the text router
-            # inherited from the legacy `$triedFallback` flag.
+            # inherited from the legacy `$triedFallback` flag. Gated on
+            # `jobs` being non-empty: an all-recycled run has nothing to
+            # have failed, and must never trigger a fallback provider it
+            # was never going to need.
             backup_provider = str(settings.get("image_provider_backup") or "")
             backup_model = str(settings.get("image_model_backup") or "")
             on_failure = str(settings.get("image_on_failure") or "stop")
-            kind = _dominant_kind(results)
+            kind = _dominant_kind(gen_results)
             if (
                 on_failure == "fall_back"
                 and backup_provider
@@ -325,8 +417,9 @@ class VisualsPhase:
                 primary_kind_label = kind.value
                 fell_back = True
                 provider_name, model = backup_provider, backup_model
-                results = _generate_all(_build_provider(backup_provider, transport), backup_model)
+                gen_results = _generate_all(_build_provider(backup_provider, transport), backup_model)
 
+        results: dict[int, _SceneResult] = {**recycled, **gen_results}
         ok_count = sum(1 for r in results.values() if r.ok)
         if ok_count == 0:
             # The reasons were on every `_SceneResult` all along; raising a
@@ -335,7 +428,7 @@ class VisualsPhase:
             kind = _dominant_kind(results)
             reasons = sorted({r.error for r in results.values() if not r.ok and r.error})
             detail = reasons[0] if reasons else "no reason reported"
-            message = f"Visuals: all {total} scene(s) failed on {provider_name}/{model} - {detail}"
+            message = f"Visuals: all {scene_count} scene(s) failed on {provider_name}/{model} - {detail}"
             if fell_back:
                 # The primary's own reason would otherwise survive only in
                 # `ProgressEvent`s - visible while the run is live, gone from
@@ -345,14 +438,14 @@ class VisualsPhase:
                 # also happened.
                 message += f" (primary {primary_provider_name} also failed - {primary_kind_label})"
             raise AvgError(kind, message)
-        if ok_count < total:
+        if ok_count < scene_count:
             # A partial set of images is a finished phase with a worse video:
             # the missing scenes repeat their neighbour's image (see
             # `index_entries`). Worth recording - it is the reason a video
             # has a picture on screen twice in a row.
             report_degradation(
                 ctx,
-                f"Visuals: {total - ok_count} of {total} scene(s) had no image; "
+                f"Visuals: {scene_count - ok_count} of {scene_count} scene(s) had no image; "
                 "each repeats the nearest one instead.",
             )
 
@@ -379,7 +472,7 @@ class VisualsPhase:
         # expects a flat list of paths and nothing else.
         rdir = render_dir(ctx)
         rdir.mkdir(parents=True, exist_ok=True)
-        write_json(rdir / "index.json", index_entries(results, total))
+        write_json(rdir / "index.json", index_entries(results, scene_count))
 
         _write_safezones(ctx, rdir)
 
@@ -387,7 +480,7 @@ class VisualsPhase:
             ProgressEvent(
                 project_id=ctx.project.id,
                 percent=100,
-                message=f"Visuals complete: {ok_count}/{total} image(s) generated.",
+                message=f"Visuals complete: {ok_count}/{scene_count} image(s) generated.",
             )
         )
 

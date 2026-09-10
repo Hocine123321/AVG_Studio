@@ -491,6 +491,125 @@ def test_visuals_falls_back_to_scene_text_when_image_prompt_is_blank(tmp_path, m
     assert fake.calls[0][0] == "the real narration text"
 
 
+def _tiny_valid_png_bytes() -> bytes:
+    """A real, 1x1 PNG - `Image.open(...).verify()` must accept it, unlike
+    an arbitrary byte string."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_visuals_phase_recycles_instead_of_generating(tmp_path, monkeypatch):
+    from avg.pipeline.phases import visuals as visuals_module
+
+    pool_image = tmp_path / "pool_sunset.jpg"
+    pool_image.write_bytes(_tiny_valid_png_bytes())
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["[RECYCLE #1]"])
+    write_json(
+        script_dir(ctx) / "recycle_pool.json",
+        [{"index": 1, "file": str(pool_image), "description": "A warm sunset."}],
+    )
+
+    called = []
+    monkeypatch.setattr(visuals_module, "_generate_one", lambda *a, **k: called.append(1) or None)
+
+    visuals_module.VisualsPhase().run(ctx)
+
+    assert not called  # no provider call at all
+    out = project.folder / "images" / "001.png"
+    assert out.is_file()
+    assert out.read_bytes() == pool_image.read_bytes()
+    manifest = read_json(project.folder / "images" / "manifest.json")
+    assert manifest["scenes"][0]["status"] == "ok"
+
+
+def test_visuals_phase_falls_back_to_generation_on_out_of_range_pick(tmp_path, monkeypatch):
+    from avg.pipeline.phases import visuals as visuals_module
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["[RECYCLE #99]"])
+    write_json(
+        script_dir(ctx) / "recycle_pool.json",
+        [{"index": 1, "file": str(tmp_path / "sunset.jpg"), "description": "A warm sunset."}],
+    )
+
+    captured_prompts = []
+
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+        captured_prompts.append(prompt)
+        out_path.write_bytes(b"generated")
+        from avg.pipeline.phases.visuals import _SceneResult
+
+        return _SceneResult(scene=scene, ok=True, file=out_path.name)
+
+    monkeypatch.setattr(visuals_module, "_generate_one", _fake_generate_one)
+
+    visuals_module.VisualsPhase().run(ctx)
+
+    # index 99 doesn't exist in a 1-entry pool - no *specific* entry to
+    # name, so the fallback is the pool's first entry's description, not
+    # a blank/generic prompt.
+    assert captured_prompts == ["A warm sunset."]
+
+
+def test_visuals_phase_falls_back_when_the_pool_file_is_not_a_real_image(tmp_path, monkeypatch):
+    from avg.pipeline.phases import visuals as visuals_module
+
+    bad_image = tmp_path / "corrupt.jpg"
+    bad_image.write_bytes(b"not actually an image")
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["[RECYCLE #1]"])
+    write_json(
+        script_dir(ctx) / "recycle_pool.json",
+        [{"index": 1, "file": str(bad_image), "description": "A warm sunset."}],
+    )
+
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+        out_path.write_bytes(b"generated")
+        from avg.pipeline.phases.visuals import _SceneResult
+
+        return _SceneResult(scene=scene, ok=True, file=out_path.name)
+
+    monkeypatch.setattr(visuals_module, "_generate_one", _fake_generate_one)
+
+    visuals_module.VisualsPhase().run(ctx)
+
+    out = project.folder / "images" / "001.png"
+    assert out.read_bytes() == b"generated"  # fell back, didn't copy the corrupt file
+
+
+def test_visuals_phase_a_scene_with_no_recycle_marker_is_unaffected(tmp_path, monkeypatch):
+    from avg.pipeline.phases import visuals as visuals_module
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_scenes(ctx, ["A regular prompt."])
+    # No recycle_pool.json at all - matches "recycling was off" exactly.
+
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+        out_path.write_bytes(b"generated")
+        from avg.pipeline.phases.visuals import _SceneResult
+
+        return _SceneResult(scene=scene, ok=True, file=out_path.name)
+
+    monkeypatch.setattr(visuals_module, "_generate_one", _fake_generate_one)
+
+    visuals_module.VisualsPhase().run(ctx)
+
+    out = project.folder / "images" / "001.png"
+    assert out.read_bytes() == b"generated"
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # VoicePhase
 # ═══════════════════════════════════════════════════════════════════════
