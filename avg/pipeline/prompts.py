@@ -33,6 +33,7 @@ owns preset parsing; this module owns assembly.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -643,24 +644,47 @@ def build_director1_prompt(
     *,
     min_images: int = 3,
     max_images: int = 160,
+    chapters_enabled: bool = False,
 ) -> str:
     """Phase 2 (Director I)'s prompt: the finished, scene-segmented script is
     FINAL - this decides the video's visual STRUCTURE around it (how many
     distinct images the story needs, each scene's role/beat/visual-intent,
-    and which words deserve zoom emphasis). Ported from `Get-AiVideoMap`
-    (`D:\\AI_Video_Gen\\modules\\ai.ps1`), simplified: chapters/parts grouping
-    and per-scene filter assignment are a separate, later concern
-    (Director II owns filters; chapters are out of scope for this task) -
-    this is the non-chaptered, filter-free path only.
+    which words deserve zoom emphasis, and - when `chapters_enabled` -
+    how scenes group into named chapters). Ported from `Get-AiVideoMap`
+    (`D:\\AI_Video_Gen\\modules\\ai.ps1`), simplified: per-scene filter
+    assignment is a separate concern (Director II owns filters).
 
     `scene_texts` is each scene's verbatim narration, in order (from
     `avg.pipeline.phases.writing`'s `scenes.json`) - the numbered list the
     model classifies is built from these, never re-derived from raw
     narration, so Director I always sees exactly the scenes the render will
     actually use.
+
+    `chapters_enabled=False` produces a BYTE-IDENTICAL prompt to before
+    this parameter existed - the chapters section and schema field only
+    ever appear when there's something for the model to plan.
     """
     numbered = "\n".join(f'[{i + 1}] "{text}"' for i, text in enumerate(scene_texts))
     current_count = len(scene_texts)
+
+    chapters_section = ""
+    parts_schema = ""
+    if chapters_enabled and current_count > 0:
+        est_parts = max(2, min(4, math.ceil(current_count / 10)))
+        chapters_section = f"""
+
+CHAPTER STRUCTURE (this video uses chapters):
+- Group the {current_count} scenes into {est_parts} sequential PARTS, each covering one sub-topic.
+  Split where the sub-topic genuinely changes, not every N scenes. Never split scene 1 away
+  from its part; never put a part break right before the final scene. Each part opens with a
+  full-screen takeover card (title + short subtitle) shown BEFORE its first scene.
+- Chapter title: max 4 words, states the sub-topic plainly. Subtitle: max 6 words, rephrases
+  the title as a hook, not a restatement.
+- Also return a "parts" array (see schema)."""
+        parts_schema = (
+            ',\n "parts":[{"part":1,"title":"<max 4 words>","sub":"<max 6 words>",'
+            '"scenes":[<scene numbers>],"duration_sec":1.8}]'
+        )
 
     return f"""You are the STRUCTURE DIRECTOR for a short narrated video built from still images.
 The script below is FINAL. Your job is to decide its VISUAL STRUCTURE: how many
@@ -691,11 +715,12 @@ Decide:
         ASSET = a floating graphic/icon/diagram composited over a clean background
         POP = a bold full-frame impact graphic that cuts in hard
 - zoom_words: array of {{scene, word}} — for each ZOOM-beat scene, the single word to emphasize.
+{chapters_section}
 
 Return ONLY a JSON object, no preamble, no markdown fences:
 {{"version":1,"image_count":<int>,
  "scenes":[{{"scene":1,"role":"hook","beat":"HIT","visual_intent":"POP"}}],
- "zoom_words":[{{"scene":<int>,"word":"<string>"}}],
+ "zoom_words":[{{"scene":<int>,"word":"<string>"}}]{parts_schema},
  "notes":"one line on your structural reasoning"}}"""
 
 
@@ -818,3 +843,30 @@ Return ONLY a JSON object, no preamble, no markdown fences. Schema:
 {{"version":1,"grade":{{"look":"..."}},
  "scenes":[{{"scene":<int>,"motion":{{"type":"...","intensity":0.5,"ease":"ease_out_cubic"}}{scene_filter_field},"transition_in":"..."}}]}}
 Every scene number above MUST appear exactly once."""
+
+
+def build_explainer_prompt(scene_texts: list[str], max_cards: int) -> str:
+    """The Explainer takeover card planner: picks a FEW scenes whose
+    narration states a deeper concept worth a full-screen pause. Ported
+    from `Get-AiEditPlan` (`D:\\AI_Video_Gen\\modules\\ai.ps1`) - an AI
+    pick, independent of the deterministic Focused cards
+    (`avg.pipeline.phases.director._build_card_plan`), which come from
+    `((question))` markers instead. `max_cards` is the caller's own
+    budget (`avg.pipeline.phases.director.Director2Phase.run`:
+    `max(0, min(4, scene_count // 6))`) - stated in the prompt so the
+    model self-limits, not enforced here.
+    """
+    numbered = "\n".join(f"[{i + 1}] {text}" for i, text in enumerate(scene_texts))
+    return f"""You are an editor deciding where to drop a full-screen EXPLAINER CARD — a centred "board" that
+covers the video for a moment to let the viewer absorb a deeper CONCEPT, definition, or summary
+spoken in that scene. Use them RARELY (at most {max_cards} in this whole video), only where a scene
+states a genuinely important idea worth pausing on. Most videos need ZERO.
+
+SCENES (number + narration):
+{numbered}
+
+For each chosen scene, "text" is a SHORT on-card phrasing of the concept (max 8 words) — it will be
+shown centred and synced to the voice, so keep it to the words actually spoken there.
+
+Return ONLY JSON, no preamble/fences: {{"cards":[{{"scene":<int>,"text":"<max 8 words>"}}]}}
+If no scene warrants a board, return {{"cards":[]}}."""

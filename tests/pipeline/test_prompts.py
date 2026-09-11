@@ -549,6 +549,48 @@ def test_segmentation_prompt_pool_rules_only_appear_when_pool_is_active():
     assert "MAY serve more than one scene" in prompt
 
 
+def test_director1_prompt_has_no_chapters_section_by_default():
+    from avg.pipeline.prompts import build_director1_prompt
+
+    prompt = build_director1_prompt(_inputs(), ["Scene one.", "Scene two."])
+    assert "CHAPTER STRUCTURE" not in prompt
+    assert '"parts"' not in prompt
+
+
+def test_director1_prompt_chapters_section_when_enabled():
+    from avg.pipeline.prompts import build_director1_prompt
+
+    scenes = [f"Scene {i}." for i in range(12)]
+    prompt = build_director1_prompt(_inputs(), scenes, chapters_enabled=True)
+    assert "CHAPTER STRUCTURE" in prompt
+    assert "Group the 12 scenes into 2 sequential PARTS" in prompt  # ceil(12/10)=2
+    assert '"parts":[{"part":1' in prompt
+
+
+def test_director1_prompt_part_count_scales_with_scene_count():
+    from avg.pipeline.prompts import build_director1_prompt
+
+    scenes = [f"Scene {i}." for i in range(35)]
+    prompt = build_director1_prompt(_inputs(), scenes, chapters_enabled=True)
+    assert "Group the 35 scenes into 4 sequential PARTS" in prompt  # min(4, ceil(35/10))=4
+
+
+def test_explainer_prompt_states_the_card_budget():
+    from avg.pipeline.prompts import build_explainer_prompt
+
+    prompt = build_explainer_prompt(["Scene one.", "Scene two."], max_cards=2)
+    assert "at most 2 in this whole video" in prompt
+    assert "[1] Scene one." in prompt
+    assert "[2] Scene two." in prompt
+
+
+def test_explainer_prompt_schema_is_present():
+    from avg.pipeline.prompts import build_explainer_prompt
+
+    prompt = build_explainer_prompt(["Scene one."], max_cards=1)
+    assert '{"cards":[{"scene":<int>,"text":"<max 8 words>"}]}' in prompt
+
+
 def test_load_catalog_parses_a_brand_presets_payload_into_a_dict():
     catalog = load_catalog()
     modern_dark = catalog["brand_presets"]["modern_dark"]

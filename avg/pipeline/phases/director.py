@@ -178,6 +178,32 @@ def _normalize_zoom_word(entry: object) -> dict | None:
     return {"scene": scene_num, "word": word}
 
 
+def _normalize_part_entry(entry: object, valid_scenes: set[int]) -> dict | None:
+    """One `parts[]` entry from Director I's chapters-mode response,
+    reduced to the flat shape `build_timeline` already reads
+    (`{after_scene, title, sub, duration_sec}`) - or `None` if it names
+    no valid scene, or its divider would land before scene 1. "Never
+    split scene 1 away from its part" means part 1 never gets a takeover
+    card - there is nothing before the video to insert one into."""
+    if not isinstance(entry, dict):
+        return None
+    scenes_in = entry.get("scenes")
+    if not isinstance(scenes_in, list):
+        return None
+    part_scenes = sorted({s for raw in scenes_in if (s := _coerce_int(raw)) is not None and s in valid_scenes})
+    if not part_scenes:
+        return None
+    after_scene = part_scenes[0] - 1
+    if after_scene <= 0:
+        return None
+    return {
+        "after_scene": after_scene,
+        "title": str(entry.get("title") or "").strip(),
+        "sub": str(entry.get("sub") or "").strip(),
+        "duration_sec": _coerce_float(entry.get("duration_sec"), _TAKEOVER_SECONDS),
+    }
+
+
 #: A takeover card holds the screen this long when the plan does not say.
 #: Matches the vendored engine's own default (`avg/media/vendor/avg.py:1992`),
 #: so a node without a duration times identically here and there.
@@ -278,9 +304,16 @@ class Director1Phase:
         scene_texts = [str(scene.get("text") or "") for scene in scenes if isinstance(scene, dict)]
         current_count = len(scene_texts)
         inputs = creative_inputs(ctx)
+        chapters_enabled = bool(ctx.channel_values.get("chapters_enabled", False))
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Planning visual structure..."))
-        prompt = build_director1_prompt(inputs, scene_texts, min_images=_MIN_IMAGES, max_images=_MAX_IMAGES)
+        prompt = build_director1_prompt(
+            inputs,
+            scene_texts,
+            min_images=_MIN_IMAGES,
+            max_images=_MAX_IMAGES,
+            chapters_enabled=chapters_enabled,
+        )
         result = generate_text(prompt, "director1", config=ctx.router)
 
         try:
@@ -320,11 +353,21 @@ class Director1Phase:
             if (normalized := _normalize_zoom_word(entry)) is not None
         ]
 
+        parts_out: list[dict] = []
+        if chapters_enabled:
+            valid_scenes = set(range(1, current_count + 1))
+            parts_out = [
+                normalized
+                for entry in (parsed.get("parts") or [])
+                if (normalized := _normalize_part_entry(entry, valid_scenes)) is not None
+            ]
+
         video_map = {
             "version": 1,
             "image_count": image_count,
             "scenes": scenes_out,
             "zoom_words": zoom_words,
+            "parts": parts_out,
             "notes": str(parsed.get("notes") or "").strip(),
         }
         sdir = script_dir(ctx)

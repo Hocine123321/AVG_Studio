@@ -792,3 +792,75 @@ def test_script_phase_partial_mode_emits_an_event_when_over_the_guided_cap(tmp_p
     scenes = read_json(script_dir(ctx) / "scenes.json")
     assert scenes[0]["image_prompt"] == "[RECYCLE #1]"  # kept, not trimmed
     assert any("over the 10% guidance" in getattr(e, "message", "") for e in events)
+
+
+def test_director1_writes_no_parts_when_chapters_is_off(tmp_path, monkeypatch):
+    reply = json.dumps({
+        "image_count": 2,
+        "scenes": [{"scene": 1, "role": "hook", "beat": "HIT", "visual_intent": "POP"}],
+        "zoom_words": [],
+        "notes": "",
+        "parts": [{"part": 1, "title": "Should be ignored", "sub": "", "scenes": [1], "duration_sec": 1.8}],
+    })
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)  # chapters_enabled defaults False
+    _write_scenes(ctx, ["Scene one text."])
+    Director1Phase().run(ctx)
+
+    video_map = read_json(script_dir(ctx) / "video_map.json")
+    assert video_map["parts"] == []
+
+
+def test_director1_writes_parts_and_the_timeline_gets_a_takeover(tmp_path, monkeypatch):
+    reply = json.dumps({
+        "image_count": 6,
+        "scenes": [{"scene": i, "role": "hook", "beat": "none", "visual_intent": "BACKGROUND"} for i in range(1, 7)],
+        "zoom_words": [],
+        "notes": "",
+        "parts": [
+            {"part": 1, "title": "Intro", "sub": "", "scenes": [1, 2, 3], "duration_sec": 1.8},
+            {"part": 2, "title": "Deep Dive", "sub": "Here's why", "scenes": [4, 5, 6], "duration_sec": 2.0},
+        ],
+    })
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    channel = _channel({"chapters_enabled": True})
+    ctx, _ = _ctx(project, channel=channel)
+    _write_scenes(ctx, [f"Scene {i} text." for i in range(1, 7)])
+    Director1Phase().run(ctx)
+
+    video_map = read_json(script_dir(ctx) / "video_map.json")
+    assert video_map["parts"] == [
+        {"after_scene": 3, "title": "Deep Dive", "sub": "Here's why", "duration_sec": 2.0}
+    ]  # part 1 covers scene 1 -> after_scene would be 0 -> dropped (never splits scene 1)
+
+    timeline = read_json(script_dir(ctx) / "timeline.json")
+    takeover_nodes = [n for n in timeline if n["type"] == "takeover"]
+    assert len(takeover_nodes) == 1
+    assert takeover_nodes[0]["headline"] == "Deep Dive"
+    assert takeover_nodes[0]["sub"] == "Here's why"
+    # This assertion is the proof the spec's central claim rests on:
+    # build_timeline needed ZERO changes to consume Director I's output -
+    # it already did, before this task existed.
+
+
+def test_director1_drops_a_part_whose_scenes_are_all_invalid(tmp_path, monkeypatch):
+    reply = json.dumps({
+        "image_count": 2,
+        "scenes": [{"scene": 1, "role": "hook", "beat": "none", "visual_intent": "BACKGROUND"}],
+        "zoom_words": [],
+        "notes": "",
+        "parts": [{"part": 1, "title": "Ghost", "sub": "", "scenes": [99], "duration_sec": 1.8}],
+    })
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", _QueueGenerator([reply]))
+
+    project = _project(tmp_path)
+    channel = _channel({"chapters_enabled": True})
+    ctx, _ = _ctx(project, channel=channel)
+    _write_scenes(ctx, ["Scene one text."])
+    Director1Phase().run(ctx)
+
+    assert read_json(script_dir(ctx) / "video_map.json")["parts"] == []
