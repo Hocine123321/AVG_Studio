@@ -111,7 +111,7 @@ from avg.pipeline.phases._common import (
 )
 from avg.media.environment import ensure_filters_dir_env
 from avg.media.vendor.avg import load_filter_catalog
-from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt, load_catalog
+from avg.pipeline.prompts import build_director1_prompt, build_director2_prompt, build_explainer_prompt, load_catalog
 from avg.providers.text.router import generate as generate_text
 
 
@@ -496,6 +496,22 @@ def _normalize_direction_entry(
     return result
 
 
+def _normalize_explainer_card(entry: object, valid_scenes: set[int]) -> dict | None:
+    """One `cards[]` entry from the Explainer AI response, or `None` if it
+    names no valid scene or has no text. Same shape `_build_card_plan`
+    already uses for a Focused card - `element` fixed to `"explainer"`,
+    since that is the only kind this planner ever produces."""
+    if not isinstance(entry, dict):
+        return None
+    scene_num = _coerce_int(entry.get("scene"))
+    if scene_num is None or scene_num not in valid_scenes:
+        return None
+    text = str(entry.get("text") or "").strip()
+    if not text:
+        return None
+    return {"element": "explainer", "scene": scene_num, "text": text, "accent": _ACCENT}
+
+
 def _cap_filter_use(scenes_out: list[dict], total_scenes: int) -> None:
     """Enforce the anti-clutter budget in place, walking scenes in order:
     at most `_FILTER_SCENE_FRACTION` of all scenes keep a filter, and at
@@ -526,11 +542,37 @@ def _cap_filter_use(scenes_out: list[dict], total_scenes: int) -> None:
         used += 1
 
 
-def _build_card_plan(scenes: list[dict]) -> dict:
-    """Deterministic Focused takeover cards from `((question))` markers in
-    each scene's text - see module docstring. No `start`/`end` yet;
-    Captions (Phase 6) adds those."""
-    cards: list[dict] = []
+def _build_card_plan(
+    scenes: list[dict],
+    *,
+    takeover_cards_enabled: bool = True,
+    explainer_cards: list[dict] | None = None,
+) -> dict:
+    """Deterministic Focused takeover cards from `((question))` markers,
+    merged with any AI-planned Explainer cards the caller already fetched
+    (`avg.pipeline.phases.director.Director2Phase.run`, via
+    `avg.pipeline.prompts.build_explainer_prompt` - a separate AI call,
+    not made here, so this stays a pure function). See module docstring.
+
+    `takeover_cards_enabled=False` is the master switch: no card of any
+    kind. The caller should skip the Explainer AI call entirely when this
+    is off, rather than fetch cards this function would just discard -
+    `Director2Phase.run` already does.
+
+    One card per scene: when a Focused and an Explainer candidate land on
+    the same scene, Focused wins - a deterministic, author-placed marker
+    is a stronger editorial signal than an AI guess. Ported from
+    `Export-CardPlan`'s own dedup (`D:\\AI_Video_Gen\\modules\\ai.ps1`).
+    The frequency cap applies to the MERGED set, in insertion order
+    (Focused cards are inserted first, so a Focused card always survives
+    the cap over an Explainer one on a different scene, matching
+    `Export-CardPlan`'s own ordered-dict behaviour). No `start`/`end` yet;
+    Captions (Phase 6) adds those.
+    """
+    if not takeover_cards_enabled:
+        return {"cards": []}
+
+    by_scene: dict[int, dict] = {}
     for i, scene in enumerate(scenes, start=1):
         if not isinstance(scene, dict):
             continue
@@ -539,8 +581,14 @@ def _build_card_plan(scenes: list[dict]) -> dict:
         if not questions:
             continue
         # One card per scene at most - a scene rarely needs two boards.
-        cards.append({"element": "focused", "scene": i, "text": questions[0], "accent": _ACCENT})
+        by_scene[i] = {"element": "focused", "scene": i, "text": questions[0], "accent": _ACCENT}
 
+    for card in explainer_cards or []:
+        scene_num = card.get("scene")
+        if scene_num not in by_scene:
+            by_scene[scene_num] = card
+
+    cards = list(by_scene.values())
     if cards:
         cap = max(1, len(scenes) // _CARD_SCENE_DIVISOR)
         cards = cards[:cap]
@@ -758,7 +806,31 @@ class Director2Phase:
 
         rdir = render_dir(ctx)
         write_json(rdir / "direction_plan.json", direction_plan)
-        card_plan = _build_card_plan(scenes)
+        card_plan_settings = ctx.channel_values
+        takeover_cards_enabled = bool(card_plan_settings.get("takeover_cards_enabled", True))
+        explainer_enabled = bool(card_plan_settings.get("explainer_enabled", False))
+
+        explainer_cards: list[dict] = []
+        if takeover_cards_enabled and explainer_enabled:
+            max_cards = max(0, min(4, len(scene_texts) // 6))
+            if max_cards > 0:
+                try:
+                    explainer_prompt = build_explainer_prompt(scene_texts, max_cards)
+                    explainer_result = generate_text(explainer_prompt, "director2_explainer", config=ctx.router)
+                    explainer_parsed = extract_json_object(explainer_result.text)
+                    explainer_cards = [
+                        normalized
+                        for entry in (explainer_parsed.get("cards") or [])[:max_cards]
+                        if (normalized := _normalize_explainer_card(entry, valid_scenes)) is not None
+                    ]
+                except Exception as exc:  # noqa: BLE001 - best-effort, matches _draw_overlay_assets below
+                    message = f"Explainer cards could not be planned ({exc}); continuing without them."
+                    ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=90, message=message))
+                    explainer_cards = []
+
+        card_plan = _build_card_plan(
+            scenes, takeover_cards_enabled=takeover_cards_enabled, explainer_cards=explainer_cards
+        )
         write_json(rdir / "card_plan.json", card_plan)
 
         # ── Part 1 tail: exact per-scene windows, and the overlay

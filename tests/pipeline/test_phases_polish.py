@@ -1071,3 +1071,148 @@ def test_the_sample_ass_resolves_a_blank_font_and_zero_size_like_the_real_phase(
     # And it matches `_ass_header` built from the resolved values directly -
     # the same construction both paths share.
     assert preview_text.startswith(_ass_header(1080, 1920, "Arial", 60, "bottom"))
+
+
+def test_director2_skips_the_explainer_call_when_disabled(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    reply = json.dumps({"grade": {"look": "none"}, "scenes": [{"scene": 1, "motion": {}, "transition_in": "cut"}]})
+    calls = _QueueGenerator([reply])
+    monkeypatch.setattr(director_module, "generate_text", calls)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)  # explainer_enabled defaults False
+    _write_scenes(ctx, ["Scene one."])
+    director_module.Director2Phase().run(ctx)
+
+    assert len(calls.calls) == 1  # only the director2 motion/grade call - no explainer call
+
+
+def test_director2_skips_the_explainer_call_when_scene_count_is_too_low(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    # max_cards = min(4, scene_count // 6); 5 scenes -> 0, so no call at all
+    reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [{"scene": i, "motion": {}, "transition_in": "cut"} for i in range(1, 6)],
+    })
+    calls = _QueueGenerator([reply])
+    monkeypatch.setattr(director_module, "generate_text", calls)
+
+    project = _project(tmp_path)
+    channel = _channel({"explainer_enabled": True})
+    ctx, _ = _ctx(project, channel=channel)
+    _write_scenes(ctx, [f"Scene {i}." for i in range(1, 6)])
+    director_module.Director2Phase().run(ctx)
+
+    assert len(calls.calls) == 1
+
+
+def test_director2_explainer_cards_reach_card_plan(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    direction_reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [{"scene": i, "motion": {}, "transition_in": "cut"} for i in range(1, 7)],
+    })
+    explainer_reply = json.dumps({"cards": [{"scene": 3, "text": "A deeper concept here."}]})
+    monkeypatch.setattr(
+        director_module, "generate_text", _QueueGenerator([direction_reply, explainer_reply])
+    )
+
+    project = _project(tmp_path)
+    channel = _channel({"explainer_enabled": True})
+    ctx, _ = _ctx(project, channel=channel)
+    _write_scenes(ctx, [f"Scene {i}." for i in range(1, 7)])  # 6 scenes -> max_cards = 1
+    director_module.Director2Phase().run(ctx)
+
+    card_plan = read_json(render_dir(ctx) / "card_plan.json")
+    assert card_plan["cards"] == [{"element": "explainer", "scene": 3, "text": "A deeper concept here.", "accent": "accent1"}]
+
+
+def test_director2_explainer_failure_degrades_to_no_cards(tmp_path, monkeypatch):
+    from avg.pipeline.phases import director as director_module
+
+    direction_reply = json.dumps({
+        "grade": {"look": "none"},
+        "scenes": [{"scene": i, "motion": {}, "transition_in": "cut"} for i in range(1, 7)],
+    })
+    calls = _QueueGenerator([direction_reply])
+
+    def _flaky(*args, **kwargs):
+        # args[1] is the phase key (generate_text(prompt, phase, *, config)) -
+        # let the real director2 call through, fail only the explainer one.
+        if args and args[1] == "director2_explainer":
+            raise RuntimeError("provider unavailable")
+        return calls(*args, **kwargs)
+
+    monkeypatch.setattr(director_module, "generate_text", _flaky)
+
+    project = _project(tmp_path)
+    channel = _channel({"explainer_enabled": True})
+    ctx, _ = _ctx(project, channel=channel)
+    _write_scenes(ctx, [f"Scene {i}." for i in range(1, 7)])
+
+    director_module.Director2Phase().run(ctx)  # must not raise
+
+    card_plan = read_json(render_dir(ctx) / "card_plan.json")
+    assert card_plan["cards"] == []
+
+
+def test_build_card_plan_takeover_cards_disabled_returns_nothing():
+    from avg.pipeline.phases.director import _build_card_plan
+
+    scenes = [{"text": "So ((why stripes?)) nobody asks."}]
+    plan = _build_card_plan(
+        scenes, takeover_cards_enabled=False, explainer_cards=[{"element": "explainer", "scene": 1, "text": "x", "accent": "accent1"}]
+    )
+    assert plan == {"cards": []}
+
+
+def test_build_card_plan_merges_explainer_cards_on_untouched_scenes():
+    from avg.pipeline.phases.director import _build_card_plan
+
+    # 6 scenes so cap = max(1, 6 // 3) = 2 comfortably fits both candidate
+    # cards - this test is about merge/dedup, not the cap (that's
+    # test_build_card_plan_cap_applies_to_the_merged_set, below); a
+    # smaller fixture would let the cap silently eat the second card and
+    # test the wrong thing.
+    scenes = [{"text": "So ((why stripes?)) nobody asks."}, {"text": "Plain scene, no marker."}] + [
+        {"text": "Plain."}
+    ] * 4
+    explainer = [{"element": "explainer", "scene": 2, "text": "A deeper concept.", "accent": "accent1"}]
+    plan = _build_card_plan(scenes, explainer_cards=explainer)
+    assert plan["cards"] == [
+        {"element": "focused", "scene": 1, "text": "why stripes?", "accent": "accent1"},
+        {"element": "explainer", "scene": 2, "text": "A deeper concept.", "accent": "accent1"},
+    ]
+
+
+def test_build_card_plan_focused_wins_on_a_shared_scene():
+    from avg.pipeline.phases.director import _build_card_plan
+
+    scenes = [{"text": "So ((why stripes?)) nobody asks."}]
+    explainer = [{"element": "explainer", "scene": 1, "text": "Should lose.", "accent": "accent1"}]
+    plan = _build_card_plan(scenes, explainer_cards=explainer)
+    assert plan["cards"] == [{"element": "focused", "scene": 1, "text": "why stripes?", "accent": "accent1"}]
+
+
+def test_build_card_plan_cap_applies_to_the_merged_set():
+    from avg.pipeline.phases.director import _build_card_plan
+
+    # 9 scenes, cap = max(1, 9 // 3) = 3. 1 focused + 3 explainer = 4 candidates -> capped to 3.
+    scenes = [{"text": "So ((why stripes?)) nobody asks."}] + [{"text": "Plain."}] * 8
+    explainer = [
+        {"element": "explainer", "scene": i, "text": f"Concept {i}.", "accent": "accent1"} for i in (2, 3, 4)
+    ]
+    plan = _build_card_plan(scenes, explainer_cards=explainer)
+    assert len(plan["cards"]) == 3
+    assert plan["cards"][0]["element"] == "focused"  # focused, inserted first, survives the cap
+
+
+def test_build_card_plan_defaults_match_pre_existing_behaviour():
+    from avg.pipeline.phases.director import _build_card_plan
+
+    # No keyword args at all - every pre-existing call site must still work.
+    scenes = [{"text": "So ((why stripes?)) nobody asks."}]
+    assert _build_card_plan(scenes) == {"cards": [{"element": "focused", "scene": 1, "text": "why stripes?", "accent": "accent1"}]}
