@@ -1491,3 +1491,44 @@ fix to the Windows plan on `development` too for consistency
 (commit `2b85c64`).
 
 **Not yet ported:** Caption Animation Styles - last of the four.
+
+## Slice 31 sub-slice 4 (Caption Animation Styles) ported to linux-port (2026-09-06)
+
+Zero functional changes needed - `avg/pipeline/phases/captions.py` and
+`avg/core/settings_schema.py` are byte-identical between branches
+(confirmed by diff). Only header/test-command updates.
+
+Verified at the function-call level this time, not just import/compile -
+applied every edit to a scratch clone and actually CALLED all six
+`_animated_text` branches under this branch's real venv. All six produce
+the exact expected ASS override strings (pop/fade/rise/none checked
+against literal expected text; highlight's `{\kf50}` per word;
+typewriter's per-word `\r\t(...)` colour snaps with correct millisecond
+offsets; `_ass_color_tag`'s alpha-byte stripping on both sample colours).
+
+While verifying, found and fixed one more instance of the Recycling
+port's same bug class: Task 2's "add two new constants directly after
+_POP_IN_OVERRIDE" (_HIGHLIGHT_ACCENT, _CAP_REF_LONG_EDGE) had no exact
+anchor - these are module-level assignments, not lazy function bodies,
+so misplacement causes a NameError the moment any highlight/typewriter/
+rise code path actually runs, invisible to import or compile checks
+alone. Fixed here and on the Windows plan on development for
+consistency (commit 4d48ec8).
+
+**All four sub-slices now ported to linux-port, each verified
+end-to-end against a real scratch install/venv, not just diffed or
+reasoned about:**
+1. Filters + Brand Kit (+ a real, pre-existing packaging bug found and
+   fixed: avg/assets/ wasn't reaching a real pip install at all)
+2. Image Recycling (+ a real bug found in the Windows original too:
+   visuals.py's import instruction was unanchored prose)
+3. Chapters + Explainer/Focused Cards (+ one more unanchored-insertion
+   fix, same class as #2)
+4. Caption Animation Styles (+ one more unanchored-insertion fix, same
+   class again - module-level constants this time)
+
+Every one of the three "unanchored insertion" bugs found during this
+porting pass was also fixed on the Windows plans on `development`,
+since none of them were Linux-specific - they were latent in the
+original plans and only surfaced by mechanically applying every
+replace-block instead of just reading them.
