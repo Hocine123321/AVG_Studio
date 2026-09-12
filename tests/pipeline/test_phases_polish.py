@@ -799,7 +799,10 @@ def test_captions_ass_header_matches_the_real_schema(tmp_path, monkeypatch):
     _patch_audio_duration(monkeypatch)
 
     project = _project(tmp_path, aspect_ratio="16:9", short_edge=1080)
-    ctx, _ = _ctx(project, channel=_channel({"font_family": "Impact"}))
+    # This test is specifically about the pop style's exact override
+    # shape - captions_animation_style must be requested explicitly, not
+    # relied on as an (incorrect, pre-fix) default.
+    ctx, _ = _ctx(project, channel=_channel({"font_family": "Impact", "captions_animation_style": "pop"}))
     _write_audio(ctx)
     _write_scenes(ctx, ["In nineteen eighty seven everything changed forever"])
 
