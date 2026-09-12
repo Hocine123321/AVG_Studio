@@ -371,7 +371,7 @@ SETTINGS: list[SettingSpec] = [
         type="choice",
         default="fade",
         scope="channel",
-        choices=["none", "fade", "pop"],
+        choices=["none", "fade", "pop", "rise", "highlight", "typewriter"],
         invalidates="screen_text",
     ),
     SettingSpec(

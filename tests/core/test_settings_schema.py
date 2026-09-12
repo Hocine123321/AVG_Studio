@@ -165,3 +165,11 @@ def test_card_settings_exist_with_expected_defaults() -> None:
     assert by_id["chapters_enabled"].invalidates == "director1"
     assert by_id["takeover_cards_enabled"].invalidates == "director2"
     assert by_id["explainer_enabled"].invalidates == "director2"
+
+
+def test_captions_animation_style_offers_all_six_mechanisms() -> None:
+    by_id = {s.id: s for s in SETTINGS}
+    assert by_id["captions_animation_style"].choices == [
+        "none", "fade", "pop", "rise", "highlight", "typewriter",
+    ]
+    assert by_id["captions_animation_style"].default == "fade"  # unchanged
