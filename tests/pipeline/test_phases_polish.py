@@ -823,6 +823,64 @@ def test_captions_ass_header_matches_the_real_schema(tmp_path, monkeypatch):
     assert r"{\fscx65\fscy65\t(0,90,0.7,\fscx108\fscy108)\t(90,190,\fscx100\fscy100)}" in content
 
 
+def test_screen_text_phase_respects_the_animation_style_setting(tmp_path, monkeypatch):
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({"captions_animation_style": "fade"}))
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+    content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+
+    assert r"\alpha&HFF&\t(0,180,\alpha&H00&)" in content
+    assert r"\fscx65" not in content  # not the pop override
+
+
+def test_screen_text_phase_none_style_has_no_override_at_all(tmp_path, monkeypatch):
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project, channel=_channel({"captions_animation_style": "none"}))
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+    content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+
+    dialogue_lines = [line for line in content.splitlines() if line.startswith("Dialogue:")]
+    assert dialogue_lines  # sanity: there is at least one cue
+    for line in dialogue_lines:
+        # A Dialogue line is Layer,Start,End,Style,Name,MarginL,MarginR,
+        # MarginV,Effect,Text - both Name and Effect are empty, so ",,"
+        # appears TWICE (Style|Name and Effect|Text boundaries). Only the
+        # LAST one actually precedes the text field - split(",,", 1) (from
+        # the left) would instead cut at the Style|Name boundary and leave
+        # "MarginL,MarginR,MarginV,,Text" as "the text field", which
+        # trivially never starts with "{" regardless of what
+        # _dialogue_line actually wrote. rsplit is the fix.
+        text_field = line.rsplit(",,", 1)[1]
+        assert not text_field.startswith("{")  # no ASS override block at all
+
+
+def test_screen_text_phase_unset_animation_style_defaults_to_fade(tmp_path, monkeypatch):
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)  # no captions_animation_style set
+    _write_audio(ctx)
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+    content = (render_dir(ctx) / "captions.ass").read_text(encoding="utf-8")
+
+    assert r"\alpha&HFF&\t(0,180,\alpha&H00&)" in content  # fade is the schema default
+
+
 def test_captions_font_family_reaches_the_ass_style_line(tmp_path, monkeypatch):
     monkeypatch.setattr(captions_module, "has_key", lambda provider: False)
     _patch_audio_duration(monkeypatch)

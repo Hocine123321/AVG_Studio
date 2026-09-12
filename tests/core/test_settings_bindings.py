@@ -52,8 +52,6 @@ def _mentioned_in_backend(setting_id: str) -> bool:
 #   captions_provider        - only AssemblyAI is implemented. Offering
 #                              "whisper" needs a second transcription
 #                              backend, not a wire.
-#   captions_animation_style - consumed by the vendored render engine's card
-#                              plan. `avg/media/vendor/` is protected.
 #   voice_stability          - ElevenLabs request-body fields. Adding them
 #   voice_speed                changes the request hash, which invalidates
 #                              the recorded fixtures the no-live-calls rule
@@ -75,7 +73,6 @@ def _mentioned_in_backend(setting_id: str) -> bool:
 # above.
 KNOWN_UNWIRED = {
     "captions_provider",
-    "captions_animation_style",
     "voice_stability",
     "voice_speed",
     "image_quality",

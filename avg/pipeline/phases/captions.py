@@ -579,8 +579,11 @@ def _overlaps(a_start: float, a_end: float, b_start: float, b_end: float) -> boo
     return a_start < b_end and b_start < a_end
 
 
-def _dialogue_line(start: float, end: float, text: str) -> str:
-    return f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{_POP_IN_OVERRIDE}{_ass_escape(text)}"
+def _dialogue_line(start: float, end: float, body: str) -> str:
+    """`body` is the already-built line content - `_animated_text`'s job,
+    not this function's; a plain (`"none"`-style) body is exactly the
+    escaped cue text with no override prefix at all."""
+    return f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{body}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -661,6 +664,8 @@ class ScreenTextPhase:
         position = str(ctx.channel_values.get("captions_position") or "bottom")
         width, height = _target_size(ctx.project.aspect_ratio, ctx.project.short_edge)
 
+        animation_style = str(ctx.channel_values.get("captions_animation_style") or "fade")
+
         cues = _group_cues(words)
         lines = [_ass_header(width, height, font_name, font_size, position)]
         suppressed = 0
@@ -668,7 +673,10 @@ class ScreenTextPhase:
             if any(_overlaps(cue["start"], cue["end"], cs, ce) for cs, ce in card_windows):
                 suppressed += 1
                 continue
-            lines.append(_dialogue_line(cue["start"], cue["end"], cue["text"]))
+            body = _animated_text(
+                animation_style, cue, width=width, height=height, position=position, font_size=font_size
+            )
+            lines.append(_dialogue_line(cue["start"], cue["end"], body))
 
         (rdir / "captions.ass").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
