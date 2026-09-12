@@ -608,6 +608,120 @@ def test_direction_plan_caps_a_single_filter_name_to_two_scenes(tmp_path, monkey
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# captions.py module-level: _group_cues, _animated_text, _ass_color_tag
+# ═══════════════════════════════════════════════════════════════════════
+
+def test_group_cues_keeps_each_cues_own_words():
+    from avg.pipeline.phases.captions import _group_cues
+
+    words = [
+        {"text": "Hello", "start": 0.0, "end": 0.3},
+        {"text": "world", "start": 0.3, "end": 0.6},
+        {"text": "again", "start": 0.6, "end": 0.9},
+    ]
+    cues = _group_cues(words, max_words=2)
+    assert cues[0]["words"] == words[:2]
+    assert cues[1]["words"] == words[2:]
+    assert cues[0]["text"] == "Hello world"  # unchanged shape
+
+
+def test_animated_text_none_is_plain_escaped_text():
+    from avg.pipeline.phases.captions import _animated_text
+
+    cue = {"start": 0.0, "end": 1.0, "text": "Hello {world}", "words": []}
+    body = _animated_text("none", cue, width=1080, height=1920, position="bottom", font_size=60)
+    assert body == r"Hello \{world\}"
+
+
+def test_animated_text_pop_matches_the_existing_override_exactly():
+    from avg.pipeline.phases.captions import _animated_text, _POP_IN_OVERRIDE
+
+    cue = {"start": 0.0, "end": 1.0, "text": "Hi", "words": []}
+    body = _animated_text("pop", cue, width=1080, height=1920, position="bottom", font_size=60)
+    assert body == _POP_IN_OVERRIDE + "Hi"
+
+
+def test_animated_text_fade_is_an_alpha_only_transform():
+    from avg.pipeline.phases.captions import _animated_text
+
+    cue = {"start": 0.0, "end": 1.0, "text": "Hi", "words": []}
+    body = _animated_text("fade", cue, width=1080, height=1920, position="bottom", font_size=60)
+    assert body == r"{\alpha&HFF&\t(0,180,\alpha&H00&)}Hi"
+    assert r"\move" not in body  # fade never moves - that's rise's job
+
+
+def test_animated_text_rise_moves_up_from_below_its_resting_position():
+    from avg.pipeline.phases.captions import _animated_text
+
+    cue = {"start": 0.0, "end": 1.0, "text": "Hi", "words": []}
+    body = _animated_text("rise", cue, width=1000, height=2000, position="bottom", font_size=100)
+    assert r"\move(500," in body
+    # y2 (resting) must be smaller than y1 (start) - it moves UP.
+    import re
+
+    m = re.search(r"\\move\(\d+,(\d+),\d+,(\d+),0,220\)", body)
+    y1, y2 = int(m.group(1)), int(m.group(2))
+    assert y1 > y2
+
+
+def test_animated_text_rise_position_varies_top_vs_bottom():
+    from avg.pipeline.phases.captions import _animated_text
+
+    bottom = _animated_text(
+        "rise", {"start": 0.0, "end": 1.0, "text": "Hi", "words": []},
+        width=1000, height=2000, position="bottom", font_size=100,
+    )
+    top = _animated_text(
+        "rise", {"start": 0.0, "end": 1.0, "text": "Hi", "words": []},
+        width=1000, height=2000, position="top", font_size=100,
+    )
+    assert bottom != top
+
+
+def test_animated_text_highlight_gives_every_word_a_kf_sweep():
+    from avg.pipeline.phases.captions import _animated_text
+
+    cue = {
+        "start": 0.0,
+        "end": 1.0,
+        "text": "Hi there",
+        "words": [{"text": "Hi", "start": 0.0, "end": 0.5}, {"text": "there", "start": 0.5, "end": 1.0}],
+    }
+    body = _animated_text("highlight", cue, width=1080, height=1920, position="bottom", font_size=60)
+    assert body.count(r"\kf") == 2
+    assert r"{\kf50}Hi" in body  # 0.5s -> 50 centiseconds
+    assert "there" in body
+
+
+def test_animated_text_typewriter_snaps_colour_per_word_not_left_behind():
+    from avg.pipeline.phases.captions import _animated_text
+
+    cue = {
+        "start": 0.0,
+        "end": 1.0,
+        "text": "Hi there",
+        "words": [{"text": "Hi", "start": 0.0, "end": 0.5}, {"text": "there", "start": 0.5, "end": 1.0}],
+    }
+    body = _animated_text("typewriter", cue, width=1080, height=1920, position="bottom", font_size=60)
+    # 2 words -> each gets a \r reset, an accent \t, and a base-colour \t back.
+    assert body.count(r"\r\t") == 2
+    # word 2 starts exactly when word 1 ends (both fixture words are
+    # contiguous, 0.5s), so the bare "\t(500,500," substring legitimately
+    # matches BOTH word 1's snap-back-to-base AND word 2's snap-to-accent
+    # - correct, expected behaviour for back-to-back words, not a bug.
+    # "\r\t(500,500," is what actually isolates word 2's own start
+    # transform, matching this test's own intent ("second word's start").
+    assert body.count(r"\r\t(500,500,") == 1  # second word's start, in ms
+
+
+def test_ass_color_tag_strips_the_leading_alpha_byte():
+    from avg.pipeline.phases.captions import _ass_color_tag
+
+    assert _ass_color_tag("&H00FFFFFF") == r"\c&HFFFFFF&"
+    assert _ass_color_tag("&H0000FFFF") == r"\c&H00FFFF&"
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # ScreenTextPhase
 # ═══════════════════════════════════════════════════════════════════════
 

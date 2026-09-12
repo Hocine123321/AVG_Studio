@@ -108,6 +108,18 @@ _MARGIN_V_BY_POSITION = {"bottom": 40, "top": 40, "center": 0}
 # off a real project). Kept exactly, not reinterpreted.
 _POP_IN_OVERRIDE = r"{\fscx65\fscy65\t(0,90,0.7,\fscx108\fscy108)\t(90,190,\fscx100\fscy100)}"
 
+# The highlight/typewriter accent - a FIXED colour, not a setting,
+# matching legacy's own `_HIGHLIGHT_ACCENT` constant exactly (bright
+# yellow). Porting it as a new brand-driven setting would be scope past
+# the source (see the design spec's Out of Scope).
+_HIGHLIGHT_ACCENT = "&H0000FFFF"
+
+# Rise's move distance and cue_pos's padding are both scaled against this
+# reference resolution, matching the pop-in override's own
+# resolution-independence (it uses fixed ms/percentages, needing no
+# scaling; rise's PIXEL distance does).
+_CAP_REF_LONG_EDGE = 1920.0
+
 
 class _AssemblyAIError(RuntimeError):
     """Raised by `_transcribe_with_assemblyai`/`_assemblyai_poll` on any
@@ -379,6 +391,128 @@ def _ass_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
 
 
+def _res_scale(width: int, height: int) -> float:
+    """Pixel distances scale against a 1920px reference long edge, the
+    same reference `_CAP_REF_LONG_EDGE` names in legacy - so `rise`'s
+    move distance (and its own padding) looks the same fraction of the
+    frame at any output resolution, not a fixed pixel count that would be
+    oversized on a small preview render or too subtle on 4K."""
+    long_edge = max(width, height)
+    return long_edge / _CAP_REF_LONG_EDGE if long_edge else 1.0
+
+
+def _cue_pos(width: int, height: int, position: str, font_size: int) -> tuple[int, int]:
+    """Where a caption cue rests once its entrance finishes - centred
+    horizontally (captions are already centre-aligned via the Style
+    line's own `Alignment` field), vertically per `position`. Ported from
+    `cue_pos` (`D:\\AI_Video_Gen\\python\\avg.py`) - simple arithmetic,
+    not font-metric text measurement; the same padding constant (`40`)
+    `_ass_header`'s own `MarginL`/`MarginR` use, scaled by `_res_scale`."""
+    x = width // 2
+    pad = int(round(40 * _res_scale(width, height)))
+    if position == "bottom":
+        y = height - pad - font_size // 2
+    elif position == "top":
+        y = pad + font_size // 2
+    else:
+        y = height // 2
+    return x, y
+
+
+def _ass_color_tag(ass_color: str) -> str:
+    """This file's own `AABBGGRR` colour constants (`&H00FFFFFF`, always
+    10 characters: `&H` + 8 hex digits) rewritten as the `\\c&HBBGGRR&`
+    colour-override tag, which carries no alpha byte - strips the leading
+    `&H00`. Ported from `Get-AiEditPlan`'s sibling `_c()` closure in
+    `reveal_text`/`highlight_text` (`D:\\AI_Video_Gen\\python\\avg.py`)."""
+    return r"\c&H" + ass_color[4:] + "&"
+
+
+def _animated_text(
+    style: str,
+    cue: dict,
+    *,
+    width: int,
+    height: int,
+    position: str,
+    font_size: int,
+) -> str:
+    """The per-cue Dialogue-line body: the escaped caption text, wrapped
+    in whichever ASS override the selected style needs. Six genuinely
+    different mechanisms, ported line-for-line from `animated_text`/
+    `reveal_text`/`highlight_text`
+    (`D:\\AI_Video_Gen\\python\\avg.py`) - not reskins of one another:
+    pop=scale, fade=opacity, rise=move+opacity, highlight=cumulative
+    colour fill (left behind), typewriter=a single whole-word highlight
+    that MOVES with the voice (not left behind - that's what makes it
+    distinct from highlight). An unrecognised style degrades to plain
+    text rather than raising, matching every other closed-vocabulary
+    degrade in this codebase.
+
+    All per-word timing below is in SECONDS (`cue["words"]`'s own shape -
+    see `_group_cues`'s docstring and `_synthetic_word_timings`'s), NOT
+    the milliseconds legacy's raw AssemblyAI dicts carried - the
+    centisecond/millisecond conversions below are scaled accordingly, not
+    copied as literal legacy arithmetic.
+    """
+    text = _ass_escape(cue["text"])
+
+    if style == "none":
+        return text
+
+    if style == "pop":
+        return _POP_IN_OVERRIDE + text
+
+    if style == "fade":
+        # Clean opacity fade-in, no movement, 180ms.
+        return r"{\alpha&HFF&\t(0,180,\alpha&H00&)}" + text
+
+    if style == "rise":
+        # Glides up ~34px (scaled) while fading in, 220ms.
+        x, y = _cue_pos(width, height, position, font_size)
+        dist = max(6, int(round(34 * _res_scale(width, height))))
+        return (
+            r"{\alpha&HFF&\move(" + f"{x},{y + dist},{x},{y},0,220" + r")"
+            r"\t(0,220,\alpha&H00&)}" + text
+        )
+
+    words = cue.get("words") or []
+    if not words:
+        return text  # no per-word data to sync highlight/typewriter to
+
+    if style == "highlight":
+        # Every word visible; each fills base -> accent as it's spoken
+        # (\kf sweep), staying accent-coloured once filled.
+        parts = []
+        for w in words:
+            dur_cs = max(1, int(round((float(w["end"]) - float(w["start"])) * 100)))
+            parts.append(r"{\kf" + str(dur_cs) + r"}" + _ass_escape(str(w["text"])) + " ")
+        return "".join(parts).rstrip()
+
+    if style == "typewriter":
+        # Every word visible; a whole-word colour SNAP moves with the
+        # voice - lit for exactly the moment it's spoken, then snapped
+        # back. \r before each word scopes the transform so only the
+        # currently-spoken word is lit at any instant.
+        base = _ass_color_tag(_COLOR_PRIMARY)
+        accent = _ass_color_tag(_HIGHLIGHT_ACCENT)
+        cue_start = float(cue["start"])
+        parts = []
+        for w in words:
+            # ws must be >=1ms: an accent \t at exactly t=0 collides with
+            # the \r reset (also at t=0) and \r wins, so the FIRST word
+            # would never light.
+            ws = max(1, int(round((float(w["start"]) - cue_start) * 1000)))
+            we = max(ws + 1, int(round((float(w["end"]) - cue_start) * 1000)))
+            parts.append(
+                r"{\r\t(" + str(ws) + "," + str(ws) + "," + accent + r")"
+                r"\t(" + str(we) + "," + str(we) + "," + base + r")}" + _ass_escape(str(w["text"]))
+            )
+        return " ".join(parts)
+
+    return text
+
+
 #: What a caption preview shows. Short enough to fit one line at any of the
 #: supported positions, long enough to show wrapping behaviour.
 SAMPLE_CAPTION_TEXT = "This is what your captions will look like"
@@ -415,10 +549,16 @@ def sample_ass(width: int, height: int, font_name: str, font_size: int, position
 
 
 def _group_cues(words: list[dict], max_words: int = _MAX_WORDS_PER_CUE) -> list[dict]:
-    """Consecutive words chunked into `{start, end, text}` caption cues of
-    up to `max_words` each - simple fixed-size grouping (no sentence-
-    boundary awareness), sufficient for both the real AssemblyAI word
-    list and the synthetic estimate."""
+    """Consecutive words chunked into `{start, end, text, words}` caption
+    cues of up to `max_words` each - simple fixed-size grouping (no
+    sentence-boundary awareness), sufficient for both the real AssemblyAI
+    word list and the synthetic estimate.
+
+    `words` (the cue's own raw per-word `{text, start, end}` list) is kept
+    alongside the already-joined `text` for `_animated_text`'s
+    `"highlight"`/`"typewriter"` styles, which sync colour to individual
+    spoken words - every other style only ever reads `start`/`end`/`text`.
+    """
     cues: list[dict] = []
     for i in range(0, len(words), max_words):
         chunk = [w for w in words[i : i + max_words] if str(w.get("text") or "").strip()]
@@ -429,6 +569,7 @@ def _group_cues(words: list[dict], max_words: int = _MAX_WORDS_PER_CUE) -> list[
                 "start": chunk[0]["start"],
                 "end": chunk[-1]["end"],
                 "text": " ".join(str(w["text"]) for w in chunk),
+                "words": chunk,
             }
         )
     return cues
