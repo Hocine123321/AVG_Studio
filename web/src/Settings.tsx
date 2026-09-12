@@ -18,6 +18,7 @@ const GROUP_LABELS: Record<string, string> = {
   voice: "Voice",
   images: "Images",
   render: "Render",
+  filters: "Filter overlays",
   creative: "Creative",
   models: "Models & cost",
   keys: "Provider keys",
@@ -40,7 +41,7 @@ const CATEGORIES: { label: string; groups: string[] }[] = [
   { label: "Images", groups: ["images"] },
   { label: "Voice", groups: ["voice"] },
   { label: "Captions", groups: ["captions", "overlay"] },
-  { label: "Render", groups: ["render", "video"] },
+  { label: "Render", groups: ["render", "video", "filters"] },
   { label: "Paths", groups: ["app"] },
 ];
 
