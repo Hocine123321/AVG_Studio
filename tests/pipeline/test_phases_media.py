@@ -1187,3 +1187,45 @@ def test_the_fallback_is_skipped_when_the_backup_names_the_same_provider(tmp_pat
 
     # Only the one pass over the one scene - no second attempt at all.
     assert len(primary.calls) == 1
+
+
+def test_visuals_module_does_not_require_pillow_at_import_time():
+    """Real, reproduced regression: `tools/dev_serve_linux.py` (and
+    `build_flatpak.sh`'s "Launch from source") installs `.[dev]` only,
+    deliberately never `.[dev,media]` - see that venv's own setup
+    comment. `GET /api/settings` calls `suggest_output_root()`
+    (`avg/config/settings.py`), which imports `avg.config.legacy_import`,
+    which imports `avg.pipeline.registry` at module level - which imports
+    every phase, including this one. A module-level `from PIL import
+    Image` here therefore breaks that entire request path with a bare
+    500 and no fallback, confirmed by actually building a fresh `.[dev]`-
+    only venv and hitting the real route, not simulated from a guess.
+
+    `Image` is only ever used inside `_is_valid_image` (pool-image
+    validity, real-render-only) - it must be a lazy, function-local
+    import, not a module-level one, so importing this module (therefore
+    the whole registry, therefore the settings route) never requires
+    Pillow to be installed at all.
+
+    Run as a SUBPROCESS, deliberately, not via monkeypatching this
+    process's own `sys.modules` in place: an earlier version of this
+    test blocked "PIL" and force-reimported this module directly in the
+    pytest process, and pytest's own monkeypatch teardown order left a
+    SECOND, distinct module object behind in `sys.modules` after the
+    test finished - a later test's `monkeypatch.setattr("avg.pipeline.
+    phases.visuals._build_provider", ...)` then patched that stale
+    duplicate instead of the one `avg.pipeline.registry.REGISTRY`
+    actually holds a `VisualsPhase` reference into, so the real call
+    reached a live (unpatched) provider path. A subprocess has no shared
+    `sys.modules` with the test runner at all, so this class of leak is
+    structurally impossible here.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import sys; sys.modules['PIL'] = None; "
+        "import avg.pipeline.phases.visuals"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr

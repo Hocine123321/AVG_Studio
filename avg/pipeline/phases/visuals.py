@@ -57,8 +57,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
-
 from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.core.sysinfo import total_ram_gb as _total_ram_gb
@@ -142,7 +140,21 @@ def _is_valid_image(path: Path) -> bool:
     the file isn't corrupt/truncated/not-an-image without decoding full
     pixel data. Ported from legacy's `Test-ValidImageFile`: a corrupt or
     non-image pool entry must fall back to generation, never poison a
-    render."""
+    render.
+
+    Lazy import, deliberately: this is the ONLY place `avg.pipeline.
+    phases.visuals` needs Pillow at all, and `avg.pipeline.registry`
+    (and therefore anything that imports it, including `GET /api/
+    settings`'s `suggest_output_root()` legacy-scan path) must stay
+    importable with no `media` extra installed - `tools/
+    dev_serve_linux.py`'s whole point is running the API with none of
+    it. A module-level `from PIL import Image` broke exactly that path;
+    see `tests/pipeline/test_phases_media.py::
+    test_visuals_module_does_not_require_pillow_at_import_time` for the
+    reproduction.
+    """
+    from PIL import Image
+
     try:
         with Image.open(path) as img:
             img.verify()
