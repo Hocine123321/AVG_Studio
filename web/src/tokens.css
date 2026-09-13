@@ -2085,6 +2085,27 @@ a:hover {
   color: var(--muted);
 }
 
+/* Model + Backup side by side (ModelsFieldGroups.tsx) - the pair a
+   person actually compares while setting a phase up. Scoped under this
+   class rather than touching `.field-row` itself, which is also used
+   standalone by every other category (Captions, Render, ...) and by
+   If-both-fail right below this pair - those all keep their own full-
+   width row and bottom border untouched. `1fr 1fr`: Model and Backup
+   are the same field `type="text"` shape, so an even split never looks
+   lopsided the way it could for two differently-shaped fields. */
+.models-phase-group__pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.models-phase-group__pair .field-row {
+  border-bottom: 0;
+}
+
+.models-phase-group__pair .field-row:first-child {
+  border-right: 1px solid var(--line);
+}
+
 /* Every numeric setting with real bounds (design spec §2) - the same
    cross-browser range-thumb-styling technique `.media-player__seek`
    already established (Slice 27's custom players), not a second

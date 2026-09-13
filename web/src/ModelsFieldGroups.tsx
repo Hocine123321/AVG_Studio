@@ -56,6 +56,18 @@ function classify(spec: SettingSpec): { phase: string; slot: "model" | "backup" 
  * order. Reuses `FieldRow` for every individual field - this is a layout
  * change over the generic renderer, not a new field-rendering path.
  *
+ * Model and Backup sit side by side in a two-column row
+ * (`.models-phase-group__pair`) when both exist for a phase - the pair a
+ * person actually compares while setting one up, previously two full-
+ * width rows apart with If-both-fail's own row in between. If-both-fail
+ * stays on its own full-width row below the pair: a `choice` field, a
+ * different shape, and read far less often than the two model ids next
+ * to it. Falls back to a lone standalone `FieldRow` if only one of
+ * Model/Backup exists for a phase (not a case the current schema
+ * produces - every phase key's loop always emits both - kept anyway so
+ * a future phase with only one of the two still renders instead of
+ * silently dropping a field).
+ *
  * Fully replaces `SettingsGroup` for this one category in `Settings.tsx`
  * (not composed alongside it), so it reproduces that component's outer
  * `<section>`/`<h2>` wrapper verbatim, `active`-highlight included -
@@ -104,8 +116,17 @@ export default function ModelsFieldGroups({
           return (
             <section key={group.phase} className="models-phase-group">
               <h3 className="models-phase-group__title">{group.label}</h3>
-              {group.model && <FieldRow spec={group.model} ctx={ctx} />}
-              {group.backup && <FieldRow spec={group.backup} ctx={ctx} />}
+              {group.model && group.backup ? (
+                <div className="models-phase-group__pair">
+                  <FieldRow spec={group.model} ctx={ctx} />
+                  <FieldRow spec={group.backup} ctx={ctx} />
+                </div>
+              ) : (
+                <>
+                  {group.model && <FieldRow spec={group.model} ctx={ctx} />}
+                  {group.backup && <FieldRow spec={group.backup} ctx={ctx} />}
+                </>
+              )}
               {group.onFailure && <FieldRow spec={group.onFailure} ctx={ctx} />}
             </section>
           );
