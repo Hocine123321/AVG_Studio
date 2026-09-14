@@ -1934,6 +1934,20 @@ a:hover {
   background: var(--canvas);
   z-index: 1;
   padding-top: 2px;
+  /* A sticky element inside a flex column (.settings__layout) can lose
+     its own background mid-scroll under QtWebEngine's Chromium
+     compositor - a known class of bug for `position: sticky` +
+     software/partial GPU rendering paths (this port's own real-machine
+     testing already found a related Chromium-rasterizer issue serious
+     enough to force `--device=dri` back into the Flatpak manifest -
+     see docs/linux-port/WINDOWS_VS_LINUX.md's "Hardware-accelerated
+     rendering was never really optional" section). Promoting this
+     element to its own compositor layer keeps its paint (background
+     included) stable and separate from the content scrolling beneath
+     it, rather than being re-derived by the browser on every scroll
+     frame - the standard fix for a sticky header rendering as
+     transparent while its sibling content scrolls underneath it. */
+  will-change: transform;
 }
 
 .settings__search {
@@ -3800,8 +3814,25 @@ a:hover {
 }
 
 @keyframes avg-spin {
+  from {
+    /* Explicit `scale(1)` at both ends, not just `rotate()` alone: with
+       only a `to { transform: rotate(360deg) }` keyframe, the implicit
+       `from` is the element's own static transform (`scale(1)`, the
+       `.is-active` rule right above) - a mismatched transform-function
+       list (`scale()` vs `rotate()`) across the two keyframes, which
+       forces matrix interpolation instead of interpolating the angle
+       directly. rotate(360deg) decomposes to the SAME rotation matrix as
+       rotate(0deg) (sin/cos are periodic), so a naive matrix
+       interpolation has no reason to animate through any visible
+       rotation at all - the ring can render fully static despite the
+       animation nominally running. Keeping the SAME function list
+       (scale then rotate) at both keyframes lets the browser interpolate
+       each function independently: scale pinned at 1, angle sweeping
+       0->360 continuously. */
+    transform: scale(1) rotate(0deg);
+  }
   to {
-    transform: rotate(360deg);
+    transform: scale(1) rotate(360deg);
   }
 }
 
