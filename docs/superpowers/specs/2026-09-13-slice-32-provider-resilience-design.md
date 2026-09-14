@@ -226,17 +226,25 @@ module already uses — no new subdirectory needed.
 
 ### D. Surfacing
 
-- `avg/pipeline/phases/visuals.py` (image fallback), `avg/providers/text/
-  router.py` (text fallback — its `generate()` currently has no
-  `ctx.emit`, being below the pipeline layer; the calling phase, e.g.
-  `avg/pipeline/phases/director.py`, already emits its own progress events
-  and gains one more line when `used_backup` is `True` and the primary's
-  `AvgError.kind` was quota/billing), and `avg/pipeline/phases/voice.py`
-  each get their existing fallback `ProgressEvent` message extended with
-  the cooldown detail when applicable — e.g. "Falling back to
-  gemini/gemini-2.5-flash... (groq: daily quota reached, back ~00:00 UTC)."
-  No new event type — this is strictly a message-text addition to events
-  that already fire.
+- `avg/pipeline/phases/visuals.py` is the one phase confirmed, by reading
+  it directly, to already emit a fallback `ProgressEvent` at a clean
+  single call site (`"Falling back to {backup_provider}/{backup_model}..."`
+  — see `_should_fall_back`/`run`) — that message gains the cooldown
+  detail when applicable, e.g. "Falling back to gemini/gemini-2.5-flash...
+  (groq: daily quota reached, back ~00:00 UTC)." No new event type, a
+  message-text addition only.
+  `avg/providers/text/router.py`'s `generate()` has no `ctx.emit` at all
+  (by design — see that module's own docstring: "no HTTP, no provider
+  knowledge beyond names"), and checking every phase that calls it
+  (`writing.py`, `director.py`) for whether each already has its own
+  fallback message is real work this sub-slice doesn't need to gate on —
+  deferred (§7). `avg/pipeline/phases/voice.py` was checked directly too
+  and has **no** existing provider-fallback message to extend — its
+  ElevenLabs primary/backup key switch happens silently inside
+  `ElevenLabsVoiceProvider._call`, which has no `ctx` to emit through;
+  giving voice a surfaced cooldown notice needs new plumbing (the provider
+  raising something `VoicePhase.run` can catch and message about), not a
+  text edit, and is deferred alongside the text-router case.
 - `avg/core/health.py`'s `_safeguard_checks` gains one new check,
   `Provider cooldowns`: lists every entry currently in
   `provider_health.json` with `is_in_cooldown(...) is True`, `ok=(no active
@@ -270,7 +278,7 @@ about a resume/re-run needs to change because this changed):
 | `avg/config/provider_health.py` | New — `is_in_cooldown`/`record_cooldown`/`clear_cooldown`/`default_quota_cooldown_until` |
 | `avg/providers/transport.py` | `Transport.request()`: pre-flight cooldown check. `_send_with_retry`: real wait time when available; records cooldown on quota/billing before raising |
 | `avg/providers/voice/providers.py` | `EdgeVoiceProvider`: same pre-flight check + `record_cooldown` at its own `classify()` sites |
-| `avg/pipeline/phases/visuals.py`, `voice.py`, `director.py` | Existing fallback `ProgressEvent` messages gain the cooldown detail when applicable |
+| `avg/pipeline/phases/visuals.py` | Its one existing fallback `ProgressEvent` message gains the cooldown detail when applicable |
 | `avg/core/health.py` | `_safeguard_checks`: new `Provider cooldowns` row |
 | `avg/core/settings_schema.py` | +2 `SettingSpec`s (`resilience_rate_limit_wait_ceiling_sec`, `resilience_quota_cooldown_hours`) |
 | `Config/provider_health.json` (under `user_assets_root()`) | New, user-machine state, not committed — same treatment as every sibling file in that directory |
@@ -301,6 +309,13 @@ provider test in this codebase.
 - Any change to ElevenLabs' own primary/backup key-switch logic — that
   stays exactly as it is; a cooldown applies to the *provider* (both keys
   exhausted, in effect), not to which of ElevenLabs' two keys tried first.
+- Surfacing a cooldown notice through `avg/providers/text/router.py`'s
+  callers or `avg/pipeline/phases/voice.py` — neither has an existing
+  fallback message to extend (confirmed by reading both directly); doing
+  this properly means new plumbing in each, not a text edit, and is real
+  follow-up work rather than part of this sub-slice's mechanism. The
+  `health.py` safeguard check (§3.D) is what makes an active cooldown
+  visible without either of these in the meantime.
 - Parts 2-4 (visual/motion consistency, captions, verification gate) —
   separate sub-slices.
 
