@@ -1613,3 +1613,117 @@ whoever eventually touches sub-slice 1's plan again.
 
 All three plans re-committed with revised self-review sections
 documenting each finding inline.
+
+## Slice 32 — "The Quality It Deserves": B2.22 port, all 4 specs (2026-09-13)
+
+**Why this slice exists:** ports `AI_Video_Gen`'s B2.22 update
+(`https://github.com/Hocine123321/AI_Video_Gen`, commit `bff265e`, `Updates
+plans/{spec,plan}_B2.22_part{1..4}_*.md`) — the legacy app's most recent
+quality pass — into AVG Studio, at the user's explicit request, framed as
+the next priority: AVG Studio has more raw capability than the PowerShell
+app it replaced but had drifted behind it in practice, and this slice is
+step one of closing that gap and moving back ahead of it.
+
+**Not a straight port.** Every one of the 4 parts was checked against
+AVG Studio's real current code first (not assumed from the legacy spec's
+own framing) — `avg/providers/errors.py`, `transport.py`, `text/router.py`,
+`images/community.py`+`premium.py`, `voice/providers.py`,
+`pipeline/phases/{visuals,director,voice,captions}.py`, `core/health.py`,
+`config/{channels,secrets}.py`, `core/settings_schema.py`. Result: AVG
+Studio's architecture is already ahead of legacy in exactly the ways B2.22
+tried to fix (distinct `rate_limit`/`quota`/`billing` `ErrorKind`s already
+exist; `classify()`/`POLICY` is already one choke point, not three
+independent stacks; `channels.py` already replaced legacy's buggy
+`channel_profiles` copy mechanism; `health.py` already has an extensible
+deep-check registry). So each sub-slice below is scoped to what's actually
+missing in *this* codebase, not a line-for-line translation — and one
+place (Director II) turned out worse than legacy and needed a bigger fix
+than B2.22 asked for.
+
+**Specs written and committed, priority order (matches B2.22's own
+ranking — resilience first since every other part's providers inherit
+it):**
+
+1. `docs/superpowers/specs/2026-09-13-slice-32-provider-resilience-design.md`
+   — real `Retry-After`/body-delay parsing in `Transport`/`classify()`
+   (currently fixed exponential backoff only); new
+   `avg/config/provider_health.py` persisting a per-provider (not
+   per-key — Studio has no key-slot concept outside ElevenLabs' own
+   primary/backup pair, untouched) quota/billing cooldown across
+   sessions, checked pre-flight in `Transport.request()` so a known-dead
+   provider is never even called again; billing cooldown auto-clears via
+   a key fingerprint compared lazily at read time (no hook into
+   `secrets.py` — that module stays exactly as narrow as its own
+   docstring says it must). In-process `threading.Lock`, not a
+   cross-process mutex — confirmed image generation's
+   `ThreadPoolExecutor` is multiple threads in one process, not separate
+   processes, so legacy's mutex requirement doesn't apply here.
+2. `docs/superpowers/specs/2026-09-13-slice-32-visual-motion-consistency-design.md`
+   — seed-lock (new `ProjectDoc.visual_seed` field; wired into
+   Pollinations/StableHorde only, the two providers whose APIs actually
+   expose a seed param); opt-in Gemini reference-image consistency
+   (first successful scene image reused as an `inline_data` part on the
+   `:generateContent` path only, never `:predict`/Imagen); **Director II
+   wired to read `video_map.json` (role/beat/visual_intent) and
+   `scene_safezones.json` (busy-zone per scene) for the first time ever**
+   — verified in code that it currently reads neither, despite both
+   being written upstream by Director I and Visuals respectively and
+   guaranteed on disk by the time Director II runs. This is a bigger fix
+   than B2.22's own "tighten the prompt" framing assumed, since legacy
+   already had that wiring and Studio didn't. Per-style recycle pools
+   (B2.22's 4th piece) explicitly **deferred** — depends on base
+   recycling (Slice 31 sub-slice 2), which is spec+plan only, not
+   implemented; building a per-style variant on a mechanism that doesn't
+   exist yet would mean designing against something that could still
+   change shape.
+3. `docs/superpowers/specs/2026-09-13-slice-32-captions-native-timing-design.md`
+   — TTS-native word timing (ElevenLabs `/with-timestamps`, Edge TTS's
+   already-flowing-but-discarded `WordBoundary` stream chunks) becomes
+   the new default priority ahead of AssemblyAI, itself ahead of the
+   existing proportional-estimate fallback (`captions_timing_source`
+   setting, default `auto`, forceable either way). Bigger win here than
+   in legacy: AVG Studio's no-AssemblyAI-key path has never been a real
+   transcription, just a character-count guess — most users are on that
+   path today. The one real design puzzle: `voice.py` synthesizes per
+   `[pause]`-segment, not per scene, and the vendored
+   `remove_silences_core` computes but never returns its `remap_points`.
+   Resolved without touching `avg/media/vendor/avg.py` at all: that
+   function already remaps any `{"scenes": [{"start","end"}, ...]}` file
+   in place when given a `scene_map` path (`_remap_scene_audio_map`) —
+   passing a throwaway file shaped that way, holding word timings instead
+   of scene timings, reuses the exact already-correct mechanism verbatim
+   rather than reconstructing `detect_nonsilent` by hand a second time.
+4. `docs/superpowers/specs/2026-09-13-slice-32-verification-gate-design.md`
+   — shrinks the most in the port. Legacy needed
+   `Final_Verification.ps1` from nothing; Studio already has 671+ pytest
+   tests and `health.py`'s `_deep_checks` is already the "do the real
+   thing against throwaway data, no network, no cost" registry B2.22
+   asked legacy to build. This sub-slice adds rows to that existing
+   registry (provider-health round-trip, word-timing remap round-trip)
+   and wraps the project's *existing* tools (pytest/mypy/oxlint/
+   `health.report(deep=True)`) into one `tools/verify_release.py` gate,
+   wired into `make_release.ps1` with a `-SkipVerification` escape hatch
+   matching its existing `-SkipInstaller` pattern. Secrets-hygiene half
+   of B2.22 Part 4 checked directly against this repo's real git history
+   (`git log --all --diff-filter=A --name-only`, filtered for
+   `secrets.dat`/`.env`/`*apikey*`) — clean; the one match is a
+   false-positive from FastAPI's own vendored `api_key.py`. Real secrets
+   live under `%APPDATA%/AVG Studio/`, outside the repo directory
+   structurally, unlike legacy's project layout. Kept as a standing
+   tripwire in the new verify script (secrets-shaped filenames blocked
+   from ever being staged), not a cleanup — there's nothing to clean up.
+
+**Sequencing risk flagged, not resolved:** Slice 31 (legacy feature
+parity — filters/brand kit, recycling, chapters+cards, caption animation
+styles; all 4 sub-slices spec+plan, none implemented) and this slice both
+touch `avg/pipeline/phases/{visuals,director,captions}.py`. Whichever
+lands second will need the same cross-plan collision review Slice 31 ran
+on itself (2026-09-05 entry above) — not attempted here since neither is
+implemented yet and there's nothing concrete to collide against until one
+of them has real diffs. Slice 32 proceeds first per the user's explicit
+priority.
+
+**Not yet done:** plans for all 4 sub-slices — specs only so far, same
+staged approach Slice 31 used (spec, review, then plan, per sub-slice).
+The DPAPI shim regression noted at the top of this ledger is untouched —
+orthogonal to this slice, not blocking it.
