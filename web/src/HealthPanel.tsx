@@ -13,7 +13,11 @@ import { getHealth, installPackage, type HealthResponse } from "./api";
  * Recheck skips the cache (`avg/core/health.py` holds results for five
  * minutes, since the ffmpeg check is a real subprocess). It is a plain
  * button, not the accented one: this screen's single terracotta action is
- * "Save changes" in the save bar.
+ * "Save changes" in the save bar. "Install what's missing" is plain for the
+ * same reason - it's a convenience over the per-row Install buttons
+ * (`POST /api/health/install`, same endpoint, one call per package in
+ * sequence rather than parallel: pip installs sharing one environment are
+ * not safe to run concurrently), not a new capability.
  */
 export default function HealthPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -21,6 +25,7 @@ export default function HealthPanel() {
   const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
 
   const load = useCallback(async (refresh: boolean) => {
     setBusy(true);
@@ -54,6 +59,39 @@ export default function HealthPanel() {
     }
   }
 
+  // Every currently-missing, actually-installable package - a snapshot at
+  // click time, not re-derived mid-run: each package's install is
+  // independent of the others, so there is nothing to gain from a full
+  // health re-check (ffmpeg's subprocess included) between every single
+  // one, only N-1 extra checks paid for nothing.
+  const missingPackages =
+    health?.components.filter((c) => !c.ok && c.package && health.can_install !== false) ?? [];
+
+  async function installAllMissing() {
+    const targets = missingPackages;
+    if (targets.length === 0) return;
+
+    setOutput(null);
+    const results: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const pkg = targets[i].package!;
+      setInstalling(pkg);
+      setBatchProgress({ done: i, total: targets.length });
+      try {
+        const res = await installPackage(pkg);
+        results.push(`${pkg}: ${res.ok ? "installed" : "failed"}\n${res.output.trim() || "(no output)"}`);
+      } catch (err) {
+        results.push(`${pkg}: failed\n${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    setInstalling(null);
+    setBatchProgress(null);
+    setOutput(results.join("\n\n"));
+    // One refresh at the end, not per package - each install already ran
+    // to completion; the point of re-checking is the FINAL state.
+    await load(true);
+  }
+
   return (
     <section className="models-panel" aria-label="Components">
       <div className="spend-card">
@@ -67,6 +105,18 @@ export default function HealthPanel() {
           Checked on this machine. FFmpeg is run, not just looked for — a file that exists can still
           fail to start.
         </span>
+        {missingPackages.length > 0 && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void installAllMissing()}
+            disabled={installing !== null}
+          >
+            {batchProgress
+              ? `Installing ${batchProgress.done + 1}/${batchProgress.total}…`
+              : `Install what's missing (${missingPackages.length})`}
+          </button>
+        )}
         <button type="button" className="btn" onClick={() => void load(true)} disabled={busy}>
           {busy ? "Checking…" : "Recheck"}
         </button>
