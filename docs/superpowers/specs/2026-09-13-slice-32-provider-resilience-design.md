@@ -186,9 +186,16 @@ Public functions:
   this module — `provider_health.py` stores state, it doesn't own policy
   about how long a cooldown should last.
 
-File location: `avg.config.settings`'s own config root (same directory as
-`settings.json`/`secrets.dat`), following the "one flat file per concern"
-pattern every sibling module already uses — no new directory.
+File location: `user_assets_root() / "Config" / "provider_health.json"`
+(`avg.config.user_assets.user_assets_root()`, currently `Documents/AVG
+Studio/UserAssets` — the README's data-documents table still says
+`%APPDATA%/AVG Studio/`, which predates the Slice 20 UserAssets
+consolidation and is stale) — the same `Config/` directory `settings.json`,
+`channel_defaults.json`, `quick_settings.json`, and `model_prefs.json`
+already share; `secrets.dat` lives in the separate `Secrets/` subdirectory
+and this is not a credential, so it belongs with the former group, not the
+latter. Following the "one flat file per concern" pattern every sibling
+module already uses — no new subdirectory needed.
 
 ### C. Where the pre-flight check and the write happen
 
@@ -266,7 +273,7 @@ about a resume/re-run needs to change because this changed):
 | `avg/pipeline/phases/visuals.py`, `voice.py`, `director.py` | Existing fallback `ProgressEvent` messages gain the cooldown detail when applicable |
 | `avg/core/health.py` | `_safeguard_checks`: new `Provider cooldowns` row |
 | `avg/core/settings_schema.py` | +2 `SettingSpec`s (`resilience_rate_limit_wait_ceiling_sec`, `resilience_quota_cooldown_hours`) |
-| `config/provider_health.json` | New, gitignored-equivalent (same treatment as `settings.json`/`secrets.dat` — user-machine state, not committed) |
+| `Config/provider_health.json` (under `user_assets_root()`) | New, user-machine state, not committed — same treatment as every sibling file in that directory |
 
 ## 6. Testing
 

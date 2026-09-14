@@ -61,7 +61,7 @@ avg/core/       models, events, errors, catalogues, takes, invalidation
 
 | Module | Responsibility |
 |---|---|
-| `settings.py` | `SettingsDoc` (`%APPDATA%/AVG Studio/settings.json`), atomic save, legacy render settings |
+| `settings.py` | `SettingsDoc` (`Documents/AVG Studio/UserAssets/Config/settings.json`), atomic save, legacy render settings |
 | `channels.py` | Channel documents and the active-channel pointer |
 | `secrets.py` | The **only** module that encrypts/decrypts/persists keys (DPAPI). `get_key()` is its public API |
 | `legacy_import.py` | Importing projects from the old app's output folder |
@@ -194,12 +194,12 @@ drain loop broadcasts it without changes; handle it in `useEvents.ts`.
 |---|---|---|
 | `project.json` | `<project folder>/` | `ProjectDoc`. Written **only** by `pipeline.create.save_project`, atomically |
 | Take artifacts | `<project folder>/takes/<id>/` | Per-take phase outputs; a clone never inherits `master_output` |
-| `settings.json` | `%APPDATA%/AVG Studio/` | `SettingsDoc` — app-scope values plus the active-channel pointer |
-| Channel documents | `%APPDATA%/AVG Studio/channels/` | Channel-scope settings. No global copy, no inheritance |
-| `secrets.dat` | `%APPDATA%/AVG Studio/` | DPAPI-encrypted keys. Only `config/secrets.py` touches it |
-| `errors.json` | `%APPDATA%/AVG Studio/` | Capped, newest-first error log, redacted before write |
-| `working_models.json` | `%APPDATA%/AVG Studio/` | `{"updated", "models": {provider: {model: bool}}}` — proven models only |
-| `model_cache.json` | `%APPDATA%/AVG Studio/` | A provider's *advertised* list. Different file, different meaning |
+| `settings.json` | `Documents/AVG Studio/UserAssets/Config/` | `SettingsDoc` — app-scope values plus the active-channel pointer |
+| Channel documents | `Documents/AVG Studio/UserAssets/Config/channels/` | Channel-scope settings. No global copy, no inheritance |
+| `secrets.dat` | `Documents/AVG Studio/UserAssets/Secrets/` | DPAPI-encrypted keys. Only `config/secrets.py` touches it |
+| `errors.json` | `Documents/AVG Studio/UserAssets/Logs/` | Capped, newest-first error log, redacted before write |
+| `working_models.json` | `%APPDATA%/AVG Studio/` | `{"updated", "models": {provider: {model: bool}}}` — proven models only. Deliberately kept out of `UserAssets`: a machine-owned cache, not user data (`avg.config.user_assets.default_working_models_path`'s own docstring) |
+| `model_cache.json` | `%APPDATA%/AVG Studio/` | A provider's *advertised* list. Different file, different meaning. Same cache exception as `working_models.json` |
 | Thumbnails | `%LOCALAPPDATA%/AVG Studio/thumbs/` | Derived, safe to delete |
 
 Every one of these paths is overridable through `create_app(...)`, which is

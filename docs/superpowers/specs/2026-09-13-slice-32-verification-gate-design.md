@@ -54,10 +54,12 @@ it does not invent a new verification mechanism.
   false-positive from a third-party library file, not a real credential.
   `.gitignore` already excludes `.env`. Every real secret
   (`secrets.dat`, `settings.json`, `channels/`) lives under
-  `%APPDATA%/AVG Studio/`, **outside the repository directory entirely** —
-  there is no path by which a `git add` could ever pick one up, unlike
-  legacy's PowerShell project, whose config lived inside the working tree
-  it committed from. Legacy's Part 4 motivation (a messy history needing
+  `Documents/AVG Studio/UserAssets/` (`user_assets_root()` — the README's
+  data-documents table still says `%APPDATA%/AVG Studio/`, stale since the
+  Slice 20 UserAssets consolidation), **outside the repository directory
+  entirely** — there is no path by which a `git add` could ever pick one
+  up, unlike legacy's PowerShell project, whose config lived inside the
+  working tree it committed from. Legacy's Part 4 motivation (a messy history needing
   cleanup, plus this project being about to go from private tooling toward
   something publishable) does not describe a problem that exists here
   today. The repo is currently private (cloning required a PAT), which
