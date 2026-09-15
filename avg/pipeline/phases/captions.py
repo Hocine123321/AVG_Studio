@@ -430,7 +430,7 @@ def _ass_color_tag(ass_color: str) -> str:
 
 def _animated_text(
     style: str,
-    cue: dict,
+    cue: dict[str, Any],
     *,
     width: int,
     height: int,
