@@ -1532,3 +1532,116 @@ porting pass was also fixed on the Windows plans on `development`,
 since none of them were Linux-specific - they were latent in the
 original plans and only surfaced by mechanically applying every
 replace-block instead of just reading them.
+
+## Slice 31 (all four sub-slices) implemented on linux-port (2026-09-16)
+
+The four sub-slices above were *ported* (docs + verified-applicable
+plans) across several earlier sessions; this session actually
+*implemented* all four, task by task, against a real venv, with a
+full-suite pass before every commit. Baseline 996 passed, 1 skipped ->
+final 1090 passed, 1 skipped. Commits `9f1da7b`..`a326fc5`.
+
+Real bugs found and fixed *during implementation* (distinct from the
+unanchored-insertion bugs the porting passes above already found and
+fixed in the plan documents themselves):
+
+- **Filters + Brand Kit**: `filters_intensity=0` didn't actually
+  suppress the prompt section (only varied wording); the anti-clutter
+  cap floored to 0 for any video under 4 scenes; `avg/assets/` doesn't
+  reach a real `pip install .` (packaging gap, unrelated to filters
+  specifically - every `assets_dir()` caller was silently degrading);
+  `brand_preset`'s SettingSpec defaults to `"modern_dark"`, not blank,
+  so a test asserting an unreachable "no brand_preset set" state needed
+  rewriting to hit the real empty-value branch.
+- **Image Recycling**: an all-recycled run (zero generation jobs) would
+  wrongly trigger the provider-fallback path (`any()` on an empty dict
+  is `False`) and then falsely raise "every scene failed" even though
+  every scene succeeded via recycling - fixed by gating the fallback
+  attempt on `jobs` being non-empty and merging `{**recycled,
+  **gen_results}` before the ok-count check. Also: a test's own fallback-
+  description expectation contradicted its own comment for a genuinely
+  out-of-range recycle pick (no entry exists at that index to name) -
+  resolved by falling back to the pool's first entry when the specific
+  index doesn't exist, not the fully generic prompt.
+- **Chapters + Cards**: a merge/dedup test's 2-scene fixture
+  unintentionally collided with the pre-existing card-frequency cap
+  (`max(1, scenes // 3) == 1` for 2 scenes), silently eating the second
+  card the test meant to check survives - widened the fixture rather
+  than touching the cap (a separate, dedicated cap test with 9 scenes
+  already validates that formula is correct and intentional).
+- **Caption Animation Styles**: a test's own fixture used contiguous
+  word timings (word 1 ends exactly when word 2 starts), so a
+  substring-count assertion legitimately matched two different, both-
+  correct transforms scheduled at the same millisecond - tightened the
+  assertion rather than the (correct) implementation.
+
+## Live bugs reported and fixed this same session
+
+- **Settings screen going blank on navigation**: `Settings.tsx`'s
+  `CATEGORIES` array has no entry for the `filters` group (new in the
+  Filters+Brand-Kit sub-slice above) - that file deliberately throws
+  when a schema group has no category home, and this app has no
+  `ErrorBoundary` anywhere, so the uncaught throw unmounted the whole
+  React tree. Fixed (`7638736`) by adding `filters` to the `Render`
+  category. Cross-checked every OTHER group added this session against
+  `CATEGORIES` too (`recycle_*`/images, `chapters_enabled` etc./overlay)
+  - `filters` was the only gap, and a second cross-check after all four
+  sub-slices landed confirmed it stayed the only one.
+- **`GET /api/settings` 500ing under `tools/dev_serve_linux.py`** (what
+  `build_flatpak.sh`'s "Launch from source" runs): that dev venv
+  installs `.[dev]` only, no `media` extra, on purpose. The route calls
+  `suggest_output_root()` -> `avg.config.legacy_import` ->
+  `avg.pipeline.registry` (module level) -> every phase, including
+  `avg/pipeline/phases/visuals.py`, which had picked up a module-level
+  `from PIL import Image` during the Recycling sub-slice above. Fixed
+  (`12fdebc`) by making that import lazy (function-local, its one call
+  site). Reproduced end-to-end first: built the exact venv
+  `build_flatpak.sh` builds, hit the real 500, confirmed the fix clears
+  it against that same venv. The first version of the regression test
+  (blocking PIL via `sys.modules` in-process) left a stale duplicate
+  module object behind after monkeypatch's own teardown order, which
+  corrupted an unrelated test elsewhere in the full suite - rewrote it
+  to run in a subprocess instead (matches `test_startup_cost.py`'s own
+  existing convention for this exact class of check - confirmed by
+  audit that no other test in the suite has the same in-process risk).
+
+## Small UI/UX fixes and additions, same session
+
+- Status pill's spin animation was rendering static: `@keyframes
+  avg-spin` only defined `to { transform: rotate(360deg) }` with no
+  explicit `from`; the implicit from (the element's own static
+  `scale(1)`) mismatches transform-function types against the `to`
+  keyframe, forcing matrix interpolation, and `rotate(360deg)`
+  decomposes to the same matrix as `rotate(0deg)` - no visible
+  rotation. Fixed by making both keyframes explicit with the same
+  function list (`scale(1) rotate(...)`).
+- Settings screen's sticky top dock reported as going transparent
+  during scroll - could not reproduce this one directly; applied the
+  standard fix (`will-change: transform`, promoting it to its own
+  compositor layer) given this port's own prior real-hardware finding
+  of a related Chromium-rasterizer issue serious enough to force GPU
+  rendering back on in the Flatpak manifest. Flagged to the user as
+  needing visual confirmation, unlike the (provable) spin fix.
+- Added an "Install what's missing" button to the Components (App
+  Health) screen - loops the *existing* `POST /api/health/install`
+  endpoint over every currently-missing installable package
+  sequentially. No backend changes; the endpoint already validated and
+  installed one package safely per call.
+- Paired each phase's Model + Backup settings side by side in a two-
+  column row (`ModelsFieldGroups.tsx` / `.models-phase-group__pair`),
+  by request - previously two separate full-width rows with If-both-
+  fail's own row in between.
+- Ran a full `mypy` (strict) pass - not previously exercised this
+  session. 703 pre-existing errors across 23 files, all predating this
+  session by months (confirmed via `git blame` on every flagged line);
+  exactly one was newly introduced this session
+  (`_animated_text`'s `cue: dict` missing its type argument, Caption
+  Animation Styles' Task 2) - fixed. Left the other 702 alone; a bulk
+  mypy cleanup is separate work with its own risk profile.
+
+**Current state**: 1090 passed, 1 skipped. All work on `linux-port`,
+pushed through commit `f8f0358`. `linux-port` is a long-running branch
+directly on origin (not a separate feature branch) - no PR pending;
+`docs.superpowers`'s own topology check each session confirmed this and
+recommended keeping it as-is, since the broader Linux port effort (past
+just Slice 31) is still ongoing.
