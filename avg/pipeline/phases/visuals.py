@@ -159,7 +159,7 @@ def _is_valid_image(path: Path) -> bool:
         with Image.open(path) as img:
             img.verify()
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - see docstring: any failure means "not valid", never a crash
         return False
 
 

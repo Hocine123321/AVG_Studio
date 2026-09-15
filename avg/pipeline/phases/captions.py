@@ -409,7 +409,7 @@ def _cue_pos(width: int, height: int, position: str, font_size: int) -> tuple[in
     not font-metric text measurement; the same padding constant (`40`)
     `_ass_header`'s own `MarginL`/`MarginR` use, scaled by `_res_scale`."""
     x = width // 2
-    pad = int(round(40 * _res_scale(width, height)))
+    pad = round(40 * _res_scale(width, height))
     if position == "bottom":
         y = height - pad - font_size // 2
     elif position == "top":
@@ -470,7 +470,7 @@ def _animated_text(
     if style == "rise":
         # Glides up ~34px (scaled) while fading in, 220ms.
         x, y = _cue_pos(width, height, position, font_size)
-        dist = max(6, int(round(34 * _res_scale(width, height))))
+        dist = max(6, round(34 * _res_scale(width, height)))
         return (
             r"{\alpha&HFF&\move(" + f"{x},{y + dist},{x},{y},0,220" + r")"
             r"\t(0,220,\alpha&H00&)}" + text
@@ -485,7 +485,7 @@ def _animated_text(
         # (\kf sweep), staying accent-coloured once filled.
         parts = []
         for w in words:
-            dur_cs = max(1, int(round((float(w["end"]) - float(w["start"])) * 100)))
+            dur_cs = max(1, round((float(w["end"]) - float(w["start"])) * 100))
             parts.append(r"{\kf" + str(dur_cs) + r"}" + _ass_escape(str(w["text"])) + " ")
         return "".join(parts).rstrip()
 
@@ -502,8 +502,8 @@ def _animated_text(
             # ws must be >=1ms: an accent \t at exactly t=0 collides with
             # the \r reset (also at t=0) and \r wins, so the FIRST word
             # would never light.
-            ws = max(1, int(round((float(w["start"]) - cue_start) * 1000)))
-            we = max(ws + 1, int(round((float(w["end"]) - cue_start) * 1000)))
+            ws = max(1, round((float(w["start"]) - cue_start) * 1000))
+            we = max(ws + 1, round((float(w["end"]) - cue_start) * 1000))
             parts.append(
                 r"{\r\t(" + str(ws) + "," + str(ws) + "," + accent + r")"
                 r"\t(" + str(we) + "," + str(we) + "," + base + r")}" + _ass_escape(str(w["text"]))
