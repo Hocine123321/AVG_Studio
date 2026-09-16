@@ -1727,3 +1727,72 @@ priority.
 staged approach Slice 31 used (spec, review, then plan, per sub-slice).
 The DPAPI shim regression noted at the top of this ledger is untouched —
 orthogonal to this slice, not blocking it.
+
+## Slice 32, sub-slice 1 — Provider Resilience: plan, mechanically verified (2026-09-13)
+
+`docs/superpowers/plans/2026-09-13-slice-32-provider-resilience-plan.md`
+— 7 tasks (settings; new `avg/config/provider_health.py`;
+`retry_after_seconds()`; `Transport` wiring; Edge TTS's own path;
+`health.py` safeguard row; `visuals.py` fallback-message surfacing).
+
+**Not just read through — actually applied.** Built a scratch venv +
+copy of this repo, applied all 7 tasks' code and tests for real, in
+order, running each task's tests immediately after its own code landed,
+using this project's own Linux dev-sandbox convention. Extended that
+sandbox's `sitecustomize.py` shim: `ctypes.WinDLL` was already no-op'd
+from an earlier session, but `ctypes.wintypes` (a whole submodule
+`avg.config.secrets` imports at module load, genuinely absent on Linux —
+not just missing attributes) was not — a real gap in the existing shim,
+fixed to unblock this verification, not carried into any app code.
+
+**Final counts:** `test_provider_health.py` 15/15,
+`test_errors.py` 60/60 (49 pre-existing + 11 new), `test_transport.py`
+30/30 (19 pre-existing + 11 new), `test_voice.py` 14/14 (12 pre-existing
++ 2 new, after installing `edge-tts` — this sandbox's minimal verify-venv
+didn't have it), `test_health.py` 18/19, `test_phases_media.py` 51/52.
+Both remaining failures confirmed pre-existing and unrelated by running
+them against the unmodified checkout too: `test_no_secret_value_appears_
+in_a_deep_check` is the DPAPI-shim regression already tracked at the top
+of this ledger (pointer-based `CryptProtectData` calling convention, not
+this plan); `test_visuals_writes_safezones_from_the_real_images` is a
+missing dependency in this sandbox's minimal verify-venv (not this repo's
+real `.venv-build`), also pre-existing on unmodified code.
+
+**Three real mistakes this caught before they could reach the plan:**
+1. Task 1's anchor guessed a verbose multi-line `SettingSpec` shape:
+   `group="keys"`'s real convention is a compact one-liner, and
+   `assemblyai`'s real default is `None`, not `""`. Would have failed to
+   anchor at all.
+2. Task 4's test used an invented helper class name
+   (`_RecordingSleeper`); the real one is `_SleepRecorder`. Would have
+   raised `NameError`.
+3. Tasks 6 and 7 assumed test entry points that don't exist:
+   `_safeguard_checks` has no direct-call precedent (fixed to go through
+   the public `report()`, reading the `"safeguards"`-keyed `Stage`), and
+   there is no existing test asserting on the literal `"Falling back to"`
+   message to extend (fixed to build a proper integration test from
+   `test_phases_media.py`'s real `_fallback_settings`/`_FakeImageProvider`
+   pattern, plus a small new `_FakeQuotaFailingProvider` — and since that
+   fake raises `AvgError` directly, bypassing `Transport` entirely, the
+   cooldown it needs to display has to be seeded directly rather than
+   produced by the fake, which the first draft of that test didn't
+   account for).
+
+All three would have made an implementer's first real attempt at this
+plan fail immediately — exactly the failure mode `CLAUDE.md`'s own
+"mechanically apply every replace-block" rule exists to catch before a
+plan ships, not after. The plan document now reflects the corrected,
+verified versions throughout, with the wrong assumptions and their fixes
+called out inline rather than silently smoothed over.
+
+**One design refinement found while grounding, not just a bug fix:** the
+spec had `classify()` itself growing an optional `headers` parameter.
+Reading `classify()`'s real body first showed no case where a header
+changes the *kind* decision — `retry_after_seconds()` ended up a fully
+independent function instead, called by `_send_with_retry` alongside
+`classify()`, not through it. Same behavior, smaller change, noted in the
+plan's own preamble.
+
+**Not yet done:** implementation itself (this session produced spec +
+plan only, per the user's request and this project's own staged
+workflow), and plans for sub-slices 2-4.
