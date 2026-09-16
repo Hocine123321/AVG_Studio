@@ -84,7 +84,16 @@ larger of this sub-slice's three tasks.
 
 1. **Seed is per-project, not per-channel.** A seed governs visual
    consistency *within one video's* generated images — the same reasoning
-   B2.22 gave for legacy. New field on `avg.core.models.ProjectDoc`:
+   B2.22 gave for legacy. New field on `avg.core.models.ProjectDoc`, and
+   the same field on `avg.core.models.Take` — a take re-run
+   (`avg/api/routes_takes.py`'s `create_take`) hands `VisualsPhase.run` a
+   `model_copy` ("shadow_project": `folder`/`phases`/`master_output`
+   swapped to the new take's own), never the real project object
+   `on_phase_change`'s closure saves, exactly the reason `Take` already
+   has its own `master_output` field and `routes_takes.py`'s worker
+   copies `shadow_project.master_output` onto `new_take.master_output` by
+   hand after the run finishes. `visual_seed` needs the identical
+   treatment — see §3.A.
    `visual_seed: int | None = None`. `None` (the default for every
    existing and new project until Visuals first runs) means "not yet
    assigned"; Pydantic's default handles old projects loading with no
@@ -121,14 +130,33 @@ larger of this sub-slice's three tasks.
 ### A. Seed
 
 - `avg.core.models.ProjectDoc` gains `visual_seed: int | None = None`.
+  `avg.core.models.Take` gains the identical field, for the shadow-copy
+  reason above — `avg/api/routes_takes.py`'s `_worker`, in its `finally`
+  block, gains one line right beside its existing `new_take.master_output
+  = shadow_project.master_output`: `new_take.visual_seed = shadow_project.
+  visual_seed`.
 - `avg/pipeline/phases/visuals.py`: at the start of a Visuals run, if
   `ctx.channel_values["visuals_seed_lock"]` (new setting, default `True`)
   is on and `ctx.project.visual_seed` is `None`, generate one
   (`random.randint(0, 2**31 - 1)` — Pollinations/StableHorde both accept
-  32-bit-range integers) and persist it via `avg.pipeline.create.
-  save_project` before generating any scene — so a crash mid-phase still
-  leaves the seed committed for the next resume, rather than a fresh
-  random seed on every retry defeating the whole point.
+  32-bit-range integers) and assign it directly to `ctx.project.
+  visual_seed` — **no direct `save_project` call**. No phase in this
+  codebase calls `avg.pipeline.create.save_project` itself
+  (`avg/pipeline/runner.py`'s own docstring: `on_phase_change` is a
+  callback specifically so the runner, not a phase, decides when and
+  *which* project object gets persisted — a take re-run hands phases a
+  throwaway `model_copy`, "shadow_project", not the real object
+  `on_phase_change`'s closure actually saves). The mutation reaches disk
+  through the exact mechanism every other phase already relies on for its
+  own side effects: the runner's `on_phase_change` fires unconditionally
+  when a phase finishes, success or failure, reading `ctx.project`'s
+  *live* state at that moment — the seed assignment, made synchronously
+  near the top of `run()`, is already covered by that same guarantee, not
+  a new one. The one real gap this leaves: a true process-level crash
+  mid-phase (not a caught, raised `AvgError`) loses the seed exactly as it
+  would lose any other artifact that phase was mid-way through writing —
+  an accepted, pre-existing risk class in this codebase, not a new one
+  seed-lock introduces.
 - `PollinationsImageProvider.generate()` and `StableHordeImageProvider.
   generate()`/`_submit()` each gain an optional `seed: int | None = None`
   keyword parameter, appended to the URL query string (Pollinations) or
@@ -204,7 +232,8 @@ existing image-model/style settings), resolved through
 
 | File | Change |
 |---|---|
-| `avg/core/models.py` | `ProjectDoc` +`visual_seed: int \| None = None` |
+| `avg/core/models.py` | `ProjectDoc` and `Take` both +`visual_seed: int \| None = None` |
+| `avg/api/routes_takes.py` | `_worker`'s `finally` block: +1 line copying `shadow_project.visual_seed` onto `new_take.visual_seed`, beside the existing `master_output` copy |
 | `avg/providers/images/community.py` | `PollinationsImageProvider.generate()`, `StableHordeImageProvider.generate()`/`_submit()`: +optional `seed` param |
 | `avg/providers/images/premium.py` | `GeminiImageProvider.generate()`: +optional `reference_image: bytes \| None` param, wired only on the `_generate_content` path |
 | `avg/pipeline/phases/visuals.py` | seed assignment/persistence at phase start; reference-image capture-and-reuse when enabled; per-call wiring of both into the selected provider |
