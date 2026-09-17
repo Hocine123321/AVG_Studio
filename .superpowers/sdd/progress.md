@@ -1796,3 +1796,55 @@ plan's own preamble.
 **Not yet done:** implementation itself (this session produced spec +
 plan only, per the user's request and this project's own staged
 workflow), and plans for sub-slices 2-4.
+
+## Slice 32, sub-slice 2 — Visual & Motion Consistency: plan, mechanically verified (2026-09-13)
+
+`docs/superpowers/plans/2026-09-13-slice-32-visual-motion-consistency-plan.md`
+— 5 tasks (`ProjectDoc`/`Take` fields + settings + take copy-back; seed on
+Pollinations/Stable Horde; reference_image on Gemini; `VisualsPhase`
+wiring; Director II reading `video_map.json`/`scene_safezones.json`).
+
+**Same discipline as sub-slice 1 — applied to a scratch copy and run for
+real, task by task**, not just written and reasoned about. Final counts:
+`test_models.py`+`test_settings_schema.py` 12/12, `test_images.py` 42/42
+(35 pre-existing + 7 new across two tasks), `test_phases_media.py` 56/57
+(49 pre-existing + 7 new; 1 pre-existing failure confirmed identical on
+the unmodified checkout — missing numpy-adjacent dependency in this
+sandbox's minimal verify-venv, not the real `.venv-build`),
+`test_phases_polish.py`+`test_prompts.py` 85/86 (83 pre-existing + 2 new;
+1 pre-existing failure confirmed identical on the unmodified checkout —
+a Windows-path string parsed differently under Linux `pathlib`).
+
+**Two real design gaps found and fixed while grounding this plan in the
+real code — both already corrected in the spec itself (see the two
+2026-09-13 correction commits above), restated here since they're the
+kind of thing worth not re-deriving:**
+
+1. **No phase in this codebase calls `save_project` directly** —
+   `avg/pipeline/runner.py`'s `on_phase_change` callback is deliberately
+   the only write-through, because a take re-run hands phases a
+   throwaway `model_copy` ("shadow_project") the callback's closure never
+   sees. `visual_seed` needed the exact same treatment `Take.
+   master_output` already has: its own field on `Take`, copied by hand
+   in `routes_takes.py`'s `finally` block. Missing this would have
+   looked completely fine on a project's first take (no shadow-copy
+   path) and silently regenerated a fresh seed on every re-run
+   specifically — the one case seed-lock exists for.
+2. **Gemini reference-image consistency can't just "reuse the first
+   successful scene" under full `ThreadPoolExecutor` parallelism** — all
+   scenes submit at once, so there's no guarantee scene 1 finishes before
+   scene 3 starts. Resolved by generating scene 1 synchronously first
+   (only when reference-lock is on and the provider is Gemini), then
+   submitting the rest to the pool with whatever that produced (or
+   `None` if it failed — the phase proceeds without a reference rather
+   than blocking).
+
+**Smaller findings folded straight into the code:** AI Horde's `seed`
+field is documented as a string, not an integer, unlike every sibling
+numeric param in that request body — kept as its own explicit assignment
+in `_submit` so the distinction stays visible rather than getting lost in
+a dict literal.
+
+**Not yet done:** implementation itself (spec + plan only, per this
+project's staged workflow), and plans for sub-slices 3 (captions) and 4
+(verification gate) — specs only so far for both.
