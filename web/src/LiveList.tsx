@@ -286,35 +286,36 @@ export default function LiveList() {
             {data.scope === "channel" ? "This channel’s own list" : "App-wide list"}
           </span>
         )}
-        <span className="home__spacer" />
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void suggest("models")}
-          disabled={busy || suggesting !== null}
-        >
-          {suggesting === "models" ? "Suggesting…" : "Suggest models"}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void suggest("voices")}
-          disabled={busy || suggesting !== null}
-        >
-          {suggesting === "voices" ? "Suggesting…" : "Suggest voices"}
-        </button>
-        {/* Plain `.btn`, not `.btn--primary` - the Quick panel's one
-            filled-action budget belongs to the screen underneath it (spec
-            §4). This was the screen's own primary action when LiveList was
-            a full Screen; demoted here, not removed. */}
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void refresh()}
-          disabled={busy || suggesting !== null}
-        >
-          {busy ? "Listing…" : "Refresh catalogues"}
-        </button>
+        <div className="livelist__actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void suggest("models")}
+            disabled={busy || suggesting !== null}
+          >
+            {suggesting === "models" ? "Suggesting…" : "Suggest models"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void suggest("voices")}
+            disabled={busy || suggesting !== null}
+          >
+            {suggesting === "voices" ? "Suggesting…" : "Suggest voices"}
+          </button>
+          {/* Plain `.btn`, not `.btn--primary` - the Quick panel's one
+              filled-action budget belongs to the screen underneath it (spec
+              §4). This was the screen's own primary action when LiveList was
+              a full Screen; demoted here, not removed. */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void refresh()}
+            disabled={busy || suggesting !== null}
+          >
+            {busy ? "Listing…" : "Refresh catalogues"}
+          </button>
+        </div>
       </div>
 
       <p className="channels__note">

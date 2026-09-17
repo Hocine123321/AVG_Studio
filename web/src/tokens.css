@@ -2100,19 +2100,34 @@ a:hover {
 }
 
 /* Model + Backup side by side (ModelsFieldGroups.tsx) - the pair a
-   person actually compares while setting a phase up. Scoped under this
-   class rather than touching `.field-row` itself, which is also used
-   standalone by every other category (Captions, Render, ...) and by
-   If-both-fail right below this pair - those all keep their own full-
-   width row and bottom border untouched. `1fr 1fr`: Model and Backup
-   are the same field `type="text"` shape, so an even split never looks
-   lopsided the way it could for two differently-shaped fields. */
+   person actually compares while setting a phase up.
+
+   flex-wrap, not a rigid grid: these are `live_list`-sourced
+   ModelPicker fields (`source` outranks `type` - Settings.tsx's own
+   field-lookup rule), not plain text inputs, so the "same shape"
+   assumption a first version of this rule made was wrong. With
+   nothing ticked in the Live List yet - the actual state on a fresh
+   install, not a rare edge case - ModelPicker falls back to a text box
+   plus a full sentence ("Nothing ticked yet - open the Live List on
+   App health to choose what this offers."), which reads fine at full
+   row width but overflows/overlaps badly when forced into a rigid
+   50% column. `flex: 1 1 320px` sits both rows side by side whenever
+   there's room for that minimum each, and drops to stacking (each full
+   width) the moment either one's actual content needs more - the
+   standard responsive-pairing pattern, not a fixed split that can't
+   adapt to which shape a given phase's fields happen to be in.
+
+   Scoped under this class rather than touching `.field-row` itself,
+   which is also used standalone by every other category (Captions,
+   Render, ...) and by If-both-fail right below this pair - those all
+   keep their own full-width row and bottom border untouched. */
 .models-phase-group__pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
 }
 
 .models-phase-group__pair .field-row {
+  flex: 1 1 320px;
   border-bottom: 0;
 }
 
@@ -4520,6 +4535,26 @@ a:hover {
   gap: 16px;
   flex-wrap: wrap;
   margin: 14px 0 12px;
+}
+
+/* The three action buttons, grouped so THEY wrap among themselves (when
+   the Quick panel is narrow - its own min width is 340px, tight for a
+   chip plus three buttons on one line) rather than as loose children of
+   `.livelist__controls` directly: a lone `margin-left: auto` spacer only
+   pushes content on ITS OWN flex line - once wrapping drops the last
+   button to a second line, that line has no spacer of its own, so the
+   button lands at the line's start (left-aligned, disconnected from its
+   two siblings still sitting right-aligned above it). Grouping the
+   three under one flex-wrap container with its own `justify-content:
+   flex-end` keeps them together and consistently right-aligned on
+   whichever line(s) they end up wrapping to, independent of the chip
+   beside them. */
+.livelist__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-left: auto;
 }
 
 .livelist__filter {
