@@ -1848,3 +1848,55 @@ a dict literal.
 **Not yet done:** implementation itself (spec + plan only, per this
 project's staged workflow), and plans for sub-slices 3 (captions) and 4
 (verification gate) — specs only so far for both.
+
+## Slice 32, sub-slice 3 — Captions: TTS-Native Word Timing: plan, mechanically verified (2026-09-13)
+
+`docs/superpowers/plans/2026-09-13-slice-32-captions-native-timing-plan.md`
+— 4 tasks (`captions_timing_source` setting; `synthesize_with_timing` on
+both voice providers; `voice.py` capture/remap/offset-merge into
+`audio/word_timings.json`; `captions.py`'s 3-way priority).
+
+**The remap mechanism — this sub-slice's whole reason for existing — was
+proven against real audio, not just reasoned about.** Installed `pydub`
+in the verify-venv (ffmpeg was already present in this sandbox), built a
+synthetic 2-second clip (0.5s tone / 1.0s silence / 0.5s tone) with known
+word timings on each tone, and ran the real, unmodified vendored
+`remove_silences_core` against it through the real (new) `_clean_segment`.
+Result: 0.90s actually removed, and the word originally at `[1.6, 1.9]`
+(in the second tone) came back remapped to exactly `[0.7, 1.0]` — the
+precise amount of silence removed, not approximately. This confirms
+reusing `_remap_scene_audio_map`'s existing (start, end)-span remap via a
+throwaway word-timing-shaped scene_map file — instead of reimplementing
+`detect_nonsilent` checkpointing a second time — works exactly as
+designed, with zero changes to the protected `avg/media/vendor/avg.py`.
+
+**Same discipline otherwise** — every task's mocked-level tests applied
+to a scratch copy and run for real. Final counts: settings 68 entries
+clean, `test_voice.py` 19/19 (12 pre-existing + 7 new), `test_phases_
+media.py` 53/54 (1 pre-existing failure, already tracked), `test_phases_
+polish.py` 41/42 (1 pre-existing failure, already tracked).
+
+**Two real mistakes caught and fixed, same pattern as sub-slices 1-2:**
+1. A first draft of the Edge TTS word-timing test asserted exact float
+   equality on a `/1e7` tick-to-seconds conversion
+   (`0.30000000000000004 != 0.3`) — fixed to `pytest.approx`.
+2. This plan's own first draft assumed `captions.py`'s real `_get_words`
+   had three separate early-return branches (matching an earlier,
+   imagined shape); the actual function is one `if has_key(...): ...
+   else-fallthrough` ending in a single unconditional return. Fixed by
+   re-reading the real function before writing the replace-block, not
+   after the anchor failed to match.
+
+**Design refinement, not a bug:** `synthesize_with_timing` is designed to
+swallow a timing-only failure internally (returning `(audio, None)`)
+rather than ever needing voice.py to catch an exception and fall back to
+a second, separately-billed `synthesize()` call for the same segment — a
+provider that got audio but couldn't parse timing keeps the audio;
+`synthesize_with_timing` only raises when audio itself couldn't be
+produced, exactly matching `synthesize()`'s own existing contract.
+
+**Not yet done:** implementation itself (spec + plan only), and sub-slice
+4's plan (verification gate — spec only so far, smallest and
+lowest-risk of the four, since it wraps this project's own already-
+existing pytest/mypy/oxlint/health.py tools rather than building
+anything from scratch).
