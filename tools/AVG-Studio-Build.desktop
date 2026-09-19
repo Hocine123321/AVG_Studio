@@ -1,0 +1,39 @@
+[Desktop Entry]
+# Double-click this file in a file manager to run build_flatpak.sh in a
+# real, visible terminal - no need to open a terminal and type the
+# command by hand. First use: most file managers (Dolphin, Nautilus,
+# Thunar, ...) will ask you to confirm you trust/want to execute this
+# specific file before honouring it - that is the file manager's own
+# one-time safety prompt for a freshly-downloaded .desktop file, not a
+# problem with this one.
+#
+# `Terminal=true` is the actual fix: it is the standard freedesktop.org
+# Desktop Entry key that tells the file manager to open a terminal
+# emulator and run `Exec` inside it, rather than running the command
+# invisibly in the background - the file manager picks whichever
+# terminal emulator is configured/installed (Konsole, GNOME Terminal,
+# ...), so this works the same way regardless of desktop environment.
+#
+# `%k` is the standard field code for "this .desktop file's own path" -
+# it is how `Exec` finds build_flatpak.sh sitting right beside it
+# without a hardcoded, machine-specific absolute path baked into the
+# file (which would break the moment anyone else clones this repo
+# somewhere else). build_flatpak.sh resolves ITS OWN location the same
+# way internally (`REPO_ROOT` from `${BASH_SOURCE[0]}`), so once `Exec`
+# hands it its own real path, everything past that point already works
+# from any working directory - this file only has to get that one path
+# right.
+#
+# The final `read` line is why the terminal window does not just vanish
+# the instant the script finishes (Terminal=true closes the window as
+# soon as `Exec` exits) - without it, a failed build's error, or the
+# finished "Build flatpak package" option's own printed `flatpak
+# install --user ...` command, would flash past unread.
+Type=Application
+Name=AVG Studio — Build / Launch
+Comment=Interactive menu: launch AVG Studio from source, or build the Flatpak package
+Exec=bash -c "d=\$(dirname \"\$1\"); \"\$d/build_flatpak.sh\"; echo; read -n 1 -s -r -p \"Press any key to close this window...\"" bash %k
+Icon=utilities-terminal
+Terminal=true
+Categories=Development;
+StartupNotify=true

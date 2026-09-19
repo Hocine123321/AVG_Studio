@@ -90,12 +90,15 @@ public API - the two are drop-in for each other at the call-site level.
 ## Removed from this branch: committed Windows build outputs
 
 None of this was intentional - found by inspection after a report that
-`tools/build_flatpak.sh` "did nothing" (still being diagnosed; unrelated
-to this). While checking the tree for anything else Windows-specific
-sitting around, three directories turned out to be tracked in git despite
-CLAUDE.md already documenting all three as "gitignored, regenerated not
-committed" - no `.gitignore` entry for any of them had ever actually
-existed:
+`tools/build_flatpak.sh` "did nothing" (still being diagnosed at the time;
+resolved later - see `tools/AVG-Studio-Build.desktop`/
+`tools/install_desktop_launcher.sh` below - the script was never broken,
+there was just no way to launch it except by typing the command into an
+already-open terminal). While checking the tree for anything else
+Windows-specific sitting around, three directories turned out to be
+tracked in git despite CLAUDE.md already documenting all three as
+"gitignored, regenerated not committed" - no `.gitignore` entry for any of
+them had ever actually existed:
 
 | Path | What it was | Tracked files | Size |
 |---|---|---|---|
@@ -144,6 +147,30 @@ New in this branch, not a port of anything - Windows has an installer
   the current two once `tools/dev_serve_linux.py` existed to actually
   be the fast option and made "refresh but don't bundle" pointless as
   its own choice; see the dev-loop entry below for why.
+- `tools/AVG-Studio-Build.desktop` / `tools/install_desktop_launcher.sh`
+  - a real freedesktop.org launcher for `build_flatpak.sh`, added after
+  a report that clicking the script did nothing useful (no file manager
+  runs a bare `.sh` in a visible terminal by default, and this branch's
+  target environments include minimal Wayland compositors - niri,
+  Sway-alikes - with no file manager at all, where the actual "click"
+  is selecting an entry in an app launcher like fuzzel/wofi, which only
+  finds `.desktop` files already sitting in a standard XDG applications
+  directory). `Terminal=true` is the whole fix - it is the standard key
+  that tells whatever's parsing the file to open a terminal emulator and
+  run `Exec` inside it, so this works the same way regardless of desktop
+  environment or app launcher. Two entry points because a `.desktop`
+  file's own self-location trick (`%k`, "this file's own path") stops
+  being trustworthy the moment the file is symlinked elsewhere, which is
+  exactly what putting it in an app launcher's search path requires:
+  `AVG-Studio-Build.desktop` is `%k`-based (works double-clicked directly
+  from wherever this repo was cloned, no install step); running
+  `install_desktop_launcher.sh` once instead writes a second copy to
+  `~/.local/share/applications/` with this clone's actual absolute path
+  baked in directly, sidestepping `%k` entirely for the app-launcher
+  case. Every escaped value in both was verified three ways before
+  trusting it: `desktop-file-validate`, a from-scratch reimplementation
+  of the spec's own Exec-quoting rules run against the literal file
+  bytes, and actually executing the resulting command end to end.
 - `tools/dev_serve_linux.py` - the actual equivalent of the Windows
   build's fast dev loop (`tools/_dev_serve.py`). No packaging step at
   all - bare `uvicorn.run(create_app(...))`, opened in a regular
