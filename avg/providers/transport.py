@@ -59,8 +59,9 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
-from avg.core.errors import AvgError
-from avg.providers.errors import POLICY, classify
+from avg.config import provider_health
+from avg.core.errors import AvgError, ErrorKind
+from avg.providers.errors import POLICY, classify, retry_after_seconds
 
 Mode = Literal["live", "record", "replay"]
 
@@ -336,6 +337,11 @@ class Transport:
         if self.mode == "replay":
             return self._replay(fixture_path, method_u, url)
 
+        if provider:
+            cooldown = provider_health.active_cooldown(provider)
+            if cooldown is not None:
+                raise provider_health.cooldown_error(cooldown)
+
         started = time.monotonic()
         try:
             response = self._send_with_retry(method_u, url, headers, json, timeout, provider)
@@ -402,6 +408,8 @@ class Transport:
                     self._sleep(rule.backoff_seconds * (2 ** (attempt - 1)))
                     attempt += 1
                     continue
+                if provider and kind in (ErrorKind.quota, ErrorKind.billing):
+                    self._record_cooldown(provider, kind)
                 raise AvgError(kind, f"{provider or 'provider'} request failed: {exc}", detail=str(exc)) from exc
 
             if response.status_code >= 400:
@@ -412,9 +420,16 @@ class Transport:
                 kind = classify(response.status_code, body_text, None, provider)
                 rule = POLICY[kind]
                 if rule.retryable and attempt < rule.max_attempts:
-                    self._sleep(rule.backoff_seconds * (2 ** (attempt - 1)))
+                    wait = None
+                    if kind == ErrorKind.rate_limit:
+                        wait = retry_after_seconds(response.headers, body_text)
+                        if wait is not None:
+                            wait = min(wait, _rate_limit_wait_ceiling_seconds())
+                    self._sleep(wait if wait is not None else rule.backoff_seconds * (2 ** (attempt - 1)))
                     attempt += 1
                     continue
+                if provider and kind in (ErrorKind.quota, ErrorKind.billing):
+                    self._record_cooldown(provider, kind)
                 raise AvgError(
                     kind,
                     f"{provider or 'provider'} request failed with HTTP {response.status_code}",
@@ -449,6 +464,31 @@ class Transport:
             },
         }
         fixture_path.write_text(json_lib.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _record_cooldown(self, provider: str, kind: ErrorKind) -> None:
+        """Persist a cooldown after a quota/billing failure. Best-effort -
+        a failure to write cooldown state must not turn an already-
+        classified provider failure into a different, more confusing one."""
+        with suppress(Exception):
+            if kind == ErrorKind.quota:
+                provider_health.record_cooldown(
+                    provider, "quota", cooldown_until=provider_health.default_quota_cooldown_until(provider)
+                )
+            else:
+                provider_health.record_cooldown(provider, "billing")
+
+
+def _rate_limit_wait_ceiling_seconds() -> float:
+    """`resilience_rate_limit_wait_ceiling_sec` (a `SettingSpec`, default
+    120). Read fresh on every call, not cached - this only runs on an
+    actual rate-limit retry, not a hot path."""
+    from avg.config.settings import load_settings  # noqa: PLC0415 - avoids importing settings at module load for every provider caller
+
+    value = load_settings().values.get("resilience_rate_limit_wait_ceiling_sec", 120)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 120.0
 
 
 def request(
