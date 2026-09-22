@@ -434,3 +434,153 @@ def test_live_mode_performs_a_real_request_and_writes_no_fixture(tmp_path):
 def test_an_unknown_mode_still_raises():
     with pytest.raises(ValueError):
         Transport(mode="teleport")  # type: ignore[arg-type]
+
+
+from datetime import datetime, timedelta, timezone
+
+from avg.config import provider_health
+
+
+def test_a_provider_in_cooldown_is_never_called(tmp_path, monkeypatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    provider_health.record_cooldown(
+        "groq", "quota", cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record")
+    with pytest.raises(AvgError) as excinfo:
+        transport.request("POST", "https://api.groq.com/x", provider="groq")
+
+    assert excinfo.value.kind == ErrorKind.quota
+    assert calls == []  # the network was never reached
+
+
+def test_a_provider_not_in_cooldown_is_called_normally(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True})
+
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record")
+    response = transport.request("POST", "https://api.groq.com/x", provider="groq")
+    assert response.status_code == 200
+
+
+def test_a_quota_failure_records_a_cooldown_before_raising(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "daily quota exceeded"})
+
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record", sleep=lambda s: None)
+    with pytest.raises(AvgError):
+        transport.request("POST", "https://api.groq.com/x", provider="groq")
+
+    assert provider_health.is_in_cooldown("groq") is True
+
+
+def test_a_billing_failure_records_a_cooldown_before_raising(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    monkeypatch.setattr(provider_health, "get_key", lambda provider: "same-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json={"error": "insufficient credits"})
+
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record")
+    with pytest.raises(AvgError):
+        transport.request("POST", "https://api.elevenlabs.io/x", provider="elevenlabs")
+
+    assert provider_health.is_in_cooldown("elevenlabs") is True
+
+
+def test_rate_limit_uses_retry_after_header_instead_of_the_fixed_backoff(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "7"}, json={"error": "rate limited"})
+        return httpx.Response(200, json={"ok": True})
+
+    sleeper = _SleepRecorder()
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record", sleep=sleeper)
+    response = transport.request("POST", "https://api.groq.com/x", provider="groq")
+
+    assert response.status_code == 200
+    assert sleeper.calls == [7.0]  # not POLICY[rate_limit].backoff_seconds * 2**0 == 2.0
+
+
+def test_rate_limit_wait_is_capped_at_the_configured_ceiling(tmp_path, monkeypatch):
+    from avg.config import settings as settings_module
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    doc = settings_module.SettingsDoc()
+    doc.values["resilience_rate_limit_wait_ceiling_sec"] = 10
+    monkeypatch.setattr(settings_module, "load_settings", lambda: doc)
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "9999"}, json={"error": "rate limited"})
+        return httpx.Response(200, json={"ok": True})
+
+    sleeper = _SleepRecorder()
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record", sleep=sleeper)
+    transport.request("POST", "https://api.groq.com/x", provider="groq")
+
+    assert sleeper.calls == [10.0]
+
+
+def test_rate_limit_without_a_real_wait_time_falls_back_to_the_existing_formula(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"error": "rate limited"})  # no Retry-After
+        return httpx.Response(200, json={"ok": True})
+
+    sleeper = _SleepRecorder()
+    transport = Transport(client=_client(handler), fixtures_dir=tmp_path, mode="record", sleep=sleeper)
+    transport.request("POST", "https://api.groq.com/x", provider="groq")
+
+    assert sleeper.calls == [POLICY[ErrorKind.rate_limit].backoff_seconds]  # unchanged behavior
+
+
+def test_replay_mode_never_checks_or_touches_provider_health(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    provider_health.record_cooldown(
+        "groq", "quota", cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    # A fixture that doesn't exist would normally raise UnmatchedRequestError,
+    # not AvgError(kind=quota) - if replay mode ever ran the pre-flight
+    # check, this would raise the wrong exception, wrongly.
+    transport = Transport(fixtures_dir=tmp_path, mode="replay")
+    with pytest.raises(UnmatchedRequestError):
+        transport.request("POST", "https://api.groq.com/x", provider="groq")
