@@ -127,3 +127,13 @@ def test_validate_value_accepts_any_string_when_choices_declare_a_custom_escape(
     )
     assert validate_value(spec, "Bebas Neue") == "Bebas Neue"
     assert validate_value(spec, "a") == "a"
+
+
+def test_resilience_settings_exist_with_no_invalidation():
+    ids = {s.id: s for s in SETTINGS}
+    assert ids["resilience_rate_limit_wait_ceiling_sec"].default == 120
+    assert ids["resilience_rate_limit_wait_ceiling_sec"].invalidates is None
+    assert ids["resilience_rate_limit_wait_ceiling_sec"].scope == "app"
+    assert ids["resilience_quota_cooldown_hours"].default == 24.0
+    assert ids["resilience_quota_cooldown_hours"].invalidates is None
+    assert ids["resilience_quota_cooldown_hours"].scope == "app"
