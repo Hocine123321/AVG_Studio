@@ -20,6 +20,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from avg.config import provider_health
 from avg.config.secrets import get_key
 from avg.core.errors import AvgError, ErrorKind
 from avg.providers.errors import classify
@@ -271,6 +272,10 @@ class EdgeVoiceProvider:
         """
         del model
 
+        cooldown = provider_health.active_cooldown(self.name)
+        if cooldown is not None:
+            raise provider_health.cooldown_error(cooldown)
+
         def _collect() -> bytes:
             communicate = _edge().Communicate(text, voice_id)
             audio = bytearray()
@@ -289,6 +294,13 @@ class EdgeVoiceProvider:
             audio = pool.submit(_collect).result(timeout=_EDGE_SYNTHESIZE_TIMEOUT_SECONDS)
         except Exception as exc:  # noqa: BLE001 - re-classified immediately below
             kind = classify(None, "", exc, self.name)
+            if kind in (ErrorKind.quota, ErrorKind.billing):
+                if kind == ErrorKind.quota:
+                    provider_health.record_cooldown(
+                        self.name, "quota", cooldown_until=provider_health.default_quota_cooldown_until(self.name)
+                    )
+                else:
+                    provider_health.record_cooldown(self.name, "billing")
             raise AvgError(kind, f"Edge TTS request failed: {exc}", detail=str(exc)) from exc
         finally:
             pool.shutdown(wait=False)
@@ -308,6 +320,13 @@ class EdgeVoiceProvider:
             voices = asyncio.run(_list_with_timeout())
         except Exception as exc:  # noqa: BLE001 - re-classified immediately below
             kind = classify(None, "", exc, self.name)
+            if kind in (ErrorKind.quota, ErrorKind.billing):
+                if kind == ErrorKind.quota:
+                    provider_health.record_cooldown(
+                        self.name, "quota", cooldown_until=provider_health.default_quota_cooldown_until(self.name)
+                    )
+                else:
+                    provider_health.record_cooldown(self.name, "billing")
             raise AvgError(kind, f"Edge TTS voice list failed: {exc}", detail=str(exc)) from exc
 
         return [
