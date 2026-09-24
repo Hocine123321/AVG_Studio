@@ -287,3 +287,51 @@ def test_no_secret_value_appears_in_a_deep_check(tmp_path):
     blob = " ".join(f"{c.name} {c.detail} {c.version}" for c in checks)
     assert real_key not in blob
     assert "sk-" not in blob
+
+
+from avg.config import provider_health
+
+
+def test_provider_cooldowns_check_is_ok_when_nothing_is_in_cooldown(tmp_path, monkeypatch):
+    from avg.core.health import report
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    result = report(settings_path=tmp_path / "s.json", channels_dir=tmp_path / "c", output_root=tmp_path)
+    safeguards = next(s for s in result if s.key == "safeguards")
+    row = next(c for c in safeguards.checks if c.name == "Provider cooldowns")
+    assert row.ok is True
+    assert row.required is False
+
+
+def test_provider_cooldowns_check_lists_active_ones(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from avg.core.health import report
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    provider_health.record_cooldown(
+        "groq", "quota", cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+
+    result = report(settings_path=tmp_path / "s.json", channels_dir=tmp_path / "c", output_root=tmp_path)
+    safeguards = next(s for s in result if s.key == "safeguards")
+    row = next(c for c in safeguards.checks if c.name == "Provider cooldowns")
+    assert row.ok is False
+    assert "groq" in row.detail
+
+
+def test_provider_cooldowns_check_never_raises_even_if_the_file_is_corrupt(tmp_path, monkeypatch):
+    from avg.core.health import report
+
+    path = tmp_path / "provider_health.json"
+    path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(provider_health, "default_provider_health_path", lambda: path)
+
+    result = report(settings_path=tmp_path / "s.json", channels_dir=tmp_path / "c", output_root=tmp_path)
+    safeguards = next(s for s in result if s.key == "safeguards")
+    row = next(c for c in safeguards.checks if c.name == "Provider cooldowns")
+    assert row.ok is True
