@@ -80,20 +80,31 @@ struct AppBackground: View {
         return Theme.accent
     }
 
+    /// Keeps animated control points inside MeshGradient's normalized domain.
+    /// The outer corners stay pinned to the viewport corners; allowing them (or
+    /// edge points) below 0 or above 1 produces transparent/black wedges that
+    /// move as the mesh animates.
+    private func safePoint(_ x: Double, _ y: Double) -> SIMD2<Float> {
+        SIMD2<Float>(
+            Float(min(max(x, 0.02), 0.98)),
+            Float(min(max(y, 0.02), 0.98))
+        )
+    }
+
     private func content(t: Double, scheme: ColorScheme) -> some View {
         let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
         return MeshGradient(
             width: 3, height: 3,
             points: [
-                SIMD2<Float>(Float(0.06 * sin(t * 0.09)), Float(0.05 * cos(t * 0.07))),
-                SIMD2<Float>(Float(0.5 + 0.05 * sin(t * 0.11 + 1.3)), Float(0.06 * sin(t * 0.08))),
-                SIMD2<Float>(Float(1 - 0.06 * sin(t * 0.06 + 2.1)), Float(0.05 * cos(t * 0.1))),
-                SIMD2<Float>(Float(0.05 * cos(t * 0.08 + 0.7)), Float(0.45 + 0.16 * sin(t * 0.13))),
-                SIMD2<Float>(Float(0.5 + 0.22 * sin(t * 0.1)), Float(0.5 + 0.2 * cos(t * 0.085))),
-                SIMD2<Float>(Float(1 - 0.05 * cos(t * 0.07 + 1.6)), Float(0.55 + 0.16 * cos(t * 0.12))),
-                SIMD2<Float>(Float(0.06 * sin(t * 0.075 + 2.6)), Float(1 - 0.05 * cos(t * 0.09))),
-                SIMD2<Float>(Float(0.5 + 0.05 * cos(t * 0.095 + 0.4)), Float(1 - 0.06 * sin(t * 0.065))),
-                SIMD2<Float>(Float(1 - 0.06 * cos(t * 0.085 + 1.9)), Float(1 - 0.05 * sin(t * 0.11))),
+                SIMD2<Float>(0, 0),
+                safePoint(0.5 + 0.05 * sin(t * 0.11 + 1.3), 0.06 * sin(t * 0.08)),
+                SIMD2<Float>(1, 0),
+                safePoint(0.05 * cos(t * 0.08 + 0.7), 0.45 + 0.16 * sin(t * 0.13)),
+                safePoint(0.5 + 0.22 * sin(t * 0.1), 0.5 + 0.2 * cos(t * 0.085)),
+                safePoint(1 - 0.05 * cos(t * 0.07 + 1.6), 0.55 + 0.16 * cos(t * 0.12)),
+                SIMD2<Float>(0, 1),
+                safePoint(0.5 + 0.05 * cos(t * 0.095 + 0.4), 1 - 0.06 * sin(t * 0.065)),
+                SIMD2<Float>(1, 1),
             ],
             colors: [
                 drift(Theme.accent, phase: 0.0, t: t).opacity(0.55), base, drift(Theme.violet, phase: 1.4, t: t).opacity(0.45),
