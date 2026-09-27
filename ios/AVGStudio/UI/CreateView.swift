@@ -65,6 +65,7 @@ struct CreateView: View {
     }
 
     private func create() {
+        Haptics.light()
         let ch = store.channels.first { $0.id == channelID } ?? store.activeChannel
         let p = store.createProject(topic: topic.trimmed, title: title, channel: ch, aspect: aspect)
         store.start(p.id)

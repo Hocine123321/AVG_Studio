@@ -43,6 +43,11 @@ struct StudioView: View {
                 }
             }
             .onChange(of: p.output, initial: true) { _, _ in loadPlayer(p) }
+            // Success feedback for a render finishing while this screen is
+            // open - `initial: false` (the default) means old != new only
+            // fires on a REAL change, never on first appearing at an
+            // already-rendered project.
+            .onChange(of: p.output) { old, new in if old != new, new != nil { Haptics.success() } }
             .alert("Saved to Photos", isPresented: $savedToPhotos) { Button("OK") {} }
             .sheet(isPresented: $showLog) { ProjectLogView(projectID: projectID, title: p.title) }
         } else {
@@ -80,10 +85,14 @@ struct StudioView: View {
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
                     if store.isRunning(p.id) {
-                        Button("Cancel", systemImage: "stop.fill", role: .destructive) { store.cancel(p.id) }
-                            .buttonStyle(.glass)
+                        Button("Cancel", systemImage: "stop.fill", role: .destructive) {
+                            Haptics.light()
+                            store.cancel(p.id)
+                        }
+                        .buttonStyle(.glass)
                     } else {
                         Button(p.output == nil ? "Render" : "Render again", systemImage: "play.fill") {
+                            Haptics.light()
                             store.start(p.id, from: p.narration == nil ? .writing : firstIncomplete(p))
                         }
                         .buttonStyle(.glassProminent)
@@ -91,6 +100,7 @@ struct StudioView: View {
                     if let url = store.file(p, p.output) {
                         Button("Save", systemImage: "square.and.arrow.down") {
                             UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+                            Haptics.success()
                             savedToPhotos = true
                         }
                         .buttonStyle(.glass)

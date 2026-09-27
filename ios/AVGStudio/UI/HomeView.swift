@@ -27,12 +27,14 @@ struct HomeView: View {
                 } else {
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(visible) { p in
-                            NavigationLink(value: p.id) { ProjectCard(project: p) }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(p.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { store.setArchived(p.id, !p.archived) }
-                                    Button("Delete", systemImage: "trash", role: .destructive) { store.delete(p.id) }
-                                }
+                            NavigationLink(value: p.id) {
+                                ProjectCard(project: p, onArchive: { archiveToggle(p) }, onDelete: { delete(p) })
+                            }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(p.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { archiveToggle(p) }
+                                Button("Delete", systemImage: "trash", role: .destructive) { delete(p) }
+                            }
                         }
                     }
                     .padding(16)
@@ -52,6 +54,16 @@ struct HomeView: View {
                 Button("New", systemImage: "plus") { store.tab = .create }
             }
         }
+    }
+
+    private func archiveToggle(_ p: Project) {
+        Haptics.light()
+        withAnimation(.spring) { store.setArchived(p.id, !p.archived) }
+    }
+
+    private func delete(_ p: Project) {
+        Haptics.warning()
+        withAnimation(.spring) { store.delete(p.id) }
     }
 
     @ViewBuilder private func interruptedBanner(_ p: Project) -> some View {
@@ -77,13 +89,32 @@ struct HomeView: View {
 struct ProjectCard: View {
     @Environment(Store.self) private var store
     let project: Project
+    /// One-tap archive/delete, mirroring the long-press context menu on
+    /// `HomeView`'s grid - a menu you have to discover by holding is easy
+    /// to miss entirely, so the same two actions get a visible affordance
+    /// too (top-right ellipsis, the standard iOS "card overflow" spot).
+    var onArchive: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            thumb
-                .frame(height: 190)
-                .frame(maxWidth: .infinity)
-                .clipShape(.rect(cornerRadius: 18))
+            ZStack(alignment: .topTrailing) {
+                thumb
+                    .frame(height: 190)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(.rect(cornerRadius: 18))
+                Menu {
+                    Button(project.archived ? "Unarchive" : "Archive", systemImage: "archivebox", action: onArchive)
+                    Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .glassEffect(.regular.interactive(), in: .circle)
+                }
+                .padding(8)
+            }
             Text(project.title).font(.subheadline.weight(.semibold)).lineLimit(2)
             if let job = store.jobs[project.id] {
                 ProgressView(value: job.progress) { Text(job.phase.title).font(.caption2) }

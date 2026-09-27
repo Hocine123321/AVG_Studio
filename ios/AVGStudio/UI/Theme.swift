@@ -28,31 +28,82 @@ enum Theme {
     }
 }
 
-/// Slowly drifting mesh behind the glass, so Liquid Glass has color to refract.
+/// A soft, continuously-flowing colour field behind the glass - the app's
+/// answer to Google Gemini's own moving backdrop, built from the same
+/// `MeshGradient` bones the previous version used but with the motion and
+/// palette doing more work: control points drift in loose, overlapping
+/// orbits (never repeating on a visible cycle - each point's period is
+/// mutually irrational-ish relative to the others) AND every colour's hue
+/// itself slowly rotates through the three brand tones, so the blend
+/// keeps evolving, not just where it sits.
+///
+/// Respects Reduce Motion: a user who has it on gets ONE still frame of
+/// the same gradient (evaluated at t=0), not a paused-mid-animation frame -
+/// this was already the standard for Welcome's entrance animation but the
+/// background itself previously ignored the setting entirely.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-            let t = Float(tl.date.timeIntervalSinceReferenceDate)
-            let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
-            MeshGradient(
-                width: 3, height: 3,
-                points: [
-                    SIMD2<Float>(0, 0), SIMD2<Float>(0.5, 0), SIMD2<Float>(1, 0),
-                    SIMD2<Float>(0, 0.45 + 0.1 * sin(t * 0.21)),
-                    SIMD2<Float>(0.5 + 0.18 * sin(t * 0.17), 0.5 + 0.16 * cos(t * 0.13)),
-                    SIMD2<Float>(1, 0.55 + 0.1 * cos(t * 0.19)),
-                    SIMD2<Float>(0, 1), SIMD2<Float>(0.5, 1), SIMD2<Float>(1, 1),
-                ],
-                colors: [
-                    Theme.accent.opacity(0.55), base, Theme.violet.opacity(0.45),
-                    base, Theme.violet.opacity(0.35), base,
-                    Theme.teal.opacity(0.35), base, Theme.accent.opacity(0.4),
-                ]
-            )
-            .ignoresSafeArea()
+        if reduceMotion {
+            content(t: 0, scheme: scheme).ignoresSafeArea()
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
+                content(t: Float(tl.date.timeIntervalSinceReferenceDate), scheme: scheme)
+                    .ignoresSafeArea()
+            }
         }
     }
+
+    /// One brand hue slowly rotated toward its neighbour and back - `phase`
+    /// offsets where in that rotation each colour slot sits, so the whole
+    /// mesh never settles on a single "dominant" tone.
+    private func drift(_ base: Color, phase: Double, t: Float) -> Color {
+        let cycle = (sin(Double(t) * 0.05 + phase) + 1) / 2 // 0…1, ~125s period
+        return base.mix(with: nextHue(base), by: cycle * 0.4)
+    }
+
+    private func nextHue(_ base: Color) -> Color {
+        if base == Theme.accent { return Theme.violet }
+        if base == Theme.violet { return Theme.teal }
+        return Theme.accent
+    }
+
+    private func content(t: Float, scheme: ColorScheme) -> some View {
+        let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
+        return MeshGradient(
+            width: 3, height: 3,
+            points: [
+                SIMD2<Float>(0.06 * sin(t * 0.09), 0.05 * cos(t * 0.07)),
+                SIMD2<Float>(0.5 + 0.05 * sin(t * 0.11 + 1.3), 0.06 * sin(t * 0.08)),
+                SIMD2<Float>(1 - 0.06 * sin(t * 0.06 + 2.1), 0.05 * cos(t * 0.1)),
+                SIMD2<Float>(0.05 * cos(t * 0.08 + 0.7), 0.45 + 0.16 * sin(t * 0.13)),
+                SIMD2<Float>(0.5 + 0.22 * sin(t * 0.1), 0.5 + 0.2 * cos(t * 0.085)),
+                SIMD2<Float>(1 - 0.05 * cos(t * 0.07 + 1.6), 0.55 + 0.16 * cos(t * 0.12)),
+                SIMD2<Float>(0.06 * sin(t * 0.075 + 2.6), 1 - 0.05 * cos(t * 0.09)),
+                SIMD2<Float>(0.5 + 0.05 * cos(t * 0.095 + 0.4), 1 - 0.06 * sin(t * 0.065)),
+                SIMD2<Float>(1 - 0.06 * cos(t * 0.085 + 1.9), 1 - 0.05 * sin(t * 0.11)),
+            ],
+            colors: [
+                drift(Theme.accent, phase: 0.0, t: t).opacity(0.55), base, drift(Theme.violet, phase: 1.4, t: t).opacity(0.45),
+                base, drift(Theme.violet, phase: 2.8, t: t).opacity(0.35), base,
+                drift(Theme.teal, phase: 4.2, t: t).opacity(0.35), base, drift(Theme.accent, phase: 5.6, t: t).opacity(0.4),
+            ]
+        )
+    }
+}
+
+/// Tiny shared haptic helper - one call site per feeling rather than every
+/// screen constructing/priming its own `UIFeedbackGenerator`. Feedback is
+/// deliberately used sparingly: only on moments the user actively
+/// initiated (create, render, save, archive/delete), never ambient state
+/// changes like a progress tick.
+enum Haptics {
+    static func light() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+    static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
 }
 
 extension View {
