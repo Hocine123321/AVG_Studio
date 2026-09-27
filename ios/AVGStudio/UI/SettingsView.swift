@@ -1,7 +1,50 @@
 import SwiftUI
 import AVFoundation
 
+/// Top-level Settings - Phase 2 of `UI_POLISH_PLAN.md`. This used to be a
+/// single ~200-line `Form` with 9 sections stacked top to bottom (AI
+/// services, three more provider-specific sections, narration, API keys,
+/// video quality, filters, captions, plus the 3 existing links) - the
+/// single most "everything at once" screen in the app. Split into three
+/// grouped destinations below, mirroring how iOS's own Settings app
+/// organizes itself; no behavior changed, same toggles/pickers, just
+/// regrouped onto their own screens.
 struct SettingsView: View {
+    var body: some View {
+        Form {
+            Section {
+                NavigationLink(destination: AIProvidersSettingsView()) {
+                    Label("AI Providers", systemImage: "sparkles")
+                }
+                NavigationLink(destination: VideoRenderSettingsView()) {
+                    Label("Video & Render", systemImage: "video")
+                }
+                NavigationLink(destination: CaptionsSettingsView()) {
+                    Label("Captions", systemImage: "captions.bubble")
+                }
+            }
+
+            Section {
+                NavigationLink("Reusable images", destination: ReusableImagesView())
+            } footer: {
+                Text("A shared pool the writer can pull from instead of generating fresh art. Each channel decides how heavily to use it under Channels → Recycling.")
+            }
+
+            Section {
+                NavigationLink("App health", destination: HealthView())
+                NavigationLink("Activity & errors", destination: ErrorLogView())
+            }
+        }
+        .screenBackground()
+        .navigationTitle("Settings")
+    }
+}
+
+/// Writer / images / voice provider pickers, their live model catalogues,
+/// the per-voice-provider section (Apple/ElevenLabs/Gemini), narration
+/// pacing, and API keys - everything that's about WHICH AI service does
+/// the work and how it's authenticated.
+struct AIProvidersSettingsView: View {
     @Environment(Store.self) private var store
     @State private var keys: [APIKey: String] = [:]
 
@@ -12,7 +55,9 @@ struct SettingsView: View {
     // fetched entries/disk cache - survives this view's body being
     // re-evaluated on every settings change; a fresh instance per body
     // pass would re-show empty/loading on every keystroke elsewhere on
-    // this screen.
+    // this screen. Now scoped to just this subview (they were previously
+    // held on the whole Settings screen, re-evaluating on every unrelated
+    // Video/Caption change too).
     @State private var geminiTextCatalog = ModelCatalog(cacheKey: "gemini_text") {
         guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
         return try await ModelCatalogSources.geminiText(key: key)
@@ -127,7 +172,25 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                 }
             } header: { Text("API keys") } footer: { Text("Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy.") }
+        }
+        .screenBackground()
+        .navigationTitle("AI Providers")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            for k in APIKey.allCases { keys[k] = Keychain.get(k) ?? "" }
+        }
+    }
+}
 
+/// Render quality/frame rate/Ken Burns motion, plus the procedural
+/// grain/light-leak filter - everything about how a take gets RENDERED,
+/// as opposed to which AI wrote/drew/spoke it.
+struct VideoRenderSettingsView: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        @Bindable var store = store
+        Form {
             Section("Video") {
                 Picker("Quality", selection: $store.settings.shortEdge) {
                     Text("720p").tag(720); Text("1080p").tag(1080); Text("1440p").tag(1440)
@@ -151,7 +214,21 @@ struct SettingsView: View {
             } header: { Text("Filters") } footer: {
                 Text("An on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.")
             }
+        }
+        .screenBackground()
+        .navigationTitle("Video & Render")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 
+/// Caption burn-in, animation, pacing and placement - split out on its own
+/// since it was one dense `Form` section among nine, easy to skip past.
+struct CaptionsSettingsView: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        @Bindable var store = store
+        Form {
             Section("Captions") {
                 Toggle("Burn in captions", isOn: $store.settings.captionsEnabled)
                 Picker("Animation", selection: $store.settings.captionAnimationStyle) {
@@ -163,23 +240,10 @@ struct SettingsView: View {
                 }
                 Slider(value: $store.settings.captionFontSize, in: 36...120) { Text("Size") }
             }
-
-            Section {
-                NavigationLink("Reusable images", destination: ReusableImagesView())
-            } footer: {
-                Text("A shared pool the writer can pull from instead of generating fresh art. Each channel decides how heavily to use it under Channels → Recycling.")
-            }
-
-            Section {
-                NavigationLink("App health", destination: HealthView())
-                NavigationLink("Activity & errors", destination: ErrorLogView())
-            }
         }
         .screenBackground()
-        .navigationTitle("Settings")
-        .onAppear {
-            for k in APIKey.allCases { keys[k] = Keychain.get(k) ?? "" }
-        }
+        .navigationTitle("Captions")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
