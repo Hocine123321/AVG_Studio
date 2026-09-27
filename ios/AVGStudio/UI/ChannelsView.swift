@@ -81,6 +81,18 @@ struct ChannelEditor: View {
                 } header: { Text("Brand") } footer: {
                     Text("Tints this channel's highlight/typewriter caption fill - a small, iPhone-sized version of the PC's brand palette.")
                 }
+
+                Section {
+                    Toggle("Reuse pool images", isOn: $channel.recycleEnabled)
+                    if channel.recycleEnabled {
+                        VStack(alignment: .leading) {
+                            Text("Up to \(Int(channel.recycleRatio))% of scenes")
+                            Slider(value: $channel.recycleRatio, in: 0...100, step: 5)
+                        }
+                    }
+                } header: { Text("Recycling") } footer: {
+                    Text("How often the writer should reach for Settings → Reusable images instead of generating fresh art for a scene. 100% forces every scene to reuse the pool.")
+                }
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)

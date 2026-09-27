@@ -128,9 +128,24 @@ struct Pipeline {
         guard !narration.isEmpty else { throw AVGError.message("The writer returned an empty script.") }
 
         store.progress(projectID, 0.7, "Splitting into scenes…")
+        // Image recycling pool - mirrors writing.py's own three modes
+        // ("off"/"partial"/"all"), see avg.config.recycle_pool's doc
+        // comment: reuse a hand-curated pool image instead of generating
+        // fresh art, when the channel opts in and a pool exists.
+        let pool = store.reusableImages
+        let recycleRatio = max(0, min(100, ch.recycleRatio))
+        let useRecyclePool = ch.recycleEnabled && recycleRatio > 0 && !pool.isEmpty
+        var splitInstructions = "Split the narration below into 5 to 12 scenes WITHOUT changing, adding or removing a single word. For each scene write a vivid image prompt describing the visual (no text, no letters in the image)."
+        if useRecyclePool {
+            let poolLines = pool.enumerated().map { "\($0 + 1). \($1.description)" }.joined(separator: "\n")
+            let rule = recycleRatio >= 100
+                ? "For EVERY scene's image_prompt, ALWAYS use the token \"[RECYCLE #k]\" naming the pool image (by its number below) that best fits. Never write a fresh description."
+                : "For each scene's image_prompt, use the token \"[RECYCLE #k]\" naming a pool image ONLY when it genuinely fits (at most \(Int(recycleRatio))% of scenes) - otherwise write a fresh image_prompt as usual."
+            splitInstructions += "\n\nYou also have a pool of existing reusable images:\n\(poolLines)\n\n\(rule)"
+        }
         let splitPrompt = """
-        Split the narration below into 5 to 12 scenes WITHOUT changing, adding or removing a single word. \
-        For each scene write a vivid image prompt describing the visual (no text, no letters in the image).
+        \(splitInstructions)
+
         Reply with ONLY a JSON array like [{"text": "...", "image_prompt": "..."}].
 
         NARRATION:
@@ -142,6 +157,10 @@ struct Pipeline {
         if scenes.isEmpty || Self.norm(scenes.map(\.text).joined(separator: " ")) != Self.norm(narration) {
             store.record("Scene split changed the wording, so scenes were split by sentence instead.")
             scenes = Self.sentenceScenes(narration, prompts: scenes.map(\.imagePrompt), topic: p.topic)
+        }
+        if useRecyclePool {
+            Self.normalizeRecyclePicks(&scenes, poolSize: pool.count)
+            if recycleRatio >= 100 { Self.forceFillAllMode(&scenes, poolSize: pool.count) }
         }
         store.update(projectID) {
             $0.narration = narration
@@ -164,12 +183,40 @@ struct Pipeline {
         guard !scenes.isEmpty else { throw AVGError.message("No scenes yet — run Script first.") }
 
         var done = 0
+        let pool = store.reusableImages
         let requestedKind = store.settings.image // captured once: read on MainActor, then only passed by value into the concurrent child tasks below, never read from `store` off-actor.
         for batch in stride(from: 0, to: scenes.count, by: 3) {
             try Task.checkCancellation()
             let slice = Array(scenes[batch..<min(batch + 3, scenes.count)])
+            // A `[RECYCLE #k]` scene copies a pool image straight in - no
+            // provider call, no cost - mirroring visuals.py's own
+            // `_resolve_recycled_scene`. A pick whose file has since gone
+            // missing falls back to generating fresh art from that same
+            // pool entry's description, never leaving the scene blank.
+            var toGenerate: [VideoScene] = []
+            for s in slice {
+                guard let k = Self.recycleIndex(s.imagePrompt), pool.indices.contains(k - 1) else {
+                    toGenerate.append(s)
+                    continue
+                }
+                let entry = pool[k - 1]
+                if let data = try? Data(contentsOf: store.reusableImageURL(entry)) {
+                    let name = "images/scene_\(String(format: "%02d", s.index)).jpg"
+                    try? data.write(to: folder.appendingPathComponent(name))
+                    store.update(projectID) { proj in
+                        if let i = proj.scenes.firstIndex(where: { $0.index == s.index }) { proj.scenes[i].imageFile = name }
+                    }
+                    done += 1
+                    store.progress(projectID, Double(done) / Double(scenes.count), "Reusing pool image for scene \(s.index)")
+                } else {
+                    var fallback = s
+                    fallback.imagePrompt = entry.description
+                    toGenerate.append(fallback)
+                }
+            }
+            guard !toGenerate.isEmpty else { continue }
             try await withThrowingTaskGroup(of: (Int, Data, ImageProviderKind).self) { group in
-                for s in slice {
+                for s in toGenerate {
                     let prompt = "\(s.imagePrompt.isEmpty ? s.text : s.imagePrompt). \(style)"
                     group.addTask {
                         do { return (s.index, try await provider.generate(prompt: prompt, size: size), requestedKind) }
@@ -439,6 +486,57 @@ struct Pipeline {
 
     static func overlaps(_ s1: Double, _ e1: Double, _ s2: Double, _ e2: Double) -> Bool {
         s1 < e2 && s2 < e1
+    }
+
+    // MARK: Image recycling pool
+    //
+    // Mirrors writing.py's own `_normalize_recycle_picks`/`_force_fill_all_mode`
+    // (post-parse cleanup of whatever the model sent back) and visuals.py's
+    // `_resolve_recycled_scene` (resolving a canonical token to an actual
+    // file). See `ReusableImage`'s doc comment in Models.swift.
+
+    private static let recyclePickRegex = try! NSRegularExpression(pattern: "(?i)\\[?\\s*recycle\\s*#?\\s*(\\d+)\\s*\\]?")
+    private static let canonicalRecycleRegex = try! NSRegularExpression(pattern: "^\\[RECYCLE #\\d+\\]$")
+
+    /// The pool index a scene's `image_prompt` names, however loosely
+    /// written ("Use [RECYCLE #3]", "recycle #3", "[RECYCLE #3]") - or nil
+    /// if it doesn't mention recycling at all.
+    static func recycleIndex(_ text: String) -> Int? {
+        let ns = text as NSString
+        guard let m = recyclePickRegex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)), m.numberOfRanges > 1 else { return nil }
+        return Int(ns.substring(with: m.range(at: 1)))
+    }
+
+    /// A loosely-written recycle pick becomes the canonical `"[RECYCLE #k]"`
+    /// token every downstream reader expects; an out-of-range pick is
+    /// stripped instead, leaving whatever prose (if any) came with it.
+    static func normalizeRecyclePicks(_ scenes: inout [VideoScene], poolSize: Int) {
+        for i in scenes.indices {
+            let text = scenes[i].imagePrompt
+            guard let k = recycleIndex(text) else { continue }
+            if k >= 1, k <= poolSize {
+                scenes[i].imagePrompt = "[RECYCLE #\(k)]"
+            } else {
+                let ns = text as NSString
+                scenes[i].imagePrompt = recyclePickRegex.stringByReplacingMatches(in: text, range: NSRange(location: 0, length: ns.length), withTemplate: "").trimmed
+            }
+        }
+    }
+
+    /// `"all"` mode's hard contract: every scene not already carrying a
+    /// valid `[RECYCLE #k]` after `normalizeRecyclePicks` is force-filled
+    /// by cycling the pool round-robin.
+    static func forceFillAllMode(_ scenes: inout [VideoScene], poolSize: Int) {
+        guard poolSize > 0 else { return }
+        var n = 0
+        for i in scenes.indices {
+            let text = scenes[i].imagePrompt
+            let ns = text as NSString
+            if canonicalRecycleRegex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)) != nil { continue }
+            let k = (n % poolSize) + 1
+            n += 1
+            scenes[i].imagePrompt = "[RECYCLE #\(k)]"
+        }
     }
 
     /// Narration text split at each `[pause]` marker; the marker itself is

@@ -21,6 +21,7 @@ private struct Meta: Codable {
     var settings: AppSettings
     var channels: [Channel]
     var activeChannelID: UUID?
+    var reusableImages: [ReusableImage] = []
 }
 
 @MainActor
@@ -30,6 +31,7 @@ final class Store {
     var channels: [Channel] = []
     var activeChannelID: UUID?
     var settings = AppSettings() { didSet { saveMeta() } }
+    var reusableImages: [ReusableImage] = [] { didSet { saveMeta() } }
     var jobs: [String: JobState] = [:]
     var log: [LogEntry] = []
     var tab: AppTab = .library
@@ -49,6 +51,7 @@ final class Store {
         return u
     }()
     static var projectsDir: URL { root.appendingPathComponent("Projects", isDirectory: true) }
+    static var reusableImagesDir: URL { root.appendingPathComponent("ReusableImages", isDirectory: true) }
     private static var metaURL: URL { root.appendingPathComponent(".avg-meta.json") }
 
     init() { load() }
@@ -64,6 +67,7 @@ final class Store {
             settings = m.settings
             channels = m.channels
             activeChannelID = m.activeChannelID
+            reusableImages = m.reusableImages
         }
         if channels.isEmpty {
             let c = Channel(name: "My Channel", niche: "curious facts")
@@ -87,7 +91,7 @@ final class Store {
 
     func saveMeta() {
         guard !loading else { return }
-        let m = Meta(settings: settings, channels: channels, activeChannelID: activeChannelID)
+        let m = Meta(settings: settings, channels: channels, activeChannelID: activeChannelID, reusableImages: reusableImages)
         if let d = try? JSONEncoder.avg.encode(m) { try? d.write(to: Self.metaURL, options: .atomic) }
     }
 
@@ -134,6 +138,34 @@ final class Store {
         saveMeta()
     }
     func activate(_ c: Channel) { activeChannelID = c.id; saveMeta() }
+
+    // MARK: Reusable image pool
+    //
+    // A shared "recycle pool" the writer can reference instead of always
+    // generating fresh art - see `ReusableImage`'s doc comment.
+
+    func reusableImageURL(_ r: ReusableImage) -> URL { Self.reusableImagesDir.appendingPathComponent(r.fileName) }
+
+    @discardableResult
+    func addReusableImage(data: Data, description: String) -> ReusableImage {
+        try? FileManager.default.createDirectory(at: Self.reusableImagesDir, withIntermediateDirectories: true)
+        let name = "\(UUID().uuidString).jpg"
+        try? data.write(to: Self.reusableImagesDir.appendingPathComponent(name))
+        let r = ReusableImage(fileName: name, description: description.trimmed)
+        reusableImages.append(r)
+        return r
+    }
+
+    func updateReusableImage(_ id: String, description: String) {
+        guard let i = reusableImages.firstIndex(where: { $0.id == id }) else { return }
+        reusableImages[i].description = description.trimmed
+    }
+
+    func deleteReusableImage(_ id: String) {
+        guard let i = reusableImages.firstIndex(where: { $0.id == id }) else { return }
+        try? FileManager.default.removeItem(at: reusableImageURL(reusableImages[i]))
+        reusableImages.remove(at: i)
+    }
 
     // MARK: Projects
 

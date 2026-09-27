@@ -103,6 +103,12 @@ struct SettingsView: View {
             }
 
             Section {
+                NavigationLink("Reusable images", destination: ReusableImagesView())
+            } footer: {
+                Text("A shared pool the writer can pull from instead of generating fresh art. Each channel decides how heavily to use it under Channels → Recycling.")
+            }
+
+            Section {
                 NavigationLink("App health", destination: HealthView())
                 NavigationLink("Activity & errors", destination: ErrorLogView())
             }

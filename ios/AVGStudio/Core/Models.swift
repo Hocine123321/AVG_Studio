@@ -69,6 +69,18 @@ struct TakeoverCard: Codable, Hashable, Identifiable {
     var id: Int { scene }
 }
 
+/// One hand-added entry in the shared image recycling pool - ported from
+/// the PC's `avg.config.recycle_pool` (a hand-edited `images.json` manifest;
+/// "No in-app editor exists in either app version" per its own docstring,
+/// so an iOS management screen here is a small improvement, not a gap).
+/// Shared across every channel; a channel opts in/out and sets how heavily
+/// it draws on it via `Channel.recycleEnabled`/`recycleRatio`.
+struct ReusableImage: Codable, Hashable, Identifiable {
+    var id: String = UUID().uuidString
+    var fileName: String
+    var description: String
+}
+
 struct CaptionCue: Codable, Hashable {
     var start: Double
     var end: Double
@@ -153,6 +165,11 @@ struct Channel: Codable, Hashable, Identifiable {
     /// Applied to the highlight/typewriter caption accent and takeover-card
     /// tint - a small, iPhone-sized analog of the PC's `resolve_brand` palette.
     var accentColorHex: String = ""
+    /// Mirrors the PC's per-channel `recycle_enabled`/`recycle_ratio`: the
+    /// master switch and how heavily (0-100%) the writer should reach for
+    /// the shared reusable-image pool over generating fresh art.
+    var recycleEnabled: Bool = true
+    var recycleRatio: Double = 70
 }
 
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
