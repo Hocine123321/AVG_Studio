@@ -12,7 +12,7 @@ animated `AppBackground` mesh gradient behind every screen. It's in decent
 shape already — this plan is about specific, scoped improvements, not a
 rewrite.
 
-## Phase 1 — background animation + quick wins (this session)
+## Phase 1 — background animation + quick wins ✅ done (`5b20f65`, bugfix `1ee9daa`)
 
 1. **Gemini-style moving background.** The current `AppBackground` (Theme.swift)
    is a `MeshGradient` whose control points drift slowly via `sin`/`cos` — a
@@ -39,7 +39,7 @@ rewrite.
    responsive. Use `UINotificationFeedbackGenerator`/`UIImpactFeedbackGenerator`,
    nothing fancier.
 
-## Phase 2 — declutter Settings (next session)
+## Phase 2 — declutter Settings ✅ done (`d7dcc01`)
 
 `SettingsView` is one long `Form` with 9 sections stacked top to bottom (AI
 services, per-provider model pickers, narration, API keys, video quality,
@@ -58,7 +58,7 @@ it's the single most "everything at once" screen in the app. Plan:
   rather than 5 classes — moving them to child views needs the same
   survive-re-evaluation care).
 
-## Phase 3 — remaining polish pass (future session)
+## Phase 3 — remaining polish pass (next session)
 
 - Empty/loading states: `ProjectCard`'s thumbnail has a placeholder gradient
   already; check other screens (Channels, Reusable images) have an equally
