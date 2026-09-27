@@ -212,6 +212,7 @@ struct ChannelEditor: View {
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
