@@ -56,12 +56,14 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     stored as its own setting), 66 after Slice 21 added the `voice`
     group's `voice_trim_aggressiveness` and
     `voice_max_removable_silence_pct`, and 67 after Slice 25 added
-    `kb_intensity`. The count is kept as a
+    `kb_intensity`, and 69 after Slice 32 sub-slice 1 added the `app`
+    group's `resilience_rate_limit_wait_ceiling_sec` and
+    `resilience_quota_cooldown_hours`. The count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 67
+    assert len(SETTINGS) == 69
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 
