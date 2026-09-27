@@ -209,6 +209,11 @@ struct ChannelEditor: View {
                     footer: "Governs splitting the finished narration into scenes and image prompts.",
                     provider: $channel.scriptSegmentationTextProvider, backup: $channel.scriptSegmentationTextBackup, onFailure: $channel.scriptSegmentationOnFailure
                 )
+                modelPhaseSection(
+                    title: "Direction (motion & grade)",
+                    footer: "Governs the Director II call that plans each scene's camera move, entrance transition, and the video's one overall colour grade, right before render.",
+                    provider: $channel.director2TextProvider, backup: $channel.director2TextBackup, onFailure: $channel.director2OnFailure
+                )
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)

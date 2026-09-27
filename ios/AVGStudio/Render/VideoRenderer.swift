@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import UIKit
 import CoreVideo
+import CoreImage
 import SwiftUI
 
 struct CaptionStyle {
@@ -52,6 +53,13 @@ struct RenderInput {
     var fps: Int
     var kenBurns: Bool
     var kbIntensity: Double
+    /// The Director II AI plan, one entry per scene in `images`/
+    /// `sceneDurations` order - see `Pipeline.planDirection()`. Empty means
+    /// "not planned" and `VideoRenderer` falls back to its own
+    /// deterministic Ken Burns/crossfade heuristic, exactly as before this
+    /// feature existed.
+    var sceneDirections: [SceneDirection] = []
+    var gradeLook: GradeLook = .none
     var captions: CaptionStyle
     var filter: FilterSpec = FilterSpec(style: .none, intensity: 0)
     var cards: [TakeoverCard] = []
@@ -63,6 +71,10 @@ struct RenderInput {
 final class VideoRenderer {
     private let crossfade: Double = 0.35
     private lazy var grainTile: CGImage? = Self.makeGrainTile()
+    /// Shared across every `applyGrade()` call in one render - a fresh
+    /// `CIContext` per frame would re-warm its Metal/GPU pipeline every
+    /// time, the one per-frame cost this port can trivially avoid.
+    private lazy var ciContext = CIContext()
 
     func render(_ input: RenderInput, progress: @escaping (Double) -> Void) async throws {
         let fm = FileManager.default
@@ -170,15 +182,59 @@ final class VideoRenderer {
         var idx = 0
         for (i, s) in starts.enumerated() where t >= s { idx = i }
         let dur = input.sceneDurations.indices.contains(idx) ? input.sceneDurations[idx] : 1
-        let local = min(max((t - starts[safe: idx, default: 0]) / max(dur, 0.01), 0), 1)
+        let sceneStart = starts[safe: idx, default: 0]
+        let local = min(max((t - sceneStart) / max(dur, 0.01), 0), 1)
+        let direction = input.sceneDirections.indices.contains(idx) ? input.sceneDirections[idx] : nil
 
-        drawScene(ctx, canvas: canvas, image: images[safe: idx, default: nil], sceneIndex: idx, p: local, input: input, alpha: 1)
-        // Crossfade into the next scene.
-        let remaining = (starts[safe: idx, default: 0] + dur) - t
-        if remaining < crossfade, idx + 1 < images.count {
-            let a = 1 - remaining / crossfade
-            drawScene(ctx, canvas: canvas, image: images[idx + 1], sceneIndex: idx + 1, p: 0, input: input, alpha: a)
+        if let direction {
+            // The Director II plan owns BOTH motion (in drawScene) and this
+            // scene's own ENTRANCE transition - ported from `avg.py`'s
+            // `_apply_scene_transition` (a fade-up-from-black or a
+            // slide-into-place on the entering clip's own opening frames,
+            // never a blend with the previous clip - see `SceneTransition`'s
+            // doc comment for why "crossfade" behaves like "fade" here).
+            var extraDX: CGFloat = 0, extraDY: CGFloat = 0
+            var fadeAlpha: CGFloat = 0
+            let d = min(crossfade, dur * 0.5)
+            let elapsed = t - sceneStart
+            if d > 0, elapsed < d {
+                let tp = elapsed / d
+                switch direction.transitionIn {
+                case .cut:
+                    break
+                case .fade, .crossfade, .dip:
+                    let f = 1 - pow(1 - tp, 2)
+                    fadeAlpha = CGFloat(1 - f)
+                case .slideLeft, .whip:
+                    extraDX = -CGFloat(1 - tp) * canvas.width
+                case .slideRight:
+                    extraDX = CGFloat(1 - tp) * canvas.width
+                }
+            }
+            drawScene(ctx, canvas: canvas, image: images[safe: idx, default: nil], sceneIndex: idx, p: local, input: input, alpha: 1, motion: direction, extraDX: extraDX, extraDY: extraDY)
+            if fadeAlpha > 0 {
+                ctx.saveGState()
+                ctx.setFillColor(UIColor.black.withAlphaComponent(fadeAlpha).cgColor)
+                ctx.fill(canvas)
+                ctx.restoreGState()
+            }
+        } else {
+            // No AI plan (planning never ran, or failed) - the original
+            // deterministic heuristic: a fixed Ken Burns pattern by scene
+            // index, and a fixed crossfade into the next scene's opening.
+            drawScene(ctx, canvas: canvas, image: images[safe: idx, default: nil], sceneIndex: idx, p: local, input: input, alpha: 1, motion: nil)
+            let remaining = sceneStart + dur - t
+            if remaining < crossfade, idx + 1 < images.count {
+                let a = 1 - remaining / crossfade
+                drawScene(ctx, canvas: canvas, image: images[idx + 1], sceneIndex: idx + 1, p: 0, input: input, alpha: a, motion: nil)
+            }
         }
+
+        // One overall colour grade for the whole video - ported from
+        // `avg.py`'s `_apply_grade` (channel gains → contrast → saturation).
+        // Applied to the scene content only, before the filter overlay and
+        // captions, matching the PC's own pass ordering.
+        applyGrade(ctx, canvas: canvas, look: input.gradeLook)
 
         // Filter overlay sits under captions, same as the PC's own pass
         // ordering (its `compose_filter_overlays` runs before the caption
@@ -218,7 +274,7 @@ final class VideoRenderer {
         let boxH = canvas.height * 0.72
         let shortEdge = min(canvas.width, canvas.height)
         let floorSize = max(14, shortEdge * 0.035)
-        let maxLines = 2 // "Focused" cards only - the PC's AI-driven "Explainer" cards aren't ported (see TakeoverCard's doc comment).
+        let maxLines = 2 // Shared by both Focused and Explainer cards - overlay_design.py draws them identically once picked; only WHO picks the text differs (see TakeoverCard's doc comment).
         let para = NSMutableParagraphStyle()
         para.alignment = .center
         para.lineBreakMode = .byWordWrapping
@@ -258,29 +314,105 @@ final class VideoRenderer {
         ctx.restoreGState()
     }
 
-    private func drawScene(_ ctx: CGContext, canvas: CGRect, image: CGImage?, sceneIndex: Int, p: Double, input: RenderInput, alpha: Double) {
+    /// `motion` is the Director II plan's entry for this scene (nil when
+    /// no plan exists - see `RenderInput.sceneDirections`'s doc comment).
+    /// `extraDX`/`extraDY` are an entrance-transition offset from `draw()`
+    /// (slide/whip only), added on top of whatever the motion itself
+    /// computes - the two are independent PC concerns (`_apply_ken_burns`
+    /// vs `_apply_scene_transition`) composited here exactly as there.
+    private func drawScene(_ ctx: CGContext, canvas: CGRect, image: CGImage?, sceneIndex: Int, p: Double, input: RenderInput, alpha: Double, motion: SceneDirection?, extraDX: CGFloat = 0, extraDY: CGFloat = 0) {
         guard let image else { return }
         let iw = CGFloat(image.width), ih = CGFloat(image.height)
         let fill = max(canvas.width / iw, canvas.height / ih)
         var scale = fill
         var dx: CGFloat = 0, dy: CGFloat = 0
         if input.kenBurns {
-            let amt = 0.12 * input.kbIntensity
-            let e = CGFloat(p * p * (3 - 2 * p)) // smoothstep
-            let zoomIn = sceneIndex % 2 == 0
-            scale = fill * CGFloat(1 + amt * Double(zoomIn ? e : 1 - e))
-            let pan = CGFloat(amt) * 0.5
-            switch sceneIndex % 4 {
-            case 1: dx = (e - 0.5) * pan * canvas.width
-            case 3: dy = (e - 0.5) * pan * canvas.height
-            default: break
+            if let motion {
+                // Ported from `avg.py`'s `_apply_ken_burns`: an eased scale
+                // (zoom) or an eased pan across the scene's own window,
+                // sized so the oversize scale always leaves enough
+                // headroom that a pan never exposes a black edge.
+                let e = CGFloat(Self.ease(motion.ease, p))
+                let amt = 0.12 * input.kbIntensity * motion.intensity
+                switch motion.motionType {
+                case .still:
+                    break
+                case .zoomIn:
+                    scale = fill * CGFloat(1 + amt * Double(e))
+                case .zoomOut:
+                    scale = fill * CGFloat(1 + amt * Double(1 - e))
+                case .panLeft, .panRight, .panUp, .panDown:
+                    let panFrac = 0.5 * amt
+                    scale = fill * CGFloat(1 + panFrac)
+                    let horizontal = motion.motionType == .panLeft || motion.motionType == .panRight
+                    let travel = CGFloat(panFrac) * (horizontal ? canvas.width : canvas.height)
+                    let offset = travel * (e - 0.5)
+                    switch motion.motionType {
+                    case .panLeft: dx = offset
+                    case .panRight: dx = -offset
+                    case .panUp: dy = offset
+                    case .panDown: dy = -offset
+                    default: break
+                    }
+                }
+            } else {
+                // No AI plan - the original deterministic pattern.
+                let amt = 0.12 * input.kbIntensity
+                let e = CGFloat(p * p * (3 - 2 * p)) // smoothstep
+                let zoomIn = sceneIndex % 2 == 0
+                scale = fill * CGFloat(1 + amt * Double(zoomIn ? e : 1 - e))
+                let pan = CGFloat(amt) * 0.5
+                switch sceneIndex % 4 {
+                case 1: dx = (e - 0.5) * pan * canvas.width
+                case 3: dy = (e - 0.5) * pan * canvas.height
+                default: break
+                }
             }
         }
         let dw = iw * scale, dh = ih * scale
-        let rect = CGRect(x: (canvas.width - dw) / 2 + dx, y: (canvas.height - dh) / 2 + dy, width: dw, height: dh)
+        let rect = CGRect(x: (canvas.width - dw) / 2 + dx + extraDX, y: (canvas.height - dh) / 2 + dy + extraDY, width: dw, height: dh)
         ctx.saveGState()
         ctx.setAlpha(CGFloat(alpha))
         ctx.draw(image, in: rect)
+        ctx.restoreGState()
+    }
+
+    /// Ported from the PC's `_ease` (`avg/media/vendor/avg.py`) - the same
+    /// five named curves over motion progress `t` (already scene-local,
+    /// 0…1 across that scene's own window).
+    private static func ease(_ curve: EaseCurve, _ t: Double) -> Double {
+        let t = min(max(t, 0), 1)
+        switch curve {
+        case .linear: return t
+        case .easeIn: return t * t
+        case .easeOut: return 1 - (1 - t) * (1 - t)
+        case .easeInOut: return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+        case .easeOutCubic: return 1 - pow(1 - t, 3)
+        }
+    }
+
+    /// One overall colour LOOK for the whole video - ported from `avg.py`'s
+    /// `_apply_grade` (channel gains → contrast → saturation), via
+    /// `CIColorMatrix` (the gains) then `CIColorControls` (contrast/
+    /// saturation, whose normalized formulas match the PC's numpy ones).
+    /// A no-op when `look == .none`, same as the PC's own early return.
+    private func applyGrade(_ ctx: CGContext, canvas: CGRect, look: GradeLook) {
+        guard look != .none, let snapshot = ctx.makeImage() else { return }
+        let g = look.params
+        let ci = CIImage(cgImage: snapshot)
+        guard let matrix = CIFilter(name: "CIColorMatrix") else { return }
+        matrix.setValue(ci, forKey: kCIInputImageKey)
+        matrix.setValue(CIVector(x: CGFloat(g.r), y: 0, z: 0, w: 0), forKey: "inputRVector")
+        matrix.setValue(CIVector(x: 0, y: CGFloat(g.g), z: 0, w: 0), forKey: "inputGVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: CGFloat(g.b), w: 0), forKey: "inputBVector")
+        matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        guard let gained = matrix.outputImage, let controls = CIFilter(name: "CIColorControls") else { return }
+        controls.setValue(gained, forKey: kCIInputImageKey)
+        controls.setValue(g.contrast, forKey: kCIInputContrastKey)
+        controls.setValue(g.saturation, forKey: kCIInputSaturationKey)
+        guard let output = controls.outputImage, let graded = ciContext.createCGImage(output, from: ci.extent) else { return }
+        ctx.saveGState()
+        ctx.draw(graded, in: canvas)
         ctx.restoreGState()
     }
 

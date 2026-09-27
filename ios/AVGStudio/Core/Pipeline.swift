@@ -614,13 +614,125 @@ struct Pipeline {
         }
     }
 
+    // MARK: Phase — Director II (motion, transition, colour grade)
+    //
+    // Ported from `avg.pipeline.phases.director`'s Director II
+    // (`build_director2_prompt`/`_normalize_direction_entry`): one AI call,
+    // after the script is final, choosing a per-scene camera move + entrance
+    // transition and ONE overall colour grade for the whole video. Director
+    // I (visual STRUCTURE - image_count, per-scene role/beat/visual_intent)
+    // is a separate, still-unported concern - this only plans what the
+    // RENDER does with the images Visuals already made.
+    //
+    // Runs lazily from `render()`, not as its own `PhaseID` - unlike the PC,
+    // this app models "phases" as the five user-visible steps in
+    // `PhaseID`, and Director II has no artifact of its own a user would
+    // ever look at; `sceneDirections`/`gradeLook` on `Project` ARE its
+    // output, cached so a second take of the same script doesn't re-spend
+    // the AI call (see `directionSignature`'s doc comment).
+    //
+    // Non-fatal by design, matching every other AI-planning step in this
+    // pipeline: on any failure the project keeps whatever plan (possibly
+    // none) it already had, and `VideoRenderer` falls back to its own
+    // deterministic Ken Burns heuristic - a failed render engine planning
+    // call must never be the reason a video can't render at all.
+    private func planDirection() async throws {
+        let p = try project
+        let ch = store.channel(for: p)
+        let scenes = p.scenes.sorted { $0.index < $1.index }
+        guard !scenes.isEmpty else { return }
+        let signature = scenes.map(\.text).joined(separator: "\u{1}")
+        guard p.sceneDirections.count != scenes.count || p.directionSignature != signature else { return }
+
+        store.progress(projectID, 0, "Planning motion and grade…")
+        let numbered = scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "\n")
+        let prompt = """
+        You are the DIRECTOR / EDITOR of a short AI-generated video built from still images with
+        narration. Think like a bold human editor: your goal is to make THIS video feel special and
+        intentional — a directed, edited piece, not images sliding by. You have real creative
+        authority over pacing, camera movement, transitions and colour. Use contrast (calm vs.
+        punchy scenes) and motion that rides the narration's energy — but stay coherent.
+
+        VIDEO STYLE (keep the whole piece feeling consistent with this):
+        - niche: \(ch.niche.isEmpty ? "general" : ch.niche)
+        - tone: \(ch.tone)
+        - length: ~\(ch.targetSeconds) seconds, \(p.aspectRatio.rawValue)
+
+        SCENES (number, narration):
+        \(numbered)
+
+        For EACH scene choose:
+        - motion.type: zoom_in | zoom_out | pan_left | pan_right | pan_up | pan_down | still
+            (use 'still' rarely, only for a deliberate held beat.)
+        - motion.intensity: 0.0-1.0 (higher = stronger move; push harder on high-energy moments,
+            gentler on calm/reflective lines. Avoid a flat 0.5 on every scene.)
+        - motion.ease: ease_out_cubic | ease_in_out | ease_in | ease_out | linear
+        - transition_in: cut | fade | crossfade | dip | slide_left | slide_right | whip
+            (the FIRST scene should almost always be "cut" or "fade" - never a jarring entrance
+            before the viewer has any context.)
+
+        Then choose ONE overall colour grade for the whole video:
+        - grade.look: none | warm | cool | cinematic | noir | vibrant | soft
+
+        Return ONLY a JSON object, no preamble, no markdown fences:
+        {"grade":{"look":"..."},"scenes":[{"scene":1,"motion":{"type":"...","intensity":0.0,"ease":"..."},"transition_in":"..."}]}
+        """
+        let (result, usedProvider) = try await routedComplete(
+            primary: ch.director2TextProvider, backup: ch.director2TextBackup, onFailure: ch.director2OnFailure,
+            prompt, system: "You return only strict JSON, nothing else."
+        )
+        costText(usedProvider, chars: prompt.count + result.count)
+
+        guard let jsonText = Self.extractJSONObject(result), let data = jsonText.data(using: .utf8) else {
+            throw AVGError.message("Direction plan reply had no usable JSON.")
+        }
+        struct MotionIn: Decodable { let type: String?; let intensity: Double?; let ease: String? }
+        struct SceneIn: Decodable { let scene: Int?; let motion: MotionIn?; let transition_in: String? }
+        struct GradeIn: Decodable { let look: String? }
+        struct PlanIn: Decodable { let grade: GradeIn?; let scenes: [SceneIn]? }
+        let parsed = try JSONDecoder().decode(PlanIn.self, from: data)
+
+        let look = GradeLook(rawValue: (parsed.grade?.look ?? "none").trimmed.lowercased()) ?? .none
+        let validScenes = Set(1...scenes.count)
+        var byScene: [Int: SceneDirection] = [:]
+        for entry in parsed.scenes ?? [] {
+            guard let num = entry.scene, validScenes.contains(num) else { continue }
+            let mtype = MotionType(rawValue: (entry.motion?.type ?? "").trimmed.lowercased()) ?? .zoomIn
+            let intensity = max(0, min(1, entry.motion?.intensity ?? 0.5))
+            let ease = EaseCurve(rawValue: (entry.motion?.ease ?? "").trimmed.lowercased()) ?? .easeOutCubic
+            let transition = SceneTransition(rawValue: (entry.transition_in ?? "").trimmed.lowercased()) ?? .cut
+            byScene[num] = SceneDirection(scene: num, motionType: mtype, intensity: intensity, ease: ease, transitionIn: transition)
+        }
+        // Degrades to one safe default entry per scene when nothing usable
+        // survived - mirrors Director I/II's own identical leniency in the
+        // PC: this plan is guidance for the render engine, not something a
+        // later phase mechanically verifies against the narration.
+        let directions = (1...scenes.count).map { byScene[$0] ?? SceneDirection(scene: $0) }
+
+        store.update(projectID) {
+            $0.sceneDirections = directions
+            $0.gradeLook = look
+            $0.directionSignature = signature
+        }
+        store.progress(projectID, 1, "Direction plan ready (\(directions.count) scene(s), grade=\(look.rawValue)).")
+    }
+
     // MARK: Phase — render
 
     private func render() async throws {
-        let p = try project
+        var p = try project
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let s = store.settings
-        let ch = store.channel(for: p)
+        var ch = store.channel(for: p)
+        if s.kenBurns {
+            do {
+                try await planDirection()
+                p = try project
+                ch = store.channel(for: p)
+            } catch {
+                store.record(projectID, "Direction plan could not be generated (\(error.localizedDescription)); using default motion.")
+            }
+        }
         let takeID = (p.takes.map(\.id).max() ?? 0) + 1
         let name = "render/take_\(takeID).mp4"
         let out = folder.appendingPathComponent(name)
@@ -634,6 +746,11 @@ struct Pipeline {
             fps: s.fps,
             kenBurns: s.kenBurns,
             kbIntensity: s.kbIntensity,
+            // Empty (mismatched count, or planning never ran/failed) makes
+            // VideoRenderer fall back to its own deterministic heuristic -
+            // see planDirection()'s doc comment.
+            sceneDirections: p.sceneDirections.count == p.scenes.count ? p.sceneDirections : [],
+            gradeLook: p.gradeLook,
             captions: CaptionStyle(
                 enabled: s.captionsEnabled,
                 fontSize: CGFloat(s.captionFontSize),

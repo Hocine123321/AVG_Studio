@@ -99,6 +99,71 @@ struct Take: Codable, Hashable, Identifiable {
     var file: String
 }
 
+/// Camera move for one scene, chosen by the Director II AI plan below -
+/// ported from `avg/media/vendor/avg.py`'s `_apply_ken_burns` motion
+/// vocabulary. `.still` is a deliberate held beat, not "motion off"
+/// (that's `Settings.kenBurns == false`, a separate global switch).
+enum MotionType: String, Codable, CaseIterable {
+    case zoomIn = "zoom_in", zoomOut = "zoom_out"
+    case panLeft = "pan_left", panRight = "pan_right", panUp = "pan_up", panDown = "pan_down"
+    case still
+}
+
+/// Ported from the PC's `_ease` - the same five named curves, applied to a
+/// scene's own motion progress `t` (0…1 across that scene's window).
+enum EaseCurve: String, Codable, CaseIterable {
+    case linear, easeIn = "ease_in", easeOut = "ease_out", easeInOut = "ease_in_out", easeOutCubic = "ease_out_cubic"
+}
+
+/// A scene's ENTRANCE transition - ported from `avg.py`'s
+/// `_apply_scene_transition`. Despite the name, the PC's own "crossfade"/
+/// "dip" behave identically to "fade" in that function (a fade-up-from-
+/// black on the entering clip, not a blend between two clips) - matched
+/// here rather than invented, since that IS what the vendored engine
+/// actually does. `slide_left`/`whip` are likewise one behaviour in the
+/// PC (same branch), kept as two names for the AI plan's own vocabulary.
+enum SceneTransition: String, Codable, CaseIterable {
+    case cut, fade, crossfade, dip
+    case slideLeft = "slide_left", slideRight = "slide_right", whip
+}
+
+/// One overall colour LOOK for the whole video - ported from `avg.py`'s
+/// `_GRADE_PRESETS` table (channel gains → contrast → saturation), values
+/// copied verbatim so the same `look` name grades the same on both apps.
+enum GradeLook: String, Codable, CaseIterable {
+    case none, warm, cool, cinematic, noir, vibrant, soft
+
+    /// (red gain, green gain, blue gain, contrast, saturation) - fed to
+    /// `CIColorMatrix`+`CIColorControls` in `VideoRenderer`, the on-device
+    /// analog of the PC's per-frame numpy pass.
+    var params: (r: Double, g: Double, b: Double, contrast: Double, saturation: Double) {
+        switch self {
+        case .none: return (1.00, 1.00, 1.00, 1.00, 1.00)
+        case .warm: return (1.06, 1.01, 0.94, 1.05, 1.06)
+        case .cool: return (0.95, 1.00, 1.08, 1.05, 1.02)
+        case .cinematic: return (1.03, 0.99, 1.02, 1.12, 0.96)
+        case .noir: return (1.00, 1.00, 1.00, 1.18, 0.30)
+        case .vibrant: return (1.02, 1.02, 1.02, 1.08, 1.22)
+        case .soft: return (1.02, 1.00, 1.01, 0.94, 1.02)
+        }
+    }
+}
+
+/// One scene's entry in the Director II motion/grade plan - ported from
+/// `avg.pipeline.phases.director`'s `direction_plan.json` (`Director2Phase`,
+/// `_normalize_direction_entry`). `grade` is shared by the whole plan in
+/// the PC (set once, not per scene); kept per-`Project` as `gradeLook`
+/// instead of repeated on every entry here, the same de-duplication the
+/// PC's own render engine performs by reading `direction_plan["grade"]`
+/// once rather than off each scene.
+struct SceneDirection: Codable, Hashable {
+    var scene: Int
+    var motionType: MotionType = .zoomIn
+    var intensity: Double = 0.5
+    var ease: EaseCurve = .easeOutCubic
+    var transitionIn: SceneTransition = .cut
+}
+
 enum AspectRatio: String, Codable, CaseIterable, Identifiable {
     case portrait = "9:16", landscape = "16:9", square = "1:1"
     var id: String { rawValue }
@@ -143,6 +208,19 @@ struct Project: Codable, Hashable, Identifiable {
     var takes: [Take] = []
     var archived: Bool = false
     var costs: [CostEntry] = []
+    /// Director II's motion/transition plan, one entry per scene in
+    /// `scenes` order - see `SceneDirection`'s doc comment. Empty means
+    /// "not planned yet, or planning failed" and `VideoRenderer` falls
+    /// back to its own deterministic Ken Burns heuristic, exactly like
+    /// before this feature existed - never a blocking failure.
+    var sceneDirections: [SceneDirection] = []
+    /// The one overall colour grade Director II chose for this project.
+    var gradeLook: GradeLook = .none
+    /// Every scene's narration text, joined, at the time `sceneDirections`
+    /// was last planned - a cheap re-plan guard: if the scenes haven't
+    /// changed since, rendering again (a new take) reuses the existing
+    /// plan instead of spending another AI call on an unchanged script.
+    var directionSignature: String = ""
 
     func phase(_ p: PhaseID) -> PhaseRecord { phases[p.rawValue] ?? PhaseRecord() }
 
@@ -258,14 +336,13 @@ struct Channel: Codable, Hashable, Identifiable {
     // PC's own `brief`/`script_draft`/`script_segmentation` router phase
     // keys exactly, including research sharing "brief"'s model like the
     // PC's own `generate_text(..., "brief", ...)` call for research does).
-    // The PC's OTHER two router phases, `director1` and `director2`, plan
-    // visual structure and motion/grade the PC's Director I/II AI phases
-    // decide - phases this app has not ported yet (no `video_map.json`/
-    // `direction_plan.json` equivalent exists here). Adding model-override
-    // settings for them now, with no AI call for them to govern, would be
-    // the exact "dead switch" mistake already found and skipped for
-    // `voice_stability`/`voice_speed` - they belong with porting Director
-    // I/II themselves, not here.
+    // The PC's `director1` router phase - visual STRUCTURE (image_count,
+    // per-scene role/beat/visual_intent) - is still not ported; see
+    // `director2TextProvider`'s own doc comment below for why it has no
+    // override field here yet. `director2` (motion/transition/grade) IS
+    // now ported (`Pipeline.planDirection()`) and has its own override
+    // fields, kept below the other three rather than here since it isn't
+    // one of the three text-generating phases this comment describes.
     var briefTextProvider: TextProviderKind? = nil
     var briefTextBackup: TextProviderKind? = nil
     var briefOnFailure: PhaseOnFailure = .stop
@@ -275,6 +352,17 @@ struct Channel: Codable, Hashable, Identifiable {
     var scriptSegmentationTextProvider: TextProviderKind? = nil
     var scriptSegmentationTextBackup: TextProviderKind? = nil
     var scriptSegmentationOnFailure: PhaseOnFailure = .stop
+    /// The PC's OTHER router phase key, `director2` - now governs the
+    /// Director II motion/transition/grade call in `Pipeline.planDirection()`.
+    /// `director1` (visual STRUCTURE - image_count, per-scene role/beat/
+    /// visual_intent) is still not ported: this app's Visuals phase always
+    /// makes one image per scene (plus the recycling pool), so there is no
+    /// structure call for a `director1` override to govern yet - adding one
+    /// now would be the same "dead switch" this doc comment used to warn
+    /// against for director2 itself.
+    var director2TextProvider: TextProviderKind? = nil
+    var director2TextBackup: TextProviderKind? = nil
+    var director2OnFailure: PhaseOnFailure = .stop
 }
 
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
