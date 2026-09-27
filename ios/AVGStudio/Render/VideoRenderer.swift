@@ -3,6 +3,7 @@ import AVFoundation
 import UIKit
 import CoreVideo
 import CoreImage
+import ImageIO
 import SwiftUI
 
 struct CaptionStyle {
@@ -71,20 +72,22 @@ struct RenderInput {
 final class VideoRenderer {
     private let crossfade: Double = 0.35
     private lazy var grainTile: CGImage? = Self.makeGrainTile()
-    /// Shared across every `applyGrade()` call in one render - a fresh
-    /// `CIContext` per frame would re-warm its Metal/GPU pipeline every
-    /// time, the one per-frame cost this port can trivially avoid.
+    /// Shared for the one-time grade bake. Creating Core Image filters per
+    /// output frame was needlessly expensive; the grade is constant for a
+    /// whole render and is now applied once per source image.
     private lazy var ciContext = CIContext()
+    /// The same color space is used by every output frame.
+    private let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
 
     func render(_ input: RenderInput, progress: @escaping (Double) -> Void) async throws {
         let fm = FileManager.default
         let folder = input.output.deletingLastPathComponent()
-        let tmp = folder.appendingPathComponent("video_only.mov")
+        let tmp = folder.appendingPathComponent("video_only.mp4")
         try? fm.removeItem(at: tmp)
         try? fm.removeItem(at: input.output)
 
         let w = Int(input.size.width), h = Int(input.size.height)
-        let writer = try AVAssetWriter(outputURL: tmp, fileType: .mov)
+        let writer = try AVAssetWriter(outputURL: tmp, fileType: .mp4)
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: w,
@@ -100,9 +103,14 @@ final class VideoRenderer {
         guard writer.startWriting() else { throw writer.error ?? AVGError.message("Couldn't start the video encoder.") }
         writer.startSession(atSourceTime: .zero)
 
+        // Decode each source once at the largest size the output can display.
+        // The old path decoded full-resolution photos and rescaled them for
+        // every frame, which wasted memory and repeated expensive image work.
+        let motionHeadroom = (input.kenBurns || !input.sceneDirections.isEmpty) ? 1.25 : 1.0
+        let maxPixelSize = max(1, Int(ceil(max(input.size.width, input.size.height) * motionHeadroom)))
         let images: [CGImage?] = input.images.map { url in
-            guard let url, let img = UIImage(contentsOfFile: url.path) else { return nil }
-            return img.cgImage
+            guard let url, let raw = Self.downsampledImage(at: url, maxPixelSize: maxPixelSize) else { return nil }
+            return gradeImage(raw, look: input.gradeLook)
         }
         var starts: [Double] = []
         var acc = 0.0
@@ -130,7 +138,7 @@ final class VideoRenderer {
         await writer.finishWriting()
         if writer.status != .completed { throw writer.error ?? AVGError.message("Video encoding failed.") }
 
-        // Mux narration.
+        // Mux narration without re-encoding the already hardware-encoded video.
         let comp = AVMutableComposition()
         let va = AVURLAsset(url: tmp)
         let aa = AVURLAsset(url: input.audio)
@@ -145,8 +153,11 @@ final class VideoRenderer {
             let adur = try await aa.load(.duration)
             try ca.insertTimeRange(CMTimeRange(start: .zero, duration: CMTimeMinimum(adur, vdur)), of: at, at: .zero)
         }
-        guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHEVCHighestQuality) else {
-            throw AVGError.message("Couldn't create the exporter.")
+        // The previous highest-quality preset decoded and encoded the entire
+        // video a second time. The video is already HEVC and the narration is
+        // AAC in .m4a, so passthrough keeps both streams intact.
+        guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetPassthrough) else {
+            throw AVGError.message("Couldn't create the passthrough exporter.")
         }
         progress(0.9)
         try await export.export(to: input.output, as: .mp4)
@@ -161,7 +172,7 @@ final class VideoRenderer {
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }
         let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb)
         guard let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: w, height: h, bitsPerComponent: 8,
-                                  bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: CGColorSpaceCreateDeviceRGB(),
+                                  bytesPerRow: CVPixelBufferGetBytesPerRow(pb), space: rgbColorSpace,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
         else { return }
         let canvas = CGRect(x: 0, y: 0, width: w, height: h)
@@ -234,7 +245,9 @@ final class VideoRenderer {
         // `avg.py`'s `_apply_grade` (channel gains → contrast → saturation).
         // Applied to the scene content only, before the filter overlay and
         // captions, matching the PC's own pass ordering.
-        applyGrade(ctx, canvas: canvas, look: input.gradeLook)
+        // The constant global grade was baked into each source image once in
+        // render(), matching the legacy renderer's smart-render path. Doing
+        // Core Image work here would repeat it for every output frame.
 
         // Filter overlay sits under captions, same as the PC's own pass
         // ordering (its `compose_filter_overlays` runs before the caption
@@ -391,29 +404,36 @@ final class VideoRenderer {
         }
     }
 
-    /// One overall colour LOOK for the whole video - ported from `avg.py`'s
-    /// `_apply_grade` (channel gains → contrast → saturation), via
-    /// `CIColorMatrix` (the gains) then `CIColorControls` (contrast/
-    /// saturation, whose normalized formulas match the PC's numpy ones).
-    /// A no-op when `look == .none`, same as the PC's own early return.
-    private func applyGrade(_ ctx: CGContext, canvas: CGRect, look: GradeLook) {
-        guard look != .none, let snapshot = ctx.makeImage() else { return }
+    private static func downsampledImage(at url: URL, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Bakes the constant whole-video look once per source image. This is the
+    /// same optimization used by the legacy renderer's graded-image cache:
+    /// motion still happens per frame, but the expensive color transform does
+    /// not.
+    private func gradeImage(_ image: CGImage, look: GradeLook) -> CGImage? {
+        guard look != .none else { return image }
         let g = look.params
-        let ci = CIImage(cgImage: snapshot)
-        guard let matrix = CIFilter(name: "CIColorMatrix") else { return }
+        let ci = CIImage(cgImage: image)
+        guard let matrix = CIFilter(name: "CIColorMatrix") else { return image }
         matrix.setValue(ci, forKey: kCIInputImageKey)
         matrix.setValue(CIVector(x: CGFloat(g.r), y: 0, z: 0, w: 0), forKey: "inputRVector")
         matrix.setValue(CIVector(x: 0, y: CGFloat(g.g), z: 0, w: 0), forKey: "inputGVector")
         matrix.setValue(CIVector(x: 0, y: 0, z: CGFloat(g.b), w: 0), forKey: "inputBVector")
         matrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-        guard let gained = matrix.outputImage, let controls = CIFilter(name: "CIColorControls") else { return }
+        guard let gained = matrix.outputImage, let controls = CIFilter(name: "CIColorControls") else { return image }
         controls.setValue(gained, forKey: kCIInputImageKey)
         controls.setValue(g.contrast, forKey: kCIInputContrastKey)
         controls.setValue(g.saturation, forKey: kCIInputSaturationKey)
-        guard let output = controls.outputImage, let graded = ciContext.createCGImage(output, from: ci.extent) else { return }
-        ctx.saveGState()
-        ctx.draw(graded, in: canvas)
-        ctx.restoreGState()
+        guard let output = controls.outputImage else { return image }
+        return ciContext.createCGImage(output, from: ci.extent) ?? image
     }
 
     // MARK: - Filter overlay (procedural film grain / light leak)
