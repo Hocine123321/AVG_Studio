@@ -131,6 +131,15 @@ struct ChannelEditor: View {
                 }
 
                 Section {
+                    Toggle("Takeover cards", isOn: $channel.takeoverCardsEnabled)
+                    if channel.takeoverCardsEnabled {
+                        Toggle("Explainer cards", isOn: $channel.explainerCardsEnabled)
+                    }
+                } header: { Text("Cards") } footer: {
+                    Text("Takeover cards is the master switch: off means no full-screen card of any kind, including the deterministic ((question)) ones. Explainer adds a FEW AI-picked scenes worth a full-screen concept card on top of those.")
+                }
+
+                Section {
                     Picker("Backup provider", selection: $channel.imageProviderBackup) {
                         Text("None").tag(ImageProviderKind?.none)
                         ForEach(ImageProviderKind.allCases) { Text($0.label).tag(ImageProviderKind?.some($0)) }

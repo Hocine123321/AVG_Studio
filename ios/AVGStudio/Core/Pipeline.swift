@@ -421,6 +421,7 @@ struct Pipeline {
 
     private func captions() async throws {
         let p = try project
+        let ch = store.channel(for: p)
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let duration = try await AVURLAsset(url: audio).load(.duration).seconds
         let cleanTexts = p.scenes.map { Self.spoken($0.text) }
@@ -452,15 +453,67 @@ struct Pipeline {
         // Deterministic Focused takeover cards: one per `((question))`
         // marker found in a scene's own (uncleaned) text, each taking over
         // its whole scene's window - mirrors director.py's `_build_card_plan`
-        // exactly (frequency cap, one-card-per-scene, first-question-wins).
+        // exactly (frequency cap, one-card-per-scene, Focused-before-
+        // Explainer, first-question-wins).
         var cards: [TakeoverCard] = []
-        if store.settings.takeoverCardsEnabled {
+        if ch.takeoverCardsEnabled {
             var bySc: [Int: TakeoverCard] = [:]
             for (scene, span) in zip(p.scenes, sceneSpans) {
                 guard bySc[scene.index] == nil, let q = Self.extractQuestionMarkers(scene.text).first else { continue }
                 bySc[scene.index] = TakeoverCard(scene: scene.index, text: q, start: span.0, end: span.1)
             }
-            let ordered = bySc.values.sorted { $0.scene < $1.scene }
+            var ordered = bySc.values.sorted { $0.scene < $1.scene }
+
+            // Mirrors `explainer_enabled`/`build_explainer_prompt`: a FEW
+            // AI-picked scenes worth a full-screen concept card, appended
+            // AFTER the deterministic Focused cards so a Focused card
+            // always wins the scene when both land on it (matches
+            // director.py's `_build_card_plan`'s own by-insertion-order
+            // dedup - Focused entries are inserted into `by_scene` first).
+            if ch.explainerCardsEnabled {
+                let maxCards = max(0, min(4, p.scenes.count / 6))
+                if maxCards > 0 {
+                    do {
+                        let text = try textProvider()
+                        let numbered = p.scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "
+")
+                        let prompt = """
+                        You are an editor deciding where to drop a full-screen EXPLAINER CARD — a centred "board" that
+                        covers the video for a moment to let the viewer absorb a deeper CONCEPT, definition, or summary
+                        spoken in that scene. Use them RARELY (at most \(maxCards) in this whole video), only where a scene
+                        states a genuinely important idea worth pausing on. Most videos need ZERO.
+
+                        SCENES (number + narration):
+                        \(numbered)
+
+                        For each chosen scene, "text" is a SHORT on-card phrasing of the concept (max 8 words) — it will be
+                        shown centred and synced to the voice, so keep it to the words actually spoken there.
+
+                        Return ONLY JSON, no preamble/fences: {"cards":[{"scene":<int>,"text":"<max 8 words>"}]}
+                        If no scene warrants a board, return {"cards":[]}.
+                        """
+                        let result = try await text.complete(prompt, system: "You return only strict JSON, nothing else.")
+                        costText(store.settings.text, chars: prompt.count + result.count)
+                        struct ExplainerCard: Decodable { let scene: Int; let text: String }
+                        struct ExplainerResponse: Decodable { let cards: [ExplainerCard] }
+                        if let data = Self.extractJSONObject(result)?.data(using: .utf8),
+                           let parsed = try? JSONDecoder().decode(ExplainerResponse.self, from: data) {
+                            var taken = Set(ordered.map(\.scene))
+                            for candidate in parsed.cards.prefix(maxCards) {
+                                let trimmedText = candidate.text.trimmed
+                                guard !trimmedText.isEmpty, !taken.contains(candidate.scene),
+                                      candidate.scene >= 1, candidate.scene <= sceneSpans.count else { continue }
+                                let span = sceneSpans[candidate.scene - 1]
+                                ordered.append(TakeoverCard(scene: candidate.scene, text: trimmedText, start: span.0, end: span.1))
+                                taken.insert(candidate.scene)
+                            }
+                        }
+                    } catch {
+                        store.record("Explainer cards could not be planned (\(error.localizedDescription)); continuing without them.")
+                    }
+                }
+            }
+
             if !ordered.isEmpty {
                 let cap = max(1, p.scenes.count / 3)
                 cards = Array(ordered.prefix(cap))
@@ -680,6 +733,15 @@ struct Pipeline {
             }
         }
         return out
+    }
+
+    /// Mirrors `avg.pipeline.util.extract_json_object`: an AI reply is
+    /// prose/fences around the JSON far more often than not, so this reads
+    /// the substring between the first `{` and the last `}` rather than
+    /// require the WHOLE reply to already be bare JSON.
+    static func extractJSONObject(_ raw: String) -> String? {
+        guard let a = raw.firstIndex(of: "{"), let b = raw.lastIndex(of: "}"), a < b else { return nil }
+        return String(raw[a...b])
     }
 
     static func parseScenes(_ raw: String) -> [VideoScene] {

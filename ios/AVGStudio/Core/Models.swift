@@ -216,6 +216,17 @@ struct Channel: Codable, Hashable, Identifiable {
     /// not a deliberate iOS difference - fixed here to match.
     var imageProviderBackup: ImageProviderKind? = nil
     var imageOnFailure: ImageOnFailure = .stop
+    /// Mirrors `takeover_cards_enabled` (avg/core/settings_schema.py) -
+    /// "Master switch for every full-screen card (Focused, Explainer,
+    /// Chapters). Off means none." PC scopes this per-CHANNEL; this app
+    /// previously made it a single global Settings toggle, which is its
+    /// own iOS-only parity bug (a channel opting out couldn't without
+    /// opting every other channel out too) - moved here to fix it.
+    var takeoverCardsEnabled = true
+    /// Mirrors `explainer_enabled`: an AI pick of a few scenes worth a
+    /// full-screen concept card, in addition to the deterministic Focused
+    /// cards. Ignored when `takeoverCardsEnabled` is off, like the PC.
+    var explainerCardsEnabled = false
 }
 
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
@@ -363,9 +374,6 @@ struct AppSettings: Codable {
     // spoken text" half of that invariant is NOT optional and always holds.
     var dynamicPausesEnabled = true
     var pauseMs: Double = 700 // matches the PC's _DEFAULT_PAUSE_MS
-    // Deterministic Focused takeover cards from `((question))` markers -
-    // the PC's own master switch (`takeover_cards_enabled`, default on).
-    var takeoverCardsEnabled = true
     var filterStyle: FilterStyle = .none
     var filterIntensity: Double = 50
 }
