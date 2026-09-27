@@ -117,6 +117,12 @@ struct StudioView: View {
                                     .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .glassEffect(.regular, in: .capsule)
+                                if !p.cards.isEmpty {
+                                    Text("\(p.cards.count) card\(p.cards.count == 1 ? "" : "s")")
+                                        .font(.caption2.weight(.semibold)).foregroundStyle(Theme.accent)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .glassEffect(.regular.tint(Theme.accent.opacity(0.25)), in: .capsule)
+                                }
                             }
                         }
                         if let e = r.error, r.status == .failed { Text(e).font(.caption).foregroundStyle(.red).lineLimit(3) }

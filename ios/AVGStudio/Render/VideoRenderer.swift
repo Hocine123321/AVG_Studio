@@ -33,6 +33,7 @@ struct RenderInput {
     var kbIntensity: Double
     var captions: CaptionStyle
     var filter: FilterSpec = FilterSpec(style: .none, intensity: 0)
+    var cards: [TakeoverCard] = []
     var output: URL
 }
 
@@ -135,6 +136,16 @@ final class VideoRenderer {
         ctx.fill(canvas)
         ctx.interpolationQuality = .high
 
+        // A takeover card OWNS its whole scene window - no scene image,
+        // no Ken Burns, no crossfade, no captions underneath it, cutting
+        // in/out instantly. Mirrors overlay_design.py's own "every card
+        // renders full-bleed/opaque... not floating over footage".
+        if let card = input.cards.first(where: { t >= $0.start && t < $0.end }) {
+            drawCard(ctx, canvas: canvas, card: card, accent: UIColor(input.captions.accent))
+            applyFilter(ctx, canvas: canvas, t: t, filter: input.filter)
+            return
+        }
+
         var idx = 0
         for (i, s) in starts.enumerated() where t >= s { idx = i }
         let dur = input.sceneDurations.indices.contains(idx) ? input.sceneDurations[idx] : 1
@@ -156,6 +167,67 @@ final class VideoRenderer {
         if input.captions.enabled, let cue = input.cues.first(where: { t >= $0.start && t < $0.end }) {
             drawCaption(ctx, canvas: canvas, cue: cue, t: t, style: input.captions)
         }
+    }
+
+    // MARK: - Takeover cards
+    //
+    // Deterministic "Focused" full-screen cards - see `TakeoverCard`'s doc
+    // comment in Models.swift. Auto-fits the font size down until the
+    // question text fits in <= 2 lines within a safe box, exactly the loop
+    // `overlay_design.py`'s `_fit_card_font` runs (no Pillow here, but the
+    // same shrink-until-it-fits idea against Core Text metrics), then draws
+    // the text centered with a small accent rule beneath it - the one
+    // static-text composition every takeover card in the PC shares.
+
+    private func drawCard(_ ctx: CGContext, canvas: CGRect, card: TakeoverCard, accent: UIColor) {
+        ctx.saveGState()
+        // Matches overlay_design.py's DEFAULT_BRAND["bg"] (#0B0F1A) - the
+        // card owns the frame, so this replaces the scene entirely.
+        ctx.setFillColor(UIColor(red: 0x0B / 255.0, green: 0x0F / 255.0, blue: 0x1A / 255.0, alpha: 1).cgColor)
+        ctx.fill(canvas)
+
+        let boxW = canvas.width * 0.84
+        let boxH = canvas.height * 0.72
+        let shortEdge = min(canvas.width, canvas.height)
+        let floorSize = max(14, shortEdge * 0.035)
+        let maxLines = 2 // "Focused" cards only - the PC's AI-driven "Explainer" cards aren't ported (see TakeoverCard's doc comment).
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineBreakMode = .byWordWrapping
+
+        var size = shortEdge * 0.15
+        var font = UIFont.systemFont(ofSize: size, weight: .heavy)
+        while size > floorSize {
+            font = UIFont.systemFont(ofSize: size, weight: .heavy)
+            let probe = NSAttributedString(string: card.text, attributes: [.font: font, .paragraphStyle: para])
+            let bounds = probe.boundingRect(with: CGSize(width: boxW, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], context: nil)
+            let lines = max(1, Int((bounds.height / font.lineHeight).rounded(.up)))
+            if bounds.height <= boxH, lines <= maxLines { break }
+            size -= max(2, size * 0.06)
+        }
+
+        let str = NSAttributedString(string: card.text, attributes: [
+            .font: font, .paragraphStyle: para, .foregroundColor: UIColor(white: 0.95, alpha: 1),
+        ])
+        let bounds = str.boundingRect(with: CGSize(width: boxW, height: boxH), options: [.usesLineFragmentOrigin], context: nil)
+        let rect = CGRect(x: (canvas.width - boxW) / 2, y: (canvas.height - bounds.height) / 2, width: boxW, height: bounds.height)
+
+        ctx.translateBy(x: 0, y: canvas.height)
+        ctx.scaleBy(x: 1, y: -1)
+        UIGraphicsPushContext(ctx)
+        str.draw(with: rect, options: [.usesLineFragmentOrigin], context: nil)
+        UIGraphicsPopContext()
+
+        // Accent rule beneath the text block - overlay_design.py's own
+        // rounded "rule" divider under a card's headline.
+        let ruleW = min(canvas.width * 0.22, shortEdge * 0.18)
+        let ruleH = max(3, shortEdge * 0.006)
+        let ruleRect = CGRect(x: (canvas.width - ruleW) / 2, y: rect.maxY + shortEdge * 0.03, width: ruleW, height: ruleH)
+        ctx.setFillColor(accent.cgColor)
+        ctx.addPath(UIBezierPath(roundedRect: ruleRect, cornerRadius: ruleH / 2).cgPath)
+        ctx.fillPath()
+
+        ctx.restoreGState()
     }
 
     private func drawScene(_ ctx: CGContext, canvas: CGRect, image: CGImage?, sceneIndex: Int, p: Double, input: RenderInput, alpha: Double) {

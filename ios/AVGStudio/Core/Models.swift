@@ -53,6 +53,22 @@ struct WordTiming: Codable, Hashable {
     var end: Double
 }
 
+/// A deterministic full-screen "Focused" takeover card - ported from the
+/// PC's `avg.pipeline.phases.director._build_card_plan`: one card per
+/// `((question))` marker found in a scene's script text (NOT AI-picked),
+/// frequency-capped to roughly one card per 3 scenes. It OWNS its scene's
+/// entire window - the scene's image and captions are replaced by the
+/// card for that span, cutting in/out instantly (no PC "Explainer" concept
+/// cards here: the PC itself hasn't built the AI-driven side of that yet -
+/// see director.py's own module docstring - so there is nothing to port).
+struct TakeoverCard: Codable, Hashable, Identifiable {
+    var scene: Int
+    var text: String
+    var start: Double
+    var end: Double
+    var id: Int { scene }
+}
+
 struct CaptionCue: Codable, Hashable {
     var start: Double
     var end: Double
@@ -106,6 +122,7 @@ struct Project: Codable, Hashable, Identifiable {
     var sceneDurations: [Double] = []
     var captions: [CaptionCue] = []
     var captionsSource: String = "estimated"
+    var cards: [TakeoverCard] = []
     var output: String?
     var takes: [Take] = []
     var archived: Bool = false
@@ -248,6 +265,9 @@ struct AppSettings: Codable {
     // spoken text" half of that invariant is NOT optional and always holds.
     var dynamicPausesEnabled = true
     var pauseMs: Double = 700 // matches the PC's _DEFAULT_PAUSE_MS
+    // Deterministic Focused takeover cards from `((question))` markers -
+    // the PC's own master switch (`takeover_cards_enabled`, default on).
+    var takeoverCardsEnabled = true
     var filterStyle: FilterStyle = .none
     var filterIntensity: Double = 50
 }

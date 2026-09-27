@@ -118,6 +118,9 @@ struct Pipeline {
         Write the narration a narrator speaks for a video about: \(p.topic)
         About \(words) words. Flowing prose only: no headings, no scene numbers, no stage directions, \
         no emojis, no quotation marks around the whole text. You may insert [pause] for a dramatic pause.
+        Separately, wrap any short rhetorical question or punchy hook in double parentheses, e.g. \
+        "((But why?))" - at most a couple across the whole script, only genuine brief questions/hooks, \
+        never a whole sentence. These become full-screen emphasis cards; the words inside are still spoken normally.
         """
         let narrationRaw = try await text.complete(narrationPrompt, system: system)
         costText(store.settings.text, chars: narrationPrompt.count + narrationRaw.count)
@@ -310,12 +313,35 @@ struct Pipeline {
         }
         guard !words.isEmpty else { throw AVGError.message("Nothing to caption.") }
 
+        // Deterministic Focused takeover cards: one per `((question))`
+        // marker found in a scene's own (uncleaned) text, each taking over
+        // its whole scene's window - mirrors director.py's `_build_card_plan`
+        // exactly (frequency cap, one-card-per-scene, first-question-wins).
+        var cards: [TakeoverCard] = []
+        if store.settings.takeoverCardsEnabled {
+            var bySc: [Int: TakeoverCard] = [:]
+            for (scene, span) in zip(p.scenes, sceneSpans) {
+                guard bySc[scene.index] == nil, let q = Self.extractQuestionMarkers(scene.text).first else { continue }
+                bySc[scene.index] = TakeoverCard(scene: scene.index, text: q, start: span.0, end: span.1)
+            }
+            let ordered = bySc.values.sorted { $0.scene < $1.scene }
+            if !ordered.isEmpty {
+                let cap = max(1, p.scenes.count / 3)
+                cards = Array(ordered.prefix(cap))
+            }
+        }
+        let cardWindows = cards.map { ($0.start, $0.end) }
+
         store.progress(projectID, 0.6, "Grouping caption cues…")
         let maxWords = max(1, store.settings.captionMaxWords)
         var cues: [CaptionCue] = []
         for chunkStart in stride(from: 0, to: words.count, by: maxWords) {
             let group = Array(words[chunkStart..<min(chunkStart + maxWords, words.count)])
             guard let first = group.first, let last = group.last else { continue }
+            // A caption cue that overlaps a takeover card's window is
+            // suppressed - the card owns that span instead (mirrors
+            // captions.py's own `_card_suppression_windows` use).
+            if cardWindows.contains(where: { Self.overlaps(first.start, last.end, $0.0, $0.1) }) { continue }
             cues.append(CaptionCue(start: first.start, end: last.end, text: group.map(\.text).joined(separator: " "), words: group))
         }
 
@@ -323,6 +349,7 @@ struct Pipeline {
             $0.sceneDurations = sceneDurations
             $0.captions = cues
             $0.captionsSource = source
+            $0.cards = cards
         }
     }
 
@@ -354,6 +381,7 @@ struct Pipeline {
                 accent: Theme.color(hex: ch.accentColorHex) ?? Theme.accent
             ),
             filter: FilterSpec(style: s.filterStyle, intensity: s.filterIntensity),
+            cards: p.cards,
             output: out
         )
         let id = projectID
@@ -395,6 +423,23 @@ struct Pipeline {
     }
 
     private static let pauseRegex = try! NSRegularExpression(pattern: "\\s*\\[\\s*pause\\s*\\]\\s*", options: [.caseInsensitive])
+
+    /// `((question))` markers' inner text, in order - the deterministic
+    /// source of Focused takeover cards. Mirrors `extract_question_markers`
+    /// exactly (same regex shape, non-greedy, spans newlines).
+    private static let questionRegex = try! NSRegularExpression(pattern: "\\(\\(\\s*(.*?)\\s*\\)\\)", options: [.dotMatchesLineSeparators])
+    static func extractQuestionMarkers(_ s: String) -> [String] {
+        let ns = s as NSString
+        return questionRegex.matches(in: s, range: NSRange(location: 0, length: ns.length)).compactMap { m in
+            guard m.numberOfRanges > 1 else { return nil }
+            let inner = ns.substring(with: m.range(at: 1)).trimmed
+            return inner.isEmpty ? nil : inner
+        }
+    }
+
+    static func overlaps(_ s1: Double, _ e1: Double, _ s2: Double, _ e2: Double) -> Bool {
+        s1 < e2 && s2 < e1
+    }
 
     /// Narration text split at each `[pause]` marker; the marker itself is
     /// consumed by the split and never appears in any returned segment.

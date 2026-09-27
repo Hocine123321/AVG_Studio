@@ -74,6 +74,12 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Takeover cards", isOn: $store.settings.takeoverCardsEnabled)
+            } header: { Text("Cards") } footer: {
+                Text("When the writer marks a rhetorical question with ((double parentheses)), it becomes a full-screen card instead of a normal caption for that moment - deterministic, not AI-picked, matching the PC.")
+            }
+
+            Section {
                 Picker("Style", selection: $store.settings.filterStyle) {
                     ForEach(FilterStyle.allCases) { Text($0.label).tag($0) }
                 }
