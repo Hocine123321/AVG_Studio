@@ -9,7 +9,28 @@ struct CaptionStyle {
     var fontSize: CGFloat
     var position: CaptionPosition
     var animation: CaptionAnimationStyle = .fade
+    /// Highlight colour - captions' own fill AND a card's rule, matching
+    /// the PC's `overlay_highlight` (shared role, one setting).
     var accent: Color = Theme.accent
+    /// Mirrors the PC's `overlay_accent1`/`overlay_accent2` - card-only,
+    /// captions never read these.
+    var accent1: Color = Theme.accent
+    var accent2: Color = Theme.accent
+    /// Mirrors `font_family` - the one font shared by captions and cards.
+    /// Empty uses the system font.
+    var fontFamily: String = ""
+}
+
+/// One UIFont for `family`/`size`/`weight`, falling back to the system font
+/// (optionally San Francisco Rounded, for captions' own look) when `family`
+/// is empty or names a font not actually installed - matching the PC's own
+/// "empty/unrecognised uses the drawing library's own default" leniency
+/// rather than a hard failure over a bad font name in a channel document.
+private func themedFont(family: String, size: CGFloat, weight: UIFont.Weight, rounded: Bool = false) -> UIFont {
+    if !family.isEmpty, let named = UIFont(name: family, size: size) { return named }
+    let base = UIFont.systemFont(ofSize: size, weight: weight)
+    if rounded { return base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base }
+    return base
 }
 
 /// A whole-video look filter, alpha-blended over every frame at
@@ -141,7 +162,7 @@ final class VideoRenderer {
         // in/out instantly. Mirrors overlay_design.py's own "every card
         // renders full-bleed/opaque... not floating over footage".
         if let card = input.cards.first(where: { t >= $0.start && t < $0.end }) {
-            drawCard(ctx, canvas: canvas, card: card, accent: UIColor(input.captions.accent))
+            drawCard(ctx, canvas: canvas, card: card, accent1: UIColor(input.captions.accent1), accent2: UIColor(input.captions.accent2), fontFamily: input.captions.fontFamily)
             applyFilter(ctx, canvas: canvas, t: t, filter: input.filter)
             return
         }
@@ -179,12 +200,19 @@ final class VideoRenderer {
     // the text centered with a small accent rule beneath it - the one
     // static-text composition every takeover card in the PC shares.
 
-    private func drawCard(_ ctx: CGContext, canvas: CGRect, card: TakeoverCard, accent: UIColor) {
+    private func drawCard(_ ctx: CGContext, canvas: CGRect, card: TakeoverCard, accent1: UIColor, accent2: UIColor, fontFamily: String) {
         ctx.saveGState()
         // Matches overlay_design.py's DEFAULT_BRAND["bg"] (#0B0F1A) - the
         // card owns the frame, so this replaces the scene entirely.
         ctx.setFillColor(UIColor(red: 0x0B / 255.0, green: 0x0F / 255.0, blue: 0x1A / 255.0, alpha: 1).cgColor)
         ctx.fill(canvas)
+
+        // A thin accent2 stripe along the top edge - the one place this
+        // card uses the PC's "secondary" card accent (overlay_accent2);
+        // accent1 stays reserved for the rule beneath the headline below.
+        let stripeH = max(3, canvas.height * 0.006)
+        ctx.setFillColor(accent2.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: canvas.width, height: stripeH))
 
         let boxW = canvas.width * 0.84
         let boxH = canvas.height * 0.72
@@ -196,9 +224,9 @@ final class VideoRenderer {
         para.lineBreakMode = .byWordWrapping
 
         var size = shortEdge * 0.15
-        var font = UIFont.systemFont(ofSize: size, weight: .heavy)
+        var font = themedFont(family: fontFamily, size: size, weight: .heavy)
         while size > floorSize {
-            font = UIFont.systemFont(ofSize: size, weight: .heavy)
+            font = themedFont(family: fontFamily, size: size, weight: .heavy)
             let probe = NSAttributedString(string: card.text, attributes: [.font: font, .paragraphStyle: para])
             let bounds = probe.boundingRect(with: CGSize(width: boxW, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], context: nil)
             let lines = max(1, Int((bounds.height / font.lineHeight).rounded(.up)))
@@ -223,7 +251,7 @@ final class VideoRenderer {
         let ruleW = min(canvas.width * 0.22, shortEdge * 0.18)
         let ruleH = max(3, shortEdge * 0.006)
         let ruleRect = CGRect(x: (canvas.width - ruleW) / 2, y: rect.maxY + shortEdge * 0.03, width: ruleW, height: ruleH)
-        ctx.setFillColor(accent.cgColor)
+        ctx.setFillColor(accent1.cgColor)
         ctx.addPath(UIBezierPath(roundedRect: ruleRect, cornerRadius: ruleH / 2).cgPath)
         ctx.fillPath()
 
@@ -327,8 +355,7 @@ final class VideoRenderer {
 
     private func drawCaption(_ ctx: CGContext, canvas: CGRect, cue: CaptionCue, t: Double, style: CaptionStyle) {
         let size = style.fontSize * canvas.width / 1080
-        let base = UIFont.systemFont(ofSize: size, weight: .black)
-        let font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: size) } ?? base
+        let font = themedFont(family: style.fontFamily, size: size, weight: .black, rounded: true)
         let para = NSMutableParagraphStyle()
         para.alignment = .center
         para.lineBreakMode = .byWordWrapping

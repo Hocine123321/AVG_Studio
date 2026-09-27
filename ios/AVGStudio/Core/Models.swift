@@ -153,6 +153,22 @@ struct Project: Codable, Hashable, Identifiable {
     var estimatedCostUSD: Double { costs.reduce(0) { $0 + $1.amountUSD } }
 }
 
+/// Mirrors the PC's `image_on_failure` catalogue entry: what happens once
+/// BOTH the primary and backup image providers have failed for a scene.
+/// A failure a second provider would hit identically (a blocked prompt, a
+/// bug) never falls back regardless of this setting - see visuals()'s own
+/// fallback-eligibility check.
+enum ImageOnFailure: String, Codable, CaseIterable, Identifiable {
+    case stop, fallBack
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .stop: return "Stop the run"
+        case .fallBack: return "Fall back to Pollinations"
+        }
+    }
+}
+
 struct Channel: Codable, Hashable, Identifiable {
     var id = UUID()
     var name: String
@@ -170,6 +186,36 @@ struct Channel: Codable, Hashable, Identifiable {
     /// the shared reusable-image pool over generating fresh art.
     var recycleEnabled: Bool = true
     var recycleRatio: Double = 70
+    /// Mirrors the PC's `voice_trim_aggressiveness`/`voice_max_removable_
+    /// silence_pct` channel settings - how readily the dead-air removal
+    /// step (SilenceTrim.swift) treats a quiet stretch as silence to cut,
+    /// and the cap it backs off one level for if it cut too much.
+    var voiceTrimAggressiveness: VoiceTrimAggressiveness = .medium
+    var voiceMaxRemovableSilencePct: Double = 40
+    /// Mirrors the PC's `overlay_accent1`/`overlay_accent2` (primary/
+    /// secondary card accent colours) - `accentColorHex` above already
+    /// covers `overlay_highlight`'s role (captions + a card's highlight
+    /// colour). Empty uses `accentColorHex`, then the app default -
+    /// matching the PC's own "empty uses the drawing library's own
+    /// default" chain, just one level deeper.
+    var accent1ColorHex: String = ""
+    var accent2ColorHex: String = ""
+    /// Mirrors the PC's `font_family` - the one font shared by captions
+    /// AND takeover/explainer cards. Empty uses the system font.
+    var fontFamily: String = ""
+    /// Mirrors `topic_research`: spend one extra AI call gathering facts
+    /// about the topic before the brief is written, so the script draws
+    /// on it.
+    var topicResearchEnabled: Bool = false
+    /// Mirrors the PC's `image_provider_backup`/`image_on_failure` exactly,
+    /// including its default: "stop" - a scene whose only configured
+    /// provider fails stops the run, UNLESS a backup provider is set AND
+    /// this is switched to "fall back". PC does NOT auto-fall-back to a
+    /// free provider by default; this app previously did (always silently
+    /// retrying on Pollinations), which was its own bug relative to the PC,
+    /// not a deliberate iOS difference - fixed here to match.
+    var imageProviderBackup: ImageProviderKind? = nil
+    var imageOnFailure: ImageOnFailure = .stop
 }
 
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
@@ -194,6 +240,40 @@ enum ImageProviderKind: String, Codable, CaseIterable, Identifiable {
         case .stablehorde: return "Stable Horde (free, community)"
         case .gemini: return "Google Gemini"
         case .openai: return "OpenAI"
+        }
+    }
+}
+
+/// Mirrors the PC's `voice_trim_aggressiveness` catalogue entry
+/// (avg/core/settings_schema.py) - which of three fixed (threshold dBFS,
+/// min-silence ms, keep-silence ms) presets the dead-air stripper uses.
+/// "medium" is exactly the PC's own pre-Slice-21 fixed behavior.
+enum VoiceTrimAggressiveness: String, Codable, CaseIterable, Identifiable {
+    case low, medium, high
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .low: return "Low (keep more air)"
+        case .medium: return "Medium"
+        case .high: return "High (cut more air)"
+        }
+    }
+    /// (thresholdDBFS, minSilenceMs, keepMs) - copied verbatim from
+    /// avg/pipeline/phases/voice.py's `_AGGRESSIVENESS_PARAMS`.
+    var params: (Double, Int, Int) {
+        switch self {
+        case .low: return (-45.0, 500, 150)
+        case .medium: return (-40.0, 400, 100)
+        case .high: return (-35.0, 300, 80)
+        }
+    }
+    /// One step less aggressive - what a capped segment retries with.
+    /// "low" maps to itself, matching `_AGGRESSIVENESS_STEP_DOWN`.
+    var stepDown: VoiceTrimAggressiveness {
+        switch self {
+        case .high: return .medium
+        case .medium: return .low
+        case .low: return .low
         }
     }
 }
