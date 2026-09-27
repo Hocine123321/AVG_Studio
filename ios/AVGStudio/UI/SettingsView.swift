@@ -32,6 +32,20 @@ struct SettingsView: View {
         guard let key = Keychain.get(.elevenlabs) else { throw AVGError.missingKey(APIKey.elevenlabs.label) }
         return try await ModelCatalogSources.elevenlabsModels(key: key)
     }
+    @State private var pollinationsTextCatalog = ModelCatalog(cacheKey: "pollinations_text") {
+        try await ModelCatalogSources.pollinationsText(key: Keychain.get(.pollinations))
+    }
+    @State private var pollinationsImageCatalog = ModelCatalog(cacheKey: "pollinations_image") {
+        try await ModelCatalogSources.pollinationsImage(key: Keychain.get(.pollinations))
+    }
+    @State private var geminiImageCatalog = ModelCatalog(cacheKey: "gemini_image") {
+        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
+        return try await ModelCatalogSources.geminiImageModels(key: key)
+    }
+    @State private var geminiVoiceModelCatalog = ModelCatalog(cacheKey: "gemini_voice_model") {
+        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
+        return try await ModelCatalogSources.geminiVoiceModels(key: key)
+    }
 
     var body: some View {
         @Bindable var store = store
@@ -44,6 +58,8 @@ struct SettingsView: View {
                     ModelPickerRow(title: "Gemini model", value: $store.settings.geminiModel, catalog: geminiTextCatalog)
                 } else if store.settings.text == .groq {
                     ModelPickerRow(title: "Groq model", value: $store.settings.groqModel, catalog: groqTextCatalog)
+                } else if store.settings.text == .pollinations {
+                    ModelPickerRow(title: "Pollinations model", value: $store.settings.pollinationsTextModel, catalog: pollinationsTextCatalog)
                 }
 
                 Picker("Images", selection: $store.settings.image) {
@@ -51,6 +67,10 @@ struct SettingsView: View {
                 }
                 if store.settings.image == .stablehorde {
                     ModelPickerRow(title: "Stable Horde model", value: $store.settings.stableHordeModel, catalog: stableHordeCatalog)
+                } else if store.settings.image == .pollinations {
+                    ModelPickerRow(title: "Pollinations model", value: $store.settings.pollinationsImageModel, catalog: pollinationsImageCatalog)
+                } else if store.settings.image == .gemini {
+                    ModelPickerRow(title: "Gemini image model", value: $store.settings.geminiImageModel, catalog: geminiImageCatalog)
                 }
 
                 Picker("Voice", selection: $store.settings.voice) {
@@ -59,7 +79,8 @@ struct SettingsView: View {
                 TextField("Image style", text: $store.settings.imageStyle, axis: .vertical)
             }
 
-            if store.settings.voice == .apple {
+            switch store.settings.voice {
+            case .apple:
                 Section("Apple voice") {
                     Picker("Voice", selection: $store.settings.appleVoiceIdentifier) {
                         Text("Automatic").tag("")
@@ -71,10 +92,19 @@ struct SettingsView: View {
                     Text("Download better voices in iOS Settings → Accessibility → Spoken Content → Voices.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } else {
+            case .elevenlabs:
                 Section("ElevenLabs") {
                     ModelPickerRow(title: "Voice ID", value: $store.settings.elevenVoiceID, catalog: elevenVoicesCatalog)
                     ModelPickerRow(title: "Model", value: $store.settings.elevenModel, catalog: elevenModelsCatalog)
+                }
+            case .gemini:
+                Section {
+                    Picker("Voice", selection: $store.settings.geminiVoiceName) {
+                        ForEach(GeminiVoice.prebuiltVoices, id: \.self) { Text($0).tag($0) }
+                    }
+                    ModelPickerRow(title: "TTS model", value: $store.settings.geminiVoiceModel, catalog: geminiVoiceModelCatalog)
+                } header: { Text("Gemini") } footer: {
+                    Text("Not a PC provider - added as a third voice option alongside ElevenLabs and Apple voices.")
                 }
             }
 

@@ -83,3 +83,90 @@ final class AppleVoice: VoiceProvider {
         return file
     }
 }
+
+/// Not a PC provider - `avg.providers.voice.providers` has exactly
+/// ElevenLabs and Edge TTS - added on request as a third voice option,
+/// reusing the same `generateContent` endpoint `GeminiText`/`GeminiImages`
+/// already call, this time with `responseModalities: ["AUDIO"]` and a
+/// `speechConfig` naming one of Google's fixed prebuilt voices.
+///
+/// Gemini's TTS reply carries raw 24kHz/16-bit/mono PCM in `inlineData`
+/// (confirmed by the `mimeType` it sends back, `audio/L16;rate=24000` or
+/// similar - never a container format), so this - unlike every other
+/// voice provider here, which gets back a playable file directly - has to
+/// prepend a PCM WAV header itself before AVFoundation (or anything else
+/// downstream) can open the file at all.
+struct GeminiVoice: VoiceProvider {
+    let key: String
+    let model: String
+    let voiceName: String
+
+    /// The complete, fixed set of prebuilt voices Gemini's TTS models
+    /// support (Google's own docs enumerate exactly these - there is no
+    /// list endpoint for voices the way ElevenLabs has one, only for the
+    /// TTS-capable MODEL id, which does come from a live catalogue - see
+    /// `ModelCatalogSources.geminiVoiceModels`).
+    static let prebuiltVoices: [String] = [
+        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+        "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+        "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+        "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+        "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+    ]
+
+    func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
+        let bareModel = model.trimmed.isEmpty ? "gemini-2.5-flash-preview-tts" : model.trimmed
+        let voice = voiceName.trimmed.isEmpty ? "Kore" : voiceName.trimmed
+        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bareModel):generateContent")!
+        comps.queryItems = [URLQueryItem(name: "key", value: key)]
+        let body: [String: Any] = [
+            "contents": [["parts": [["text": text]]]],
+            "generationConfig": [
+                "responseModalities": ["AUDIO"],
+                "speechConfig": ["voiceConfig": ["prebuiltVoiceConfig": ["voiceName": voice]]],
+            ],
+        ]
+        let data = try await HTTP.retrying({ try await HTTP.send(comps.url!, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")
+        let o = try HTTP.object(data)
+        let parts = (((o["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
+        for p in parts {
+            if let inline = (p["inlineData"] ?? p["inline_data"]) as? [String: Any],
+               let b64 = inline["data"] as? String, let pcm = Data(base64Encoded: b64) {
+                // Gemini's own docs fix this at 24kHz/16-bit/mono for every
+                // TTS model it currently offers - there is nothing in the
+                // reply to negotiate a different rate from.
+                let wav = GeminiVoice.wavHeader(pcmByteCount: pcm.count, sampleRate: 24_000, channels: 1, bitsPerSample: 16) + pcm
+                let file = "\(name).wav"
+                try wav.write(to: folder.appendingPathComponent(file))
+                return file
+            }
+        }
+        throw AVGError.message("Gemini returned no audio.")
+    }
+
+    /// A minimal 44-byte canonical PCM WAV header - the one container
+    /// format every audio API in this app (AVAudioFile included) can open
+    /// without help, and the smallest one that fits `pcm`'s raw bytes
+    /// without re-encoding them.
+    private static func wavHeader(pcmByteCount: Int, sampleRate: Int, channels: Int, bitsPerSample: Int) -> Data {
+        let blockAlign = channels * bitsPerSample / 8
+        let byteRate = sampleRate * blockAlign
+        var d = Data()
+        func le32(_ v: Int) { var x = UInt32(v).littleEndian; d.append(Data(bytes: &x, count: 4)) }
+        func le16(_ v: Int) { var x = UInt16(v).littleEndian; d.append(Data(bytes: &x, count: 2)) }
+        d.append("RIFF".data(using: .ascii)!)
+        le32(36 + pcmByteCount)
+        d.append("WAVE".data(using: .ascii)!)
+        d.append("fmt ".data(using: .ascii)!)
+        le32(16)               // fmt chunk size
+        le16(1)                // PCM
+        le16(channels)
+        le32(sampleRate)
+        le32(byteRate)
+        le16(blockAlign)
+        le16(bitsPerSample)
+        d.append("data".data(using: .ascii)!)
+        le32(pcmByteCount)
+        return d
+    }
+}

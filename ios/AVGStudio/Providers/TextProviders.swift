@@ -91,7 +91,7 @@ struct ChatText: TextProvider {
     static func groq(key: String, model: String) -> ChatText {
         ChatText(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, key: key, model: model, provider: "groq")
     }
-    static func pollinations() -> ChatText {
-        ChatText(url: URL(string: "https://text.pollinations.ai/openai")!, key: nil, model: "openai", provider: "pollinations")
+    static func pollinations(key: String?, model: String) -> ChatText {
+        ChatText(url: URL(string: "https://text.pollinations.ai/openai")!, key: key, model: model, provider: "pollinations")
     }
 }

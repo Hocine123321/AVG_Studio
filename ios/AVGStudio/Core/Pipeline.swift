@@ -34,7 +34,7 @@ struct Pipeline {
         case .apple: return AppleText()
         case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
         case .groq: return ChatText.groq(key: try Keychain.require(.groq), model: s.groqModel)
-        case .pollinations: return ChatText.pollinations()
+        case .pollinations: return ChatText.pollinations(key: Keychain.get(.pollinations), model: s.pollinationsTextModel)
         }
     }
 
@@ -47,7 +47,7 @@ struct Pipeline {
         case .apple: return AppleText()
         case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
         case .groq: return ChatText.groq(key: try Keychain.require(.groq), model: s.groqModel)
-        case .pollinations: return ChatText.pollinations()
+        case .pollinations: return ChatText.pollinations(key: Keychain.get(.pollinations), model: s.pollinationsTextModel)
         }
     }
 
@@ -97,10 +97,11 @@ struct Pipeline {
     private func imageProvider() throws -> ImageProvider { try imageProvider(for: store.settings.image) }
 
     private func imageProvider(for kind: ImageProviderKind) throws -> ImageProvider {
+        let s = store.settings
         switch kind {
-        case .pollinations: return PollinationsImages()
-        case .stablehorde: return StableHordeImages(model: store.settings.stableHordeModel)
-        case .gemini: return GeminiImages(key: try Keychain.require(.gemini))
+        case .pollinations: return PollinationsImages(key: Keychain.get(.pollinations), model: s.pollinationsImageModel)
+        case .stablehorde: return StableHordeImages(model: s.stableHordeModel)
+        case .gemini: return GeminiImages(key: try Keychain.require(.gemini), model: s.geminiImageModel)
         case .openai: return OpenAIImages(key: try Keychain.require(.openai))
         }
     }
@@ -110,6 +111,7 @@ struct Pipeline {
         switch s.voice {
         case .apple: return AppleVoice(identifier: s.appleVoiceIdentifier)
         case .elevenlabs: return ElevenLabsVoice(key: try Keychain.require(.elevenlabs), voiceID: s.elevenVoiceID, model: s.elevenModel)
+        case .gemini: return GeminiVoice(key: try Keychain.require(.gemini), model: s.geminiVoiceModel, voiceName: s.geminiVoiceName)
         }
     }
 
@@ -142,6 +144,10 @@ struct Pipeline {
         switch kind {
         case .apple: return
         case .elevenlabs: store.addCost(projectID, "ElevenLabs · \(chars) chars", Double(chars) * 0.00003)
+        // Ballpark for a preview-tier Gemini TTS model, same "flat,
+        // clearly-labelled guess" spirit as every other rate in this
+        // method - not real billing.
+        case .gemini: store.addCost(projectID, "Gemini TTS · \(chars) chars", Double(chars) * 0.00002)
         }
     }
 

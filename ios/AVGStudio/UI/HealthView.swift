@@ -27,6 +27,7 @@ struct HealthView: View {
         if s.image == .gemini { out.append(Check(title: "Gemini key (images)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true)) }
         if s.image == .openai { out.append(Check(title: "OpenAI key", detail: Keychain.has(.openai) ? "Saved" : "Missing", ok: Keychain.has(.openai), required: true)) }
         if s.voice == .elevenlabs { out.append(Check(title: "ElevenLabs key", detail: Keychain.has(.elevenlabs) ? "Saved" : "Missing", ok: Keychain.has(.elevenlabs), required: true)) }
+        if s.voice == .gemini { out.append(Check(title: "Gemini key (voice)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true)) }
         // AssemblyAI is never required: missing it just means captions fall
         // back to the estimated per-word timing (Pipeline.captions()'s own
         // synthetic-timing path) rather than real transcription - degraded,

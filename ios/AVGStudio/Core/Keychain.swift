@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum APIKey: String, CaseIterable, Identifiable {
-    case gemini, groq, openai, elevenlabs, assemblyai, stablehorde
+    case gemini, groq, openai, elevenlabs, assemblyai, stablehorde, pollinations
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -12,6 +12,10 @@ enum APIKey: String, CaseIterable, Identifiable {
         case .elevenlabs: return "ElevenLabs"
         case .assemblyai: return "AssemblyAI (real caption timing)"
         case .stablehorde: return "Stable Horde (optional, for priority)"
+        // Optional on the PC too (avg/core/settings_schema.py's "pollinations"
+        // key entry) - Pollinations works fully keyless; a key only lifts
+        // its (generous) anonymous rate limit.
+        case .pollinations: return "Pollinations (optional, for priority)"
         }
     }
 }

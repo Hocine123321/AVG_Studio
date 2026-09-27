@@ -10,12 +10,50 @@ private func validImage(_ d: Data) throws -> Data {
     return d
 }
 
+/// Ported from `avg.providers.images.community.PollinationsImageProvider`:
+/// same endpoint (`gen.pollinations.ai/image/...`, not the older
+/// `image.pollinations.ai/prompt/...` this struct used before this had a
+/// model setting to honor), same per-ratio size table, same fixed safety/
+/// negative-prompt params, and the same "reject a foreign provider's
+/// namespaced model id" guard so a stale `imagen-3.0` or `gpt-image-1`
+/// left over from switching providers falls back to Pollinations' own
+/// `flux` instead of erroring.
 struct PollinationsImages: ImageProvider {
+    let key: String?
+    let model: String
+
+    init(key: String? = nil, model: String = "") {
+        self.key = key
+        self.model = PollinationsImages.normalizeModel(model)
+    }
+
+    private static let foreignPrefixes = [
+        "gpt-image", "dall-e", "imagen", "gemini", "black-forest-labs", "stabilityai", "sdxl", "albedo",
+    ]
+
+    private static func normalizeModel(_ raw: String) -> String {
+        let m = raw.trimmed
+        if m.isEmpty || m.contains("/") || foreignPrefixes.contains(where: { m.lowercased().hasPrefix($0) }) {
+            return "flux"
+        }
+        return m
+    }
+
     func generate(prompt: String, size: CGSize) async throws -> Data {
+        let ratio = size.width > size.height ? "16:9" : (size.width < size.height ? "9:16" : "1:1")
+        let (width, height) = ratio == "1:1" ? (1024, 1024) : (ratio == "9:16" ? (768, 1344) : (1344, 768))
         let enc = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? "image"
-        let seed = Int.random(in: 1...999_999)
-        let url = URL(string: "https://image.pollinations.ai/prompt/\(enc)?width=\(Int(size.width))&height=\(Int(size.height))&nologo=true&seed=\(seed)")!
-        let d = try await HTTP.retrying({ try await HTTP.send(url, method: "GET", timeout: 120, provider: "pollinations") }, provider: "pollinations")
+        var comps = URLComponents(string: "https://gen.pollinations.ai/image/\(enc)")!
+        comps.queryItems = [
+            URLQueryItem(name: "model", value: model),
+            URLQueryItem(name: "width", value: String(width)),
+            URLQueryItem(name: "height", value: String(height)),
+            URLQueryItem(name: "safe", value: "true"),
+            URLQueryItem(name: "negative_prompt", value: "text, watermark, logo, blurry, low quality"),
+        ]
+        var headers: [String: String] = [:]
+        if let key, !key.isEmpty { headers["Authorization"] = "Bearer \(key)" }
+        let d = try await HTTP.retrying({ try await HTTP.send(comps.url!, method: "GET", headers: headers, timeout: 120, provider: "pollinations") }, provider: "pollinations")
         return try validImage(d)
     }
 }
@@ -131,9 +169,12 @@ struct StableHordeImages: ImageProvider {
 
 struct GeminiImages: ImageProvider {
     let key: String
+    var model: String = "gemini-2.5-flash-image"
+
     func generate(prompt: String, size: CGSize) async throws -> Data {
         // Same belt-and-suspenders auth as GeminiText: header AND `key=` query param.
-        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent")!
+        let bare = model.trimmed.isEmpty ? "gemini-2.5-flash-image" : model.trimmed
+        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bare):generateContent")!
         comps.queryItems = [URLQueryItem(name: "key", value: key)]
         let url = comps.url!
         let ratio = size.width > size.height ? "16:9" : (size.width < size.height ? "9:16" : "1:1")

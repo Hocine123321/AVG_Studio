@@ -1,33 +1,33 @@
 import Foundation
 
-/// The five `ModelCatalog.fetch` closures this app actually needs - one per
-/// provider endpoint that can meaningfully offer a live list. Deliberately
-/// NOT ported for every provider with a "model" setting:
-///
-///   - Gemini's own image model and OpenAI's `gpt-image-1` are each the
-///     ONE model that provider offers for that call shape (`GeminiImages`/
-///     `OpenAIImages` in ImageProviders.swift hardcode them) - a picker
-///     with exactly one entry has nothing to pick.
-///   - Pollinations (text and image) has no per-account catalogue to list;
-///     its text provider already hardcodes the one proxy model id it
-///     needs (`ChatText.pollinations()`).
+/// The `ModelCatalog.fetch` closures this app needs - one per provider
+/// endpoint that can meaningfully offer a live list. Deliberately NOT
+/// ported for every provider with a "model" setting: OpenAI's `gpt-image-1`
+/// is the one model that call shape offers (`OpenAIImages` hardcodes it) -
+/// a picker with exactly one entry has nothing to pick. Gemini's image and
+/// voice-model pickers below are NOT ports of a PC feature - the PC's own
+/// `catalogues.py` explicitly gives Gemini no image-model catalogue
+/// ("OpenAI and Gemini publish no image-model catalogue" through the
+/// endpoint IT restricts itself to) and has no Gemini voice provider at
+/// all - they reuse GeminiText's own `/v1beta/models` fetch with a
+/// different keep-filter, added on request.
 ///
 /// Every function here returns already-sorted, already-filtered entries -
 /// `ModelCatalog` itself has no filtering opinion, on purpose, so a new
 /// source never has to fight the generic class's assumptions about shape.
 enum ModelCatalogSources {
-    // MARK: Gemini text models
+    // MARK: Gemini - shared catalogue fetch
 
     /// `GET /v1beta/models` (paginated, `pageSize=1000` so this is a
     /// single round trip in practice) - same endpoint and the same
     /// `supportedGenerationMethods` filter as Palabra's own
     /// `GeminiClient.listModels` (`Palabra/Services/AI/GeminiClient.swift`).
-    /// Excludes image/embedding/TTS-only ids so this offers exactly the
-    /// models `GeminiText.complete` can actually call, and strips the
-    /// `models/` prefix Gemini's `name` field carries - `GeminiText`
-    /// builds its own URL with a literal `/models/` segment already, so
-    /// the STORED id has to be the bare model name, not the full path.
-    static func geminiText(key: String) async throws -> [CatalogEntry] {
+    /// `keep` decides which of the three Gemini catalogues (text/image/
+    /// voice) this call is for - see the three thin wrappers below - and
+    /// runs on the BARE id (the `models/` prefix already stripped), since
+    /// every call site's own URL already supplies that segment literally
+    /// and the stored setting has to match.
+    private static func geminiModels(key: String, keep: @escaping (String) -> Bool) async throws -> [CatalogEntry] {
         var all: [CatalogEntry] = []
         var pageToken: String?
         repeat {
@@ -46,9 +46,7 @@ enum ModelCatalogSources {
                 let methods = (m["supportedGenerationMethods"] as? [String]) ?? []
                 guard methods.contains("generateContent") else { continue }
                 let bare = name.hasPrefix("models/") ? String(name.dropFirst("models/".count)) : name
-                guard !bare.localizedCaseInsensitiveContains("embedding"),
-                      !bare.localizedCaseInsensitiveContains("aqa"),
-                      !bare.localizedCaseInsensitiveContains("image") else { continue }
+                guard keep(bare) else { continue }
                 let display = (m["displayName"] as? String) ?? bare
                 let desc = m["description"] as? String
                 all.append(CatalogEntry(id: bare, label: display, sublabel: desc))
@@ -57,6 +55,42 @@ enum ModelCatalogSources {
         } while pageToken != nil
         // Newest-first, numeric-aware - matches Palabra's ModelFilter.
         return all.sorted { $0.id.localizedStandardCompare($1.id) == .orderedDescending }
+    }
+
+    // MARK: Gemini text models
+
+    /// Excludes image/embedding/TTS-only ids so this offers exactly the
+    /// models `GeminiText.complete` can actually call.
+    static func geminiText(key: String) async throws -> [CatalogEntry] {
+        try await geminiModels(key: key) { bare in
+            !bare.localizedCaseInsensitiveContains("embedding")
+                && !bare.localizedCaseInsensitiveContains("aqa")
+                && !bare.localizedCaseInsensitiveContains("image")
+                && !bare.localizedCaseInsensitiveContains("tts")
+        }
+    }
+
+    // MARK: Gemini image models
+
+    /// The mirror image of `geminiText`'s exclusion: KEEPS only ids that
+    /// look like an image-output model (`gemini-2.5-flash-image`, any
+    /// `imagen-*`), which `GeminiImages.generate`'s `responseModalities:
+    /// ["IMAGE"]` call needs.
+    static func geminiImageModels(key: String) async throws -> [CatalogEntry] {
+        try await geminiModels(key: key) { bare in
+            bare.localizedCaseInsensitiveContains("image") || bare.lowercased().hasPrefix("imagen")
+        }
+    }
+
+    // MARK: Gemini TTS models
+
+    /// KEEPS only ids containing "tts" - the models `GeminiVoice.
+    /// synthesize`'s `responseModalities: ["AUDIO"]` call needs. The
+    /// PREBUILT VOICE NAME (Kore, Puck, ...) is a separate, fixed setting -
+    /// see `GeminiVoice.prebuiltVoices` - because Google publishes that
+    /// list in docs, not through an endpoint this could fetch.
+    static func geminiVoiceModels(key: String) async throws -> [CatalogEntry] {
+        try await geminiModels(key: key) { bare in bare.localizedCaseInsensitiveContains("tts") }
     }
 
     // MARK: Groq text models
@@ -158,5 +192,59 @@ enum ModelCatalogSources {
             let r = Int(rhs.sublabel?.split(separator: " ").first ?? "0") ?? 0
             return l > r
         }
+    }
+
+    // MARK: Pollinations
+
+    /// `GET https://text.pollinations.ai/models` - a bare array of
+    /// objects, each with a `name` and (usually) an `output_modalities`
+    /// list. Ported filter, from `avg.providers.text.community.
+    /// PollinationsBackend.list_models`: keep an entry if it has no
+    /// `output_modalities` field at all, or if that list includes "text" -
+    /// the same either-or the PC's own generator expression encodes,
+    /// because Pollinations' text-only legacy models predate the field
+    /// existing and still have to be offered.
+    ///
+    /// Key OPTIONAL - matches every call site here matching the PC's own
+    /// `if key: headers["Authorization"] = ...` (never required, only
+    /// raises the anonymous rate ceiling).
+    static func pollinationsText(key: String?) async throws -> [CatalogEntry] {
+        let url = URL(string: "https://text.pollinations.ai/models")!
+        var headers: [String: String] = [:]
+        if let key, !key.isEmpty { headers["Authorization"] = "Bearer \(key)" }
+        let data = try await HTTP.retrying(
+            { try await HTTP.send(url, method: "GET", headers: headers, timeout: 30, provider: "pollinations") },
+            provider: "pollinations"
+        )
+        guard let raw = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        let entries = raw.compactMap { item -> CatalogEntry? in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            if let modalities = item["output_modalities"] as? [String], !modalities.contains("text") { return nil }
+            let desc = item["description"] as? String
+            return CatalogEntry(id: name, label: name, sublabel: desc)
+        }
+        return entries.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    /// `GET https://image.pollinations.ai/models` - a bare array of short
+    /// model name STRINGS ("flux", "turbo", "kontext", ...), unlike the
+    /// text endpoint's array of objects - matches `avg.providers.
+    /// catalogues._IMAGE_CATALOGUE_URLS`'s own comment on this endpoint's
+    /// shape. Key optional, same reasoning as `pollinationsText`.
+    static func pollinationsImage(key: String?) async throws -> [CatalogEntry] {
+        let url = URL(string: "https://image.pollinations.ai/models")!
+        var headers: [String: String] = [:]
+        if let key, !key.isEmpty { headers["Authorization"] = "Bearer \(key)" }
+        let data = try await HTTP.retrying(
+            { try await HTTP.send(url, method: "GET", headers: headers, timeout: 30, provider: "pollinations") },
+            provider: "pollinations"
+        )
+        guard let raw = try JSONSerialization.jsonObject(with: data) as? [Any] else { return [] }
+        let names: [String] = raw.compactMap { item in
+            if let s = item as? String, !s.isEmpty { return s }
+            if let d = item as? [String: Any], let n = d["name"] as? String, !n.isEmpty { return n }
+            return nil
+        }
+        return Set(names).sorted().map { CatalogEntry(id: $0, label: $0, sublabel: nil) }
     }
 }

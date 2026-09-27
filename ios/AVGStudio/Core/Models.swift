@@ -356,12 +356,22 @@ enum VoiceTrimAggressiveness: String, Codable, CaseIterable, Identifiable {
 }
 
 enum VoiceProviderKind: String, Codable, CaseIterable, Identifiable {
-    case apple, elevenlabs
+    case apple, elevenlabs, gemini
     var id: String { rawValue }
     var label: String {
         switch self {
         case .apple: return "Apple voices (on-device)"
         case .elevenlabs: return "ElevenLabs"
+        // Not a PC provider (avg/providers/voice/providers.py has exactly
+        // ElevenLabs + Edge TTS) - added on request as a third option,
+        // same "generateContent" endpoint GeminiText/GeminiImages already
+        // call, with responseModalities: ["AUDIO"] and a prebuilt voice
+        // name instead of a free-form voice id (see GeminiVoice, and
+        // GeminiVoice.prebuiltVoices for the full fixed name list Google
+        // publishes - there is no list endpoint for these, unlike the TTS
+        // MODEL id, which is fetched from the same catalogue GeminiText
+        // uses, filtered for "tts").
+        case .gemini: return "Google Gemini (TTS)"
         }
     }
 }
@@ -422,6 +432,25 @@ struct AppSettings: Codable {
     // here (e.g. appleVoiceIdentifier's "" == Automatic) rather than
     // duplicating that default string a second time.
     var stableHordeModel = ""
+    // Pollinations' own default text/image model ids - "openai" and
+    // "flux" match the PC's own hardcoded fallbacks
+    // (avg/providers/text/community.py's ChatCompletion model, avg/
+    // providers/images/community.py's `_normalize_model`'s fallback).
+    var pollinationsTextModel = "openai"
+    var pollinationsImageModel = "flux"
+    // The one Gemini image model this app calls today - kept as a real
+    // setting (not just GeminiImages' own hardcoded literal) now that
+    // there is more than one worth offering; see ModelCatalogSources.
+    // geminiImageModels for why the PC's own Live List has no equivalent
+    // picker to match against (catalogues.py: "OpenAI and Gemini publish
+    // no image-model catalogue" through the endpoint the PC restricts
+    // itself to) - this reuses GeminiText's own /v1beta/models fetch
+    // instead, filtered for image-output ids.
+    var geminiImageModel = "gemini-2.5-flash-image"
+    var geminiVoiceModel = "gemini-2.5-flash-preview-tts"
+    // One of GeminiVoice.prebuiltVoices - "Kore" is Google's own sample
+    // default across its TTS docs, kept here for the same reason.
+    var geminiVoiceName = "Kore"
     var elevenVoiceID = "21m00Tcm4TlvDq8ikWAM"
     // Matches the PC's own legacy default (avg/pipeline/phases/voice.py's
     // _DEFAULT_MODEL["elevenlabs"]) rather than a higher-cost model picked
