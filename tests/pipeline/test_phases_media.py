@@ -1229,3 +1229,49 @@ def test_visuals_module_does_not_require_pillow_at_import_time():
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
+
+
+from avg.config import provider_health
+
+
+class _FakeQuotaFailingProvider:
+    """Like `_FakeImageProvider` but raises a quota-classified AvgError,
+    to exercise the cooldown-detail path in the fallback message."""
+
+    name = "primary"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def generate(self, prompt: str, *, aspect_ratio: str, model: str) -> bytes:
+        self.calls.append((prompt, aspect_ratio, model))
+        raise AvgError(ErrorKind.quota, "simulated quota exhaustion")
+
+
+def test_fallback_message_includes_cooldown_detail_on_quota_failure(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    provider_health.record_cooldown(
+        "primary", "quota", cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+
+    primary = _FakeQuotaFailingProvider()
+    backup = _FakeImageProvider()
+    providers = {"primary": primary, "backup": backup}
+    monkeypatch.setattr(
+        "avg.pipeline.phases.visuals._build_provider",
+        lambda name, transport: providers[name],
+    )
+
+    project = _project(tmp_path)
+    ctx, events = _ctx(project, channel=_channel(_fallback_settings()))
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    VisualsPhase().run(ctx)
+
+    messages = [e.message for e in events if isinstance(e, ProgressEvent)]
+    fallback_message = next(m for m in messages if m.startswith("Falling back to"))
+    assert "quota" in fallback_message

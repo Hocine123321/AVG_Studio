@@ -57,6 +57,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+from avg.config import provider_health
 from avg.core.errors import AvgError, ErrorKind, report_degradation
 from avg.core.events import ProgressEvent
 from avg.core.sysinfo import total_ram_gb as _total_ram_gb
@@ -419,11 +420,16 @@ class VisualsPhase:
                 and backup_provider != provider_name
                 and _should_fall_back(kind)
             ):
+                cooldown_detail = ""
+                if kind in (ErrorKind.quota, ErrorKind.billing):
+                    cooldown_detail = provider_health.cooldown_message_suffix(
+                        provider_health.active_cooldown(primary_provider_name)
+                    )
                 ctx.emit(
                     ProgressEvent(
                         project_id=ctx.project.id,
                         percent=0,
-                        message=f"Falling back to {backup_provider}/{backup_model}...",
+                        message=f"Falling back to {backup_provider}/{backup_model}...{cooldown_detail}",
                     )
                 )
                 primary_kind_label = kind.value
