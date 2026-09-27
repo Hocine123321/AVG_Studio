@@ -1,0 +1,46 @@
+name: AVGStudio
+options:
+  bundleIdPrefix: com.avgstudio
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  AVGStudio:
+    type: application
+    platform: iOS
+    sources:
+      - AVGStudio
+    info:
+      path: AVGStudio/Info.plist
+      properties:
+        CFBundleDisplayName: AVG Studio
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        NSPhotoLibraryAddUsageDescription: "AVG Studio saves your rendered videos to Photos."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.avgstudio.app
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+schemes:
+  AVGStudio:
+    build:
+      targets:
+        AVGStudio: all
+    run:
+      config: Debug
+    archive:
+      config: Release
