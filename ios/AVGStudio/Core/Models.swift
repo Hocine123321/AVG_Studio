@@ -53,14 +53,18 @@ struct WordTiming: Codable, Hashable {
     var end: Double
 }
 
-/// A deterministic full-screen "Focused" takeover card - ported from the
-/// PC's `avg.pipeline.phases.director._build_card_plan`: one card per
-/// `((question))` marker found in a scene's script text (NOT AI-picked),
-/// frequency-capped to roughly one card per 3 scenes. It OWNS its scene's
-/// entire window - the scene's image and captions are replaced by the
-/// card for that span, cutting in/out instantly (no PC "Explainer" concept
-/// cards here: the PC itself hasn't built the AI-driven side of that yet -
-/// see director.py's own module docstring - so there is nothing to port).
+/// A full-screen takeover card - ported from the PC's
+/// `avg.pipeline.phases.director._build_card_plan`. Two sources merge into
+/// this same array: a deterministic "Focused" card per `((question))`
+/// marker found in a scene's script text (NOT AI-picked), and - when the
+/// channel's `explainerCardsEnabled` is on - a FEW AI-picked "Explainer"
+/// cards for scenes whose narration states a concept worth a full-screen
+/// pause (Focused always wins a scene both would land on). The merged set
+/// is frequency-capped to roughly one card per 3 scenes. A card OWNS its
+/// scene's entire window - the scene's image and captions are replaced by
+/// the card for that span, cutting in/out instantly - regardless of which
+/// of the two sources placed it there; the PC's own `card_plan.json`
+/// carries no field distinguishing them at render time either.
 struct TakeoverCard: Codable, Hashable, Identifiable {
     var scene: Int
     var text: String
@@ -227,6 +231,50 @@ struct Channel: Codable, Hashable, Identifiable {
     /// full-screen concept card, in addition to the deterministic Focused
     /// cards. Ignored when `takeoverCardsEnabled` is off, like the PC.
     var explainerCardsEnabled = false
+
+    // ── Per-phase text model overrides ──────────────────────────────
+    //
+    // Mirrors the PC's "Models" settings tab (avg/core/settings_schema.py's
+    // per-phase block, `avg.providers.text.router.config_from_settings`):
+    // each text-generating phase can name its own provider, an optional
+    // backup tried once on a switchable failure, and what to do if both
+    // fail. `nil`/`.stop` on every field (the default) behaves exactly
+    // like an unconfigured PC channel - everything routes to the one
+    // global default provider (`store.settings.text`), matching
+    // `config_from_settings`'s own "a phase whose _model is blank simply
+    // gets no entry" fallback.
+    //
+    // The PC names a model as a free `"provider/model"` string per phase;
+    // this app already keeps one GLOBAL model id per provider (e.g.
+    // `Settings.geminiModel`) rather than a per-channel-per-phase model id,
+    // so a phase override here picks the PROVIDER only - the model id for
+    // whichever provider is picked still comes from that global field,
+    // the same simplification the app already makes for the base case.
+    //
+    // Only `brief`, `scriptDraft` and `scriptSegmentation` exist, because
+    // those are the only text-generating AI calls this app's pipeline
+    // actually makes today (Pipeline.writing()'s research+brief call,
+    // narration call, and scene-split call, in that order - matching the
+    // PC's own `brief`/`script_draft`/`script_segmentation` router phase
+    // keys exactly, including research sharing "brief"'s model like the
+    // PC's own `generate_text(..., "brief", ...)` call for research does).
+    // The PC's OTHER two router phases, `director1` and `director2`, plan
+    // visual structure and motion/grade the PC's Director I/II AI phases
+    // decide - phases this app has not ported yet (no `video_map.json`/
+    // `direction_plan.json` equivalent exists here). Adding model-override
+    // settings for them now, with no AI call for them to govern, would be
+    // the exact "dead switch" mistake already found and skipped for
+    // `voice_stability`/`voice_speed` - they belong with porting Director
+    // I/II themselves, not here.
+    var briefTextProvider: TextProviderKind? = nil
+    var briefTextBackup: TextProviderKind? = nil
+    var briefOnFailure: PhaseOnFailure = .stop
+    var scriptDraftTextProvider: TextProviderKind? = nil
+    var scriptDraftTextBackup: TextProviderKind? = nil
+    var scriptDraftOnFailure: PhaseOnFailure = .stop
+    var scriptSegmentationTextProvider: TextProviderKind? = nil
+    var scriptSegmentationTextBackup: TextProviderKind? = nil
+    var scriptSegmentationOnFailure: PhaseOnFailure = .stop
 }
 
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
@@ -238,6 +286,24 @@ enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
         case .gemini: return "Google Gemini"
         case .groq: return "Groq"
         case .pollinations: return "Pollinations (free)"
+        }
+    }
+}
+
+/// Generic "what to do if both the phase model and its backup fail" policy
+/// - mirrors the PC's `<phase>_on_failure` catalogue entries (`stop` /
+/// `fall_back`, avg/core/settings_schema.py), used identically by every
+/// text phase below. Kept separate from `ImageOnFailure` because that
+/// enum's label names a fixed fallback provider (Pollinations); a text
+/// phase falls back to the channel's own default text provider instead,
+/// which has no fixed name to put in a label.
+enum PhaseOnFailure: String, Codable, CaseIterable, Identifiable {
+    case stop, fallBack
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .stop: return "Stop the run"
+        case .fallBack: return "Fall back to the default text model"
         }
     }
 }

@@ -75,6 +75,32 @@ struct ChannelEditor: View {
     /// Windows-only and would silently no-op here). "" keeps the system
     /// font; "custom" reveals a free-text field for any other installed
     /// family name.
+    /// One "Models" table row (PC mockup: provider+model / backup / if-both-
+    /// fail per phase) as a Form Section. `provider`/`backup` are `nil` by
+    /// default - "use the channel's global default text provider" - and
+    /// the model id for whichever provider IS picked still comes from
+    /// Settings' own per-provider fields (e.g. Gemini model), matching the
+    /// simplification documented on Channel's phase-override properties.
+    @ViewBuilder
+    private func modelPhaseSection(
+        title: String, footer: String,
+        provider: Binding<TextProviderKind?>, backup: Binding<TextProviderKind?>, onFailure: Binding<PhaseOnFailure>
+    ) -> some View {
+        Section {
+            Picker("Model", selection: provider) {
+                Text("Default").tag(TextProviderKind?.none)
+                ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
+            }
+            Picker("Backup", selection: backup) {
+                Text("None").tag(TextProviderKind?.none)
+                ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
+            }
+            Picker("If both fail", selection: onFailure) {
+                ForEach(PhaseOnFailure.allCases) { Text($0.label).tag($0) }
+            }
+        } header: { Text(title) } footer: { Text(footer) }
+    }
+
     private static let fontPresets = ["", "Georgia", "Avenir Next", "Futura", "Times New Roman", "Courier New", "Impact", "custom"]
     private var fontPickerSelection: Binding<String> {
         Binding(
@@ -162,6 +188,27 @@ struct ChannelEditor: View {
                 } header: { Text("Voice cleanup") } footer: {
                     Text("How readily dead-air removal treats a quiet stretch in the narration as silence to cut, matching the PC's voice_trim_aggressiveness.")
                 }
+
+                // Mirrors the PC's "Models" settings tab: each text-writing
+                // phase can override the channel's default text provider,
+                // with its own backup and if-both-fail policy. Left blank
+                // (None), a phase just uses Settings → the default text
+                // provider, like an unconfigured PC channel.
+                modelPhaseSection(
+                    title: "Brief",
+                    footer: "Governs the creative brief AND the optional topic-research call ahead of it - the PC's own router shares one model between the two.",
+                    provider: $channel.briefTextProvider, backup: $channel.briefTextBackup, onFailure: $channel.briefOnFailure
+                )
+                modelPhaseSection(
+                    title: "Script · Draft",
+                    footer: "Governs writing the narration itself.",
+                    provider: $channel.scriptDraftTextProvider, backup: $channel.scriptDraftTextBackup, onFailure: $channel.scriptDraftOnFailure
+                )
+                modelPhaseSection(
+                    title: "Script · Segmentation",
+                    footer: "Governs splitting the finished narration into scenes and image prompts.",
+                    provider: $channel.scriptSegmentationTextProvider, backup: $channel.scriptSegmentationTextBackup, onFailure: $channel.scriptSegmentationOnFailure
+                )
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)
