@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import SwiftUI
 
 /// Swift port of avg/pipeline: each phase reads what the previous one wrote on the project.
 @MainActor
@@ -53,6 +54,42 @@ struct Pipeline {
         }
     }
 
+    // MARK: Rough cost estimates
+    //
+    // Flat, clearly-labelled guesses (see CostEntry's doc comment) - not
+    // real billing. Free/on-device providers never post a cost.
+
+    private func costText(_ kind: TextProviderKind, chars: Int) {
+        let rate: Double
+        switch kind {
+        case .apple, .pollinations: return
+        case .gemini: rate = 0.00000025 // ~$0.25 / 1M chars, ballpark for a flash-tier model
+        case .groq: rate = 0.00000015
+        }
+        store.addCost(projectID, "\(kind.label) · \(chars) chars", Double(chars) * rate)
+    }
+
+    private func costImage(_ kind: ImageProviderKind) {
+        let flat: Double
+        switch kind {
+        case .pollinations: return
+        case .gemini: flat = 0.02
+        case .openai: flat = 0.04
+        }
+        store.addCost(projectID, "\(kind.label) image", flat)
+    }
+
+    private func costVoice(_ kind: VoiceProviderKind, chars: Int) {
+        switch kind {
+        case .apple: return
+        case .elevenlabs: store.addCost(projectID, "ElevenLabs · \(chars) chars", Double(chars) * 0.00003)
+        }
+    }
+
+    private func costTranscription(seconds: Double) {
+        store.addCost(projectID, "AssemblyAI · \(Int(seconds))s audio", seconds / 60.0 * 0.01)
+    }
+
     // MARK: Phase 0+1 — brief, narration, scenes
 
     private func writing() async throws {
@@ -64,33 +101,40 @@ struct Pipeline {
         Tone: \(ch.tone). Write in \(ch.language).
         """
         store.progress(projectID, 0.1, "Writing the creative brief…")
-        let brief = try await text.complete("""
+        let briefPrompt = """
         Write a short creative brief for a ~\(ch.targetSeconds)-second video about: \(p.topic)
         Cover the hook, the angle, the emotional arc and the tone. Max 120 words. Plain text, no headings.
-        """, system: system)
+        """
+        let brief = try await text.complete(briefPrompt, system: system)
+        costText(store.settings.text, chars: briefPrompt.count + brief.count)
         store.update(projectID) { $0.brief = brief.trimmed }
 
         store.progress(projectID, 0.4, "Writing the narration…")
         let words = max(40, ch.targetSeconds * 150 / 60)
-        let narration = Self.cleanNarration(try await text.complete("""
+        let narrationPrompt = """
         Creative brief:
         \(brief)
 
         Write the narration a narrator speaks for a video about: \(p.topic)
         About \(words) words. Flowing prose only: no headings, no scene numbers, no stage directions, \
         no emojis, no quotation marks around the whole text. You may insert [pause] for a dramatic pause.
-        """, system: system))
+        """
+        let narrationRaw = try await text.complete(narrationPrompt, system: system)
+        costText(store.settings.text, chars: narrationPrompt.count + narrationRaw.count)
+        let narration = Self.cleanNarration(narrationRaw)
         guard !narration.isEmpty else { throw AVGError.message("The writer returned an empty script.") }
 
         store.progress(projectID, 0.7, "Splitting into scenes…")
-        let raw = try await text.complete("""
+        let splitPrompt = """
         Split the narration below into 5 to 12 scenes WITHOUT changing, adding or removing a single word. \
         For each scene write a vivid image prompt describing the visual (no text, no letters in the image).
         Reply with ONLY a JSON array like [{"text": "...", "image_prompt": "..."}].
 
         NARRATION:
         \(narration)
-        """, system: nil)
+        """
+        let raw = try await text.complete(splitPrompt, system: nil)
+        costText(store.settings.text, chars: splitPrompt.count + raw.count)
         var scenes = Self.parseScenes(raw)
         if scenes.isEmpty || Self.norm(scenes.map(\.text).joined(separator: " ")) != Self.norm(narration) {
             store.record("Scene split changed the wording, so scenes were split by sentence instead.")
@@ -117,24 +161,26 @@ struct Pipeline {
         guard !scenes.isEmpty else { throw AVGError.message("No scenes yet — run Script first.") }
 
         var done = 0
+        let requestedKind = store.settings.image // captured once: read on MainActor, then only passed by value into the concurrent child tasks below, never read from `store` off-actor.
         for batch in stride(from: 0, to: scenes.count, by: 3) {
             try Task.checkCancellation()
             let slice = Array(scenes[batch..<min(batch + 3, scenes.count)])
-            try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+            try await withThrowingTaskGroup(of: (Int, Data, ImageProviderKind).self) { group in
                 for s in slice {
                     let prompt = "\(s.imagePrompt.isEmpty ? s.text : s.imagePrompt). \(style)"
                     group.addTask {
-                        do { return (s.index, try await provider.generate(prompt: prompt, size: size)) }
+                        do { return (s.index, try await provider.generate(prompt: prompt, size: size), requestedKind) }
                         catch let e as AVGError {
                             // Paid provider failed: fall back to the free one, like the PC app.
                             if provider is PollinationsImages { throw e }
-                            return (s.index, try await PollinationsImages().generate(prompt: prompt, size: size))
+                            return (s.index, try await PollinationsImages().generate(prompt: prompt, size: size), .pollinations)
                         }
                     }
                 }
-                for try await (index, data) in group {
+                for try await (index, data, usedKind) in group {
                     let name = "images/scene_\(String(format: "%02d", index)).jpg"
                     try data.write(to: folder.appendingPathComponent(name))
+                    costImage(usedKind)
                     store.update(projectID) { proj in
                         if let i = proj.scenes.firstIndex(where: { $0.index == index }) { proj.scenes[i].imageFile = name }
                     }
@@ -146,47 +192,137 @@ struct Pipeline {
     }
 
     // MARK: Phase — voice
+    //
+    // "[pause] must become real silence, never spoken text" - the PC's
+    // named invariant (avg/pipeline/phases/voice.py's module docstring),
+    // carried from a real bug in the legacy PowerShell app: it used to feed
+    // the TTS engine a literal " ... " and hope the voice paused on it. This
+    // phase does the same thing the PC does instead: split the narration AT
+    // each [pause] marker (the marker text itself never reaches a
+    // provider), synthesize each segment separately, then stitch the
+    // segments back together with an explicit, exact-length silent gap
+    // (`assembleWithGaps`) - a real silence, not a hope.
 
     private func voice() async throws {
         let p = try project
         guard let narration = p.narration else { throw AVGError.message("No script yet — run Script first.") }
-        let spoken = Self.spoken(narration)
-        store.progress(projectID, 0.2, "Recording the narration…")
+        let s = store.settings
+        let provider = try voiceProvider()
         let dir = folder.appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let name = try await voiceProvider().synthesize(spoken, into: dir)
-        store.update(projectID) { $0.audioFile = "audio/\(name)" }
+
+        let rawParts = s.dynamicPausesEnabled ? Self.splitOnPause(narration) : [Self.stripPauseMarkers(narration)]
+        let segments = rawParts.map(Self.spoken).filter { !$0.isEmpty }
+        guard !segments.isEmpty else { throw AVGError.message("Nothing left to narrate after removing pause markers.") }
+
+        store.progress(projectID, 0.1, segments.count > 1 ? "Recording \(segments.count) segments…" : "Recording the narration…")
+        var files: [URL] = []
+        for (i, seg) in segments.enumerated() {
+            try Task.checkCancellation()
+            if segments.count > 1 { store.progress(projectID, 0.1 + 0.6 * Double(i) / Double(segments.count), "Segment \(i + 1) of \(segments.count)…") }
+            let name = try await provider.synthesize(seg, into: dir, name: "segment_\(i)")
+            files.append(dir.appendingPathComponent(name))
+            costVoice(s.voice, chars: seg.count)
+        }
+
+        let finalURL: URL
+        if files.count == 1 {
+            finalURL = files[0]
+        } else {
+            store.progress(projectID, 0.8, "Assembling narration with pauses…")
+            let pauseSeconds = s.dynamicPausesEnabled ? max(0, s.pauseMs / 1000) : 0
+            finalURL = try await Self.assembleWithGaps(files, pauseSeconds: pauseSeconds, into: dir)
+            for f in files where f.lastPathComponent != finalURL.lastPathComponent {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
+        store.update(projectID) { $0.audioFile = "audio/\(finalURL.lastPathComponent)" }
     }
 
-    // MARK: Phase — captions (estimated word timing, like the PC's "estimated" provider)
+    /// Concatenates `segments` into one audio file at `folder/narration.m4a`,
+    /// inserting `pauseSeconds` of real silence between each pair. An
+    /// `AVMutableComposition` track is silent by default wherever nothing
+    /// has been inserted, so leaving the gap between two `insertTimeRange`
+    /// calls untouched IS the silence - no synthetic silent buffer needed.
+    static func assembleWithGaps(_ segments: [URL], pauseSeconds: Double, into folder: URL) async throws -> URL {
+        let comp = AVMutableComposition()
+        guard let track = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw AVGError.message("Couldn't assemble the narration audio.")
+        }
+        var cursor = CMTime.zero
+        for (i, url) in segments.enumerated() {
+            let asset = AVURLAsset(url: url)
+            guard let segTrack = try await asset.loadTracks(withMediaType: .audio).first else { continue }
+            let dur = try await asset.load(.duration)
+            try track.insertTimeRange(CMTimeRange(start: .zero, duration: dur), of: segTrack, at: cursor)
+            cursor = cursor + dur
+            if i < segments.count - 1, pauseSeconds > 0 {
+                cursor = cursor + CMTime(seconds: pauseSeconds, preferredTimescale: 600)
+            }
+        }
+        guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetAppleM4A) else {
+            throw AVGError.message("Couldn't export the narration audio.")
+        }
+        let out = folder.appendingPathComponent("narration.m4a")
+        try? FileManager.default.removeItem(at: out)
+        try await export.export(to: out, as: .m4a)
+        return out
+    }
+
+    // MARK: Phase — captions
+    //
+    // Real transcription (AssemblyAI) when a key is configured; otherwise
+    // an estimate, exactly mirroring the PC's own
+    // `avg.pipeline.phases.captions._get_words`/`_synthetic_word_timings`:
+    // each scene's text gets a character-weighted proportional slice of the
+    // audio, then each scene's own words get a character-weighted
+    // proportional slice of that. Per-word timing (not just per-cue) is
+    // kept so the highlight/typewriter caption animations have something
+    // to sync to.
 
     private func captions() async throws {
         let p = try project
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let duration = try await AVURLAsset(url: audio).load(.duration).seconds
-        let texts = p.scenes.map { Self.spoken($0.text) }
-        let weights = texts.map { Double(max($0.count, 1)) }
-        let total = weights.reduce(0, +)
-        let durations = weights.map { $0 / total * duration }
+        let cleanTexts = p.scenes.map { Self.spoken($0.text) }
+        guard cleanTexts.contains(where: { !$0.isEmpty }) else { throw AVGError.message("No scene text to caption.") }
 
-        var cues: [CaptionCue] = []
-        var t = 0.0
-        let maxWords = max(1, store.settings.captionMaxWords)
-        for (text, d) in zip(texts, durations) {
-            let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
-            let chars = Double(max(words.reduce(0) { $0 + $1.count + 1 }, 1))
-            var local = t
-            for chunk in stride(from: 0, to: words.count, by: maxWords) {
-                let group = Array(words[chunk..<min(chunk + maxWords, words.count)])
-                let len = Double(group.reduce(0) { $0 + $1.count + 1 }) / chars * d
-                cues.append(CaptionCue(start: local, end: local + len, text: group.joined(separator: " ")))
-                local += len
+        let sceneSpans = Self.allocateProportional(cleanTexts, total: duration)
+        let sceneDurations = sceneSpans.map { $0.1 - $0.0 }
+
+        var words: [WordTiming] = []
+        var source = "estimated"
+        if let key = Keychain.get(.assemblyai) {
+            store.progress(projectID, 0.15, "Transcribing narration…")
+            do {
+                let real = try await AssemblyAI.words(fromAudio: audio, key: key)
+                if !real.isEmpty {
+                    words = real
+                    source = "assemblyai"
+                    costTranscription(seconds: duration)
+                }
+            } catch {
+                store.record("AssemblyAI transcription unavailable (\(error.localizedDescription)); using estimated timing.")
             }
-            t += d
         }
+        if words.isEmpty {
+            words = Self.syntheticWordTimings(cleanTexts, spans: sceneSpans)
+        }
+        guard !words.isEmpty else { throw AVGError.message("Nothing to caption.") }
+
+        store.progress(projectID, 0.6, "Grouping caption cues…")
+        let maxWords = max(1, store.settings.captionMaxWords)
+        var cues: [CaptionCue] = []
+        for chunkStart in stride(from: 0, to: words.count, by: maxWords) {
+            let group = Array(words[chunkStart..<min(chunkStart + maxWords, words.count)])
+            guard let first = group.first, let last = group.last else { continue }
+            cues.append(CaptionCue(start: first.start, end: last.end, text: group.map(\.text).joined(separator: " "), words: group))
+        }
+
         store.update(projectID) {
-            $0.sceneDurations = durations
+            $0.sceneDurations = sceneDurations
             $0.captions = cues
+            $0.captionsSource = source
         }
     }
 
@@ -196,6 +332,7 @@ struct Pipeline {
         let p = try project
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let s = store.settings
+        let ch = store.channel(for: p)
         let takeID = (p.takes.map(\.id).max() ?? 0) + 1
         let name = "render/take_\(takeID).mp4"
         let out = folder.appendingPathComponent(name)
@@ -209,7 +346,14 @@ struct Pipeline {
             fps: s.fps,
             kenBurns: s.kenBurns,
             kbIntensity: s.kbIntensity,
-            captions: CaptionStyle(enabled: s.captionsEnabled, fontSize: CGFloat(s.captionFontSize), position: s.captionPosition),
+            captions: CaptionStyle(
+                enabled: s.captionsEnabled,
+                fontSize: CGFloat(s.captionFontSize),
+                position: s.captionPosition,
+                animation: s.captionAnimationStyle,
+                accent: Theme.color(hex: ch.accentColorHex) ?? Theme.accent
+            ),
+            filter: FilterSpec(style: s.filterStyle, intensity: s.filterIntensity),
             output: out
         )
         let id = projectID
@@ -236,11 +380,71 @@ struct Pipeline {
         return t.replacingOccurrences(of: "*", with: "").trimmed
     }
 
-    /// What the narrator actually says: delivery markers removed.
+    /// What the narrator actually says: delivery markers removed, [pause]
+    /// collapsed to a space (used on the "dynamic pauses off" path, and for
+    /// on-screen previews - the actual pause handling on the "on" path
+    /// happens BEFORE this via `splitOnPause`, never through this).
     static func spoken(_ s: String) -> String {
         var t = s.replacingOccurrences(of: "[pause]", with: " ", options: .caseInsensitive)
         for m in ["[[", "]]", "((", "))"] { t = t.replacingOccurrences(of: m, with: "") }
         return norm(t)
+    }
+
+    static func stripPauseMarkers(_ s: String) -> String {
+        pauseRegex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: " ")
+    }
+
+    private static let pauseRegex = try! NSRegularExpression(pattern: "\\s*\\[\\s*pause\\s*\\]\\s*", options: [.caseInsensitive])
+
+    /// Narration text split at each `[pause]` marker; the marker itself is
+    /// consumed by the split and never appears in any returned segment.
+    /// Mirrors the PC's `_split_on_pause` exactly (same regex shape).
+    static func splitOnPause(_ s: String) -> [String] {
+        let ns = s as NSString
+        var out: [String] = []
+        var last = 0
+        let matches = pauseRegex.matches(in: s, range: NSRange(location: 0, length: ns.length))
+        for m in matches {
+            let piece = ns.substring(with: NSRange(location: last, length: m.range.location - last)).trimmed
+            if !piece.isEmpty { out.append(piece) }
+            last = m.range.location + m.range.length
+        }
+        let tail = ns.substring(from: last).trimmed
+        if !tail.isEmpty { out.append(tail) }
+        return out.isEmpty ? [s.trimmed] : out
+    }
+
+    /// Splits `total` seconds across `units` proportional to each unit's own
+    /// character count (floor of 1 char so an empty unit doesn't swallow
+    /// zero time). Exactly the PC's `allocate_proportional` - shared by
+    /// scene-level AND word-level timing so the two can't disagree.
+    static func allocateProportional(_ units: [String], total: Double, offset: Double = 0) -> [(Double, Double)] {
+        let weights = units.map { max($0.trimmed.count, 1) }
+        let totalWeight = weights.reduce(0, +)
+        var cursor = offset
+        var spans: [(Double, Double)] = []
+        for w in weights {
+            let dur = totalWeight > 0 ? total * (Double(w) / Double(totalWeight)) : 0
+            spans.append((cursor, cursor + dur))
+            cursor += dur
+        }
+        return spans
+    }
+
+    /// Per-word estimated timing with no real transcript: each scene's own
+    /// words split proportionally across that scene's already-estimated
+    /// window. Mirrors `_synthetic_word_timings`.
+    static func syntheticWordTimings(_ texts: [String], spans: [(Double, Double)]) -> [WordTiming] {
+        var out: [WordTiming] = []
+        for (text, span) in zip(texts, spans) {
+            let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard !words.isEmpty else { continue }
+            let wordSpans = allocateProportional(words, total: max(span.1 - span.0, 0), offset: span.0)
+            for (word, ws) in zip(words, wordSpans) {
+                out.append(WordTiming(text: word, start: ws.0, end: ws.1))
+            }
+        }
+        return out
     }
 
     static func parseScenes(_ raw: String) -> [VideoScene] {

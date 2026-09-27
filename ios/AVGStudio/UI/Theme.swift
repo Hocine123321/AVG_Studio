@@ -1,9 +1,31 @@
 import SwiftUI
+import UIKit
 
 enum Theme {
     static let accent = Color(red: 1.0, green: 0.43, blue: 0.32)
     static let violet = Color(red: 0.52, green: 0.38, blue: 1.0)
     static let teal = Color(red: 0.2, green: 0.78, blue: 0.82)
+
+    /// Parses a "RRGGBB" (optionally "#RRGGBB") hex string into a Color, or
+    /// nil for anything blank/unparsable - the channel-level brand accent
+    /// (`Channel.accentColorHex`) is optional, and "no brand colour set"
+    /// must cleanly fall back to `Theme.accent`, not draw a black swatch.
+    static func color(hex: String) -> Color? {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
+        let r = Double((v >> 16) & 0xFF) / 255.0
+        let g = Double((v >> 8) & 0xFF) / 255.0
+        let b = Double(v & 0xFF) / 255.0
+        return Color(red: r, green: g, blue: b)
+    }
+
+    static func hex(from color: Color) -> String {
+        let ui = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
 }
 
 /// Slowly drifting mesh behind the glass, so Liquid Glass has color to refract.

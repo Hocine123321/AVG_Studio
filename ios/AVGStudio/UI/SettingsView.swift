@@ -41,6 +41,15 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Dynamic pauses", isOn: $store.settings.dynamicPausesEnabled)
+                if store.settings.dynamicPausesEnabled {
+                    Stepper("Pause length: \(Int(store.settings.pauseMs)) ms", value: $store.settings.pauseMs, in: 200...2000, step: 100)
+                }
+            } header: { Text("Narration") } footer: {
+                Text("When the writer inserts [pause], on becomes a real held silence between two separately-recorded segments. Off just collapses it to a beat, spoken as part of one take.")
+            }
+
+            Section {
                 ForEach(APIKey.allCases) { k in
                     SecureField(k.label, text: Binding(
                         get: { keys[k] ?? "" },
@@ -49,7 +58,7 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 }
-            } header: { Text("API keys") } footer: { Text("Stored in your iPhone's Keychain. Free options need no keys.") }
+            } header: { Text("API keys") } footer: { Text("Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy.") }
 
             Section("Video") {
                 Picker("Quality", selection: $store.settings.shortEdge) {
@@ -64,8 +73,22 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                Picker("Style", selection: $store.settings.filterStyle) {
+                    ForEach(FilterStyle.allCases) { Text($0.label).tag($0) }
+                }
+                if store.settings.filterStyle != .none {
+                    Slider(value: $store.settings.filterIntensity, in: 0...100) { Text("Intensity") }
+                }
+            } header: { Text("Filters") } footer: {
+                Text("An on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.")
+            }
+
             Section("Captions") {
                 Toggle("Burn in captions", isOn: $store.settings.captionsEnabled)
+                Picker("Animation", selection: $store.settings.captionAnimationStyle) {
+                    ForEach(CaptionAnimationStyle.allCases) { Text($0.label).tag($0) }
+                }
                 Stepper("Words per caption: \(store.settings.captionMaxWords)", value: $store.settings.captionMaxWords, in: 1...10)
                 Picker("Position", selection: $store.settings.captionPosition) {
                     ForEach(CaptionPosition.allCases) { Text($0.rawValue.capitalized).tag($0) }

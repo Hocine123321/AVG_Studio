@@ -84,6 +84,15 @@ struct StudioView: View {
                     }
                 }
             }
+
+            if p.estimatedCostUSD > 0 {
+                HStack {
+                    Image(systemName: "dollarsign.circle").foregroundStyle(.secondary)
+                    Text("~$\(String(format: "%.3f", p.estimatedCostUSD)) so far · rough estimate, not a real invoice")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
         }
         .glassCard(30, padding: 12)
     }
@@ -101,7 +110,15 @@ struct StudioView: View {
                     Image(systemName: ph.symbol).frame(width: 28)
                         .foregroundStyle(r.status == .done ? .green : (r.status == .failed ? .red : .secondary))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(ph.title).font(.subheadline.weight(.medium))
+                        HStack(spacing: 6) {
+                            Text(ph.title).font(.subheadline.weight(.medium))
+                            if ph == .captions, r.status == .done {
+                                Text(p.captionsSource == "assemblyai" ? "AssemblyAI" : "Estimated")
+                                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .glassEffect(.regular, in: .capsule)
+                            }
+                        }
                         if let e = r.error, r.status == .failed { Text(e).font(.caption).foregroundStyle(.red).lineLimit(3) }
                         else if r.status == .running, let j = store.jobs[p.id] { Text(j.message).font(.caption).foregroundStyle(.secondary) }
                     }
@@ -162,4 +179,3 @@ struct StudioView: View {
         .glassCard()
     }
 }
-

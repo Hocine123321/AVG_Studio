@@ -35,13 +35,28 @@ struct GeminiText: TextProvider {
     let model: String
 
     func complete(_ prompt: String, system: String?) async throws -> String {
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
+        // The PC's Gemini backend (avg/providers/text/gemini.py) sends the
+        // key BOTH as the `x-goog-api-key` header AND a `key=` query param -
+        // its own comment calls this "a genuine quirk of Gemini's REST API,
+        // the old code sent both rather than guessing which one Gemini
+        // actually requires". Matching that here rather than trusting the
+        // header alone.
+        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
+        comps.queryItems = [URLQueryItem(name: "key", value: key)]
+        let url = comps.url!
         var body: [String: Any] = ["contents": [["role": "user", "parts": [["text": prompt]]]]]
         if let system { body["systemInstruction"] = ["parts": [["text": system]]] }
         let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body) }
         let o = try HTTP.object(data)
         guard let c = (o["candidates"] as? [[String: Any]])?.first,
               let parts = (c["content"] as? [String: Any])?["parts"] as? [[String: Any]] else {
+            // Mirrors the PC's own care here: a 200 with no candidates can
+            // mean a safety block (promptFeedback/finishReason), not just
+            // "no text" - surface that instead of a generic message when
+            // it's present, so Settings/Activity shows something actionable.
+            if let feedback = o["promptFeedback"] as? [String: Any], let reason = feedback["blockReason"] as? String {
+                throw AVGError.message("Gemini blocked this prompt (\(reason)). Try rephrasing the topic.")
+            }
             throw AVGError.message("Gemini returned no text.")
         }
         return parts.compactMap { $0["text"] as? String }.joined()

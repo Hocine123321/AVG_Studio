@@ -2,8 +2,13 @@ import Foundation
 import AVFoundation
 
 protocol VoiceProvider {
-    /// Writes narration audio into `folder`, returns the file name.
-    func synthesize(_ text: String, into folder: URL) async throws -> String
+    /// Synthesizes `text` into `folder/<name>.<ext>` and returns the file
+    /// name actually written. `name` lets a caller request several
+    /// independent segments (Pipeline.voice() does this to give each
+    /// `[pause]`-separated segment of the narration its own file, which it
+    /// then stitches back together with real silence in between - see
+    /// Pipeline.swift's `assembleWithGaps`).
+    func synthesize(_ text: String, into folder: URL, name: String) async throws -> String
 }
 
 struct ElevenLabsVoice: VoiceProvider {
@@ -11,13 +16,13 @@ struct ElevenLabsVoice: VoiceProvider {
     let voiceID: String
     let model: String
 
-    func synthesize(_ text: String, into folder: URL) async throws -> String {
+    func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
         let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voiceID)?output_format=mp3_44100_128")!
         let body: [String: Any] = ["text": text, "model_id": model]
         let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["xi-api-key": key, "Accept": "audio/mpeg"], json: body) }
-        let name = "narration.mp3"
-        try data.write(to: folder.appendingPathComponent(name))
-        return name
+        let file = "\(name).mp3"
+        try data.write(to: folder.appendingPathComponent(file))
+        return file
     }
 }
 
@@ -33,9 +38,9 @@ final class AppleVoice: VoiceProvider {
         }
     }
 
-    func synthesize(_ text: String, into folder: URL) async throws -> String {
-        let name = "narration.caf"
-        let url = folder.appendingPathComponent(name)
+    func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
+        let file = "\(name).caf"
+        let url = folder.appendingPathComponent(file)
         try? FileManager.default.removeItem(at: url)
         let synth = AVSpeechSynthesizer()
         let utt = AVSpeechUtterance(string: text)
@@ -44,6 +49,11 @@ final class AppleVoice: VoiceProvider {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utt.rate = AVSpeechUtteranceDefaultSpeechRate
 
+        // `synth` only needs to outlive this call, which it does: it's a
+        // local `let` referenced by the closure passed to its own
+        // `write(_:bufferCallback:)`, and ARC keeps a local alive across an
+        // `await` suspension for as long as the function body can still
+        // reference it - no separate `withExtendedLifetime` needed.
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             var file: AVAudioFile?
             var resumed = false
@@ -67,10 +77,9 @@ final class AppleVoice: VoiceProvider {
                 }
             }
         }
-        withExtendedLifetime(synth) {}
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw AVGError.message("The voice produced no audio. Try another voice in Settings.")
         }
-        return name
+        return file
     }
 }

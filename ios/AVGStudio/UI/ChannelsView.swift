@@ -11,7 +11,7 @@ struct ChannelsView: View {
                     HStack(spacing: 14) {
                         Image(systemName: c.id == store.activeChannelID ? "star.circle.fill" : "person.crop.circle")
                             .font(.title)
-                            .foregroundStyle(c.id == store.activeChannelID ? Theme.accent : .secondary)
+                            .foregroundStyle(c.id == store.activeChannelID ? (Theme.color(hex: c.accentColorHex) ?? Theme.accent) : .secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(c.name).font(.headline)
                             Text("\(c.niche.isEmpty ? "General" : c.niche) · \(c.targetSeconds)s · \(c.aspectRatio.rawValue)")
@@ -51,6 +51,13 @@ struct ChannelEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var channel: Channel
 
+    private var accentBinding: Binding<Color> {
+        Binding(
+            get: { Theme.color(hex: channel.accentColorHex) ?? Theme.accent },
+            set: { channel.accentColorHex = Theme.hex(from: $0) }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -65,6 +72,14 @@ struct ChannelEditor: View {
                     Picker("Shape", selection: $channel.aspectRatio) {
                         ForEach(AspectRatio.allCases) { Text($0.rawValue).tag($0) }
                     }
+                }
+                Section {
+                    ColorPicker("Accent colour", selection: accentBinding, supportsOpacity: false)
+                    if !channel.accentColorHex.isEmpty {
+                        Button("Use app default") { channel.accentColorHex = "" }
+                    }
+                } header: { Text("Brand") } footer: {
+                    Text("Tints this channel's highlight/typewriter caption fill - a small, iPhone-sized version of the PC's brand palette.")
                 }
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)

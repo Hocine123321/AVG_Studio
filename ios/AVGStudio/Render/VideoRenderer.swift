@@ -2,11 +2,24 @@ import Foundation
 import AVFoundation
 import UIKit
 import CoreVideo
+import SwiftUI
 
 struct CaptionStyle {
     var enabled: Bool
     var fontSize: CGFloat
     var position: CaptionPosition
+    var animation: CaptionAnimationStyle = .fade
+    var accent: Color = Theme.accent
+}
+
+/// A whole-video look filter, alpha-blended over every frame at
+/// `intensity/100` opacity - the on-device analog of the PC's vendored
+/// `film_grain.mov`/`light_leak.mov` overlay compositing. See
+/// `FilterStyle`'s doc comment in Models.swift for what's deliberately
+/// different about this version.
+struct FilterSpec {
+    var style: FilterStyle
+    var intensity: Double
 }
 
 struct RenderInput {
@@ -19,6 +32,7 @@ struct RenderInput {
     var kenBurns: Bool
     var kbIntensity: Double
     var captions: CaptionStyle
+    var filter: FilterSpec = FilterSpec(style: .none, intensity: 0)
     var output: URL
 }
 
@@ -26,6 +40,7 @@ struct RenderInput {
 /// and encoded by the iPhone's hardware HEVC encoder, then muxed with the narration.
 final class VideoRenderer {
     private let crossfade: Double = 0.35
+    private lazy var grainTile: CGImage? = Self.makeGrainTile()
 
     func render(_ input: RenderInput, progress: @escaping (Double) -> Void) async throws {
         let fm = FileManager.default
@@ -133,6 +148,11 @@ final class VideoRenderer {
             drawScene(ctx, canvas: canvas, image: images[idx + 1], sceneIndex: idx + 1, p: 0, input: input, alpha: a)
         }
 
+        // Filter overlay sits under captions, same as the PC's own pass
+        // ordering (its `compose_filter_overlays` runs before the caption
+        // burn pass), so grain/light leak never fights caption legibility.
+        applyFilter(ctx, canvas: canvas, t: t, filter: input.filter)
+
         if input.captions.enabled, let cue = input.cues.first(where: { t >= $0.start && t < $0.end }) {
             drawCaption(ctx, canvas: canvas, cue: cue, t: t, style: input.captions)
         }
@@ -164,6 +184,75 @@ final class VideoRenderer {
         ctx.restoreGState()
     }
 
+    // MARK: - Filter overlay (procedural film grain / light leak)
+
+    private static func makeGrainTile() -> CGImage? {
+        let size = 128
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        for i in 0..<(size * size) {
+            let v = UInt8.random(in: 90...165) // mid-gray noise: keeps a softLight blend subtle, not a exposure shift
+            pixels[i * 4 + 0] = v; pixels[i * 4 + 1] = v; pixels[i * 4 + 2] = v; pixels[i * 4 + 3] = 255
+        }
+        guard let cs = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        return pixels.withUnsafeMutableBytes { buf -> CGImage? in
+            guard let ctx = CGContext(data: buf.baseAddress, width: size, height: size, bitsPerComponent: 8,
+                                       bytesPerRow: size * 4, space: cs,
+                                       bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+            return ctx.makeImage()
+        }
+    }
+
+    private func applyFilter(_ ctx: CGContext, canvas: CGRect, t: Double, filter: FilterSpec) {
+        guard filter.style != .none, filter.intensity > 0 else { return }
+        let amount = CGFloat(filter.intensity / 100.0)
+        ctx.saveGState()
+        switch filter.style {
+        case .none:
+            break
+        case .filmGrain:
+            if let tile = grainTile {
+                ctx.setAlpha(min(0.45, amount * 0.5))
+                ctx.setBlendMode(.softLight)
+                let tileSize: CGFloat = 128
+                // Cheap deterministic "flicker": jump the tile origin every
+                // frame instead of regenerating noise (which would cost a
+                // fresh image allocation per frame for ~thousands of frames).
+                let jx = CGFloat(Int(t * 24) % Int(tileSize))
+                let jy = CGFloat(Int(t * 17) % Int(tileSize))
+                let rect = CGRect(x: -jx, y: -jy, width: canvas.width + tileSize, height: canvas.height + tileSize)
+                ctx.draw(tile, in: rect, byTiling: true)
+            }
+        case .lightLeak:
+            ctx.setBlendMode(.screen)
+            let cycle = 6.0
+            let phase = (t.truncatingRemainder(dividingBy: cycle)) / cycle
+            let cx = canvas.width * CGFloat(-0.3 + 1.6 * phase)
+            let cy = canvas.height * 0.22
+            let radius = max(canvas.width, canvas.height) * 0.65
+            let colors = [
+                UIColor(red: 1.0, green: 0.75, blue: 0.45, alpha: amount * 0.55).cgColor,
+                UIColor(red: 1.0, green: 0.5, blue: 0.3, alpha: 0).cgColor,
+            ]
+            if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]) {
+                ctx.drawRadialGradient(grad, startCenter: CGPoint(x: cx, y: cy), startRadius: 0,
+                                        endCenter: CGPoint(x: cx, y: cy), endRadius: radius, options: [])
+            }
+        }
+        ctx.restoreGState()
+    }
+
+    // MARK: - Captions
+    //
+    // Six mechanisms, matching the PC's own six (avg/pipeline/phases/
+    // captions.py's `_animated_text`, "not reskins of one another"):
+    // pop=scale overshoot, fade=opacity, rise=move+opacity, highlight=
+    // cumulative colour fill that stays filled, typewriter=a single
+    // instantaneous highlight that MOVES with the voice (not left behind).
+    // highlight/typewriter are approximated at WORD granularity (colour
+    // per whole word) rather than the PC's sub-word `\kf` character sweep -
+    // a deliberate simplification for a per-frame Core Graphics draw, not a
+    // silent gap: the visible effect (fills as spoken, in sync) is the same.
+
     private func drawCaption(_ ctx: CGContext, canvas: CGRect, cue: CaptionCue, t: Double, style: CaptionStyle) {
         let size = style.fontSize * canvas.width / 1080
         let base = UIFont.systemFont(ofSize: size, weight: .black)
@@ -171,12 +260,8 @@ final class VideoRenderer {
         let para = NSMutableParagraphStyle()
         para.alignment = .center
         para.lineBreakMode = .byWordWrapping
-        let text = cue.text.uppercased()
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: UIColor.white, .paragraphStyle: para,
-            .strokeColor: UIColor.black, .strokeWidth: -5.0,
-        ]
-        let str = NSAttributedString(string: text, attributes: attrs)
+
+        let str = attributedString(for: cue, t: t, style: style, font: font, para: para)
         let maxW = canvas.width * 0.86
         let bounds = str.boundingRect(with: CGSize(width: maxW, height: canvas.height), options: [.usesLineFragmentOrigin], context: nil)
         let y: CGFloat
@@ -185,22 +270,96 @@ final class VideoRenderer {
         case .center: y = (canvas.height - bounds.height) / 2
         case .bottom: y = canvas.height * 0.78 - bounds.height
         }
-        // "Pop" in: quick scale from 85% during the first 120 ms.
-        let age = t - cue.start
-        let pop = CGFloat(age < 0.12 ? 0.85 + 0.15 * (age / 0.12) : 1)
         let rect = CGRect(x: (canvas.width - maxW) / 2, y: y, width: maxW, height: bounds.height + 4)
 
+        // Entrance transform: only the three cue-level styles move/scale the
+        // whole block. highlight/typewriter are fully in place immediately
+        // (matching the PC: no \move/\t(alpha) override on those two) since
+        // their animation lives in per-word colour instead.
+        let age = t - cue.start
+        var scale: CGFloat = 1
+        var alpha: CGFloat = 1
+        var offsetY: CGFloat = 0
+        switch style.animation {
+        case .none, .highlight, .typewriter:
+            break
+        case .pop:
+            // 0.65 scale at t=0 -> overshoot to 1.08 by 90ms -> settle to
+            // 1.0 by 190ms. Matches the PC's _POP_IN_OVERRIDE curve shape.
+            if age < 0.09 {
+                let p = max(0, age) / 0.09
+                scale = 0.65 + (1.08 - 0.65) * CGFloat(pow(p, 0.7))
+            } else if age < 0.19 {
+                let p = (age - 0.09) / 0.10
+                scale = 1.08 + (1.0 - 1.08) * CGFloat(p)
+            } else {
+                scale = 1.0
+            }
+        case .fade:
+            alpha = age < 0.18 ? CGFloat(max(0, age) / 0.18) : 1
+        case .rise:
+            let d = min(max(age, 0), 0.22) / 0.22
+            alpha = CGFloat(d)
+            let dist = max(6, 34 * canvas.width / 1920) // PC's _res_scale, long-edge-relative
+            offsetY = -dist * (1 - CGFloat(d))
+        }
+
         ctx.saveGState()
+        ctx.setAlpha(alpha)
         ctx.translateBy(x: 0, y: canvas.height)
         ctx.scaleBy(x: 1, y: -1)
-        ctx.translateBy(x: rect.midX, y: rect.midY)
-        ctx.scaleBy(x: pop, y: pop)
+        ctx.translateBy(x: rect.midX, y: rect.midY - offsetY)
+        ctx.scaleBy(x: scale, y: scale)
         ctx.translateBy(x: -rect.midX, y: -rect.midY)
         ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 12, color: UIColor.black.withAlphaComponent(0.6).cgColor)
         UIGraphicsPushContext(ctx)
         str.draw(with: rect, options: [.usesLineFragmentOrigin], context: nil)
         UIGraphicsPopContext()
         ctx.restoreGState()
+    }
+
+    private func attributedString(for cue: CaptionCue, t: Double, style: CaptionStyle, font: UIFont, para: NSParagraphStyle) -> NSAttributedString {
+        let strokeAttrs: [NSAttributedString.Key: Any] = [
+            .font: font, .paragraphStyle: para, .strokeColor: UIColor.black, .strokeWidth: -5.0,
+        ]
+        switch style.animation {
+        case .highlight, .typewriter:
+            guard !cue.words.isEmpty else {
+                return NSAttributedString(string: cue.text.uppercased(), attributes: strokeAttrs.merging([.foregroundColor: UIColor.white]) { a, _ in a })
+            }
+            let accent = UIColor(style.accent)
+            let out = NSMutableAttributedString()
+            for (i, w) in cue.words.enumerated() {
+                var color = UIColor.white
+                if style.animation == .highlight {
+                    if t >= w.end { color = accent }
+                    else if t >= w.start {
+                        let p = w.end > w.start ? CGFloat((t - w.start) / (w.end - w.start)) : 1
+                        color = lerp(UIColor.white, accent, p)
+                    }
+                } else { // typewriter: a moving snap, never left behind
+                    color = (t >= w.start && t < w.end) ? accent : .white
+                }
+                var attrs = strokeAttrs
+                attrs[.foregroundColor] = color
+                out.append(NSAttributedString(string: w.text.uppercased(), attributes: attrs))
+                if i < cue.words.count - 1 { out.append(NSAttributedString(string: " ", attributes: attrs)) }
+            }
+            return out
+        case .none, .pop, .fade, .rise:
+            var attrs = strokeAttrs
+            attrs[.foregroundColor] = UIColor.white
+            return NSAttributedString(string: cue.text.uppercased(), attributes: attrs)
+        }
+    }
+
+    private func lerp(_ a: UIColor, _ b: UIColor, _ p: CGFloat) -> UIColor {
+        var (ar, ag, ab, aa) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+        var (br, bg, bb, ba) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        let c = max(0, min(1, p))
+        return UIColor(red: ar + (br - ar) * c, green: ag + (bg - ag) * c, blue: ab + (bb - ab) * c, alpha: aa + (ba - aa) * c)
     }
 }
 

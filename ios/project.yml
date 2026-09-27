@@ -6,7 +6,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   AVGStudio:
@@ -27,6 +27,11 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         ITSAppUsesNonExemptEncryption: false
+        # Lets a render opportunistically continue after the app is
+        # backgrounded, via BGProcessingTask - see Core/BackgroundRender.swift
+        # for exactly what this can and can't promise.
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.avgstudio.app.render
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.avgstudio.app

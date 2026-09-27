@@ -1,7 +1,11 @@
 import Foundation
 
 enum HTTP {
-    static func send(_ url: URL, method: String = "POST", headers: [String: String] = [:], json body: Any? = nil, timeout: TimeInterval = 180) async throws -> Data {
+    // Matches the PC's own _GENERATE_TIMEOUT_SECONDS (avg/providers/text/*.py,
+    // avg/providers/text/gemini.py): 180s was too tight for a slower model's
+    // full generation (scene-segmentation prompts especially), and the PC
+    // deliberately raised its own transport default for exactly that reason.
+    static func send(_ url: URL, method: String = "POST", headers: [String: String] = [:], json body: Any? = nil, timeout: TimeInterval = 300) async throws -> Data {
         var r = URLRequest(url: url)
         r.httpMethod = method
         r.timeoutInterval = timeout
@@ -25,14 +29,28 @@ enum HTTP {
         return o
     }
 
-    /// Retries transient failures (rate limits, 5xx, timeouts) with backoff.
+    /// Retries only genuinely transient failures - a rate limit, a 5xx, a
+    /// dropped connection/timeout at the network layer. A deterministic
+    /// failure (bad request, auth error, "the service replied 200 but had
+    /// nothing usable" - e.g. a content-filter block or a parse miss, both
+    /// surfaced as `AVGError.message`) will not change on attempt two, so it
+    /// is now thrown immediately instead of burning 3-4 attempts and several
+    /// seconds of backoff on something retrying can't fix. Previously ANY
+    /// non-`.http` error fell through to a full retry loop purely because it
+    /// wasn't the `.http` case - this is the fix for that.
     static func retrying<T>(_ attempts: Int = 3, _ op: () async throws -> T) async throws -> T {
         var last: Error = AVGError.message("Unknown error")
         for i in 0..<attempts {
             do { return try await op() } catch {
                 last = error
-                if case AVGError.http(let code, _) = error, code != 429, code < 500 { throw error }
                 if error is CancellationError { throw error }
+                if let avg = error as? AVGError {
+                    if !avg.isTransient { throw error }
+                } else if !(error is URLError) {
+                    // Not a network-layer failure and not one of our own
+                    // classified errors - treat as non-transient too.
+                    throw error
+                }
                 try await Task.sleep(nanoseconds: UInt64(1_500_000_000 * Double(i + 1)))
             }
         }

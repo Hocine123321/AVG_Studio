@@ -9,29 +9,34 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            if visible.isEmpty {
-                ContentUnavailableView {
-                    Label(showArchived ? "Nothing archived" : "No videos yet", systemImage: "film.stack")
-                } description: {
-                    Text(showArchived ? "Archived videos show up here." : "Create your first video — everything renders right on your iPhone.")
-                } actions: {
-                    if !showArchived {
-                        Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
-                    }
+            VStack(spacing: 0) {
+                if !showArchived, let id = store.interruptedProjectID, let p = store.project(id) {
+                    interruptedBanner(p).padding([.horizontal, .top], 16)
                 }
-                .padding(.top, 80)
-            } else {
-                LazyVGrid(columns: cols, spacing: 14) {
-                    ForEach(visible) { p in
-                        NavigationLink(value: p.id) { ProjectCard(project: p) }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(p.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { store.setArchived(p.id, !p.archived) }
-                                Button("Delete", systemImage: "trash", role: .destructive) { store.delete(p.id) }
-                            }
+                if visible.isEmpty {
+                    ContentUnavailableView {
+                        Label(showArchived ? "Nothing archived" : "No videos yet", systemImage: "film.stack")
+                    } description: {
+                        Text(showArchived ? "Archived videos show up here." : "Create your first video — everything renders right on your iPhone.")
+                    } actions: {
+                        if !showArchived {
+                            Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
+                        }
                     }
+                    .padding(.top, 80)
+                } else {
+                    LazyVGrid(columns: cols, spacing: 14) {
+                        ForEach(visible) { p in
+                            NavigationLink(value: p.id) { ProjectCard(project: p) }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(p.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { store.setArchived(p.id, !p.archived) }
+                                    Button("Delete", systemImage: "trash", role: .destructive) { store.delete(p.id) }
+                                }
+                        }
+                    }
+                    .padding(16)
                 }
-                .padding(16)
             }
         }
         .screenBackground()
@@ -47,6 +52,25 @@ struct HomeView: View {
                 Button("New", systemImage: "plus") { store.tab = .create }
             }
         }
+    }
+
+    @ViewBuilder private func interruptedBanner(_ p: Project) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                .font(.title3).foregroundStyle(Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("“\(p.title)” was interrupted").font(.subheadline.weight(.semibold))
+                Text("The app closed mid-render. Resume from where it left off.").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Resume") {
+                let next = PhaseID.allCases.first { p.phase($0).status != .done } ?? .render
+                store.start(p.id, from: next)
+                store.libraryPath = [p.id]
+            }
+            .buttonStyle(.glassProminent)
+        }
+        .glassCard()
     }
 }
 

@@ -23,7 +23,10 @@ struct PollinationsImages: ImageProvider {
 struct GeminiImages: ImageProvider {
     let key: String
     func generate(prompt: String, size: CGSize) async throws -> Data {
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent")!
+        // Same belt-and-suspenders auth as GeminiText: header AND `key=` query param.
+        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent")!
+        comps.queryItems = [URLQueryItem(name: "key", value: key)]
+        let url = comps.url!
         let ratio = size.width > size.height ? "16:9" : (size.width < size.height ? "9:16" : "1:1")
         let body: [String: Any] = [
             "contents": [["parts": [["text": prompt]]]],

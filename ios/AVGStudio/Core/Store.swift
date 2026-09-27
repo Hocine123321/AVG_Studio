@@ -34,6 +34,12 @@ final class Store {
     var log: [LogEntry] = []
     var tab: AppTab = .library
     var libraryPath: [String] = []
+    /// Set when `load()` finds a phase stuck `.running` from a previous
+    /// launch (the app was killed or lost its background grace period
+    /// mid-render - see `BackgroundRender`). Surfaced as a "tap to resume"
+    /// banner rather than auto-resumed, since silently re-firing paid API
+    /// calls without the user asking isn't something this should do quietly.
+    var interruptedProjectID: String?
 
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var loading = false
@@ -70,7 +76,10 @@ final class Store {
             var p = try? JSONDecoder.avg.decode(Project.self, from: d)
             // A render interrupted by the app closing is not running anymore.
             if let pp = p {
-                for (k, r) in pp.phases where r.status == .running { p?.phases[k]?.status = .pending }
+                for (k, r) in pp.phases where r.status == .running {
+                    p?.phases[k]?.status = .pending
+                    interruptedProjectID = pp.id
+                }
             }
             return p
         }.sorted { $0.created > $1.created }
@@ -97,6 +106,17 @@ final class Store {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
         body(&projects[i])
         save(projects[i])
+    }
+
+    /// A rough, disclosed-as-rough cost estimate for one provider call (see
+    /// `CostEntry`'s doc comment). No-op for a non-positive amount, so free
+    /// providers never need their own guard at the call site.
+    func addCost(_ id: String, _ label: String, _ amountUSD: Double) {
+        guard amountUSD > 0 else { return }
+        update(id) { p in
+            p.costs.append(CostEntry(label: label, amountUSD: amountUSD))
+            if p.costs.count > 200 { p.costs.removeFirst(p.costs.count - 200) }
+        }
     }
 
     // MARK: Channels
@@ -133,6 +153,7 @@ final class Store {
         try? FileManager.default.removeItem(at: folder(for: id))
         projects.removeAll { $0.id == id }
         libraryPath.removeAll { $0 == id }
+        if interruptedProjectID == id { interruptedProjectID = nil }
     }
 
     func setArchived(_ id: String, _ v: Bool) { update(id) { $0.archived = v } }
@@ -145,9 +166,11 @@ final class Store {
     // MARK: Jobs
 
     func isRunning(_ id: String) -> Bool { tasks[id] != nil }
+    var runningProjectID: String? { tasks.keys.first }
 
     func start(_ id: String, from phase: PhaseID = .writing) {
         guard tasks[id] == nil else { return }
+        if interruptedProjectID == id { interruptedProjectID = nil }
         tasks[id] = Task { [weak self] in
             await self?.run(id, from: phase)
             self?.tasks[id] = nil
@@ -160,6 +183,11 @@ final class Store {
     }
 
     private func run(_ id: String, from start: PhaseID) async {
+        // Buys roughly the standard background grace period (historically up
+        // to a few minutes, often less) - not enough on its own for a
+        // multi-minute pipeline. `BackgroundRender` is the opportunistic
+        // continuation for when this runs out; see its doc comment for why
+        // neither mechanism can promise the render finishes unattended.
         let bg = UIApplication.shared.beginBackgroundTask(withName: "AVG render") {}
         defer { UIApplication.shared.endBackgroundTask(bg) }
         for phase in PhaseID.allCases where phase.order >= start.order {
