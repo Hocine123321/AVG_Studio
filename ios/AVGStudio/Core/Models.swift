@@ -417,6 +417,11 @@ struct AppSettings: Codable {
     var voice: VoiceProviderKind = .apple
     var geminiModel = "gemini-2.5-flash"
     var groqModel = "llama-3.3-70b-versatile"
+    // Empty means "use StableHordeImages' own baseline default
+    // (stable_diffusion)" - matches every other optional-override field
+    // here (e.g. appleVoiceIdentifier's "" == Automatic) rather than
+    // duplicating that default string a second time.
+    var stableHordeModel = ""
     var elevenVoiceID = "21m00Tcm4TlvDq8ikWAM"
     // Matches the PC's own legacy default (avg/pipeline/phases/voice.py's
     // _DEFAULT_MODEL["elevenlabs"]) rather than a higher-cost model picked

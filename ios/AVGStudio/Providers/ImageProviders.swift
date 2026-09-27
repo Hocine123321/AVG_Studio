@@ -36,8 +36,16 @@ struct PollinationsImages: ImageProvider {
 struct StableHordeImages: ImageProvider {
     private let base = "https://aihorde.net/api/v2"
     private let anonymousKey = "0000000000"
-    private let model = "stable_diffusion"
+    /// Caller-supplied via `AppSettings.stableHordeModel` (see
+    /// `ModelCatalogSources.stableHordeImage` for the live worker-count
+    /// list this is picked from) - blank keeps the previous fixed
+    /// baseline rather than sending an empty model name to the API.
+    private let model: String
     private let maxWaitSeconds: Double = 180
+
+    init(model: String = "") {
+        self.model = model.trimmed.isEmpty ? "stable_diffusion" : model.trimmed
+    }
 
     func generate(prompt: String, size: CGSize) async throws -> Data {
         let (w, h) = Self.sizeFor(size)

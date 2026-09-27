@@ -63,6 +63,17 @@ enum HTTP {
         return o
     }
 
+    /// Same as `object(_:)`, for the handful of catalogue endpoints
+    /// (ElevenLabs' `/v1/models`, AI Horde's `/status/models`) that answer
+    /// with a bare JSON array at the top level instead of wrapping it in
+    /// an object field.
+    static func array(_ data: Data) throws -> [[String: Any]] {
+        guard let a = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw AVGError.message("Unexpected reply from service.")
+        }
+        return a
+    }
+
     /// Policy-driven retry - mirrors `avg.providers.transport.Transport.
     /// _send_with_retry` exactly: classify the failure, look its `kind` up
     /// in `POLICY`, and either back off exponentially and try again (while

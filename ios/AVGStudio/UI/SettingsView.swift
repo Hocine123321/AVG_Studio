@@ -5,6 +5,34 @@ struct SettingsView: View {
     @Environment(Store.self) private var store
     @State private var keys: [APIKey: String] = [:]
 
+    // ── Live model catalogues ───────────────────────────────────────
+    // One ModelCatalog per provider endpoint (see ModelCatalog.swift's
+    // doc comment for why this is 5 small closures rather than 5 near-
+    // identical classes). Held as @State so the SAME instance - and its
+    // fetched entries/disk cache - survives this view's body being
+    // re-evaluated on every settings change; a fresh instance per body
+    // pass would re-show empty/loading on every keystroke elsewhere on
+    // this screen.
+    @State private var geminiTextCatalog = ModelCatalog(cacheKey: "gemini_text") {
+        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
+        return try await ModelCatalogSources.geminiText(key: key)
+    }
+    @State private var groqTextCatalog = ModelCatalog(cacheKey: "groq_text") {
+        guard let key = Keychain.get(.groq) else { throw AVGError.missingKey(APIKey.groq.label) }
+        return try await ModelCatalogSources.groqText(key: key)
+    }
+    @State private var stableHordeCatalog = ModelCatalog(cacheKey: "stablehorde_image") {
+        try await ModelCatalogSources.stableHordeImage()
+    }
+    @State private var elevenVoicesCatalog = ModelCatalog(cacheKey: "elevenlabs_voices") {
+        guard let key = Keychain.get(.elevenlabs) else { throw AVGError.missingKey(APIKey.elevenlabs.label) }
+        return try await ModelCatalogSources.elevenlabsVoices(key: key)
+    }
+    @State private var elevenModelsCatalog = ModelCatalog(cacheKey: "elevenlabs_models") {
+        guard let key = Keychain.get(.elevenlabs) else { throw AVGError.missingKey(APIKey.elevenlabs.label) }
+        return try await ModelCatalogSources.elevenlabsModels(key: key)
+    }
+
     var body: some View {
         @Bindable var store = store
         Form {
@@ -12,9 +40,19 @@ struct SettingsView: View {
                 Picker("Writer", selection: $store.settings.text) {
                     ForEach(TextProviderKind.allCases) { Text($0.label).tag($0) }
                 }
+                if store.settings.text == .gemini {
+                    ModelPickerRow(title: "Gemini model", value: $store.settings.geminiModel, catalog: geminiTextCatalog)
+                } else if store.settings.text == .groq {
+                    ModelPickerRow(title: "Groq model", value: $store.settings.groqModel, catalog: groqTextCatalog)
+                }
+
                 Picker("Images", selection: $store.settings.image) {
                     ForEach(ImageProviderKind.allCases) { Text($0.label).tag($0) }
                 }
+                if store.settings.image == .stablehorde {
+                    ModelPickerRow(title: "Stable Horde model", value: $store.settings.stableHordeModel, catalog: stableHordeCatalog)
+                }
+
                 Picker("Voice", selection: $store.settings.voice) {
                     ForEach(VoiceProviderKind.allCases) { Text($0.label).tag($0) }
                 }
@@ -35,8 +73,8 @@ struct SettingsView: View {
                 }
             } else {
                 Section("ElevenLabs") {
-                    TextField("Voice ID", text: $store.settings.elevenVoiceID)
-                    TextField("Model", text: $store.settings.elevenModel)
+                    ModelPickerRow(title: "Voice ID", value: $store.settings.elevenVoiceID, catalog: elevenVoicesCatalog)
+                    ModelPickerRow(title: "Model", value: $store.settings.elevenModel, catalog: elevenModelsCatalog)
                 }
             }
 

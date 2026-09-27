@@ -99,7 +99,7 @@ struct Pipeline {
     private func imageProvider(for kind: ImageProviderKind) throws -> ImageProvider {
         switch kind {
         case .pollinations: return PollinationsImages()
-        case .stablehorde: return StableHordeImages()
+        case .stablehorde: return StableHordeImages(model: store.settings.stableHordeModel)
         case .gemini: return GeminiImages(key: try Keychain.require(.gemini))
         case .openai: return OpenAIImages(key: try Keychain.require(.openai))
         }
