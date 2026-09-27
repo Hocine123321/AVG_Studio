@@ -50,7 +50,17 @@ struct AppBackground: View {
             content(t: 0, scheme: scheme).ignoresSafeArea()
         } else {
             TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                content(t: Float(tl.date.timeIntervalSinceReferenceDate), scheme: scheme)
+                // Was `Float(tl.date.timeIntervalSinceReferenceDate)` - that
+                // property is ~788 million-plus by now (2026), and Float's
+                // 24-bit mantissa only has ~64-unit resolution at that
+                // magnitude. Every sin/cos below effectively saw the SAME
+                // input for ~64 real seconds at a time, then jumped - a
+                // frozen background that suddenly teleports, not an
+                // animation. Fixed by keeping `t` a Double end to end;
+                // only the final small (0…1-ish) per-coordinate offsets
+                // get cast to Float, right where SIMD2<Float> needs it -
+                // at THAT magnitude Float has plenty of precision.
+                content(t: tl.date.timeIntervalSinceReferenceDate, scheme: scheme)
                     .ignoresSafeArea()
             }
         }
@@ -59,8 +69,8 @@ struct AppBackground: View {
     /// One brand hue slowly rotated toward its neighbour and back - `phase`
     /// offsets where in that rotation each colour slot sits, so the whole
     /// mesh never settles on a single "dominant" tone.
-    private func drift(_ base: Color, phase: Double, t: Float) -> Color {
-        let cycle = (sin(Double(t) * 0.05 + phase) + 1) / 2 // 0…1, ~125s period
+    private func drift(_ base: Color, phase: Double, t: Double) -> Color {
+        let cycle = (sin(t * 0.05 + phase) + 1) / 2 // 0…1, ~125s period
         return base.mix(with: nextHue(base), by: cycle * 0.4)
     }
 
@@ -70,20 +80,20 @@ struct AppBackground: View {
         return Theme.accent
     }
 
-    private func content(t: Float, scheme: ColorScheme) -> some View {
+    private func content(t: Double, scheme: ColorScheme) -> some View {
         let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
         return MeshGradient(
             width: 3, height: 3,
             points: [
-                SIMD2<Float>(0.06 * sin(t * 0.09), 0.05 * cos(t * 0.07)),
-                SIMD2<Float>(0.5 + 0.05 * sin(t * 0.11 + 1.3), 0.06 * sin(t * 0.08)),
-                SIMD2<Float>(1 - 0.06 * sin(t * 0.06 + 2.1), 0.05 * cos(t * 0.1)),
-                SIMD2<Float>(0.05 * cos(t * 0.08 + 0.7), 0.45 + 0.16 * sin(t * 0.13)),
-                SIMD2<Float>(0.5 + 0.22 * sin(t * 0.1), 0.5 + 0.2 * cos(t * 0.085)),
-                SIMD2<Float>(1 - 0.05 * cos(t * 0.07 + 1.6), 0.55 + 0.16 * cos(t * 0.12)),
-                SIMD2<Float>(0.06 * sin(t * 0.075 + 2.6), 1 - 0.05 * cos(t * 0.09)),
-                SIMD2<Float>(0.5 + 0.05 * cos(t * 0.095 + 0.4), 1 - 0.06 * sin(t * 0.065)),
-                SIMD2<Float>(1 - 0.06 * cos(t * 0.085 + 1.9), 1 - 0.05 * sin(t * 0.11)),
+                SIMD2<Float>(Float(0.06 * sin(t * 0.09)), Float(0.05 * cos(t * 0.07))),
+                SIMD2<Float>(Float(0.5 + 0.05 * sin(t * 0.11 + 1.3)), Float(0.06 * sin(t * 0.08))),
+                SIMD2<Float>(Float(1 - 0.06 * sin(t * 0.06 + 2.1)), Float(0.05 * cos(t * 0.1))),
+                SIMD2<Float>(Float(0.05 * cos(t * 0.08 + 0.7)), Float(0.45 + 0.16 * sin(t * 0.13))),
+                SIMD2<Float>(Float(0.5 + 0.22 * sin(t * 0.1)), Float(0.5 + 0.2 * cos(t * 0.085))),
+                SIMD2<Float>(Float(1 - 0.05 * cos(t * 0.07 + 1.6)), Float(0.55 + 0.16 * cos(t * 0.12))),
+                SIMD2<Float>(Float(0.06 * sin(t * 0.075 + 2.6)), Float(1 - 0.05 * cos(t * 0.09))),
+                SIMD2<Float>(Float(0.5 + 0.05 * cos(t * 0.095 + 0.4)), Float(1 - 0.06 * sin(t * 0.065))),
+                SIMD2<Float>(Float(1 - 0.06 * cos(t * 0.085 + 1.9)), Float(1 - 0.05 * sin(t * 0.11))),
             ],
             colors: [
                 drift(Theme.accent, phase: 0.0, t: t).opacity(0.55), base, drift(Theme.violet, phase: 1.4, t: t).opacity(0.45),
