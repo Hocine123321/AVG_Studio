@@ -475,8 +475,7 @@ struct Pipeline {
                 if maxCards > 0 {
                     do {
                         let text = try textProvider()
-                        let numbered = p.scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "
-")
+                        let numbered = p.scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "\n")
                         let prompt = """
                         You are an editor deciding where to drop a full-screen EXPLAINER CARD — a centred "board" that
                         covers the video for a moment to let the viewer absorb a deeper CONCEPT, definition, or summary
