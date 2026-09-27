@@ -19,7 +19,7 @@ struct ElevenLabsVoice: VoiceProvider {
     func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
         let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voiceID)?output_format=mp3_44100_128")!
         let body: [String: Any] = ["text": text, "model_id": model]
-        let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["xi-api-key": key, "Accept": "audio/mpeg"], json: body) }
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["xi-api-key": key, "Accept": "audio/mpeg"], json: body, provider: "elevenlabs") }, provider: "elevenlabs")
         let file = "\(name).mp3"
         try data.write(to: folder.appendingPathComponent(file))
         return file

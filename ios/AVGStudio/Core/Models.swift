@@ -446,28 +446,29 @@ struct AppSettings: Codable {
 
 enum AVGError: LocalizedError {
     case missingKey(String)
-    case http(Int, String)
+    /// A classified provider failure - `avg/providers/errors.py`'s
+    /// `AvgError(kind, message, detail)` equivalent. `HTTP.retrying` is the
+    /// only thing that constructs this case; every provider call site just
+    /// lets it propagate, same as before. Replaced the old `.http(Int,
+    /// String)` case (an unclassified status+body pair with no policy
+    /// attached, and the only reason `isTransient` had to exist as its own
+    /// crude classifier) now that `ErrorPolicy.swift` does that job once,
+    /// centrally, instead of every reader re-guessing from a status code.
+    case provider(ErrorKind, provider: String, message: String)
     case message(String)
 
     var errorDescription: String? {
         switch self {
         case .missingKey(let k): return "Add your \(k) key in Settings first."
-        case .http(let code, let body): return "Service error \(code): \(body)"
+        case .provider(_, let provider, let message): return "\(provider): \(message)"
         case .message(let m): return m
         }
     }
 
-    /// Whether retrying the same call has a real chance of succeeding:
-    /// rate limits and server-side errors are transient; a bad request, an
-    /// auth failure, or "the service replied but had nothing useful" are
-    /// not going to change on attempt two. Fixes the old retry policy,
-    /// which retried EVERY non-http error (including deterministic
-    /// content-filter/parse failures) purely because it wasn't `.http`.
-    var isTransient: Bool {
-        switch self {
-        case .http(let code, _): return code == 429 || code >= 500
-        case .missingKey: return false
-        case .message: return false
-        }
+    /// `nil` for `.missingKey`/`.message` - neither has a provider failure
+    /// behind it for `POLICY` to have an opinion about.
+    var kind: ErrorKind? {
+        if case .provider(let k, _, _) = self { return k }
+        return nil
     }
 }

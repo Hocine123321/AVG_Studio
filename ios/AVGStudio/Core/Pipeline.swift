@@ -259,7 +259,7 @@ struct Pipeline {
         costText(splitProvider, chars: splitPrompt.count + raw.count)
         var scenes = Self.parseScenes(raw)
         if scenes.isEmpty || Self.norm(scenes.map(\.text).joined(separator: " ")) != Self.norm(narration) {
-            store.record("Scene split changed the wording, so scenes were split by sentence instead.")
+            store.record(projectID, "Scene split changed the wording, so scenes were split by sentence instead.")
             scenes = Self.sentenceScenes(narration, prompts: scenes.map(\.imagePrompt), topic: p.topic)
         }
         if useRecyclePool {
@@ -509,7 +509,7 @@ struct Pipeline {
                     costTranscription(seconds: duration)
                 }
             } catch {
-                store.record("AssemblyAI transcription unavailable (\(error.localizedDescription)); using estimated timing.")
+                store.record(projectID, "AssemblyAI transcription unavailable (\(error.localizedDescription)); using estimated timing.")
             }
         }
         if words.isEmpty {
@@ -575,7 +575,7 @@ struct Pipeline {
                             }
                         }
                     } catch {
-                        store.record("Explainer cards could not be planned (\(error.localizedDescription)); continuing without them.")
+                        store.record(projectID, "Explainer cards could not be planned (\(error.localizedDescription)); continuing without them.")
                     }
                 }
             }
@@ -651,7 +651,7 @@ struct Pipeline {
             $0.output = name
             $0.takes.append(Take(id: takeID, label: "Take \(takeID)", created: Date(), file: name))
         }
-        store.record("Finished “\(p.title)” (take \(takeID)).")
+        store.record(projectID, "Finished “\(p.title)” (take \(takeID)).")
     }
 
     // MARK: Text helpers

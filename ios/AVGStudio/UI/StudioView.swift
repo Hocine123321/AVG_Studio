@@ -6,6 +6,7 @@ struct StudioView: View {
     let projectID: String
     @State private var player: AVPlayer?
     @State private var savedToPhotos = false
+    @State private var showLog = false
 
     var body: some View {
         if let p = store.project(projectID) {
@@ -26,12 +27,24 @@ struct StudioView: View {
             .navigationTitle(p.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Matches the PC's per-take "Log" toggle (Studio.tsx's
+                // TakeLogToggle) - everything the run has done for THIS
+                // video, tail-read from `Store.projectLogTail`, available
+                // in every phase state (pending/running/failed/done): the
+                // PC's own doc comment calls out a log being most worth
+                // checking exactly when a phase failed before writing any
+                // artifact, which is precisely when nothing else on this
+                // screen has anything to show.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Log", systemImage: "text.alignleft") { showLog = true }
+                }
                 if let url = store.file(p, p.output) {
                     ToolbarItem(placement: .topBarTrailing) { ShareLink(item: url) }
                 }
             }
             .onChange(of: p.output, initial: true) { _, _ in loadPlayer(p) }
             .alert("Saved to Photos", isPresented: $savedToPhotos) { Button("OK") {} }
+            .sheet(isPresented: $showLog) { ProjectLogView(projectID: projectID, title: p.title) }
         } else {
             ContentUnavailableView("Project not found", systemImage: "questionmark.folder")
         }

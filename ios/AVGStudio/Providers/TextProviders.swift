@@ -46,7 +46,7 @@ struct GeminiText: TextProvider {
         let url = comps.url!
         var body: [String: Any] = ["contents": [["role": "user", "parts": [["text": prompt]]]]]
         if let system { body["systemInstruction"] = ["parts": [["text": system]]] }
-        let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body) }
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")
         let o = try HTTP.object(data)
         guard let c = (o["candidates"] as? [[String: Any]])?.first,
               let parts = (c["content"] as? [String: Any])?["parts"] as? [[String: Any]] else {
@@ -68,6 +68,10 @@ struct ChatText: TextProvider {
     let url: URL
     let key: String?
     let model: String
+    /// Feeds `classify()` - "groq" or "pollinations", set by the matching
+    /// factory below rather than guessed from the URL, so a provider-
+    /// specific pattern (see `ErrorPolicy.swift`) is never silently missed.
+    let provider: String
 
     func complete(_ prompt: String, system: String?) async throws -> String {
         var msgs: [[String: String]] = []
@@ -76,7 +80,7 @@ struct ChatText: TextProvider {
         var headers: [String: String] = [:]
         if let key { headers["Authorization"] = "Bearer \(key)" }
         let body: [String: Any] = ["model": model, "messages": msgs]
-        let data = try await HTTP.retrying { try await HTTP.send(url, headers: headers, json: body) }
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: headers, json: body, provider: provider) }, provider: provider)
         let o = try HTTP.object(data)
         guard let msg = ((o["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String else {
             throw AVGError.message("The writer returned no text.")
@@ -85,9 +89,9 @@ struct ChatText: TextProvider {
     }
 
     static func groq(key: String, model: String) -> ChatText {
-        ChatText(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, key: key, model: model)
+        ChatText(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, key: key, model: model, provider: "groq")
     }
     static func pollinations() -> ChatText {
-        ChatText(url: URL(string: "https://text.pollinations.ai/openai")!, key: nil, model: "openai")
+        ChatText(url: URL(string: "https://text.pollinations.ai/openai")!, key: nil, model: "openai", provider: "pollinations")
     }
 }

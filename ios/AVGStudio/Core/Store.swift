@@ -190,9 +190,65 @@ final class Store {
 
     func setArchived(_ id: String, _ v: Bool) { update(id) { $0.archived = v } }
 
-    func record(_ message: String, error: Bool = false) {
+    /// Records one line to the app-wide Activity log (Settings → Activity &
+    /// errors - unchanged behaviour) and, when `id` is given, appends it to
+    /// that project's own persisted run log too - the iOS analogue of the
+    /// PC's per-take `take.log` (`avg.core.take_log.TakeLog`): a plain,
+    /// timestamped text file next to the project's other files, so
+    /// "what happened to this video" survives the global list's 300-line
+    /// cap scrolling it away, and survives the app being killed mid-run.
+    ///
+    /// One deliberate simplification versus the PC: the PC keeps one log
+    /// FILE per take, never mixing two attempts' history together. This
+    /// app doesn't split storage per take the same way, so `logPath(for:)`
+    /// is one continuous file per PROJECT across every run - `start(_:
+    /// from:)` writes a "▶ Started…" separator line at the top of each run
+    /// so distinct attempts stay visually distinguishable without needing
+    /// a second on-disk layout.
+    func record(_ id: String?, _ message: String, error: Bool = false) {
         log.insert(LogEntry(message: message, isError: error), at: 0)
         if log.count > 300 { log.removeLast() }
+        if let id { appendToProjectLog(id, message) }
+    }
+
+    private static let logStamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    func logPath(for id: String) -> URL { folder(for: id).appendingPathComponent("take.log") }
+
+    private func appendToProjectLog(_ id: String, _ message: String) {
+        let line = "\(Self.logStamp.string(from: Date())) \(message)\n"
+        let path = logPath(for: id)
+        // A log that can't be written must never break a run - same
+        // tolerance the PC's own TakeLog._append applies (a read-only
+        // folder, a locked file cost one failed attempt, not a crash).
+        do {
+            try FileManager.default.createDirectory(at: folder(for: id), withIntermediateDirectories: true)
+            if let data = line.data(using: .utf8) {
+                if let handle = try? FileHandle(forWritingTo: path) {
+                    defer { try? handle.close() }
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                } else {
+                    try data.write(to: path)
+                }
+            }
+        } catch {}
+    }
+
+    /// Tail of a project's run log for the Studio screen's "Log" panel -
+    /// mirrors the PC's `GET /api/projects/{id}/takes/{take}/log` (tail
+    /// rather than the whole file: a verbose run is a lot of lines, and
+    /// "what happened, especially at the end" is almost always the
+    /// question). No log yet is a normal, expected state - a project that
+    /// hasn't rendered - so this returns an empty tail rather than throwing.
+    func projectLogTail(_ id: String, lines: Int = 400) -> (lines: [String], truncated: Bool, total: Int) {
+        guard let text = try? String(contentsOf: logPath(for: id), encoding: .utf8) else { return ([], false, 0) }
+        let all = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        return (Array(all.suffix(lines)), all.count > lines, all.count)
     }
 
     // MARK: Jobs
@@ -204,7 +260,17 @@ final class Store {
         guard tasks[id] == nil else { return }
         if interruptedProjectID == id { interruptedProjectID = nil }
         tasks[id] = Task { [weak self] in
-            await self?.run(id, from: phase)
+            // Binds this render's project id as the `@TaskLocal` HTTP.swift
+            // reads on a retry/give-up. Bound around just the `run()` call
+            // (Swift concurrency propagates a task-local through every
+            // `await` inside it, including several layers down into
+            // `HTTP.retrying`) - two projects rendering at once each get
+            // their own binding, correctly, since each has its own `Task`.
+            await RenderLog.$record.withValue({ [weak self] message in
+                await MainActor.run { self?.record(id, message) }
+            }) {
+                await self?.run(id, from: phase)
+            }
             self?.tasks[id] = nil
             self?.jobs[id] = nil
         }
@@ -222,6 +288,7 @@ final class Store {
         // neither mechanism can promise the render finishes unattended.
         let bg = UIApplication.shared.beginBackgroundTask(withName: "AVG render") {}
         defer { UIApplication.shared.endBackgroundTask(bg) }
+        record(id, "▶ Started “\(project(id)?.title ?? id)” from \(start.title).")
         for phase in PhaseID.allCases where phase.order >= start.order {
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
         }
@@ -229,15 +296,17 @@ final class Store {
             if Task.isCancelled { break }
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .running, started: Date()) }
             jobs[id] = JobState(phase: phase, progress: 0, message: "\(phase.title)…")
+            record(id, "— \(phase.title) —")
             do {
                 try await Pipeline(store: self, projectID: id).execute(phase)
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .done
                     $0.phases[phase.rawValue]?.finished = Date()
                 }
+                record(id, "\(phase.title) done.")
             } catch is CancellationError {
                 update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
-                record("Render cancelled: \(project(id)?.title ?? id)")
+                record(id, "Render cancelled: \(project(id)?.title ?? id)")
                 break
             } catch {
                 let msg = error.localizedDescription
@@ -246,7 +315,7 @@ final class Store {
                     $0.phases[phase.rawValue]?.error = msg
                     $0.phases[phase.rawValue]?.finished = Date()
                 }
-                record("\(phase.title) failed for “\(project(id)?.title ?? id)”: \(msg)", error: true)
+                record(id, "\(phase.title) failed for “\(project(id)?.title ?? id)”: \(msg)", error: true)
                 break
             }
         }
@@ -254,6 +323,14 @@ final class Store {
 
     func progress(_ id: String, _ value: Double, _ message: String) {
         guard var j = jobs[id] else { return }
+        // Every meaningfully NEW step message also becomes a log line -
+        // the bulk of "everything happening" for the Log panel, at zero
+        // extra call sites: every phase in Pipeline.swift already narrates
+        // its own steps through this one function. Guarded on the message
+        // actually changing (not just the progress fraction ticking up) so
+        // a percentage-only update doesn't spam the log with a line per
+        // frame, mirroring TakeLog's own repeat-collapsing intent.
+        if message != j.message { record(id, message) }
         j.progress = value
         j.message = message
         jobs[id] = j

@@ -15,7 +15,7 @@ struct PollinationsImages: ImageProvider {
         let enc = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? "image"
         let seed = Int.random(in: 1...999_999)
         let url = URL(string: "https://image.pollinations.ai/prompt/\(enc)?width=\(Int(size.width))&height=\(Int(size.height))&nologo=true&seed=\(seed)")!
-        let d = try await HTTP.retrying(4) { try await HTTP.send(url, method: "GET", timeout: 120) }
+        let d = try await HTTP.retrying({ try await HTTP.send(url, method: "GET", timeout: 120, provider: "pollinations") }, provider: "pollinations")
         return try validImage(d)
     }
 }
@@ -69,7 +69,7 @@ struct StableHordeImages: ImageProvider {
             "censor_nsfw": true,
             "r2": true, // CDN URL response instead of inline base64 - matches the PC's own reasoning (avoids a huge body).
         ]
-        let data = try await HTTP.send(URL(string: "\(base)/generate/async")!, headers: headers, json: body, timeout: 60)
+        let data = try await HTTP.retrying({ try await HTTP.send(URL(string: "\(base)/generate/async")!, headers: headers, json: body, timeout: 60, provider: "stablehorde") }, provider: "stablehorde")
         let o = try HTTP.object(data)
         guard let id = o["id"] as? String else { throw AVGError.message("Stable Horde: no job ID returned.") }
         return id
@@ -84,7 +84,7 @@ struct StableHordeImages: ImageProvider {
             elapsed += wait
             wait = min(8, wait + 1) // _POLL_MAX_SECONDS / _POLL_STEP_SECONDS
 
-            let data = try await HTTP.send(URL(string: "\(base)/generate/check/\(jobID)")!, method: "GET", headers: headers, timeout: 30)
+            let data = try await HTTP.retrying({ try await HTTP.send(URL(string: "\(base)/generate/check/\(jobID)")!, method: "GET", headers: headers, timeout: 30, provider: "stablehorde") }, provider: "stablehorde")
             let check = try HTTP.object(data)
             if (check["faulted"] as? Bool) == true {
                 await cancelJob(jobID, headers: headers)
@@ -99,7 +99,7 @@ struct StableHordeImages: ImageProvider {
     }
 
     private func fetchResult(jobID: String, headers: [String: String]) async throws -> Data {
-        let data = try await HTTP.send(URL(string: "\(base)/generate/status/\(jobID)")!, method: "GET", headers: headers, timeout: 30)
+        let data = try await HTTP.retrying({ try await HTTP.send(URL(string: "\(base)/generate/status/\(jobID)")!, method: "GET", headers: headers, timeout: 30, provider: "stablehorde") }, provider: "stablehorde")
         let o = try HTTP.object(data)
         guard let gens = o["generations"] as? [[String: Any]], let gen = gens.first else {
             throw AVGError.message("Stable Horde: done but no generation in response.")
@@ -109,7 +109,7 @@ struct StableHordeImages: ImageProvider {
             throw AVGError.message("Stable Horde: generation returned no image data.")
         }
         if img.hasPrefix("http://") || img.hasPrefix("https://") {
-            let d = try await HTTP.send(URL(string: img)!, method: "GET", timeout: 60)
+            let d = try await HTTP.retrying({ try await HTTP.send(URL(string: img)!, method: "GET", timeout: 60, provider: "stablehorde") }, provider: "stablehorde")
             return try validImage(d)
         }
         guard let d = Data(base64Encoded: img) else { throw AVGError.message("Stable Horde: unreadable image data.") }
@@ -117,7 +117,7 @@ struct StableHordeImages: ImageProvider {
     }
 
     private func cancelJob(_ jobID: String, headers: [String: String]) async {
-        _ = try? await HTTP.send(URL(string: "\(base)/generate/status/\(jobID)")!, method: "DELETE", headers: headers, timeout: 15)
+        _ = try? await HTTP.send(URL(string: "\(base)/generate/status/\(jobID)")!, method: "DELETE", headers: headers, timeout: 15, provider: "stablehorde")
     }
 }
 
@@ -133,7 +133,7 @@ struct GeminiImages: ImageProvider {
             "contents": [["parts": [["text": prompt]]]],
             "generationConfig": ["responseModalities": ["IMAGE"], "imageConfig": ["aspectRatio": ratio]],
         ]
-        let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body) }
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")
         let o = try HTTP.object(data)
         let parts = (((o["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
         for p in parts {
@@ -152,7 +152,7 @@ struct OpenAIImages: ImageProvider {
         let url = URL(string: "https://api.openai.com/v1/images/generations")!
         let sz = size.width > size.height ? "1536x1024" : (size.width < size.height ? "1024x1536" : "1024x1024")
         let body: [String: Any] = ["model": "gpt-image-1", "prompt": prompt, "size": sz, "n": 1]
-        let data = try await HTTP.retrying { try await HTTP.send(url, headers: ["Authorization": "Bearer \(key)"], json: body) }
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["Authorization": "Bearer \(key)"], json: body, provider: "openai") }, provider: "openai")
         let o = try HTTP.object(data)
         guard let b64 = (o["data"] as? [[String: Any]])?.first?["b64_json"] as? String, let d = Data(base64Encoded: b64) else {
             throw AVGError.message("OpenAI returned no image.")
