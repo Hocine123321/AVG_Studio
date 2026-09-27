@@ -114,6 +114,9 @@ struct ProjectCard: View {
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
                 .padding(8)
+                // Icon-only label - VoiceOver would otherwise read nothing
+                // more useful than "ellipsis, button".
+                .accessibilityLabel("More options for \(project.title)")
             }
             Text(project.title).font(.subheadline.weight(.semibold)).lineLimit(2)
             if let job = store.jobs[project.id] {
