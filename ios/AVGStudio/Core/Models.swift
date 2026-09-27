@@ -186,11 +186,12 @@ enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
 }
 
 enum ImageProviderKind: String, Codable, CaseIterable, Identifiable {
-    case pollinations, gemini, openai
+    case pollinations, stablehorde, gemini, openai
     var id: String { rawValue }
     var label: String {
         switch self {
         case .pollinations: return "Pollinations (free)"
+        case .stablehorde: return "Stable Horde (free, community)"
         case .gemini: return "Google Gemini"
         case .openai: return "OpenAI"
         }

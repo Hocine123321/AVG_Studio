@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum APIKey: String, CaseIterable, Identifiable {
-    case gemini, groq, openai, elevenlabs, assemblyai
+    case gemini, groq, openai, elevenlabs, assemblyai, stablehorde
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -11,6 +11,7 @@ enum APIKey: String, CaseIterable, Identifiable {
         case .openai: return "OpenAI"
         case .elevenlabs: return "ElevenLabs"
         case .assemblyai: return "AssemblyAI (real caption timing)"
+        case .stablehorde: return "Stable Horde (optional, for priority)"
         }
     }
 }

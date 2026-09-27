@@ -41,6 +41,7 @@ struct Pipeline {
     private func imageProvider() throws -> ImageProvider {
         switch store.settings.image {
         case .pollinations: return PollinationsImages()
+        case .stablehorde: return StableHordeImages()
         case .gemini: return GeminiImages(key: try Keychain.require(.gemini))
         case .openai: return OpenAIImages(key: try Keychain.require(.openai))
         }
@@ -72,7 +73,7 @@ struct Pipeline {
     private func costImage(_ kind: ImageProviderKind) {
         let flat: Double
         switch kind {
-        case .pollinations: return
+        case .pollinations, .stablehorde: return
         case .gemini: flat = 0.02
         case .openai: flat = 0.04
         }
