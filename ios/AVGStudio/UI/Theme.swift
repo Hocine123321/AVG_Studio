@@ -211,7 +211,16 @@ private struct GlassSurface<S: InsettableShape>: ViewModifier {
                     .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.06)))
             )
             .clipShape(shape)
-            .compositingGroup()
+            // No `.compositingGroup()` here on purpose: it forces this
+            // whole subtree into an isolated offscreen layer, and
+            // `.ultraThinMaterial` above can no longer sample the REAL
+            // live content behind it once isolated that way - it falls
+            // back to a flat, noticeably more opaque/tinted color instead
+            // of an actual blurred window onto the animated background,
+            // which is exactly the "too tinted, not transparent" bug.
+            // `.clipShape` above already bounds the shadow to one shape,
+            // so the shadow doesn't need the isolation compositingGroup
+            // would otherwise give it.
             // `0 10px 30px var(--sh)` - a soft, downward-offset drop shadow.
             .shadow(color: Theme.glassShadow, radius: 15, x: 0, y: 10)
     }

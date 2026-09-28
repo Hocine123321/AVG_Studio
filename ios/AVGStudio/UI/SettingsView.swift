@@ -22,6 +22,7 @@ struct SettingsView: View {
     @Environment(Store.self) private var store
     @State private var keys: [APIKey: String] = [:]
     @State private var refreshingCatalogs = false
+    @State private var editingKey: APIKey?
 
     // ── Live model catalogues ───────────────────────────────────────
     // One ModelCatalog per provider endpoint (see ModelCatalog.swift's
@@ -183,14 +184,20 @@ struct SettingsView: View {
             }
 
             // ── API keys ─────────────────────────────────────────────
+            // The mock's own row: label + a "Connected"/"Add key" status
+            // pill, tap to edit - not a bare always-visible SecureField
+            // list. Editing itself still happens in a SecureField, just
+            // inside `keyEditor`'s sheet instead of inline.
             Section {
                 ForEach(APIKey.allCases) { k in
-                    SecureField(k.label, text: Binding(
-                        get: { keys[k] ?? "" },
-                        set: { keys[k] = $0; Keychain.set(k, $0) }
-                    ))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    Button { editingKey = k } label: {
+                        HStack {
+                            Text(k.label).foregroundStyle(Theme.ink)
+                            Spacer()
+                            keyStatusPill(k)
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             } header: { Text("API keys") } footer: {
                 Text("Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy.")
@@ -247,6 +254,62 @@ struct SettingsView: View {
         .onAppear {
             for k in APIKey.allCases { keys[k] = Keychain.get(k) ?? "" }
         }
+        .sheet(item: $editingKey) { k in
+            APIKeyEditSheet(key: k, value: keys[k] ?? "") { newValue in
+                keys[k] = newValue
+                Keychain.set(k, newValue)
+            }
+        }
+    }
+
+    @ViewBuilder private func keyStatusPill(_ k: APIKey) -> some View {
+        let saved = Keychain.has(k)
+        Text(saved ? "Connected" : "Add key")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(saved ? Theme.ok : Theme.ink2)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(saved ? Theme.ok.opacity(0.16) : Theme.fill, in: Capsule())
+            .overlay(Capsule().strokeBorder(saved ? Theme.ok.opacity(0.4) : Theme.glassEdge, lineWidth: 0.5))
+    }
+}
+
+/// The mock's key-entry sheet: one `SecureField` plus Save, and Remove
+/// when a key is already saved - opened by tapping a Settings API-key
+/// row instead of that row being an inline always-visible field.
+private struct APIKeyEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let key: APIKey
+    @State var value: String
+    let onSave: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    SecureField("API key", text: $value)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("Stored in your iPhone's Keychain, never in a project file.")
+                }
+                if !value.trimmed.isEmpty {
+                    Button("Remove key", role: .destructive) {
+                        value = ""
+                        onSave("")
+                        dismiss()
+                    }
+                }
+            }
+            .navigationTitle(key.label)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { onSave(value); dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

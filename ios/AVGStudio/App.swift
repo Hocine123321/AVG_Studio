@@ -48,7 +48,7 @@ struct RootView: View {
                     // Store.currentProject), not a screen pushed from a
                     // library card tap - see SKIN_V2_PLAN.md's "Navigation"
                     // note and Store.selectForStudio.
-                    Tab("Studio", systemImage: "clapperboard.fill", value: AppTab.studio) {
+                    Tab("Studio", systemImage: "film.stack.fill", value: AppTab.studio) {
                         NavigationStack { StudioView() }
                     }
                     Tab("Create", systemImage: "sparkles", value: AppTab.create) {
