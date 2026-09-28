@@ -216,7 +216,7 @@ struct StudioView: View {
         Task {
             defer { isExportingCapCut = false }
             do {
-                let url = try CapCutExporter.export(project: p, take: take, store: store)
+                let url = try await CapCutExporter.export(project: p, take: take, store: store)
                 capcutBundle = url
                 Haptics.success()
             } catch {

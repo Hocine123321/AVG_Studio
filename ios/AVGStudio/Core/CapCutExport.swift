@@ -39,6 +39,7 @@ enum CapCutExportError: LocalizedError {
     }
 }
 
+@MainActor
 enum CapCutExporter {
     /// Builds the export folder and returns its URL. Throws before
     /// creating anything if the take has no playable render or the
