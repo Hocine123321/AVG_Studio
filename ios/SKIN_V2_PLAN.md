@@ -186,10 +186,20 @@ here is unclear rather than trusting this summary alone.
    a new "Recent activity" card previewing the last 3 `store.log`
    entries with a "See all" link to `ErrorLogView` - real data that
    already existed, just not shown on this screen before.
-9. **Welcome / remaining polish** - `WelcomeView.swift` restyle; sweep for
-   any leftover `Theme.violet`/`Theme.teal` call sites once every screen
-   above is done and decide case-by-case (both constants stay defined for
-   now so nothing breaks mid-migration).
+9. **Welcome / remaining polish** ✅ done (72372c2) - `WelcomeView.swift`'s
+   last 3 raw `.glassEffect()` calls (icon circle, name field, niche
+   field) swapped for the app's own `.glass(Circle())`/`.fieldStyle(14)`
+   - the only `.glassEffect()` sites left anywhere in the app.
+   `.buttonStyle(.glassProminent)` on its CTA was left alone: it's the
+   same primary-button convention HomeView/CreateView/StudioView already
+   use, not a leftover. `Theme.violet`/`Theme.teal` retired for good -
+   WelcomeView's 3 feature icons now share one `Theme.accent` tint
+   (the mock's palette has no second/third bright hue), HomeView's
+   no-thumbnail placeholder gradient is accent-on-accent instead of
+   accent-to-violet - both constants deleted since those were their only
+   two call sites.
+
+**All 9 phases complete.** Skin v2 migration closed out.
 
 ## Notes
 
