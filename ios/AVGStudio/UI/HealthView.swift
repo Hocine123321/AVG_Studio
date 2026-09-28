@@ -1,6 +1,11 @@
 import SwiftUI
 import AVFoundation
 
+/// The mock's own App health screen: 3-up status tiles, a provider/
+/// dependency list, and an activity card - restyled from a native `List`
+/// onto the same ScrollView+glassCard pattern as the rest of Skin v2.
+/// All data is real and unchanged from before (the same `Check` model,
+/// same `store.log`); only the layout is new.
 struct HealthView: View {
     @Environment(Store.self) private var store
 
@@ -16,6 +21,9 @@ struct HealthView: View {
         /// whole page red, the same "a degradable dependency stops being
         /// treated as an alarm" the PC's own doc comment names.
         var required: Bool = true
+        /// Whether this check is about a saved API key - drives the
+        /// "Keys saved" summary tile.
+        var isKey: Bool = false
     }
 
     private var checks: [Check] {
@@ -23,17 +31,17 @@ struct HealthView: View {
         var out: [Check] = []
         out.append(Check(title: "Apple Intelligence", detail: AppleText.isAvailable ? "On-device writer ready" : "Not available — use another writer", ok: AppleText.isAvailable || s.text != .apple, required: s.text == .apple))
         let keyFor: [TextProviderKind: APIKey] = [.gemini: .gemini, .groq: .groq]
-        if let k = keyFor[s.text] { out.append(Check(title: "\(k.label) key", detail: Keychain.has(k) ? "Saved" : "Missing", ok: Keychain.has(k), required: true)) }
-        if s.image == .gemini { out.append(Check(title: "Gemini key (images)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true)) }
-        if s.image == .openai { out.append(Check(title: "OpenAI key", detail: Keychain.has(.openai) ? "Saved" : "Missing", ok: Keychain.has(.openai), required: true)) }
-        if s.voice == .elevenlabs { out.append(Check(title: "ElevenLabs key", detail: Keychain.has(.elevenlabs) ? "Saved" : "Missing", ok: Keychain.has(.elevenlabs), required: true)) }
-        if s.voice == .gemini { out.append(Check(title: "Gemini key (voice)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true)) }
+        if let k = keyFor[s.text] { out.append(Check(title: "\(k.label) key", detail: Keychain.has(k) ? "Saved" : "Missing", ok: Keychain.has(k), required: true, isKey: true)) }
+        if s.image == .gemini { out.append(Check(title: "Gemini key (images)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true, isKey: true)) }
+        if s.image == .openai { out.append(Check(title: "OpenAI key", detail: Keychain.has(.openai) ? "Saved" : "Missing", ok: Keychain.has(.openai), required: true, isKey: true)) }
+        if s.voice == .elevenlabs { out.append(Check(title: "ElevenLabs key", detail: Keychain.has(.elevenlabs) ? "Saved" : "Missing", ok: Keychain.has(.elevenlabs), required: true, isKey: true)) }
+        if s.voice == .gemini { out.append(Check(title: "Gemini key (voice)", detail: Keychain.has(.gemini) ? "Saved" : "Missing", ok: Keychain.has(.gemini), required: true, isKey: true)) }
         // AssemblyAI is never required: missing it just means captions fall
         // back to the estimated per-word timing (Pipeline.captions()'s own
         // synthetic-timing path) rather than real transcription - degraded,
         // not broken, mirroring the PC's own "assemblyai" key check which
         // Component never marks required either.
-        out.append(Check(title: "AssemblyAI key", detail: Keychain.has(.assemblyai) ? "Saved — real caption timing" : "Missing — captions use estimated timing", ok: Keychain.has(.assemblyai), required: false))
+        out.append(Check(title: "AssemblyAI key", detail: Keychain.has(.assemblyai) ? "Saved — real caption timing" : "Missing — captions use estimated timing", ok: Keychain.has(.assemblyai), required: false, isKey: true))
         let voices = AVSpeechSynthesisVoice.speechVoices()
         out.append(Check(title: "Voices", detail: "\(voices.count) installed, \(voices.filter { $0.quality != .default }.count) high quality", ok: !voices.isEmpty, required: false))
         let hevc = AVAssetExportSession.allExportPresets().contains(AVAssetExportPresetHEVCHighestQuality)
@@ -45,36 +53,101 @@ struct HealthView: View {
     }
 
     private var healthy: Bool { checks.filter(\.required).allSatisfy(\.ok) }
+    private var issueCount: Int { checks.filter { $0.required && !$0.ok }.count }
+    private var freeGBText: String { checks.first { $0.title == "Free storage" }?.detail ?? "—" }
+    private var keyChecks: [Check] { checks.filter(\.isKey) }
 
     var body: some View {
-        List {
-            if !healthy {
-                Section {
-                    HStack {
-                        Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-                        Text("Something required needs attention before your next render.")
-                            .font(.subheadline.weight(.medium))
+        ScrollView {
+            VStack(spacing: 16) {
+                HStack(spacing: 10) {
+                    statTile(
+                        icon: healthy ? "checkmark.seal.fill" : "xmark.octagon.fill",
+                        value: healthy ? "Healthy" : "\(issueCount)",
+                        label: healthy ? "All required checks pass" : "issue\(issueCount == 1 ? "" : "s") to fix",
+                        tint: healthy ? .green : .red
+                    )
+                    statTile(icon: "internaldrive.fill", value: freeGBText, label: "Free storage", tint: Theme.accent)
+                    statTile(
+                        icon: "key.fill",
+                        value: "\(keyChecks.filter(\.ok).count)/\(keyChecks.count)",
+                        label: "Keys saved",
+                        tint: Theme.accent
+                    )
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(checks.enumerated()), id: \.element.id) { i, c in
+                        if i > 0 { hairline }
+                        checkRow(c)
                     }
                 }
-            }
-            Section {
-                ForEach(checks) { c in
+                .padding(.horizontal, 14)
+                .glassCard(24, padding: 6)
+
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Image(systemName: icon(for: c)).foregroundStyle(color(for: c))
-                        VStack(alignment: .leading) {
-                            Text(c.title).font(.subheadline.weight(.medium))
-                            Text(c.detail).font(.caption).foregroundStyle(.secondary)
-                        }
+                        Text("Recent activity").sectionHeader()
                         Spacer()
-                        if !c.required {
-                            Text("Optional").font(.caption2).foregroundStyle(.tertiary)
+                        NavigationLink("See all", destination: ErrorLogView())
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                    }
+                    if store.log.isEmpty {
+                        Text("No activity yet.").font(.caption).foregroundStyle(Theme.ink2)
+                            .padding(.vertical, 4)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(store.log.prefix(3).enumerated()), id: \.element.id) { i, e in
+                                if i > 0 { hairline }
+                                HStack(spacing: 10) {
+                                    Image(systemName: e.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
+                                        .foregroundStyle(e.isError ? Color.red : Theme.ink2)
+                                    Text(e.message).font(.footnote).foregroundStyle(Theme.ink).lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text(e.date, style: .time).font(.caption2).foregroundStyle(Theme.ink2)
+                                }
+                                .padding(.vertical, 8)
+                            }
                         }
                     }
                 }
+                .padding(14)
+                .glassCard(24, padding: 0)
             }
+            .padding(16)
         }
         .screenBackground()
         .navigationTitle("App health")
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+    }
+
+    @ViewBuilder private func statTile(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: icon).font(.title3).foregroundStyle(tint)
+            Text(value).font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.caption2).foregroundStyle(Theme.ink2).lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .glassCard(20, padding: 0)
+    }
+
+    @ViewBuilder private func checkRow(_ c: Check) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon(for: c)).foregroundStyle(color(for: c))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(c.title).font(.subheadline.weight(.medium)).foregroundStyle(Theme.ink)
+                Text(c.detail).font(.caption).foregroundStyle(Theme.ink2)
+            }
+            Spacer(minLength: 8)
+            if !c.required {
+                Text("Optional").font(.caption2).foregroundStyle(Theme.ink2)
+            }
+        }
+        .padding(.vertical, 10)
     }
 
     private func icon(for c: Check) -> String {
