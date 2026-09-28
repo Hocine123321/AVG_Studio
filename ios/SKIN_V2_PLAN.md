@@ -133,9 +133,19 @@ here is unclear rather than trusting this summary alone.
    Tapping a non-running phase row now confirms via `confirmationDialog`
    before redoing it, preserving the old Menu's one-extra-step safety net
    instead of a bare single-tap redo.
-5. **Create** - `CreateView.swift`: topic field, format segmented control,
-   settings rows opening sheets (channel/model/image-model/voice pickers),
-   scene stepper, estimated-cost card, restyled to match.
+5. **Create** ✅ done (43219cc) - `CreateView.swift`: topic/title fields
+   get the FULL glass treatment (the mock's own `field g`, distinct from
+   Library's flatter `.fieldStyle()` search box), `SegmentedFilter
+   <AspectRatio>` for format (kept Square alongside the mock's 9:16/16:9 -
+   a real option its demo just doesn't cover), Channel is a real
+   interactive `GlassSheet` single-choice picker. Writer/Images/Voice
+   became real but READ-ONLY rows that jump to Settings instead of the
+   mock's inline per-creation model pickers - this app's provider choice
+   is a GLOBAL `Store.settings` field, not a per-video draft config, so a
+   fake inline picker here would silently do nothing. Dropped the mock's
+   Scenes stepper (no fixed scene-count setting exists - the AI script
+   decides) and its static per-phase cost table (no real number is known
+   before a run) entirely rather than fabricating either.
 6. **Channels** - `ChannelsView.swift`: active-channel list + edit chevron,
    "Global defaults" entry row, matching card/row style. Channel editor
    sheet itself (already reduced to 8 sections in the old plan) gets the new
