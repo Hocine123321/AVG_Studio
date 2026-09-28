@@ -152,3 +152,39 @@ def test_concurrent_writes_do_not_lose_an_entry(path: Path):
 
     for name in providers:
         assert ph.is_in_cooldown(name, path=path) is True
+
+
+def test_fingerprint_headers_extracts_known_credential_headers():
+    assert ph.fingerprint_headers({"xi-api-key": "abc"}) == ph.fingerprint_headers({"xi-api-key": "abc"})
+    assert ph.fingerprint_headers({"xi-api-key": "abc"}) != ph.fingerprint_headers({"xi-api-key": "xyz"})
+    assert ph.fingerprint_headers({"X-Goog-Api-Key": "abc"}) == ph.fingerprint_headers({"xi-api-key": "abc"})
+
+
+def test_fingerprint_headers_strips_bearer_prefix_and_matches_the_raw_key():
+    assert ph.fingerprint_headers({"Authorization": "Bearer secret123"}) == ph._fingerprint("secret123")
+
+
+def test_fingerprint_headers_returns_none_for_unrecognised_or_missing_headers():
+    assert ph.fingerprint_headers(None) is None
+    assert ph.fingerprint_headers({}) is None
+    assert ph.fingerprint_headers({"Content-Type": "application/json"}) is None
+
+
+def test_key_fingerprint_mismatch_means_not_in_cooldown_for_either_status(path: Path):
+    ph.record_cooldown(
+        "elevenlabs", "quota",
+        cooldown_until=datetime.now(timezone.utc) + timedelta(hours=1),
+        key_fingerprint="fingerprint-a", path=path,
+    )
+    assert ph.active_cooldown("elevenlabs", key_fingerprint="fingerprint-a", path=path) is not None
+    assert ph.active_cooldown("elevenlabs", key_fingerprint="fingerprint-b", path=path) is None
+    # No override at all still sees the cooldown (old callers, unaffected).
+    assert ph.active_cooldown("elevenlabs", path=path) is not None
+
+
+def test_key_fingerprint_omitted_preserves_original_behavior(path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(ph, "get_key", lambda provider: "same-key")
+    ph.record_cooldown("elevenlabs", "billing", path=path)
+    assert ph.is_in_cooldown("elevenlabs", path=path) is True
+    monkeypatch.setattr(ph, "get_key", lambda provider: "new-key")
+    assert ph.is_in_cooldown("elevenlabs", path=path) is False

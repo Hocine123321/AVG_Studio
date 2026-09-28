@@ -22,11 +22,28 @@ Two cooldown shapes, because they end differently:
     full stop, so the comparison is made lazily, here, at read time
     instead.
 
-Granularity is per-provider, not per-key. `avg.config.secrets` is one key
-per provider name (ElevenLabs' own primary/backup pair is handled entirely
-inside `avg.providers.voice.providers.ElevenLabsVoiceProvider` and is not
-this module's concern - a cooldown here means "this provider, in effect,
-whichever of its own keys it tried").
+Granularity is per-provider, keyed by whichever credential actually failed
+- not per-provider-name alone. That distinction exists because of a real
+bug: `avg.providers.voice.providers.ElevenLabsVoiceProvider` retries a
+`quota`/`auth` failure once against a *different* key (its configured
+backup) under the *same* provider name. An earlier version of this module
+recorded cooldowns by provider name only, so a primary-key quota failure
+put "elevenlabs" in cooldown and the very next call - the backup-key retry,
+milliseconds later, same `synthesize()` call - was blocked by this
+module's own pre-flight check before it ever reached the network, even
+though the backup is a different account with its own quota. `Transport`
+now passes `key_fingerprint=fingerprint_headers(...)` computed from the
+actual request headers (whichever credential header is present -
+`xi-api-key`, `x-goog-api-key`, `apikey`, or a `Bearer `-stripped
+`Authorization`) at both record and check time, so a cooldown recorded
+against one credential's fingerprint does not block a request carrying a
+different one. Callers that never pass `key_fingerprint` (this module's
+other, older callers - `avg.core.health`'s summary check,
+`avg.pipeline.phases.visuals`'s message-suffix lookup, `EdgeVoiceProvider`,
+which has no separate-key concept at all) keep exactly the behaviour they
+had before this fix: quota expires on its own timer, billing clears when
+`avg.config.secrets.get_key(provider)`'s current value stops matching what
+was fingerprinted at write time.
 
 Same atomic-write shape every sibling module in this package already
 uses: a temp file in the same directory, then `os.replace` - `path` either
@@ -90,6 +107,37 @@ def _fingerprint(key: str | None) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
 
 
+_CREDENTIAL_HEADER_NAMES = ("xi-api-key", "x-goog-api-key", "apikey", "authorization")
+
+
+def fingerprint_headers(headers: object) -> str | None:
+    """Fingerprint of whichever credential-bearing header is present in a
+    request's headers, or `None` if none of the known header names are
+    present. `None` means "this request carries no header this function
+    recognises as a credential" - the caller should then skip the
+    per-credential distinction entirely (fall back to the provider-name-
+    only behaviour), not treat it as "definitely no credential", since a
+    header name this app hasn't seen yet is a gap in this list, not a
+    signal.
+
+    `authorization` has its `Bearer ` prefix stripped before fingerprinting
+    so that hashing a header value here and hashing a raw key elsewhere
+    (`avg.config.secrets.get_key`) agree when they hold the same secret.
+    """
+    if not headers or not isinstance(headers, dict):
+        return None
+    lower = {str(k).lower(): v for k, v in headers.items()}
+    for name in _CREDENTIAL_HEADER_NAMES:
+        value = lower.get(name)
+        if not value:
+            continue
+        value = str(value)
+        if name == "authorization" and value.lower().startswith("bearer "):
+            value = value[len("bearer ") :]
+        return _fingerprint(value)
+    return None
+
+
 def _provider_key(provider: str) -> str:
     return provider.strip().lower()
 
@@ -129,10 +177,20 @@ def record_cooldown(
     *,
     cooldown_until: datetime | None = None,
     note: str = "",
+    key_fingerprint: str | None = None,
     path: Path | None = None,
 ) -> None:
     """Persist a cooldown for `provider`. Overwrites any existing entry for
-    the same provider (case-insensitive)."""
+    the same provider (case-insensitive).
+
+    `key_fingerprint`, when given (`Transport` passes
+    `fingerprint_headers(headers)`), records exactly which credential
+    failed, so `active_cooldown`'s own `key_fingerprint` check can tell a
+    provider's backup key apart from its primary. When omitted, falls back
+    to fingerprinting `avg.config.secrets.get_key(provider)` - this
+    module's original, still-correct behaviour for any provider with only
+    one key.
+    """
     key = _provider_key(provider)
     with _LOCK:
         providers = _load(path)
@@ -141,18 +199,29 @@ def record_cooldown(
             "since": datetime.now(timezone.utc).isoformat(),
             "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
             "note": note,
-            "key_fingerprint": _fingerprint(get_key(provider)),
+            "key_fingerprint": key_fingerprint if key_fingerprint is not None else _fingerprint(get_key(provider)),
         }
         _save(providers, path)
 
 
-def active_cooldown(provider: str, *, path: Path | None = None) -> ProviderCooldown | None:
+def active_cooldown(
+    provider: str, *, key_fingerprint: str | None = None, path: Path | None = None
+) -> ProviderCooldown | None:
     """The active cooldown for `provider`, or `None` if there isn't one.
 
     A `quota` entry expires on its own once `cooldown_until` passes. A
     `billing` entry clears when the provider's currently configured key no
     longer matches the fingerprint stored at write time (including "the
     key was removed entirely").
+
+    `key_fingerprint`, when given, is compared against the stored entry's
+    fingerprint FIRST, for either status: a mismatch means the credential
+    behind this specific call has not been tried yet, so there is no
+    cooldown to apply to it, however the provider-as-a-whole looks - this
+    is what lets `Transport`'s pre-flight check tell ElevenLabs' primary
+    key's cooldown apart from its backup's. Omitted (the default, used by
+    every caller that predates this parameter), this function behaves
+    exactly as it always has.
     """
     key = _provider_key(provider)
     with _LOCK:
@@ -177,10 +246,13 @@ def active_cooldown(provider: str, *, path: Path | None = None) -> ProviderCoold
         except (TypeError, ValueError):
             cooldown_until = None
 
+    if key_fingerprint is not None and key_fingerprint != entry.get("key_fingerprint", ""):
+        return None
+
     if status == "quota":
         if cooldown_until is not None and datetime.now(timezone.utc) >= cooldown_until:
             return None
-    else:  # billing
+    elif key_fingerprint is None:  # billing, and the caller left the live check to us
         if _fingerprint(get_key(provider)) != entry.get("key_fingerprint", ""):
             return None
 
@@ -193,9 +265,9 @@ def active_cooldown(provider: str, *, path: Path | None = None) -> ProviderCoold
     )
 
 
-def is_in_cooldown(provider: str, *, path: Path | None = None) -> bool:
+def is_in_cooldown(provider: str, *, key_fingerprint: str | None = None, path: Path | None = None) -> bool:
     """Convenience wrapper: `True` iff `active_cooldown` is not `None`."""
-    return active_cooldown(provider, path=path) is not None
+    return active_cooldown(provider, key_fingerprint=key_fingerprint, path=path) is not None
 
 
 def clear_cooldown(provider: str, *, path: Path | None = None) -> None:

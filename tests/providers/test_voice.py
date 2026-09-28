@@ -437,3 +437,37 @@ def test_edge_synthesize_records_a_cooldown_on_a_classified_quota_failure(tmp_pa
         provider.synthesize("hello", voice_id="en-US-GuyNeural", model="")
 
     assert provider_health.is_in_cooldown("edge") is True
+
+
+def test_elevenlabs_quota_failure_on_primary_does_not_block_the_backup_retry(tmp_path, monkeypatch):
+    """Regression: Transport's own cooldown recording (Slice 32 sub-slice 1)
+    must not block ElevenLabs' primary/backup key-switch retry (pre-existing
+    behaviour) - the two keys share one provider name but are different
+    credentials, and only the credential that actually failed should cool
+    down."""
+    from avg.config import provider_health
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    _patch_keys(monkeypatch, primary=PRIMARY_KEY, backup=BACKUP_KEY)
+    seen_keys = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = request.headers["xi-api-key"]
+        seen_keys.append(key)
+        if key == PRIMARY_KEY:
+            return httpx.Response(429, json={"detail": {"status": "quota_exceeded", "message": "quota"}})
+        return httpx.Response(200, content=FAKE_AUDIO)
+
+    provider = ElevenLabsVoiceProvider(transport=_mock_record_transport(tmp_path, handler))
+    audio = provider.synthesize("hi", voice_id=VOICE_ID, model=MODEL)
+
+    assert audio == FAKE_AUDIO
+    assert seen_keys == [PRIMARY_KEY, BACKUP_KEY]
+    # The primary key's own cooldown is still real - a second call with
+    # only the primary configured (no backup) should still be blocked.
+    monkeypatch.setattr("avg.providers.voice.providers.get_key", lambda name: PRIMARY_KEY if name == "elevenlabs" else None)
+    with pytest.raises(AvgError) as excinfo:
+        provider.synthesize("hi again", voice_id=VOICE_ID, model=MODEL)
+    assert excinfo.value.kind == ErrorKind.quota

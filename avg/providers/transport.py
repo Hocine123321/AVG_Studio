@@ -338,7 +338,13 @@ class Transport:
             return self._replay(fixture_path, method_u, url)
 
         if provider:
-            cooldown = provider_health.active_cooldown(provider)
+            # `key_fingerprint` tells apart, say, ElevenLabs' primary key
+            # from its backup - both share one provider name, so a bare
+            # `active_cooldown(provider)` would let one key's cooldown
+            # block the other's genuinely separate account.
+            cooldown = provider_health.active_cooldown(
+                provider, key_fingerprint=provider_health.fingerprint_headers(headers)
+            )
             if cooldown is not None:
                 raise provider_health.cooldown_error(cooldown)
 
@@ -409,7 +415,7 @@ class Transport:
                     attempt += 1
                     continue
                 if provider and kind in (ErrorKind.quota, ErrorKind.billing):
-                    self._record_cooldown(provider, kind)
+                    self._record_cooldown(provider, kind, headers)
                 raise AvgError(kind, f"{provider or 'provider'} request failed: {exc}", detail=str(exc)) from exc
 
             if response.status_code >= 400:
@@ -429,7 +435,7 @@ class Transport:
                     attempt += 1
                     continue
                 if provider and kind in (ErrorKind.quota, ErrorKind.billing):
-                    self._record_cooldown(provider, kind)
+                    self._record_cooldown(provider, kind, headers)
                 raise AvgError(
                     kind,
                     f"{provider or 'provider'} request failed with HTTP {response.status_code}",
@@ -465,17 +471,27 @@ class Transport:
         }
         fixture_path.write_text(json_lib.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
-    def _record_cooldown(self, provider: str, kind: ErrorKind) -> None:
+    def _record_cooldown(self, provider: str, kind: ErrorKind, headers: dict[str, str] | None) -> None:
         """Persist a cooldown after a quota/billing failure. Best-effort -
         a failure to write cooldown state must not turn an already-
-        classified provider failure into a different, more confusing one."""
+        classified provider failure into a different, more confusing one.
+
+        `headers` is this failed request's own headers - fingerprinted so
+        the cooldown is scoped to whichever credential actually failed
+        (see `provider_health.fingerprint_headers`), not the provider as a
+        whole. `None`/no recognised credential header degrades to that
+        module's original provider-name-only behaviour, unchanged."""
         with suppress(Exception):
+            key_fingerprint = provider_health.fingerprint_headers(headers)
             if kind == ErrorKind.quota:
                 provider_health.record_cooldown(
-                    provider, "quota", cooldown_until=provider_health.default_quota_cooldown_until(provider)
+                    provider,
+                    "quota",
+                    cooldown_until=provider_health.default_quota_cooldown_until(provider),
+                    key_fingerprint=key_fingerprint,
                 )
             else:
-                provider_health.record_cooldown(provider, "billing")
+                provider_health.record_cooldown(provider, "billing", key_fingerprint=key_fingerprint)
 
 
 def _rate_limit_wait_ceiling_seconds() -> float:
