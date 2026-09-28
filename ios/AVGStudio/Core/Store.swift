@@ -54,6 +54,7 @@ final class Store {
     /// The failure prompt currently waiting on the user (nil = none), and
     /// the continuation the paused render resumes from once they choose.
     var recoveryPlan: RecoveryPlan?
+    @ObservationIgnored private var triedAutoFallback: Set<String> = []
     @ObservationIgnored private var recoveryContinuation: CheckedContinuation<RecoveryAction, Never>?
     /// Set by the "Reword the topic" choice so Create can pre-open on it.
     var pendingReword: String?
@@ -388,6 +389,16 @@ final class Store {
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
+                // Model fallback: on a "too expensive" failure (quota / billing),
+                // drop to the fallback model by itself when the user opted in,
+                // once per phase, instead of interrupting them.
+                if settings.autoUseFallback, !triedAutoFallback.contains(id + phase.rawValue),
+                   let avg = error as? AVGError, let k = avg.kind, k == .quota || k == .billing,
+                   let m = Recovery.applyFallback(phase: phase, store: self) {
+                    triedAutoFallback.insert(id + phase.rawValue)
+                    record(id, "Too expensive / over quota: switched to fallback model \(m) automatically.")
+                    continue
+                }
                 guard let plan = Recovery.plan(for: error, project: id, phase: phase, store: self) else { throw error }
                 record(id, "\(phase.title) paused: \(plan.title). Waiting for your choice.", error: true)
                 jobs[id]?.message = "Needs your decision"

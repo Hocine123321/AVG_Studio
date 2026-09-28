@@ -266,6 +266,19 @@ struct SettingsView: View {
                 Text("Transparency applies to the whole app as soon as you let go of the slider. Font applies right away too; a few fixed-size headings and the tab bar keep their own type.")
             }
 
+            // ── Model fallback ───────────────────────────────────────
+            Section {
+                fallbackRow("Writer", $store.settings.writerFallbackModel,
+                            hint: Recovery.fallbackModel(.writer, store: store))
+                fallbackRow("Images", $store.settings.imageFallbackModel,
+                            hint: Recovery.fallbackModel(.image, store: store))
+                fallbackRow("Voice", $store.settings.voiceFallbackModel,
+                            hint: Recovery.fallbackModel(.voice, store: store))
+                Toggle("Switch automatically when too expensive", isOn: $store.settings.autoUseFallback)
+            } header: { Text("Model fallback") } footer: {
+                Text("The cheaper model each AI drops to when the main one is over quota, out of credit or too expensive. Leave a field empty to use the built-in light model for the provider you're using. With the switch on, quota and billing errors move to the fallback without asking; otherwise you're asked first.")
+            }
+
             // ── Appearance ───────────────────────────────────────────
             Section("Appearance") {
                 Picker("Theme", selection: $store.settings.themePreference) {
@@ -296,6 +309,17 @@ struct SettingsView: View {
                 keys[k] = newValue
                 Keychain.set(k, newValue)
             }
+        }
+    }
+
+    private func fallbackRow(_ title: String, _ value: Binding<String>, hint: String?) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(hint ?? "None available", text: value)
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .foregroundStyle(Theme.ink2)
         }
     }
 

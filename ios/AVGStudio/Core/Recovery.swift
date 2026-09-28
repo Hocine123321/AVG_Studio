@@ -46,7 +46,7 @@ enum RecoveryAction: Identifiable, Equatable {
         switch self {
         case .retry: return "Try again"
         case .waitAndRetry(let s): return s >= 60 ? "Wait \(s / 60) min, then retry" : "Wait \(s)s, then retry"
-        case .cheaperModel: return "Use a cheaper / lighter model"
+        case .cheaperModel: return "Use the fallback (cheaper) model"
         case .otherProvider(let n): return "Switch to \(n)"
         case .freeProvider: return "Switch to a free provider"
         case .openKeys: return "Fix my API key"
@@ -78,8 +78,87 @@ struct RecoveryPlan: Identifiable {
     var pattern: String? = nil
 }
 
+/// Which AI a phase uses, for picking the right fallback model.
+enum AIKind { case writer, image, voice }
+
 @MainActor
 enum Recovery {
+    static func aiKind(for phase: PhaseID) -> AIKind {
+        switch phase { case .visuals: return .image; case .voice: return .voice; default: return .writer }
+    }
+
+    /// The model this AI would drop to: the user's own fallback if set, else a
+    /// built-in light preset for the provider currently in use. `nil` when
+    /// there is nothing lighter (Apple on-device, Stable Horde...).
+    static func fallbackModel(_ kind: AIKind, store: Store) -> String? {
+        let s = store.settings
+        switch kind {
+        case .writer:
+            if !s.writerFallbackModel.isEmpty { return s.writerFallbackModel }
+            switch s.text {
+            case .gemini: return "gemini-2.5-flash-lite"
+            case .groq: return "llama-3.1-8b-instant"
+            case .pollinations: return "openai-fast"
+            case .apple: return nil
+            }
+        case .image:
+            if !s.imageFallbackModel.isEmpty { return s.imageFallbackModel }
+            switch s.image {
+            case .gemini: return "gemini-2.5-flash-image"
+            case .pollinations: return "flux"
+            default: return nil
+            }
+        case .voice:
+            if !s.voiceFallbackModel.isEmpty { return s.voiceFallbackModel }
+            switch s.voice {
+            case .elevenlabs: return "eleven_flash_v2_5"
+            default: return nil
+            }
+        }
+    }
+
+    /// True when the fallback differs from what is already set (otherwise
+    /// offering it would just repeat the same failing request).
+    static func fallbackIsUseful(_ kind: AIKind, store: Store) -> Bool {
+        guard let m = fallbackModel(kind, store: store) else { return false }
+        let s = store.settings
+        switch kind {
+        case .writer:
+            switch s.text {
+            case .gemini: return m != s.geminiModel
+            case .groq: return m != s.groqModel
+            case .pollinations: return m != s.pollinationsTextModel
+            case .apple: return false
+            }
+        case .image:
+            return s.image == .gemini ? m != s.geminiImageModel : (s.image == .pollinations ? m != s.pollinationsImageModel : false)
+        case .voice:
+            return s.voice == .elevenlabs ? m != s.elevenModel : false
+        }
+    }
+
+    /// Switches the AI for `phase` to its fallback model. Returns the model
+    /// name applied, or nil if there was nothing to switch to.
+    @discardableResult
+    static func applyFallback(phase: PhaseID, store: Store) -> String? {
+        let kind = aiKind(for: phase)
+        guard fallbackIsUseful(kind, store: store), let m = fallbackModel(kind, store: store) else { return nil }
+        switch kind {
+        case .writer:
+            switch store.settings.text {
+            case .gemini: store.settings.geminiModel = m
+            case .groq: store.settings.groqModel = m
+            case .pollinations: store.settings.pollinationsTextModel = m
+            case .apple: return nil
+            }
+        case .image:
+            if store.settings.image == .gemini { store.settings.geminiImageModel = m } else { store.settings.pollinationsImageModel = m }
+        case .voice:
+            store.settings.elevenModel = m
+        }
+        return m
+    }
+
     /// Failures remembered this session, per provider (safeguard 9).
     private static var failures: [String: Int] = [:]
 
@@ -107,6 +186,8 @@ enum Recovery {
         let others = alternatives(to: provider, store: store)
         let switches: [RecoveryAction] = others.prefix(2).map { .otherProvider(name: $0) }
         var plan: RecoveryPlan?
+        let canFallback = fallbackIsUseful(aiKind(for: phase), store: store)
+        let fb = fallbackModel(aiKind(for: phase), store: store) ?? ""
         switch kind {
         case .network, .timeout:
             plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) isn't responding",
@@ -120,7 +201,7 @@ enum Recovery {
             plan = RecoveryPlan(projectID: project, phase: phase, title: kind == .billing ? "\(provider) needs payment" : "\(provider) quota used up",
                 reason: kind == .billing ? "\(provider) rejected the request over billing or credit. Retrying won't help until that's fixed on their side."
                                          : "Your free or paid allowance on \(provider) is used up. Retrying won't help until it resets.",
-                actions: switches + [.freeProvider, .stop])
+                actions: [.cheaperModel] + switches + [.freeProvider, .stop])
         case .auth:
             plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) rejected your key",
                 reason: "The API key for \(provider) looks invalid, expired or lacks permission.",
@@ -135,6 +216,16 @@ enum Recovery {
                 actions: [.reword] + switches + [.stop])
         case .dependency, .bug:
             return nil
+        }
+        if var p = plan {
+            if !canFallback {
+                p = RecoveryPlan(projectID: p.projectID, phase: p.phase, title: p.title, reason: p.reason,
+                                 actions: p.actions.filter { $0 != .cheaperModel }, pattern: p.pattern)
+            } else if p.actions.contains(.cheaperModel) {
+                p = RecoveryPlan(projectID: p.projectID, phase: p.phase, title: p.title,
+                                 reason: p.reason + " Your fallback model is \(fb).", actions: p.actions, pattern: p.pattern)
+            }
+            plan = p
         }
         if repeated, var p = plan {
             p.pattern = "\(provider) has failed \(failures[provider, default: 0]) times this session. Consider switching it for good in Settings."
@@ -164,15 +255,8 @@ enum Recovery {
             try? await Task.sleep(nanoseconds: UInt64(s) * 1_000_000_000)
             return !Task.isCancelled
         case .cheaperModel:
-            switch store.settings.text {
-            case .gemini: store.settings.geminiModel = "gemini-2.5-flash-lite"
-            case .groq: store.settings.groqModel = "llama-3.1-8b-instant"
-            case .pollinations: store.settings.pollinationsTextModel = "openai-fast"
-            case .apple: break
-            }
-            if store.settings.image == .gemini { store.settings.geminiImageModel = "gemini-2.5-flash-image" }
-            if store.settings.voice == .elevenlabs { store.settings.elevenModel = "eleven_flash_v2_5" }
-            store.record(plan.projectID, "Switched to a lighter model and retrying.")
+            let m = applyFallback(phase: plan.phase, store: store)
+            store.record(plan.projectID, m.map { "Switched to the fallback model \($0) and retrying." } ?? "No lighter model available, retrying as is.")
             return true
         case .otherProvider(let name):
             let n = name.lowercased()

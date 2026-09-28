@@ -541,6 +541,15 @@ struct AppSettings: Codable {
     var glassOpacity: Double = 1.0
     /// App-wide UI font: system or the mock's Caprasimo.
     var appFont: AppFontChoice = .system
+    /// Model fallback: the cheaper model each AI drops to when the main one is
+    /// too expensive, over quota, or keeps failing. One per AI kind. Empty
+    /// means "use the built-in light preset for the current provider".
+    var writerFallbackModel = ""
+    var imageFallbackModel = ""
+    var voiceFallbackModel = ""
+    /// When on, a quota/billing/"too expensive" failure switches to the
+    /// fallback model by itself (and says so in the log) instead of asking.
+    var autoUseFallback = false
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple
@@ -607,6 +616,10 @@ struct AppSettings: Codable {
         themePreference = c.value("themePreference", themePreference)
         glassOpacity = c.value("glassOpacity", glassOpacity)
         appFont = c.value("appFont", appFont)
+        writerFallbackModel = c.value("writerFallbackModel", writerFallbackModel)
+        imageFallbackModel = c.value("imageFallbackModel", imageFallbackModel)
+        voiceFallbackModel = c.value("voiceFallbackModel", voiceFallbackModel)
+        autoUseFallback = c.value("autoUseFallback", autoUseFallback)
         text = c.value("text", text)
         image = c.value("image", image)
         voice = c.value("voice", voice)
