@@ -7,6 +7,7 @@ struct CreateView: View {
     @State private var channelID: UUID?
     @State private var aspect: AspectRatio = .portrait
     @FocusState private var focused: Bool
+    @State private var toastMessage: String?
 
     var body: some View {
         ScrollView {
@@ -62,6 +63,7 @@ struct CreateView: View {
         .navigationTitle("Create")
         .onAppear { aspect = store.activeChannel.aspectRatio }
         .scrollDismissesKeyboard(.interactively)
+        .toast($toastMessage)
     }
 
     private func create() {
@@ -75,6 +77,6 @@ struct CreateView: View {
         // currentProjectID so a direct tap on the Studio tab shows it.
         store.currentProjectID = p.id
         store.tab = .library
-        toast = "Started rendering “" + p.title + "”"
+        toastMessage = "Started rendering “" + p.title + "”"
     }
 }
