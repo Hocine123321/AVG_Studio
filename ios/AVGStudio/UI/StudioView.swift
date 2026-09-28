@@ -7,6 +7,13 @@ struct StudioView: View {
     @State private var player: AVPlayer?
     @State private var savedToPhotos = false
     @State private var showLog = false
+    // CapCut export (ported from the PC's Slice 30 "My Videos" action -
+    // see CapCutExporter's own doc comment for what iOS does differently).
+    // `capcutBundle` doubles as the sheet's `isPresented` driver AND the
+    // temp folder to clean up once that sheet goes away, in either
+    // direction (completed share, or a plain swipe-to-dismiss).
+    @State private var capcutBundle: URL?
+    @State private var isExportingCapCut = false
 
     var body: some View {
         if let p = store.project(projectID) {
@@ -170,7 +177,11 @@ struct StudioView: View {
 
     @ViewBuilder private func takesCard(_ p: Project) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Takes").font(.headline)
+            HStack {
+                Text("Takes").font(.headline)
+                Spacer()
+                if isExportingCapCut { ProgressView().controlSize(.small) }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(p.takes.reversed()) { take in
@@ -178,11 +189,46 @@ struct StudioView: View {
                             store.update(p.id) { $0.output = take.file }
                         }
                         .buttonStyle(.glass)
+                        .disabled(isExportingCapCut)
+                        .contextMenu {
+                            Button("Export to CapCut", systemImage: "square.and.arrow.up") {
+                                exportToCapCut(p, take)
+                            }
+                        }
                     }
                 }
             }
         }
         .glassCard()
+        .sheet(isPresented: Binding(
+            get: { capcutBundle != nil },
+            set: { if !$0 { discardCapcutBundle() } }
+        )) {
+            if let url = capcutBundle {
+                ActivityShareSheet(items: [url]) { discardCapcutBundle() }
+            }
+        }
+    }
+
+    private func exportToCapCut(_ p: Project, _ take: Take) {
+        guard !isExportingCapCut else { return }
+        isExportingCapCut = true
+        Task {
+            defer { isExportingCapCut = false }
+            do {
+                let url = try CapCutExporter.export(project: p, take: take, store: store)
+                capcutBundle = url
+                Haptics.success()
+            } catch {
+                Haptics.error()
+                store.record(p.id, "CapCut export failed: \(error.localizedDescription)", error: true)
+            }
+        }
+    }
+
+    private func discardCapcutBundle() {
+        if let url = capcutBundle { try? FileManager.default.removeItem(at: url) }
+        capcutBundle = nil
     }
 
     @ViewBuilder private func scenesCard(_ p: Project) -> some View {
