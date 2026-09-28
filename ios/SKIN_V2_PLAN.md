@@ -107,9 +107,17 @@ here is unclear rather than trusting this summary alone.
    scroll-reveal title bar yet - deferred to land per-screen alongside each
    screen's own restyle (Phases 3+), since it needs that screen's own
    scroll offset, not a standalone piece.
-3. **Library** - `HomeView.swift`: title bar + search field + segmented
-   filter + grid card style (rounded thumbnail, play glyph, status chip,
-   progress bar) + selection mode + floating select bar, matching the mock.
+3. **Library** ✅ done (16ae255) - `HomeView.swift`/`Theme.swift`: search
+   field, All/Running/Done/Archived SegmentedFilter (replaced the old
+   Archive-toggle button entirely), restyled ProjectCard (status chip +
+   selection dot + date/aspect overlay on the thumbnail, real progress
+   bar), selection mode + floating "N selected/Archive" bar, honest
+   subtitle (real counts, no fake disk-size/job-slot numbers - flagged
+   above). Added reusable `SegmentedFilter<T>`, `.fieldStyle()`, generic
+   `.glass(shape:)`, `Theme.onAccent` to Theme.swift for later phases to
+   reuse. Still has the native `.navigationTitle` bar, not yet the mock's
+   custom floating scroll-reveal title - still deferred (see Phase 2's
+   note).
 4. **Studio** - `StudioView.swift`: restyle as a tab-hosted screen (current
    project from `Store`, not a pushed `projectID`), takes segmented control,
    device-frame preview, 5-row pipeline list per the adaptation above, log
