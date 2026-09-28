@@ -9,6 +9,9 @@ struct AVGStudioApp: App {
         // App's `init()` runs at that point, which is the documented place
         // to do this in a SwiftUI-lifecycle app.
         BackgroundRender.register()
+        // Belt-and-suspenders alongside Info.plist's UIAppFonts entry - see
+        // Theme.registerFonts's own doc comment.
+        Theme.registerFonts()
     }
 
     var body: some Scene {

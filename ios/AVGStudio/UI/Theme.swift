@@ -1,8 +1,45 @@
 import SwiftUI
 import UIKit
 
+/// Skin v2 - see `ios/SKIN_V2_PLAN.md`. Every value below is a direct port
+/// of the owner's HTML mock's `:root` custom properties (and its dark-mode
+/// override block), not a fresh design - if a color/shape/timing looks odd,
+/// check the mock before assuming this file drifted from it.
 enum Theme {
-    static let accent = Color(red: 1.0, green: 0.43, blue: 0.32)
+    /// Resolves per the environment's light/dark trait, matching the mock's
+    /// `:root` / `prefers-color-scheme:dark` pair - the same technique
+    /// `UIColor(dynamicProvider:)` always uses, just spelled out so every
+    /// token below reads as one plain line.
+    private static func dyn(_ light: UIColor, _ dark: UIColor) -> Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
+    private static func rgb(_ r: Int, _ g: Int, _ b: Int, _ a: CGFloat = 1) -> UIColor {
+        UIColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: a)
+    }
+
+    // --bg1 / --bg2 - the diagonal gradient AppBackground paints under
+    // everything else.
+    static let bg1 = dyn(rgb(244, 238, 229), rgb(20, 17, 13))
+    static let bg2 = dyn(rgb(228, 238, 219), rgb(27, 36, 24))
+    // --ink / --i2 (secondary text, ink at 60%/62% alpha)
+    static let ink = dyn(rgb(36, 26, 18), rgb(246, 239, 230))
+    static let ink2 = dyn(rgb(36, 26, 18, 0.6), rgb(246, 239, 230, 0.62))
+    // --gl (glass fill) / --ed (glass edge) / --sh (glass shadow) / --fl
+    // (subtle fill - segmented-inactive bg, switch track, chip bg)
+    static let glassFill = dyn(rgb(255, 255, 255, 0.5), rgb(255, 255, 255, 0.09))
+    static let glassEdge = dyn(rgb(255, 255, 255, 0.75), rgb(255, 255, 255, 0.22))
+    static let glassShadow = dyn(rgb(90, 60, 30, 0.16), rgb(0, 0, 0, 0.45))
+    static let fill = dyn(rgb(36, 26, 18, 0.07), rgb(255, 255, 255, 0.08))
+    // --acc / --ok / --bad - accent is a single hue now (was accent/violet/
+    // teal); --ok and --bad are the only other named colors in the mock.
+    static let accent = Color(red: 0.878, green: 0.541, blue: 0.306) // #e08a4e, same both schemes
+    static let ok = dyn(rgb(111, 135, 87), rgb(174, 191, 146))
+    static let bad = Color(red: 0.769, green: 0.329, blue: 0.290) // #c4544a, same both schemes
+
+    /// Kept only for screens Skin v2 hasn't reached yet (`HomeView`'s card
+    /// gradient, `WelcomeView`'s feature icons) - not part of the new
+    /// palette above. Retire the call site, not this constant, once that
+    /// screen's own phase in `SKIN_V2_PLAN.md` lands.
     static let violet = Color(red: 0.52, green: 0.38, blue: 1.0)
     static let teal = Color(red: 0.2, green: 0.78, blue: 0.82)
 
@@ -26,117 +63,101 @@ enum Theme {
         ui.getRed(&r, green: &g, blue: &b, alpha: &a)
         return String(format: "%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
     }
+
+    /// Registers the bundled Caprasimo font (OFL-licensed,
+    /// `Resources/`, listed in `UIAppFonts` so iOS loads it at launch
+    /// already - this call is a defensive double-check, cheap and
+    /// idempotent, in case that Info.plist route ever silently fails on a
+    /// given OS version) so `Font.disp` can find it by PostScript name.
+    static func registerFonts() {
+        guard UIFont(name: "Caprasimo-Regular", size: 12) == nil,
+              let url = Bundle.main.url(forResource: "Caprasimo-Regular", withExtension: "ttf")
+        else { return }
+        CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+    }
 }
 
-/// A soft, continuously-flowing colour field behind the glass - the app's
-/// answer to Google Gemini's own moving backdrop.
+extension Font {
+    /// The mock's `--disp` stack's primary face ("Caprasimo","New York",
+    /// ui-serif, Georgia, serif) - every screen title (`.lt`) and sheet
+    /// heading (`.sh3`), regular weight only, the mock never bolds it.
+    /// Falls back to the system serif (closest native analogue to the
+    /// mock's own fallback, "New York") if the bundled font isn't found -
+    /// belt and suspenders, shouldn't actually trigger once registered.
+    static func disp(_ size: CGFloat) -> Font {
+        if UIFont(name: "Caprasimo-Regular", size: size) != nil {
+            return .custom("Caprasimo-Regular", size: size)
+        }
+        return .system(size: size, weight: .regular, design: .serif)
+    }
+}
+
+/// A soft, continuously-flowing colour field behind the glass - the
+/// mock's own two-orb `.orb`/`.orb.a`/`.orb.b` + the diagonal `#app`
+/// gradient, not Apple's Liquid Glass or a `MeshGradient`; ported to a
+/// `TimelineView` since CSS animations have no native SwiftUI equivalent.
 ///
-/// Rewritten from scratch (was `MeshGradient`-based): a 3x3 mesh pins its
-/// four outer control points to the exact viewport corners by
-/// construction, and interpolates a smooth surface FROM them - on a tall,
-/// narrow phone viewport (nothing like the square-ish canvases mesh
-/// gradients are usually demoed on) that surface can collapse into a
-/// visibly flat, almost-unblended wedge of a single corner colour before
-/// it has room to mix toward the next control point, which is exactly the
-/// "solid white/black corner patches" bug this was rewritten to fix - not
-/// a one-line tweak, a wrong tool for this aspect ratio.
-///
-/// New approach: independent soft "blobs" - each an analytic
-/// `RadialGradient` circle (colour at its centre fading smoothly to fully
-/// transparent at its own edge, well before that edge reaches the
-/// viewport bounds) drifting in slow, mutually-irrational orbits over a
-/// flat base fill. Nothing here is a convolution filter (no `.blur()`)
-/// sampling pixels outside the layer, and no control point is ever pinned
-/// to a corner - so a corner the animation drifts away from just shows
-/// the plain base colour, never a hard-edged patch, regardless of screen
-/// aspect ratio, size class, or how far into an orbit any given blob is.
+/// Deliberately simpler than the palette this replaced (which used four
+/// drifting radial blobs and a three-hue rotation): the mock specifies
+/// exactly two large blurred circles, fixed brand colours, one shared
+/// motion curve. Matching the mock precisely means matching ITS
+/// simplicity too, not keeping the old version's extra motion.
 ///
 /// Respects Reduce Motion: a user who has it on gets ONE still frame (at
-/// t=0), not a paused-mid-animation frame.
+/// t=0), not a paused-mid-animation frame - the mock's own
+/// `@media(prefers-reduced-motion:reduce){*{animation:none}}` rule.
 struct AppBackground: View {
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// One drifting colour blob. `base`/`orbit*` are fractions of the
-    /// viewport's own size (from `GeometryReader`, not a normalized mesh
-    /// grid) - the actual reason this can't reproduce the old bug: a
-    /// blob's position and size are always relative to the REAL frame
-    /// being drawn into, on every aspect ratio.
-    private struct Blob {
-        let colorPhase: Double // this blob's own phase into the accent->violet->teal drift
-        let baseX: Double, baseY: Double // 0...1, orbit center
-        let orbitX: Double, orbitY: Double // 0...1, how far it wanders from centre
-        let speed: Double
-        let phase: Double // offsets this blob's own orbit, so no two ever sync up
-        let sizeFraction: Double // of max(width, height)
-    }
-
-    private static let blobs: [Blob] = [
-        Blob(colorPhase: 0.0, baseX: 0.22, baseY: 0.16, orbitX: 0.14, orbitY: 0.09, speed: 0.055, phase: 0.6, sizeFraction: 0.62),
-        Blob(colorPhase: 1.8, baseX: 0.80, baseY: 0.22, orbitX: 0.12, orbitY: 0.11, speed: 0.048, phase: 2.1, sizeFraction: 0.68),
-        Blob(colorPhase: 3.4, baseX: 0.28, baseY: 0.84, orbitX: 0.13, orbitY: 0.12, speed: 0.041, phase: 4.0, sizeFraction: 0.64),
-        Blob(colorPhase: 5.0, baseX: 0.76, baseY: 0.80, orbitX: 0.11, orbitY: 0.10, speed: 0.063, phase: 1.2, sizeFraction: 0.58),
-    ]
 
     var body: some View {
         GeometryReader { proxy in
             if reduceMotion {
-                field(t: 0, size: proxy.size, scheme: scheme)
+                field(t: 0, size: proxy.size)
             } else {
-                // Was `Float(tl.date.timeIntervalSinceReferenceDate)` further
-                // down this file's history - that property is ~788
-                // million-plus by now (2026), and Float's 24-bit mantissa
-                // only has ~64-unit resolution at that magnitude, freezing
-                // the animation for ~64 real seconds at a time then jumping.
-                // `t` stays Double end to end here; only ever cast to
-                // CGFloat for the final on-screen position/size, where
-                // Double has plenty of precision at that magnitude.
                 TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                    field(t: tl.date.timeIntervalSinceReferenceDate, size: proxy.size, scheme: scheme)
+                    field(t: tl.date.timeIntervalSinceReferenceDate, size: proxy.size)
                 }
             }
         }
         .ignoresSafeArea()
     }
 
-    /// One brand hue slowly rotated toward its neighbour and back - `phase`
-    /// offsets where in that rotation each blob sits, so the whole field
-    /// never settles on a single dominant tone.
-    private func drift(_ base: Color, phase: Double, t: Double) -> Color {
-        let cycle = (sin(t * 0.05 + phase) + 1) / 2 // 0...1, ~125s period
-        return base.mix(with: nextHue(base), by: cycle * 0.4)
+    /// One 0...1 cycle of the mock's `dr` keyframe (`translate(-40px,60px)
+    /// scale(1.15)`, 18s ease-in-out, `alternate`) - a smooth sine
+    /// oscillation stands in for CSS's exact cubic-bezier easing, close
+    /// enough to read the same. `phase` (radians) is `.pi` apart for the
+    /// two orbs, mirroring the mock's orb.b `animation-delay:-9s` - exactly
+    /// half of the 18s period, i.e. a half-cycle head start.
+    private func drift(_ t: Double, phase: Double) -> Double {
+        (sin(t * (2 * .pi / 18) + phase) + 1) / 2
     }
 
-    private func nextHue(_ base: Color) -> Color {
-        if base == Theme.accent { return Theme.violet }
-        if base == Theme.violet { return Theme.teal }
-        return Theme.accent
-    }
-
-    private func field(t: Double, size: CGSize, scheme: ColorScheme) -> some View {
-        let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
-        let dim = max(size.width, size.height)
-        // Cycle the three brand hues across the four blob slots rather than
-        // hard-assigning one each, so which colour sits where itself drifts.
-        let hues = [Theme.accent, Theme.violet, Theme.teal]
-        return ZStack {
-            base
-            ForEach(Array(Self.blobs.enumerated()), id: \.offset) { i, b in
-                let color = drift(hues[i % hues.count], phase: b.colorPhase, t: t)
-                let cx = (b.baseX + b.orbitX * sin(t * b.speed + b.phase)) * size.width
-                let cy = (b.baseY + b.orbitY * cos(t * b.speed * 0.82 + b.phase)) * size.height
-                let blobDim = dim * b.sizeFraction
-                Circle()
-                    .fill(RadialGradient(
-                        colors: [color.opacity(scheme == .dark ? 0.55 : 0.6), color.opacity(0)],
-                        center: .center, startRadius: 0, endRadius: blobDim / 2
-                    ))
-                    .frame(width: blobDim, height: blobDim)
-                    .position(x: cx, y: cy)
-                    .blendMode(scheme == .dark ? .plusLighter : .normal)
-            }
+    private func field(t: Double, size: CGSize) -> some View {
+        ZStack {
+            LinearGradient(colors: [Theme.bg1, Theme.bg2], startPoint: .topLeading, endPoint: .bottomTrailing)
+            orb(color: Theme.accent, top: -80, right: -90, opacity: 0.45, phase: 0, t: t, size: size)
+            orb(color: Color(red: 0.682, green: 0.749, blue: 0.573), bottom: 120, left: -120, opacity: 0.3, phase: .pi, t: t, size: size)
         }
-        .compositingGroup()
+    }
+
+    /// `top`/`right` (or `bottom`/`left`) are the mock's own raw CSS values
+    /// (sign included) for `.orb.a`/`.orb.b` - a 300pt circle positioned by
+    /// two of its four edges relative to the container, never centred, so
+    /// its actual centre has to be derived from whichever pair is given
+    /// (CSS `right`/`bottom` measure INWARD from that edge; a negative
+    /// value pushes the box back out past it, off-screen).
+    private func orb(color: Color, top: CGFloat? = nil, right: CGFloat? = nil, bottom: CGFloat? = nil, left: CGFloat? = nil, opacity: Double, phase: Double, t: Double, size: CGSize) -> some View {
+        let dim: CGFloat = 300
+        let x: CGFloat = left.map { $0 + dim / 2 } ?? right.map { size.width - $0 - dim / 2 } ?? size.width / 2
+        let y: CGFloat = top.map { $0 + dim / 2 } ?? bottom.map { size.height - $0 - dim / 2 } ?? size.height / 2
+        let d = drift(t, phase: phase)
+        return Circle()
+            .fill(color)
+            .frame(width: dim, height: dim)
+            .blur(radius: 70)
+            .opacity(opacity)
+            .scaleEffect(1.0 + 0.15 * d)
+            .position(x: x + (-40 * d), y: y + (60 * d))
     }
 }
 
@@ -152,35 +173,144 @@ enum Haptics {
     static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
 }
 
-extension View {
-    func glassCard(_ radius: CGFloat = 26, padding: CGFloat = 16) -> some View {
-        self.padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: radius))
-    }
+/// The mock's `.g` glass recipe, hand-rolled rather than Apple's Liquid
+/// Glass (`.glassEffect`): a translucent fill over a blur, a hairline
+/// edge, an inset top highlight + a soft outer shadow, and a diagonal
+/// white sheen (`.g::after`). Liquid Glass is a real, better-integrated
+/// system material, but it's a black box with no fill-color/blur-radius/
+/// border knobs to expose - it can't be tuned to reproduce a specific
+/// hand-designed look. "Pixel for pixel" means matching the mock's actual
+/// recipe by hand instead.
+private struct GlassSurface<S: InsettableShape>: ViewModifier {
+    let shape: S
 
-    func screenBackground() -> some View {
-        self.scrollContentBackground(.hidden)
-            .background(AppBackground())
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    // `backdrop-filter: blur(26px) saturate(190%)` -
+                    // `.ultraThinMaterial` is the closest built-in stand-in;
+                    // exact blur radius/saturation aren't independently
+                    // tunable the way CSS's are.
+                    shape.fill(.ultraThinMaterial)
+                    shape.fill(Theme.glassFill)
+                    // `.g::after`'s diagonal sheen.
+                    shape.fill(
+                        LinearGradient(colors: [.white.opacity(0.3), .white.opacity(0)], startPoint: .topLeading, endPoint: UnitPoint(x: 0.6, y: 0.6))
+                    ).opacity(0.5)
+                }
+            }
+            .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+            // `inset 0 1px 0 rgba(255,255,255,.35)` - a top highlight line;
+            // stroking the full shape then masking to a sliver at the top
+            // (rather than trying to draw just one edge) keeps this simple
+            // and correct regardless of the shape's actual geometry.
+            .overlay(
+                shape.stroke(Color.white.opacity(0.35), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.06)))
+            )
+            .clipShape(shape)
+            .compositingGroup()
+            // `0 10px 30px var(--sh)` - a soft, downward-offset drop shadow.
+            .shadow(color: Theme.glassShadow, radius: 15, x: 0, y: 10)
     }
 }
 
-struct StatusBadge: View {
-    let status: PhaseStatus
+extension View {
+    /// The mock's `.card`/`.g` panel: rounded glass, no default padding
+    /// beyond what `.card`/`.card.p` add at each call site.
+    func glassCard(_ radius: CGFloat = 24, padding: CGFloat = 16) -> some View {
+        self.padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(GlassSurface(shape: RoundedRectangle(cornerRadius: radius, style: .continuous)))
+    }
+
+    /// The mock's `.g` on a pill/circle shape - tab bar, segmented
+    /// control, chips, round icon buttons.
+    func glassPill() -> some View {
+        self.modifier(GlassSurface(shape: Capsule(style: .continuous)))
+    }
+
+    func glassCircle() -> some View {
+        self.modifier(GlassSurface(shape: Circle()))
+    }
+
+    /// The mock's `.chip`: small pill label (`background:var(--fl)`, a
+    /// hairline inset border, no blur) - status/count badges, not a full
+    /// glass surface.
+    func chipStyle() -> some View {
+        self
+            .font(.system(size: 11.5, weight: .semibold))
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .background(Theme.fill, in: .capsule)
+            .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+}
+
+/// The mock's `.toast`: a transient top-center pill notice that fades in
+/// and auto-dismisses (`toast()`/`setTimeout(...,2300)`) - a primitive the
+/// app didn't have before Skin v2. Attach with `.toast($message)`; set the
+/// binding to a string to show it, it clears itself back to nil after the
+/// mock's own 2.3s.
+private struct ToastModifier: ViewModifier {
+    @Binding var message: String?
+    @State private var dismissTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .top) {
+            if let message {
+                Text(message)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .glassPill()
+                    .padding(.top, 58)
+                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
+                    .onAppear {
+                        dismissTask?.cancel()
+                        dismissTask = Task {
+                            try? await Task.sleep(for: .seconds(2.3))
+                            if !Task.isCancelled { self.message = nil }
+                        }
+                    }
+            }
+        }
+    }
+}
+
+extension View {
+    func toast(_ message: Binding<String?>) -> some View {
+        modifier(ToastModifier(message: message))
+    }
+}
+
+/// The mock's `.sheet`/`.grab`/`.sh3`: a bottom glass panel with its own
+/// grab handle and Caprasimo heading, presented over a dim scrim - built
+/// as content for SwiftUI's OWN native `.sheet(isPresented:)` (which
+/// already gives keyboard avoidance, swipe-to-dismiss and accessibility
+/// for free) rather than hand-rolling the mock's custom scrim+overlay
+/// system from scratch. `title` is optional since a couple of the mock's
+/// sheets (the model picker) put their own header content inline instead.
+struct GlassSheet<Content: View>: View {
+    var title: String?
+    @ViewBuilder var content: Content
+
     var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .glassEffect(.regular.tint(color.opacity(0.25)), in: .capsule)
-    }
-    private var text: String {
-        switch status { case .pending: "Draft"; case .running: "Rendering"; case .done: "Ready"; case .failed: "Failed" }
-    }
-    private var symbol: String {
-        switch status { case .pending: "circle.dashed"; case .running: "bolt.fill"; case .done: "checkmark.circle.fill"; case .failed: "exclamationmark.triangle.fill" }
-    }
-    private var color: Color {
-        switch status { case .pending: .secondary; case .running: Theme.accent; case .done: .green; case .failed: .red }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Capsule().fill(Theme.ink2).frame(width: 38, height: 5).opacity(0.5)
+                    .frame(maxWidth: .infinity).padding(.bottom, 4)
+                if let title { Text(title).font(.disp(24)).foregroundStyle(Theme.ink) }
+                content
+            }
+            .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 22)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .presentationCornerRadius(34)
+        .presentationBackground {
+            Theme.bg1.opacity(0.62).background(.ultraThinMaterial)
+        }
     }
 }

@@ -1,0 +1,127 @@
+# AVG Studio (iOS) — Skin v2: full redesign from the owner's HTML mock
+
+The owner hand-designed a complete, clickable HTML/CSS/JS prototype (not
+looking at this codebase) and wants the real app to match it pixel-for-pixel
+in look AND behavior. This supersedes `UI_POLISH_PLAN.md`'s remaining scope
+(that plan's Phases 1-3 already landed; its one open item, a Dynamic Type
+simulator check, still stands and isn't touched by this).
+
+The mock is `incoming_files/31cde4b51_AVG20Studio20for20iOS.html` from the
+2026-09-28 "rewrite the skin" conversation - re-read it directly if a detail
+here is unclear rather than trusting this summary alone.
+
+## What the mock actually specifies (read once, applies everywhere)
+
+- **Palette** (light/dark pairs): bg1 `#f4eee5`/`#14110d`, bg2 (olive-tinted)
+  `#e4eedb`/`#1b2418`, ink `#241a12`/`#f6efe6`, i2 (secondary text) is ink at
+  60%/62% alpha, gl (glass fill) white at 50%/9%, ed (glass edge) white at
+  75%/22%, sh (shadow) is a warm brown/black at 16%/45%, fl (subtle fill -
+  segmented-inactive, switch track, chip bg) is ink/white at 7%/8%. Single
+  accent `#e08a4e` (warm amber) - **no more three-hue accent/violet/teal
+  system**, `ok` (success) `#6f8757`/`#aebf92`, `bad` (danger) `#c4544a`.
+- **Display font**: Caprasimo (bundled, OFL-licensed, `Resources/`) for
+  every screen title (`.lt`) and sheet heading (`.sh3`), regular weight, NOT
+  bold. Body text stays system (SF Pro / San Francisco).
+- **Glass**: NOT Apple's Liquid Glass API (`.glassEffect`) - the mock hand-
+  rolls its own recipe (26px blur + 190% saturate, translucent fill, .5px
+  edge, inset top highlight + outer shadow, a diagonal white sheen overlay)
+  that doesn't match Liquid Glass's system rendering. Pixel-fidelity means
+  rebuilding this recipe by hand (`.background(.ultraThinMaterial)` + custom
+  fill/border/shadow/sheen), not tinting the system material.
+- **Background**: solid diagonal gradient (bg1→bg2) plus exactly TWO large
+  blurred "orb" blobs (amber top-right, olive bottom-left, 300px, 70px blur,
+  opacity .45/.3) that drift via one CSS keyframe (`translate(-40px,60px)
+  scale(1.15)`, 18s ease-in-out alternate) - simpler and more specific than
+  the 4-blob version just built for the old palette; replace it, don't layer
+  on top of it.
+- **Navigation**: floating pill title bar that fades in on scroll (not a
+  standard nav bar); a floating pill tab bar, **five** tabs in this order -
+  Library, **Studio**, Create (+), Channels, Settings. Tapping a library
+  card sets Studio's "current project" and switches to the Studio TAB - it
+  does not push a detail screen. This is a real navigation model change
+  (`AppTab` needs a `.studio` case), not just a skin - implementing as drawn
+  since it's unambiguous in the mock, not asking first.
+- **Sheets**: nearly every picker (channel, model, image model, voice, API
+  key entry, phase file list, export options) is a bottom sheet with a grab
+  handle over a scrim, not a pushed screen or a `Menu`.
+- **Toasts**: a new transient-notice primitive (top-center pill, auto-
+  dismiss) - doesn't exist in the app at all yet.
+- **Selection mode**: an explicit toggle (top-right icon in the title bar)
+  puts Library into multi-select with a dedicated floating "N selected /
+  Archive" bar - more than the current per-card swipe/context-menu archive;
+  add this without removing the existing per-card actions.
+- **Settings**: single page again (mock shows ONE screen with a
+  Channel/Global segmented mode switch), not the three-page split Phase 2
+  of the old plan did. Re-merging is an intentional read of the mock, not a
+  mistake - the old split solved a real clutter problem a different way;
+  this replaces that structure per the new design.
+
+## Known mock-vs-real mismatches (adapt to real data, don't fake it)
+
+- Mock's Studio "Pipeline" list has 8 rows (Brief/Script/Director I/Director
+  II/Visuals/Voice/Captions/Render) with individual done/live state. Real
+  `PhaseID` only has 5 stored phases (writing/visuals/voice/captions/render)
+  - Brief/Script/Director I/Director II are sub-steps INSIDE `.writing`,
+  tracked only as progress-message text (`store.jobs[id].message`), not as
+  separate persisted statuses. Decision: keep the real 5-row granularity,
+  port the mock's exact row styling (icon circle, pulsing "live" state,
+  inline progress bar, trailing done/percent text) to those 5 rows, and
+  surface the live sub-step message as StudioView already does today. Not
+  building fake finer-grained persisted phase tracking for this.
+- Mock's Settings "Model cache" (Groq 5/10 proven, rebuild-cache button with
+  a fake progress timer), "API keys" list (Groq/Gemini/HuggingFace/
+  Pollinations/ElevenLabs with Connected/Add-key chips), and "App health"
+  screen's provider list/error log are ALL demo placeholder data in the
+  mock's JS (`MD`, `KEYS`, `cp`, fake error log strings) - port the UI
+  pattern (rows, chips, sheet-based key entry), wire it to whatever real
+  equivalents already exist in `ModelCatalog.swift`/`HealthView.swift`/
+  `Keychain.swift`, and only invent new real state if a real feature is
+  genuinely missing (flag here if so, don't silently fabricate fake counts).
+- Mock's Library empty-state copy, project list, channel names, etc. are all
+  placeholder demo content - use real `Store.projects`/`Store.channels`.
+
+## Phases (each gets its own commit + green build before the next)
+
+1. **Foundation** - `Theme.swift` full rewrite: new color tokens (dynamic
+   light/dark via `UIColor` trait closures), Caprasimo font registration +
+   `Theme.disp(size:)` helper, hand-rolled glass card/pill modifiers
+   replacing `.glassEffect` call sites, rewritten `AppBackground` (2-orb
+   version), toast primitive, bottom-sheet presentation helper, segmented-
+   control/chip/button style helpers. Nothing else can look right until
+   this lands.
+2. **Navigation shell** - `App.swift`/`Models.swift`: add `AppTab.studio`,
+   make Library's "pick" action switch tabs instead of pushing, floating
+   scroll-reveal title bar, floating pill tab bar with the new 5-tab set.
+3. **Library** - `HomeView.swift`: title bar + search field + segmented
+   filter + grid card style (rounded thumbnail, play glyph, status chip,
+   progress bar) + selection mode + floating select bar, matching the mock.
+4. **Studio** - `StudioView.swift`: restyle as a tab-hosted screen (current
+   project from `Store`, not a pushed `projectID`), takes segmented control,
+   device-frame preview, 5-row pipeline list per the adaptation above, log
+   card, export sheet (CapCut export from the last session becomes one of
+   its rows, alongside Save-to-Photos/Share-link).
+5. **Create** - `CreateView.swift`: topic field, format segmented control,
+   settings rows opening sheets (channel/model/image-model/voice pickers),
+   scene stepper, estimated-cost card, restyled to match.
+6. **Channels** - `ChannelsView.swift`: active-channel list + edit chevron,
+   "Global defaults" entry row, matching card/row style. Channel editor
+   sheet itself (already reduced to 8 sections in the old plan) gets the new
+   visual skin, not a re-split.
+7. **Settings** - `SettingsView.swift`: re-merge the 3-page split back into
+   one page with the Channel/Global segmented mode switch, matching the
+   mock's section list (Writing/Visuals/Voice/Captions groups → API keys →
+   Model cache → Library → Appearance incl. Night/Day/Auto → App health
+   link).
+8. **App health** - `HealthView.swift`: 3-up status tiles + provider list +
+   error log card, restyled.
+9. **Welcome / remaining polish** - `WelcomeView.swift` restyle; sweep for
+   any leftover `Theme.violet`/`Theme.teal` call sites once every screen
+   above is done and decide case-by-case (both constants stay defined for
+   now so nothing breaks mid-migration).
+
+## Notes
+
+- Reduce Motion must keep working (orb background AND toast/sheet
+  animations) - already a hard requirement from the old plan, still is.
+- `git fetch` + rebase before starting each phase - other sessions may land
+  work on `ios-native` in parallel (see `UI_POLISH_PLAN.md`'s own sync note).

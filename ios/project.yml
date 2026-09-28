@@ -32,6 +32,11 @@ targets:
         # for exactly what this can and can't promise.
         BGTaskSchedulerPermittedIdentifiers:
           - com.avgstudio.app.render
+        # Skin v2 (see ios/SKIN_V2_PLAN.md) - display headings use the
+        # bundled Caprasimo font (OFL-licensed, Resources/), with a
+        # system-serif fallback baked into Theme.disp itself.
+        UIAppFonts:
+          - Caprasimo-Regular.ttf
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.avgstudio.app
