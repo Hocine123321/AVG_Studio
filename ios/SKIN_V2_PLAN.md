@@ -179,8 +179,13 @@ here is unclear rather than trusting this summary alone.
    system - Auto preserves that exact old default). No "Library" section
    (no real parallel-jobs or user-choosable storage-folder setting
    exists to show there - flagged rather than faked).
-8. **App health** - `HealthView.swift`: 3-up status tiles + provider list +
-   error log card, restyled.
+8. **App health** ✅ done (fdc86c2) - `HealthView.swift` moved off a
+   native List onto ScrollView+glassCard: 3 stat tiles (overall health/
+   free storage/keys saved, all derived from the existing checks array),
+   the provider/dependency checks as one shared card with hairlines, and
+   a new "Recent activity" card previewing the last 3 `store.log`
+   entries with a "See all" link to `ErrorLogView` - real data that
+   already existed, just not shown on this screen before.
 9. **Welcome / remaining polish** - `WelcomeView.swift` restyle; sweep for
    any leftover `Theme.violet`/`Theme.teal` call sites once every screen
    above is done and decide case-by-case (both constants stay defined for
