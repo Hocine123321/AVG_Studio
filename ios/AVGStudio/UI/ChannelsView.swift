@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// The mock's `ch()` screen: a "Global defaults" entry row (its own card,
+/// globe glyph - bridges to Settings since the Channel/Global mode
+/// toggle lives there, real once Phase 7 re-merges Settings back to one
+/// page), then every channel as a ROW inside ONE shared card (hairlines
+/// between rows, not each channel in its own floating card the way
+/// Library's project grid works), then a plain "New channel" button.
+/// Tapping a row's main content ACTIVATES that channel (mock's `act`);
+/// a separate trailing chevron opens the editor (mock's `edch`) - two
+/// distinct tap targets, not the old single "tap row = edit, plus a
+/// button = activate" split.
 struct ChannelsView: View {
     @Environment(Store.self) private var store
     @State private var editing: Channel?
@@ -7,42 +17,90 @@ struct ChannelsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                ForEach(store.channels) { c in
-                    HStack(spacing: 14) {
-                        Image(systemName: c.id == store.activeChannelID ? "star.circle.fill" : "person.crop.circle")
-                            .font(.title)
-                            .foregroundStyle(c.id == store.activeChannelID ? (Theme.color(hex: c.accentColorHex) ?? Theme.accent) : .secondary)
+                Button {
+                    Haptics.light()
+                    store.tab = .settings
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "globe").font(.title3).foregroundStyle(Theme.accent)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(c.name).font(.headline)
-                            Text("\(c.niche.isEmpty ? "General" : c.niche) · \(c.targetSeconds)s · \(c.aspectRatio.rawValue)")
-                                .font(.caption).foregroundStyle(.secondary)
+                            Text("Global defaults").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                            Text("Used when a channel leaves a value unset").font(.caption).foregroundStyle(Theme.ink2)
                         }
-                        Spacer()
-                        if c.id != store.activeChannelID {
-                            Button("Activate") { withAnimation(.spring) { store.activate(c) } }
-                                .buttonStyle(.glass)
-                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink2)
                     }
-                    .glassCard()
                     .contentShape(.rect)
-                    .onTapGesture { editing = c }
-                    .contextMenu {
-                        Button("Edit", systemImage: "pencil") { editing = c }
-                        Button("Delete", systemImage: "trash", role: .destructive) { store.deleteChannel(c) }
-                            .disabled(store.channels.count < 2)
+                }
+                .buttonStyle(.plain)
+                .glassCard(24, padding: 14)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(store.channels.enumerated()), id: \.element.id) { i, c in
+                        if i > 0 { hairline }
+                        channelRow(c)
                     }
                 }
+                .padding(.horizontal, 14)
+                .glassCard(24, padding: 6)
+
+                Button {
+                    Haptics.light()
+                    editing = Channel(name: "New Channel")
+                } label: {
+                    Label("New channel", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
             }
             .padding(16)
         }
         .screenBackground()
         .navigationTitle("Channels")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Add", systemImage: "plus") { editing = Channel(name: "New Channel") }
-            }
-        }
         .sheet(item: $editing) { c in ChannelEditor(channel: c) }
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+    }
+
+    @ViewBuilder private func channelRow(_ c: Channel) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                Haptics.light()
+                withAnimation(.spring) { store.activate(c) }
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle().fill(c.id == store.activeChannelID ? (Theme.color(hex: c.accentColorHex) ?? Theme.accent) : Theme.fill)
+                        if c.id == store.activeChannelID {
+                            Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.onAccent)
+                        }
+                    }
+                    .frame(width: 32, height: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                        Text("\(c.niche.isEmpty ? "General" : c.niche) · \(c.targetSeconds)s · \(c.aspectRatio.rawValue)")
+                            .font(.caption).foregroundStyle(Theme.ink2)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            Button { editing = c } label: {
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+                    .frame(width: 30, height: 30)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit \(c.name)")
+        }
+        .padding(.vertical, 8)
+        .contextMenu {
+            Button("Edit", systemImage: "pencil") { editing = c }
+            Button("Delete", systemImage: "trash", role: .destructive) { store.deleteChannel(c) }
+                .disabled(store.channels.count < 2)
+        }
     }
 }
 
@@ -237,6 +295,15 @@ struct ChannelEditor: View {
                     Button("Save") { store.upsert(channel); dismiss() }.disabled(channel.name.trimmed.isEmpty)
                 }
             }
+            // A themed pass, not a rebuild: this stays a native Form (8
+            // Sections of Pickers/Sliders/ColorPickers/Steppers - see the
+            // "Phase 3 polish" comment above on why it isn't split further)
+            // sitting on the app's own warm background instead of the
+            // system grouped-list one, tinted with the real accent - not
+            // hand-rolled glass rows per SKIN_V2_PLAN.md's own scope note
+            // for this screen ("gets the new visual skin, not a re-split").
+            .screenBackground()
+            .tint(Theme.accent)
         }
         .presentationDetents([.medium, .large])
     }
