@@ -157,11 +157,28 @@ here is unclear rather than trusting this summary alone.
    Sections, not hand-rolled glass rows for every Picker/Slider/
    ColorPicker (a much larger effort than "gets the new visual skin, not
    a re-split" was asking for here).
-7. **Settings** - `SettingsView.swift`: re-merge the 3-page split back into
-   one page with the Channel/Global segmented mode switch, matching the
-   mock's section list (Writing/Visuals/Voice/Captions groups → API keys →
-   Model cache → Library → Appearance incl. Night/Day/Auto → App health
-   link).
+7. **Settings** ✅ done (33ad6cc) - `SettingsView.swift` re-merged the
+   3-page split (UI_POLISH_PLAN.md's earlier AI Providers/Video & Render/
+   Captions) back onto ONE Form, grouped under the mock's own section
+   names as closely as the real fields correspond: Writing, Visuals
+   (also absorbed Quality/FPS/Ken Burns/Filters - the mock has no
+   separate Video section), Voice, Captions, API keys, Model cache,
+   Appearance, then App health/Activity links. Did NOT build the mock's
+   Channel/Global segmented mode toggle: it assumes every field has both
+   a global default AND a per-channel override sitting behind it, which
+   isn't how this app's settings are shaped (provider/quality/captions
+   are global-only; tone/niche/per-phase-model/recycling/cards/brand are
+   per-channel-only, in ChannelEditor since Phase 6) - there's no
+   uniform pair to flip between, so the toggle would show values with
+   nothing real to switch to. Two small real additions instead of faked
+   mock content: "Refresh all model lists" (a real aggregate refresh()
+   over every ModelPickerRow's catalog) in place of the mock's static
+   "Proven working: Groq 5 of 10..." text, and Appearance's Night/Day/
+   Auto is now a REAL `preferredColorScheme` override (this app
+   previously had no in-app theme override, only ever following the
+   system - Auto preserves that exact old default). No "Library" section
+   (no real parallel-jobs or user-choosable storage-folder setting
+   exists to show there - flagged rather than faked).
 8. **App health** - `HealthView.swift`: 3-up status tiles + provider list +
    error log card, restyled.
 9. **Welcome / remaining polish** - `WelcomeView.swift` restyle; sweep for
