@@ -146,10 +146,17 @@ here is unclear rather than trusting this summary alone.
    Scenes stepper (no fixed scene-count setting exists - the AI script
    decides) and its static per-phase cost table (no real number is known
    before a run) entirely rather than fabricating either.
-6. **Channels** - `ChannelsView.swift`: active-channel list + edit chevron,
-   "Global defaults" entry row, matching card/row style. Channel editor
-   sheet itself (already reduced to 8 sections in the old plan) gets the new
-   visual skin, not a re-split.
+6. **Channels** ✅ done (28583f9) - `ChannelsView.swift` list rebuilt to
+   the mock's `ch()`: a "Global defaults" row (bridges to Settings),
+   every channel as a row inside ONE shared card with hairlines (not
+   each in its own floating card), plain "New channel" button replacing
+   the old toolbar Add. Split the old single tap target: row content
+   now activates, a dedicated trailing chevron opens the editor. The
+   editor itself got the scoped-down treatment the plan called for -
+   `screenBackground()` + `Theme.accent` tint on the same native Form/8
+   Sections, not hand-rolled glass rows for every Picker/Slider/
+   ColorPicker (a much larger effort than "gets the new visual skin, not
+   a re-split" was asking for here).
 7. **Settings** - `SettingsView.swift`: re-merge the 3-page split back into
    one page with the Channel/Global segmented mode switch, matching the
    mock's section list (Writing/Visuals/Voice/Captions groups → API keys →
