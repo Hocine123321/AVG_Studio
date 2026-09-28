@@ -58,22 +58,40 @@ it's the single most "everything at once" screen in the app. Plan:
   rather than 5 classes — moving them to child views needs the same
   survive-re-evaluation care).
 
-## Phase 3 — remaining polish pass (next session)
+## Phase 3 — remaining polish pass (in progress)
 
-- Empty/loading states: `ProjectCard`'s thumbnail has a placeholder gradient
-  already; check other screens (Channels, Reusable images) have an equally
-  considered empty state, not just `ContentUnavailableView` defaults.
-  Check for a real loading skeleton before AVPlayer content loads.
-- Typography/spacing consistency pass across all `glassCard()` sections —
-  look for inconsistent header casing, padding, or icon sizing between
-  screens now that there are ~10 of them.
-- Accessibility: VoiceOver labels for icon-only buttons, Dynamic Type check
-  on the card grid and Studio screen text.
-- Re-verify `ChannelsView`'s already-long `ChannelEditor` sheet (Identity /
-  Videos / Brand / Recycling / Cards / Images / Voice cleanup / 4 model
-  sections) — likely the same "one screen holds everything" pattern as
-  Settings; same grouped-navigation treatment once Settings' pattern is
-  proven out.
+- [x] Empty/loading states checked: `ChannelsView` always has ≥1 channel from
+  onboarding so an empty list isn't reachable in normal use; `ReusableImagesView`'s
+  empty pool still shows its "Add from Photos" action + explanation. Both
+  degrade reasonably as-is — no change made.
+- [x] Section header casing audited across every `Form` — already consistent
+  sentence case ("AI services", "Video", "Captions", "Apple voice", ...).
+  Nothing to fix.
+- [x] Accessibility: audited every `Image(systemName:)` in `UI/` for icon-only
+  *tappable* controls (as opposed to decorative icons sitting next to text,
+  which VoiceOver already reads via the label). Found and fixed exactly one
+  gap — `ProjectCard`'s overflow `Menu` (`c1046b0`).
+- [x] `ChannelEditor` sheet: had 11 Form sections, 4 of which (Brief/Script-
+  Draft/Script-Segmentation/Direction) were the identical "3 pickers + header
+  + footer" shape repeated 4 times. Merged into one "Per-phase models"
+  section — 11 → 8 sections (`d95ed5e`→`28f044b` after a rebase). Did NOT do
+  a full page-split like Settings: 8 sections in one sheet is a reasonable
+  size, unlike Settings' 9 fully-independent sections; splitting further felt
+  like manufactured work rather than a real win.
+- [ ] Dynamic Type check on the card grid and Studio screen text — needs an
+  actual Accessibility-size simulator run, can't be verified by reading code
+  alone. Flagging for whoever has simulator access rather than guess-fixing.
+
+## Sync note
+
+Another agent/session is also pushing to `ios-native` in parallel (saw
+`f8fabfb` "keep animated background mesh inside bounds" and `a6aa73b`
+"avoid duplicate video encode and per-frame image work" land between two of
+my sessions, both authored as `Hocine123321`, both green). `f8fabfb` is a
+real fix on top of Phase 1's `AppBackground` rework — worth reading before
+touching `Theme.swift` again. No conflicts so far since work has stayed on
+different files, but always `git fetch` + rebase before starting, not just
+before pushing.
 
 ## Notes
 
