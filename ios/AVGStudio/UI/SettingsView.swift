@@ -73,7 +73,7 @@ struct SettingsView: View {
         @Bindable var store = store
         Form {
             // ── Writing ──────────────────────────────────────────────
-            Section("Writing") {
+            Section {
                 Picker("Writer", selection: $store.settings.text) {
                     ForEach(TextProviderKind.allCases) { Text($0.label).tag($0) }
                 }
@@ -88,7 +88,7 @@ struct SettingsView: View {
                 if store.settings.dynamicPausesEnabled {
                     Stepper("Pause length: \(Int(store.settings.pauseMs)) ms", value: $store.settings.pauseMs, in: 200...2000, step: 100)
                 }
-            } footer: {
+            } header: { Text("Writing") } footer: {
                 Text("When the writer inserts [pause], on becomes a real held silence between two separately-recorded segments. Off just collapses it to a beat, spoken as part of one take.")
             }
 
@@ -96,7 +96,7 @@ struct SettingsView: View {
             // Folds in Quality/FPS/Ken Burns/Filters too - the mock has
             // no separate "Video" section, everything about how a take
             // LOOKS lives here.
-            Section("Visuals") {
+            Section {
                 Picker("Images", selection: $store.settings.image) {
                     ForEach(ImageProviderKind.allCases) { Text($0.label).tag($0) }
                 }
@@ -124,7 +124,7 @@ struct SettingsView: View {
                 if store.settings.filterStyle != .none {
                     Slider(value: $store.settings.filterIntensity, in: 0...100) { Text("Filter intensity") }
                 }
-            } footer: {
+            } header: { Text("Visuals") } footer: {
                 Text("Filters are an on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.")
             }
 
