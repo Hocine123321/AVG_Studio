@@ -118,11 +118,21 @@ here is unclear rather than trusting this summary alone.
    reuse. Still has the native `.navigationTitle` bar, not yet the mock's
    custom floating scroll-reveal title - still deferred (see Phase 2's
    note).
-4. **Studio** - `StudioView.swift`: restyle as a tab-hosted screen (current
-   project from `Store`, not a pushed `projectID`), takes segmented control,
-   device-frame preview, 5-row pipeline list per the adaptation above, log
-   card, export sheet (CapCut export from the last session becomes one of
-   its rows, alongside Save-to-Photos/Share-link).
+4. **Studio** ✅ done (1d6b660) - `StudioView.swift`: each of the 5
+   stored `PhaseID` rows is now its own floating glass card with a
+   pulsing/filled `PhaseIcon`, a real per-phase subtitle, and an honest
+   trailing Done/percent/dash (kept the real per-take horizontal scroller
+   rather than the mock's fixed 2-take segmented control - a real N-takes
+   feature, not a downgrade). Added the mock's always-visible "Live list"
+   card (`store.projectLogTail`, last 6 lines) alongside the existing
+   full-history Log sheet. Consolidated Save-to-Photos/CapCut/Share into
+   one Export sheet (first real use of Phase 1's `GlassSheet`). Kept the
+   real Render/Render-again/Cancel trigger the mock's own demo doesn't
+   need (its projects auto-progress through a queue this app doesn't
+   have) - removing it would have broken starting or retrying a render.
+   Tapping a non-running phase row now confirms via `confirmationDialog`
+   before redoing it, preserving the old Menu's one-extra-step safety net
+   instead of a bare single-tap redo.
 5. **Create** - `CreateView.swift`: topic field, format segmented control,
    settings rows opening sheets (channel/model/image-model/voice pickers),
    scene stepper, estimated-cost card, restyled to match.
