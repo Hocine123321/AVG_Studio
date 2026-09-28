@@ -34,6 +34,9 @@ enum Theme {
     static let bg1 = dyn(rgb(244, 238, 229), rgb(20, 17, 13))
     static let bg2 = dyn(rgb(228, 238, 219), rgb(27, 36, 24))
     // --ink / --i2 (secondary text, ink at 60%/62% alpha)
+    /// Solid-enough panel behind long text in pop-up windows (the log), so it
+    /// stays readable whatever the glass transparency is set to.
+    static let logPanel = dyn(rgb(255, 250, 242, 0.82), rgb(20, 16, 12, 0.72))
     static let ink = dyn(rgb(36, 26, 18), rgb(246, 239, 230))
     static let ink2 = dyn(rgb(36, 26, 18, 0.6), rgb(246, 239, 230, 0.62))
     // --gl (glass fill) / --ed (glass edge) / --sh (glass shadow) / --fl

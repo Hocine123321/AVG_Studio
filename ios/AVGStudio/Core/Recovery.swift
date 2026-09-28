@@ -1,0 +1,272 @@
+import Foundation
+import SwiftUI
+import Network
+
+/// Smart failure recovery. `HTTP.retrying` already retries automatically
+/// (the classified `POLICY` table). When that is exhausted - or the failure
+/// was never retryable - the render used to just stop with a red error.
+/// Now the render PAUSES and asks: `RecoveryPlan` says what went wrong in
+/// plain words and offers only the choices that can actually help for THAT
+/// kind of failure (a quota problem never offers "retry", a content-filter
+/// block never offers "cheaper model").
+///
+/// Safeguards (trigger -> automatic handling -> what the user is asked):
+///  1. busy/network/timeout -> 3 retries, longer waits (HTTP.retrying) -> retry / cheaper model / other provider
+///  2. rate limit           -> 5 slow retries                          -> wait a minute / other provider / cheaper model
+///  3. quota or billing     -> none (retrying can't fix it)            -> other provider / free provider / top up
+///  4. bad or missing key   -> none                                    -> fix key / other provider
+///  5. model not found/long -> none                                    -> other model / other provider
+///  6. content filter       -> none                                    -> reword the topic / other provider
+///  7. device offline       -> waits for connection, auto-resumes      -> cancel
+///  8. low storage          -> none                                    -> says how much space to free
+///  9. same provider failing repeatedly -> remembered                  -> suggests switching for good
+enum RecoveryAction: Identifiable, Equatable {
+    case retry
+    case waitAndRetry(seconds: Int)
+    case cheaperModel
+    case otherProvider(name: String)
+    case freeProvider
+    case openKeys
+    case reword
+    case stop
+
+    var id: String {
+        switch self {
+        case .retry: return "retry"
+        case .waitAndRetry(let s): return "wait\(s)"
+        case .cheaperModel: return "cheaper"
+        case .otherProvider(let n): return "other-\(n)"
+        case .freeProvider: return "free"
+        case .openKeys: return "keys"
+        case .reword: return "reword"
+        case .stop: return "stop"
+        }
+    }
+    var label: String {
+        switch self {
+        case .retry: return "Try again"
+        case .waitAndRetry(let s): return s >= 60 ? "Wait \(s / 60) min, then retry" : "Wait \(s)s, then retry"
+        case .cheaperModel: return "Use a cheaper / lighter model"
+        case .otherProvider(let n): return "Switch to \(n)"
+        case .freeProvider: return "Switch to a free provider"
+        case .openKeys: return "Fix my API key"
+        case .reword: return "Reword the topic and retry"
+        case .stop: return "Stop here"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .retry, .waitAndRetry: return "arrow.clockwise"
+        case .cheaperModel: return "leaf"
+        case .otherProvider, .freeProvider: return "arrow.triangle.swap"
+        case .openKeys: return "key"
+        case .reword: return "text.badge.plus"
+        case .stop: return "xmark.circle"
+        }
+    }
+    var isDestructive: Bool { self == .stop }
+}
+
+struct RecoveryPlan: Identifiable {
+    let id = UUID()
+    let projectID: String
+    let phase: PhaseID
+    let title: String
+    let reason: String
+    let actions: [RecoveryAction]
+    /// Set when the same provider keeps failing (safeguard 9).
+    var pattern: String? = nil
+}
+
+@MainActor
+enum Recovery {
+    /// Failures remembered this session, per provider (safeguard 9).
+    private static var failures: [String: Int] = [:]
+
+    static func noteSuccess(_ provider: String) { failures[provider] = 0 }
+
+    /// Builds the prompt for a failed phase. `nil` means "nothing useful to
+    /// offer" (a plain bug / cancelled) - the caller falls back to the old
+    /// red-error behaviour.
+    static func plan(for error: Error, project: String, phase: PhaseID, store: Store) -> RecoveryPlan? {
+        // 8: storage. Checked first - every other fix is pointless without disk.
+        if let free = freeBytes(), free < 300_000_000 {
+            let mb = Int(free / 1_000_000)
+            return RecoveryPlan(projectID: project, phase: phase, title: "Your iPhone is almost full",
+                reason: "Only \(mb) MB free. A render needs a few hundred MB of working space. Free some up (Settings, General, iPhone Storage) and retry.",
+                actions: [.retry, .stop])
+        }
+        guard let avg = error as? AVGError else { return nil }
+        if case .missingKey = avg {
+            return RecoveryPlan(projectID: project, phase: phase, title: "An API key is missing",
+                reason: avg.localizedDescription, actions: [.openKeys, .freeProvider, .stop])
+        }
+        guard case .provider(let kind, let provider, _) = avg else { return nil }
+        failures[provider, default: 0] += 1
+        let repeated = failures[provider, default: 0] >= 3
+        let others = alternatives(to: provider, store: store)
+        let switches: [RecoveryAction] = others.prefix(2).map { .otherProvider(name: $0) }
+        var plan: RecoveryPlan?
+        switch kind {
+        case .network, .timeout:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) isn't responding",
+                reason: "\(provider) was tried 3 times with longer waits and still couldn't be reached. It is usually a busy server or a weak connection.",
+                actions: [.retry, .cheaperModel] + switches + [.stop])
+        case .rateLimit:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) says: slow down",
+                reason: "You've hit \(provider)'s rate limit (too many requests in a short time). It normally clears within a minute.",
+                actions: [.waitAndRetry(seconds: 60), .cheaperModel] + switches + [.stop])
+        case .quota, .billing:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: kind == .billing ? "\(provider) needs payment" : "\(provider) quota used up",
+                reason: kind == .billing ? "\(provider) rejected the request over billing or credit. Retrying won't help until that's fixed on their side."
+                                         : "Your free or paid allowance on \(provider) is used up. Retrying won't help until it resets.",
+                actions: switches + [.freeProvider, .stop])
+        case .auth:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) rejected your key",
+                reason: "The API key for \(provider) looks invalid, expired or lacks permission.",
+                actions: [.openKeys] + switches + [.stop])
+        case .modelMissing:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: "That model isn't available",
+                reason: "\(provider) says the chosen model doesn't exist, was retired, or the text was too long for it.",
+                actions: [.cheaperModel] + switches + [.stop])
+        case .contentFilter:
+            plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) blocked this topic",
+                reason: "The safety filter flagged the request. Switching model won't change that, but rewording the topic or trying another provider often does.",
+                actions: [.reword] + switches + [.stop])
+        case .dependency, .bug:
+            return nil
+        }
+        if repeated, var p = plan {
+            p.pattern = "\(provider) has failed \(failures[provider, default: 0]) times this session. Consider switching it for good in Settings."
+            return p
+        }
+        return plan
+    }
+
+    /// Providers other than `current`, that are usable right now (have a
+    /// key, or need none), best first.
+    static func alternatives(to provider: String, store: Store) -> [String] {
+        let p = provider.lowercased()
+        var out: [String] = []
+        if !p.contains("gemini"), Keychain.get(.gemini) != nil { out.append("Google Gemini") }
+        if !p.contains("groq"), Keychain.get(.groq) != nil { out.append("Groq") }
+        if !p.contains("pollinations") { out.append("Pollinations (free)") }
+        return out
+    }
+
+    /// Applies a chosen action to settings. Returns whether the phase
+    /// should be retried (false = stop).
+    static func apply(_ action: RecoveryAction, plan: RecoveryPlan, store: Store) async -> Bool {
+        switch action {
+        case .retry: return true
+        case .waitAndRetry(let s):
+            store.record(plan.projectID, "Waiting \(s)s before retrying…")
+            try? await Task.sleep(nanoseconds: UInt64(s) * 1_000_000_000)
+            return !Task.isCancelled
+        case .cheaperModel:
+            switch store.settings.text {
+            case .gemini: store.settings.geminiModel = "gemini-2.5-flash-lite"
+            case .groq: store.settings.groqModel = "llama-3.1-8b-instant"
+            case .pollinations: store.settings.pollinationsTextModel = "openai-fast"
+            case .apple: break
+            }
+            if store.settings.image == .gemini { store.settings.geminiImageModel = "gemini-2.5-flash-image" }
+            if store.settings.voice == .elevenlabs { store.settings.elevenModel = "eleven_flash_v2_5" }
+            store.record(plan.projectID, "Switched to a lighter model and retrying.")
+            return true
+        case .otherProvider(let name):
+            let n = name.lowercased()
+            if plan.phase == .visuals {
+                store.settings.image = n.contains("gemini") ? .gemini : .pollinations
+            } else if plan.phase == .voice {
+                store.settings.voice = n.contains("gemini") ? .gemini : .apple
+            } else {
+                store.settings.text = n.contains("gemini") ? .gemini : (n.contains("groq") ? .groq : .pollinations)
+            }
+            store.record(plan.projectID, "Switched to \(name) and retrying.")
+            return true
+        case .freeProvider:
+            switch plan.phase {
+            case .visuals: store.settings.image = .pollinations
+            case .voice: store.settings.voice = .apple
+            default: store.settings.text = .pollinations
+            }
+            store.record(plan.projectID, "Switched to a free provider and retrying.")
+            return true
+        case .openKeys:
+            store.tab = .settings
+            return false
+        case .reword:
+            store.pendingReword = plan.projectID
+            store.tab = .create
+            return false
+        case .stop: return false
+        }
+    }
+
+    static func freeBytes() -> Int64? {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        return (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage
+    }
+}
+
+/// Safeguard 7: knows if the device is online, so a render can wait for
+/// the connection instead of failing.
+@MainActor
+final class Connectivity {
+    static let shared = Connectivity()
+    private let monitor = NWPathMonitor()
+    private(set) var online = true
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.online = up }
+        }
+        monitor.start(queue: DispatchQueue(label: "avg.connectivity"))
+    }
+    /// Suspends until back online (max `timeout` seconds). Returns whether it is online.
+    func waitUntilOnline(timeout: Double = 600) async -> Bool {
+        var waited = 0.0
+        while !online, waited < timeout, !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 2_000_000_000); waited += 2
+        }
+        return online
+    }
+}
+
+/// The prompt itself: a glass sheet with the reason and the choices.
+struct RecoverySheet: View {
+    @Environment(Store.self) private var store
+    let plan: RecoveryPlan
+    let choose: (RecoveryAction) -> Void
+
+    var body: some View {
+        GlassSheet(title: plan.title) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(plan.reason).font(.subheadline).foregroundStyle(Theme.ink2)
+                if let pattern = plan.pattern {
+                    Label(pattern, systemImage: "lightbulb")
+                        .font(.footnote).foregroundStyle(Theme.accent)
+                }
+                Text("What would you like to do?").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink2)
+                ForEach(plan.actions) { a in
+                    Button { choose(a) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: a.symbol).frame(width: 22)
+                            Text(a.label).font(.subheadline.weight(.medium))
+                            Spacer()
+                        }
+                        .foregroundStyle(a.isDestructive ? Color.red : Theme.ink)
+                        .padding(12)
+                        .frame(maxWidth: .infinity)
+                        .glassCard(16, padding: 0)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled()
+    }
+}

@@ -28,15 +28,18 @@ struct RetryRule: Sendable {
     let onExhausted: OnExhausted
 }
 
-/// Verbatim from `avg/providers/errors.py`'s own table - same kinds, same
+/// network/timeout: the first try plus 3 automatic retries, waiting 4s, 8s,
+/// then 16s (exponential) - long enough to ride out a briefly busy server
+/// before the user is asked what to do (Recovery.swift). Otherwise verbatim
+/// from `avg/providers/errors.py`'s own table - same kinds, same
 /// attempt counts, same backoff seconds. `rateLimit` gets the deepest
 /// budget with a real exponential base (a 429 is the one failure genuinely
 /// expected to clear if given room); `network`/`timeout` get a short fixed
 /// retry; everything non-retryable is one attempt, decide immediately.
 let POLICY: [ErrorKind: RetryRule] = [
     .rateLimit: RetryRule(retryable: true, maxAttempts: 5, backoffSeconds: 2.0, onExhausted: .switchProvider),
-    .network: RetryRule(retryable: true, maxAttempts: 3, backoffSeconds: 1.0, onExhausted: .switchProvider),
-    .timeout: RetryRule(retryable: true, maxAttempts: 3, backoffSeconds: 1.0, onExhausted: .switchProvider),
+    .network: RetryRule(retryable: true, maxAttempts: 4, backoffSeconds: 4.0, onExhausted: .switchProvider),
+    .timeout: RetryRule(retryable: true, maxAttempts: 4, backoffSeconds: 4.0, onExhausted: .switchProvider),
     .auth: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .switchKey),
     .quota: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .switchProvider),
     .billing: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .switchProvider),

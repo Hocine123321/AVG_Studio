@@ -33,15 +33,20 @@ struct ProjectLogView: View {
                             Text("Showing the last \(tail.lines.count) of \(tail.total) lines.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        // Readable panel: text sits on a solid-ish layer
+                        // instead of straight on the window's blur.
                         Text(tail.lines.joined(separator: "\n"))
                             .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(Theme.ink)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(Theme.logPanel, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                     .padding(16)
                 }
             }
-            .screenBackground()
+            .glassSheetBackground()
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

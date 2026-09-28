@@ -51,6 +51,12 @@ final class Store {
     var jobs: [String: JobState] = [:]
     var log: [LogEntry] = []
     var tab: AppTab = .library
+    /// The failure prompt currently waiting on the user (nil = none), and
+    /// the continuation the paused render resumes from once they choose.
+    var recoveryPlan: RecoveryPlan?
+    @ObservationIgnored private var recoveryContinuation: CheckedContinuation<RecoveryAction, Never>?
+    /// Set by the "Reword the topic" choice so Create can pre-open on it.
+    var pendingReword: String?
     /// The mock's `S.cur` - which project the (now tab-hosted, not pushed)
     /// Studio screen shows. `nil` means "nothing explicitly picked yet";
     /// `currentProject` below falls back to the most recent project (index
@@ -320,6 +326,7 @@ final class Store {
 
     func cancel(_ id: String) {
         tasks[id]?.cancel()
+        if recoveryPlan?.projectID == id { resolveRecovery(.stop) }
     }
 
     private func run(_ id: String, from start: PhaseID) async {
@@ -340,7 +347,7 @@ final class Store {
             jobs[id] = JobState(phase: phase, progress: 0, message: "\(phase.title)…")
             record(id, "— \(phase.title) —")
             do {
-                try await Pipeline(store: self, projectID: id).execute(phase)
+                try await executeWithRecovery(phase, id: id)
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .done
                     $0.phases[phase.rawValue]?.finished = Date()
@@ -361,6 +368,48 @@ final class Store {
                 break
             }
         }
+    }
+
+    /// Runs one phase. On a failure the automatic retries couldn't fix,
+    /// PAUSES the render and asks the user what to do (see Recovery.swift),
+    /// then applies the choice and runs the phase again - looping until it
+    /// succeeds, the user stops, or the failure has nothing useful to offer.
+    private func executeWithRecovery(_ phase: PhaseID, id: String) async throws {
+        while true {
+            do {
+                // Safeguard 7: offline -> wait for the connection instead of failing.
+                if !Connectivity.shared.online {
+                    record(id, "No internet. Waiting for a connection, the render resumes by itself…")
+                    jobs[id]?.message = "Waiting for internet…"
+                    _ = await Connectivity.shared.waitUntilOnline()
+                }
+                try await Pipeline(store: self, projectID: id).execute(phase)
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard let plan = Recovery.plan(for: error, project: id, phase: phase, store: self) else { throw error }
+                record(id, "\(phase.title) paused: \(plan.title). Waiting for your choice.", error: true)
+                jobs[id]?.message = "Needs your decision"
+                Haptics.warning()
+                let action: RecoveryAction = await withCheckedContinuation { c in
+                    recoveryContinuation = c
+                    recoveryPlan = plan
+                }
+                recoveryPlan = nil
+                if action == .stop || action == .openKeys || action == .reword {
+                    _ = await Recovery.apply(action, plan: plan, store: self)
+                    throw error
+                }
+                if !(await Recovery.apply(action, plan: plan, store: self)) { throw error }
+            }
+        }
+    }
+
+    /// Called by the prompt sheet when the user taps a choice.
+    func resolveRecovery(_ action: RecoveryAction) {
+        recoveryContinuation?.resume(returning: action)
+        recoveryContinuation = nil
     }
 
     func progress(_ id: String, _ value: Double, _ message: String) {
