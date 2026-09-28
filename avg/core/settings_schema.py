@@ -672,6 +672,34 @@ SETTINGS: list[SettingSpec] = [
         choices=["low", "medium", "high"],
         invalidates="visuals",
     ),
+    SettingSpec(
+        id="visuals_seed_lock",
+        group="images",
+        label="Lock visual seed",
+        help=(
+            "Reuse one seed across every scene and re-run of a take, for a more "
+            "consistent look. Only Pollinations and Stable Horde support it - "
+            "the only two providers whose API accepts one."
+        ),
+        type="bool",
+        default=True,
+        scope="channel",
+        invalidates="visuals",
+    ),
+    SettingSpec(
+        id="visuals_gemini_reference_lock",
+        group="images",
+        label="Gemini reference-image consistency",
+        help=(
+            "Send the take's first generated scene image as a visual reference "
+            "on every later Gemini call, for a more consistent look. Real "
+            "bandwidth/latency/cost per image, so this is off by default."
+        ),
+        type="bool",
+        default=False,
+        scope="channel",
+        invalidates="visuals",
+    ),
     # --- image recycling (reuse a verified pool image instead of generating) ---
     SettingSpec(
         id="recycle_enabled",

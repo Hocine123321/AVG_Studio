@@ -15,3 +15,12 @@ def test_render_request_mirrors_render_project_signature():
 def test_phase_record_roundtrips():
     rec = PhaseRecord(name="render", status="failed", error="boom")
     assert PhaseRecord.model_validate(rec.model_dump()).error == "boom"
+
+
+def test_project_and_take_both_default_visual_seed_to_none():
+    from avg.core.models import Take
+
+    project = ProjectDoc(id="p", title="t", folder=Path("."), created="2026-01-01T00:00:00")
+    assert project.visual_seed is None
+    take = Take(id=1, label="Take 1", created="2026-01-01T00:00:00")
+    assert take.visual_seed is None

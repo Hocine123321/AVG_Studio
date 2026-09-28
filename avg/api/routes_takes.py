@@ -766,6 +766,9 @@ async def create_take(project_id: str, body: TakeRequest, request: Request) -> T
             # copying by hand, since `RenderPhase.run` only ever writes
             # `ctx.project.master_output` (the shadow), never the take.
             new_take.master_output = shadow_project.master_output
+            # Same reasoning, same fix - VisualsPhase.run only ever writes
+            # `ctx.project.visual_seed` (the shadow) too.
+            new_take.visual_seed = shadow_project.visual_seed
             if success:
                 _sync_current_take(project, new_take)
             # One more write even though `on_phase_change` already persisted

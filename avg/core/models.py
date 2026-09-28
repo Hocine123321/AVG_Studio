@@ -71,6 +71,11 @@ class Take(BaseModel):
     #: merely absent - one built in a test, one whose folder was removed -
     #: would read as root storage and adopt the project's phase records.
     storage: Literal["root", "own"] = "own"
+    #: Copied by hand from `shadow_project.visual_seed` after a take's run
+    #: finishes (`avg/api/routes_takes.py`) - the same treatment
+    #: `master_output` above already needs and for the same reason: phases
+    #: mutate the shadow project passed to the runner, not this object.
+    visual_seed: int | None = None
 
 class ProjectDoc(BaseModel):
     schema_version: int = 1
@@ -99,6 +104,14 @@ class ProjectDoc(BaseModel):
     # a migration. Deliberately NOT a deletion or a move: the folder is the
     # user's work and the app does not relocate it behind their back.
     archived: bool = False
+    # Slice 32 sub-slice 2: assigned once, on Visuals' first run for a
+    # take, when seed-lock is on - reused for every scene and every
+    # re-run of that take, locking the video's look rather than each
+    # image's. `None` (every project and take before this field existed,
+    # and every one after it until Visuals actually runs) means "not yet
+    # assigned". See `avg.pipeline.phases.visuals` for assignment,
+    # `avg.core.models.Take.visual_seed` for why a take needs its own copy.
+    visual_seed: int | None = None
 
 class RenderRequest(BaseModel):
     project_folder: Path

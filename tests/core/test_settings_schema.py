@@ -183,3 +183,12 @@ def test_resilience_settings_exist_with_no_invalidation():
     assert ids["resilience_quota_cooldown_hours"].default == 24.0
     assert ids["resilience_quota_cooldown_hours"].invalidates is None
     assert ids["resilience_quota_cooldown_hours"].scope == "app"
+
+
+def test_visuals_seed_and_reference_lock_settings_exist():
+    ids = {s.id: s for s in SETTINGS}
+    assert ids["visuals_seed_lock"].default is True
+    assert ids["visuals_seed_lock"].invalidates == "visuals"
+    assert ids["visuals_seed_lock"].scope == "channel"
+    assert ids["visuals_gemini_reference_lock"].default is False
+    assert ids["visuals_gemini_reference_lock"].invalidates == "visuals"
