@@ -235,6 +235,33 @@ struct SettingsView: View {
                 Text("Re-fetches every provider's live model list at once, instead of one at a time from its own picker.")
             }
 
+            // ── App related ──────────────────────────────────────────
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Glass transparency")
+                        Spacer()
+                        Text("\(Int((1 - store.settings.glassOpacity) / 0.85 * 100))%")
+                            .foregroundStyle(Theme.ink2).monospacedDigit()
+                    }
+                    // Slider runs left = solid, right = see-through.
+                    Slider(
+                        value: Binding(
+                            get: { (1 - store.settings.glassOpacity) / 0.85 },
+                            set: { store.settings.glassOpacity = 1 - $0 * 0.85 }
+                        ),
+                        in: 0...1
+                    )
+                    GlassPreview(level: store.settings.glassOpacity)
+                }
+                .padding(.vertical, 4)
+                if store.settings.glassOpacity != 1 {
+                    Button("Reset to default") { store.settings.glassOpacity = 1 }
+                }
+            } header: { Text("App related") } footer: {
+                Text("Applies to every card, field and pop-up window. The preview below the slider updates live; the rest of the app follows as you drag.")
+            }
+
             // ── Appearance ───────────────────────────────────────────
             Section("Appearance") {
                 Picker("Theme", selection: $store.settings.themePreference) {
@@ -273,6 +300,47 @@ struct SettingsView: View {
     }
 }
 
+/// Live miniature of the app (colored orbs, a glass card with a row, a
+/// pill button) drawn with the SAME fill/material math as the real glass,
+/// at the slider's current level, so the effect is visible before it's
+/// applied everywhere.
+private struct GlassPreview: View {
+    let level: Double
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Theme.bg1, Theme.bg2], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(Theme.accent).frame(width: 110, height: 110).blur(radius: 26).offset(x: -70, y: -20)
+            Circle().fill(Theme.ok).frame(width: 120, height: 120).blur(radius: 28).offset(x: 80, y: 30)
+            VStack(spacing: 10) {
+                HStack {
+                    Text("Library").font(.footnote.weight(.semibold))
+                    Spacer()
+                    Text("Done").font(.caption).foregroundStyle(Theme.ink2)
+                }
+                .padding(12)
+                .background(previewGlass(RoundedRectangle(cornerRadius: 16, style: .continuous)))
+                Text("Create a video")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.onAccent)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Theme.accent, in: Capsule())
+            }
+            .padding(.horizontal, 24)
+        }
+        .frame(height: 150)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+
+    private func previewGlass<S: InsettableShape>(_ shape: S) -> some View {
+        ZStack {
+            shape.fill(.ultraThinMaterial).opacity(level)
+            shape.fill(Color.white.opacity(0.09 * level))
+        }
+        .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+}
+
 /// The mock's key-entry sheet: one `SecureField` plus Save, and Remove
 /// when a key is already saved - opened by tapping a Settings API-key
 /// row instead of that row being an inline always-visible field.
@@ -300,6 +368,7 @@ private struct APIKeyEditSheet: View {
                     }
                 }
             }
+            .glassSheetBackground()
             .navigationTitle(key.label)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

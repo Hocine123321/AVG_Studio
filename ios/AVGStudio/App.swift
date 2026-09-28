@@ -29,7 +29,8 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var store = store
-        Group {
+        Theme.glassLevel = store.settings.glassOpacity
+        return Group {
             if !store.settings.onboarded {
                 WelcomeView()
             } else {

@@ -535,6 +535,10 @@ struct AppSettings: Codable {
     /// only ever followed the system automatically. `.auto` keeps that
     /// exact old behaviour (a nil `colorScheme` override).
     var themePreference: ThemePreference = .auto
+    /// App-wide glass opacity, 0.15 (very see-through) ... 1.0 (the mock's
+    /// own default fill). Drives every glass card AND sheet background so
+    /// the main screens and pop-up windows read the same.
+    var glassOpacity: Double = 1.0
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple

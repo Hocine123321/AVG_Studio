@@ -302,7 +302,7 @@ struct ChannelEditor: View {
             // system grouped-list one, tinted with the real accent - not
             // hand-rolled glass rows per SKIN_V2_PLAN.md's own scope note
             // for this screen ("gets the new visual skin, not a re-split").
-            .screenBackground()
+            .glassSheetBackground()
             .tint(Theme.accent)
         }
         .presentationDetents([.medium, .large])

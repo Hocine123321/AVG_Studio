@@ -26,7 +26,14 @@ enum Theme {
     static let ink2 = dyn(rgb(36, 26, 18, 0.6), rgb(246, 239, 230, 0.62))
     // --gl (glass fill) / --ed (glass edge) / --sh (glass shadow) / --fl
     // (subtle fill - segmented-inactive bg, switch track, chip bg)
-    static let glassFill = dyn(rgb(255, 255, 255, 0.5), rgb(255, 255, 255, 0.09))
+    /// 0.15...1.0, set from Settings → App (RootView pushes it in on every
+    /// change and re-renders). 1.0 == the mock's exact fill.
+    nonisolated(unsafe) static var glassLevel: Double = 1.0
+    /// Scaled with `glassLevel`, so lowering it lets far more of the
+    /// animated background show through every card, field and sheet.
+    static var glassFill: Color {
+        dyn(rgb(255, 255, 255, 0.5 * glassLevel), rgb(255, 255, 255, 0.09 * glassLevel))
+    }
     static let glassEdge = dyn(rgb(255, 255, 255, 0.75), rgb(255, 255, 255, 0.22))
     static let glassShadow = dyn(rgb(90, 60, 30, 0.16), rgb(0, 0, 0, 0.45))
     static let fill = dyn(rgb(36, 26, 18, 0.07), rgb(255, 255, 255, 0.08))
@@ -193,7 +200,7 @@ private struct GlassSurface<S: InsettableShape>: ViewModifier {
                     // `.ultraThinMaterial` is the closest built-in stand-in;
                     // exact blur radius/saturation aren't independently
                     // tunable the way CSS's are.
-                    shape.fill(.ultraThinMaterial)
+                    shape.fill(.ultraThinMaterial).opacity(Theme.glassLevel)
                     shape.fill(Theme.glassFill)
                     // `.g::after`'s diagonal sheen.
                     shape.fill(
@@ -412,7 +419,21 @@ struct GlassSheet<Content: View>: View {
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(34)
         .presentationBackground {
-            Theme.bg1.opacity(0.62).background(.ultraThinMaterial)
+            Theme.bg1.opacity(0.62 * Theme.glassLevel).background(.ultraThinMaterial.opacity(Theme.glassLevel))
         }
+    }
+}
+
+
+extension View {
+    /// Same glass backdrop `GlassSheet` uses, for sheets built on a plain
+    /// `Form` (ChannelEditor, key editor) so every pop-up window follows
+    /// the one app-wide glass-opacity setting.
+    func glassSheetBackground() -> some View {
+        self.scrollContentBackground(.hidden)
+            .presentationCornerRadius(34)
+            .presentationBackground {
+                Theme.bg1.opacity(0.62 * Theme.glassLevel).background(.ultraThinMaterial.opacity(Theme.glassLevel))
+            }
     }
 }
