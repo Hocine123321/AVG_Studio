@@ -785,6 +785,19 @@ AVAILABLE FILTERS (optional overlay clips baked over the finished scene — use 
 For a scene that should carry one, add "filter": "<name>" (the exact catalog name, lowercase). Most scenes should have none."""
 
 
+def _director2_scene_line(i: int, text: str, scene_context: dict[int, dict[str, str]]) -> str:
+    """One numbered scene line for `build_director2_prompt`'s SCENES block,
+    with Director I's role/beat/visual_intent and Visuals' safe/busy zone
+    appended in parentheses when present for that scene number (1-indexed,
+    matching `scene_context`'s own keys - `i` here is 0-indexed)."""
+    line = f'[{i + 1}] "{text}"'
+    context = scene_context.get(i + 1)
+    if context:
+        tags = ", ".join(f"{key}={value}" for key, value in context.items())
+        line += f" ({tags})"
+    return line
+
+
 def build_director2_prompt(
     inputs: CreativeInputs,
     scene_texts: list[str],
@@ -793,6 +806,7 @@ def build_director2_prompt(
     emotional_arc: str = "",
     filter_catalog: dict[str, str] | None = None,
     filters_intensity: int = 50,
+    scene_context: dict[int, dict[str, str]] | None = None,
 ) -> str:
     """Phase 5 (Director II)'s motion/grade prompt: opens with
     `build_director_style_bible`'s style-bible fragment (now including the
@@ -808,7 +822,8 @@ def build_director2_prompt(
     else to a safe default, mirroring the legacy app's own validated
     lists."""
     style_bible = build_director_style_bible(inputs, personality=personality, emotional_arc=emotional_arc)
-    numbered = "\n".join(f'[{i + 1}] "{text}"' for i, text in enumerate(scene_texts))
+    context = scene_context or {}
+    numbered = "\n".join(_director2_scene_line(i, text, context) for i, text in enumerate(scene_texts))
     filters_section = _filters_section(filter_catalog or {}, filters_intensity)
     scene_filter_field = ',"filter":"..."' if filters_section else ""
 
@@ -816,7 +831,11 @@ def build_director2_prompt(
 narration. Think like a bold human editor: your goal is to make THIS video feel special and
 intentional — a directed, edited piece, not images sliding by. You have real creative
 authority over pacing, camera movement, transitions and colour. Use contrast (calm vs.
-punchy scenes) and motion that rides the narration's energy — but stay coherent.
+punchy scenes) and motion that rides the narration's energy — but stay coherent. Where a
+scene lists a role, beat or busy zone in parentheses, that is Director I's own structural
+call and where the generated image is already visually busy — respect it rather than
+re-deciding it: a HIT beat wants a decisive move, not a drift; a busy zone is not where a
+caption or a slow pan should crowd the frame further.
 
 {style_bible}
 

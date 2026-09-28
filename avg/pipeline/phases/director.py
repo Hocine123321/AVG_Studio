@@ -128,6 +128,54 @@ def _coerce_int(value: object) -> int | None:
         return None
 
 
+def _director2_scene_context(ctx: PhaseContext) -> dict[int, dict[str, str]]:
+    """Per-scene role/beat/visual_intent (Director I's `video_map.json`,
+    its `scenes[]` list - NOT `parts[]`, which since Slice 31 holds
+    chapter takeover cards: `{after_scene, title, sub, duration_sec}`)
+    merged with safe_zone/busy_zone (Visuals' `render/scene_safezones.json`),
+    keyed by scene number, for `build_director2_prompt` to fold into its
+    prompt.
+
+    Both files are on disk by the time Director II runs (`REGISTRY` order:
+    Director I, Visuals, Voice, then this phase) - but read defensively
+    anyway, like every other optional-guidance file this pipeline
+    produces: a missing or malformed file degrades to an empty context for
+    the affected scenes, never a phase failure. Before Slice 32 neither
+    file was ever read back after the phase that wrote it.
+    """
+    context: dict[int, dict[str, str]] = {}
+
+    video_map = read_json(script_dir(ctx) / "video_map.json")
+    if isinstance(video_map, dict):
+        for entry in video_map.get("scenes") or []:
+            if not isinstance(entry, dict):
+                continue
+            scene = _coerce_int(entry.get("scene"))
+            if scene is None:
+                continue
+            bucket = context.setdefault(scene, {})
+            for key in ("role", "beat", "visual_intent"):
+                value = entry.get(key)
+                if value:
+                    bucket[key] = str(value)
+
+    safezones = read_json(render_dir(ctx) / "scene_safezones.json")
+    if isinstance(safezones, list):
+        for item in safezones:
+            if not isinstance(item, dict):
+                continue
+            scene = _coerce_int(item.get("scene"))
+            if scene is None:
+                continue
+            bucket = context.setdefault(scene, {})
+            for key in ("safe_zone", "busy_zone"):
+                value = item.get(key)
+                if value:
+                    bucket[key] = str(value)
+
+    return context
+
+
 # ── Director I ───────────────────────────────────
 
 _VALID_ROLES = {"hook", "tension", "reveal", "proof", "example", "pause", "hit", "cta"}
@@ -763,8 +811,13 @@ class Director2Phase:
         )
 
         ctx.emit(ProgressEvent(project_id=ctx.project.id, percent=0, message="Planning motion and grade..."))
+        scene_context = _director2_scene_context(ctx)
         prompt = build_director2_prompt(
-            inputs, scene_texts, filter_catalog=eligible_filters, filters_intensity=filters_intensity
+            inputs,
+            scene_texts,
+            filter_catalog=eligible_filters,
+            filters_intensity=filters_intensity,
+            scene_context=scene_context,
         )
         result = generate_text(prompt, "director2", config=ctx.router)
 

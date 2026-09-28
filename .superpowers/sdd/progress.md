@@ -1645,3 +1645,43 @@ directly on origin (not a separate feature branch) - no PR pending;
 `docs.superpowers`'s own topology check each session confirmed this and
 recommended keeping it as-is, since the broader Linux port effort (past
 just Slice 31) is still ongoing.
+
+## Slice 32 - sub-slices 1 and 2 implemented on `linux-port` (not `development`)
+
+Work targets `linux-port` by explicit user instruction. An earlier pass built
+sub-slice 1 on `development` by mistake (stale "development first" note);
+those commits still sit on `origin/development` (`c74cd17`..`27f25a5`) and
+were ported here, not reverted.
+
+**Sub-slice 1 (Provider Resilience)** - 7 tasks, `b4f57c5`..`e13a9b1`.
+Six files cherry-picked clean; `settings_schema.py` and `visuals.py`
+reconciled by hand (Slice 31 had already changed both).
+
+**Sub-slice 2 (Visual & Motion Consistency)** - 5 tasks: `visual_seed` on
+ProjectDoc/Take + take copy-back + two settings; seed on Pollinations/Stable
+Horde; `reference_image` on Gemini; VisualsPhase seed assignment + "generate
+scene 1 first" reference sequencing; Director II reads `video_map.json` +
+`scene_safezones.json`.
+
+Plan errors found while porting (the plan's own tests passed anyway, because
+they wrote fixtures in the shape the plan assumed):
+- Task 5 read `video_map["parts"]` for per-scene role/beat/visual_intent.
+  Real location is `video_map["scenes"]`; on `linux-port` `parts` is
+  chapter takeover cards. Reader uses `scenes`; a test now pins it to
+  `_normalize_scene_entry`'s real output.
+- Task 5 fixtures used `visual_intent` `CLOSEUP`/`WIDE`; real vocabulary is
+  `BACKGROUND | ASSET | POP`.
+- Task 4's import replace-block assumed `import ctypes`, absent on
+  `linux-port`; imports were merged by hand.
+- Three existing tests monkeypatch `_generate_one` with a 6-arg fake and
+  needed the new optional 7th `extra_kwargs`.
+
+`linux-port` suite: 1146 passed, 1 skipped, 0 failed.
+
+**Environment lesson:** the sandbox resets mid-session; unpushed commits
+vanish. Push after every task.
+
+**Pending:** live-provider manual verification (seed/reference on real
+Pollinations/Horde/Gemini) - never done, costs money. Sub-slice 3 (captions
+native timing) plan exists on `development` docs, not yet ported/implemented.
+Sub-slice 4 (verification gate) has spec only, no plan.

@@ -1391,3 +1391,83 @@ def test_build_card_plan_defaults_match_pre_existing_behaviour():
     # No keyword args at all - every pre-existing call site must still work.
     scenes = [{"text": "So ((why stripes?)) nobody asks."}]
     assert _build_card_plan(scenes) == {"cards": [{"element": "focused", "scene": 1, "text": "why stripes?", "accent": "accent1"}]}
+
+
+def _director2_reply(n_scenes: int) -> str:
+    return json.dumps({
+        "version": 1,
+        "grade": {"look": "warm"},
+        "scenes": [
+            {"scene": i, "motion": {"type": "zoom_in", "intensity": 0.3, "ease": "ease_out_cubic"},
+             "transition_in": "fade"}
+            for i in range(1, n_scenes + 1)
+        ],
+    })
+
+
+def test_director2_prompt_includes_video_map_and_safezone_context(tmp_path, monkeypatch):
+    """Director I's role/beat/visual_intent (`video_map.json` `scenes[]`)
+    and Visuals' safe/busy zone - both already on disk by the time
+    Director II runs - now actually reach its prompt."""
+    generator = _QueueGenerator([_director2_reply(2)])
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", generator)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["Scene one text.", "Scene two text."])
+    write_json(script_dir(ctx) / "video_map.json", {
+        "version": 1,
+        "image_count": 2,
+        "scenes": [
+            {"scene": 1, "role": "hook", "beat": "HIT", "visual_intent": "POP"},
+            {"scene": 2, "role": "payoff", "beat": "none", "visual_intent": "ASSET"},
+        ],
+        "zoom_words": [],
+        "parts": [],
+    })
+    write_json(render_dir(ctx) / "scene_safezones.json", [
+        {"scene": 1, "safe_zone": "center", "busy_zone": "lower-third"},
+        {"scene": 2, "safe_zone": "upper-third", "busy_zone": "none"},
+    ])
+
+    Director2Phase().run(ctx)
+
+    assert len(generator.calls) == 1
+    _phase, prompt = generator.calls[0]
+    assert "role=hook" in prompt
+    assert "beat=HIT" in prompt
+    assert "busy_zone=lower-third" in prompt
+    assert "role=payoff" in prompt
+
+
+def test_director2_context_reads_the_shape_director1_really_writes(tmp_path):
+    """Pins the reader to `_normalize_scene_entry`'s real output, so the
+    key it reads (`scenes`, not the chapter-card `parts`) cannot drift
+    away from what Director I actually writes."""
+    from avg.pipeline.phases.director import _director2_scene_context, _normalize_scene_entry
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    entry = _normalize_scene_entry({"scene": 1, "role": "Hook", "beat": "HIT", "visual_intent": "pop"})
+    assert entry is not None
+    write_json(script_dir(ctx) / "video_map.json", {
+        "version": 1, "image_count": 1, "scenes": [entry], "zoom_words": [],
+        "parts": [{"after_scene": 1, "title": "Part 2", "sub": "", "duration_sec": 1.8}],
+    })
+
+    assert _director2_scene_context(ctx) == {1: {"role": "hook", "beat": "HIT", "visual_intent": "POP"}}
+
+
+def test_director2_prompt_degrades_cleanly_without_video_map_or_safezones(tmp_path, monkeypatch):
+    generator = _QueueGenerator([_director2_reply(1)])
+    monkeypatch.setattr("avg.pipeline.phases.director.generate_text", generator)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project)
+    _write_scenes(ctx, ["Scene one text."])
+
+    Director2Phase().run(ctx)  # must not raise
+
+    assert len(generator.calls) == 1
+    _phase, prompt = generator.calls[0]
+    assert '[1] "Scene one text."' in prompt
