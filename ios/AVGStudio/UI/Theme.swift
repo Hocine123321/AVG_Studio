@@ -245,6 +245,36 @@ extension View {
             .background(Theme.fill, in: .capsule)
             .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
     }
+
+    /// Every scrollable/Form-based screen sits on `AppBackground` with the
+    /// system's own opaque list/form backing hidden - unchanged by Skin v2,
+    /// still needed on every screen regardless of which phase has restyled
+    /// its foreground content so far.
+    func screenBackground() -> some View {
+        self.scrollContentBackground(.hidden)
+            .background(AppBackground())
+    }
+}
+
+/// The mock's `.chip` (`background:var(--fl)`, a hairline border, ONLY the
+/// text tinted by status - not the fill) - ported status pill, still used
+/// by `HomeView` until its own Skin v2 phase restyles the whole card.
+struct StatusBadge: View {
+    let status: PhaseStatus
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .foregroundStyle(color)
+            .chipStyle()
+    }
+    private var text: String {
+        switch status { case .pending: "Draft"; case .running: "Rendering"; case .done: "Ready"; case .failed: "Failed" }
+    }
+    private var symbol: String {
+        switch status { case .pending: "circle.dashed"; case .running: "bolt.fill"; case .done: "checkmark.circle.fill"; case .failed: "exclamationmark.triangle.fill" }
+    }
+    private var color: Color {
+        switch status { case .pending: Theme.ink2; case .running: Theme.accent; case .done: Theme.ok; case .failed: Theme.bad }
+    }
 }
 
 /// The mock's `.toast`: a transient top-center pill notice that fades in
