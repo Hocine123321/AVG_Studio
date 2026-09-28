@@ -102,7 +102,9 @@ class GeminiImageProvider:
     def supports(self, aspect_ratio: str) -> bool:
         return aspect_ratio in _ASPECT_RATIOS
 
-    def generate(self, prompt: str, *, aspect_ratio: str, model: str) -> bytes:
+    def generate(
+        self, prompt: str, *, aspect_ratio: str, model: str, reference_image: bytes | None = None
+    ) -> bytes:
         key = get_key(self.name)
         if not key:
             raise AvgError(ErrorKind.auth, "Gemini API key is not set")
@@ -113,8 +115,12 @@ class GeminiImageProvider:
         model_id = _DEAD_MODEL_REMAP.get(model_id.lower(), model_id)
 
         if "imagen" in model_id.lower():
+            # Imagen's :predict body has no image-conditioning slot in this
+            # shape - reference_image is silently ignored here rather than
+            # raising, so a user who enabled the setting while routed to an
+            # Imagen model does not get a phase failure over it.
             return self._predict(model_id, prompt, aspect_ratio, key)
-        return self._generate_content(model_id, prompt, aspect_ratio, key)
+        return self._generate_content(model_id, prompt, aspect_ratio, key, reference_image)
 
     def _predict(self, model_id: str, prompt: str, aspect_ratio: str, key: str) -> bytes:
         url = f"{_GEMINI_MODELS_BASE}/{quote(model_id, safe='')}:predict?key={quote(key, safe='')}"
@@ -144,14 +150,30 @@ class GeminiImageProvider:
             raise AvgError(ErrorKind.bug, f"Gemini returned no image data (model={model_id})")
         return base64.b64decode(b64)
 
-    def _generate_content(self, model_id: str, prompt: str, aspect_ratio: str, key: str) -> bytes:
+    def _generate_content(
+        self, model_id: str, prompt: str, aspect_ratio: str, key: str, reference_image: bytes | None = None
+    ) -> bytes:
         url = f"{_GEMINI_MODELS_BASE}/{quote(model_id, safe='')}:generateContent?key={quote(key, safe='')}"
+        parts: list[dict[str, Any]] = []
+        if reference_image is not None:
+            # Prepended, ahead of the text part - Gemini's documented
+            # image-plus-text multimodal input shape reads image parts as
+            # context for the text that follows them.
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": base64.b64encode(reference_image).decode("ascii"),
+                    }
+                }
+            )
+        parts.append({"text": prompt})
         response = self._transport.request(
             "POST",
             url,
             headers={"x-goog-api-key": key, "Content-Type": "application/json"},
             json={
-                "contents": [{"parts": [{"text": prompt}]}],
+                "contents": [{"parts": parts}],
                 "generationConfig": {
                     "responseModalities": ["TEXT", "IMAGE"],
                     "imageConfig": {"aspectRatio": aspect_ratio},

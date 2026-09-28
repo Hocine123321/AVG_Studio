@@ -596,3 +596,113 @@ def test_billing_failure_switches_provider_per_policy(monkeypatch):
     pollinations = PollinationsImageProvider(transport=_replay_transport())
     data = pollinations.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux")
     assert data, "the backup provider should have produced real image bytes"
+
+
+def test_pollinations_generate_sends_seed_when_given(tmp_path, monkeypatch):
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: None)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, content=b"fake-bytes")
+
+    provider = PollinationsImageProvider(transport=_mock_record_transport(tmp_path, handler))
+    provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux", seed=12345)
+    assert "seed=12345" in captured["url"]
+
+
+def test_pollinations_generate_omits_seed_when_not_given(tmp_path, monkeypatch):
+    monkeypatch.setattr("avg.providers.images.community.get_key", lambda _p: None)
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, content=b"fake-bytes")
+
+    provider = PollinationsImageProvider(transport=_mock_record_transport(tmp_path, handler))
+    provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux")
+    assert "seed" not in captured["url"]
+
+
+def _horde_handler(captured):
+    import json as json_lib
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "generate/async" in str(request.url):
+            captured["body"] = json_lib.loads(request.content)
+            return httpx.Response(200, json={"id": "job-1"})
+        if "generate/check" in str(request.url):
+            return httpx.Response(200, json={"done": True, "faulted": False})
+        return httpx.Response(200, json={"generations": [{"img": base64.b64encode(b"fake-bytes").decode()}]})
+
+    return handler
+
+
+def test_stablehorde_submit_sends_seed_as_a_string_when_given(tmp_path):
+    captured = {}
+    provider = StableHordeImageProvider(
+        transport=_mock_record_transport(tmp_path, _horde_handler(captured)), sleep=lambda _s: None
+    )
+    provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux", seed=99)
+    assert captured["body"]["params"]["seed"] == "99"
+
+
+def test_stablehorde_submit_omits_seed_when_not_given(tmp_path):
+    captured = {}
+    provider = StableHordeImageProvider(
+        transport=_mock_record_transport(tmp_path, _horde_handler(captured)), sleep=lambda _s: None
+    )
+    provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="flux")
+    assert "seed" not in captured["body"]["params"]
+
+
+def _gemini_content_handler(captured):
+    import json as json_lib
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json_lib.loads(request.content)
+        b64 = base64.b64encode(b"fake-inline-image-bytes").decode()
+        return httpx.Response(
+            200,
+            json={"candidates": [{"content": {"parts": [{"inlineData": {"data": b64}}]}, "finishReason": "STOP"}]},
+        )
+
+    return handler
+
+
+def test_gemini_generate_content_includes_reference_image_when_given(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
+    captured = {}
+    provider = GeminiImageProvider(transport=_mock_record_transport(tmp_path, _gemini_content_handler(captured)))
+    provider.generate(
+        PROMPT_APPLE, aspect_ratio="1:1", model="gemini-3.1-flash-image", reference_image=b"reference-bytes"
+    )
+    parts = captured["body"]["contents"][0]["parts"]
+    assert len(parts) == 2
+    assert parts[0]["inline_data"]["data"] == base64.b64encode(b"reference-bytes").decode("ascii")
+    assert parts[1]["text"] == PROMPT_APPLE
+
+
+def test_gemini_generate_content_omits_reference_image_when_not_given(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
+    captured = {}
+    provider = GeminiImageProvider(transport=_mock_record_transport(tmp_path, _gemini_content_handler(captured)))
+    provider.generate(PROMPT_APPLE, aspect_ratio="1:1", model="gemini-3.1-flash-image")
+    parts = captured["body"]["contents"][0]["parts"]
+    assert len(parts) == 1
+    assert parts[0]["text"] == PROMPT_APPLE
+
+
+def test_gemini_generate_imagen_ignores_reference_image_silently(monkeypatch, tmp_path):
+    monkeypatch.setattr("avg.providers.images.premium.get_key", lambda _p: "fixture-test-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert ":predict" in str(request.url)
+        b64 = base64.b64encode(b"fake-predict-image-bytes").decode()
+        return httpx.Response(200, json={"predictions": [{"bytesBase64Encoded": b64}]})
+
+    provider = GeminiImageProvider(transport=_mock_record_transport(tmp_path, handler))
+    data = provider.generate(
+        PROMPT_APPLE, aspect_ratio="16:9", model="imagen-4.0-generate-001", reference_image=b"reference-bytes"
+    )
+    assert data == b"fake-predict-image-bytes"
