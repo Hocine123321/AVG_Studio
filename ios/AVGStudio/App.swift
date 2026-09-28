@@ -63,6 +63,11 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom) { FloatingTabBar(tab: $store.tab) }
             }
         }
+        // The mock's Settings → Appearance Night/Day/Auto switch (`S.theme`) -
+        // `.auto` passes `nil` through, which is exactly the old always-
+        // follow-the-system behaviour this app had before Settings gained
+        // an explicit override.
+        .preferredColorScheme(store.settings.themePreference.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { BackgroundRender.scheduleIfNeeded(store: store) }
         }

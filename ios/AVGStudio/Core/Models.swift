@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum PhaseStatus: String, Codable { case pending, running, done, failed }
 
@@ -365,6 +366,25 @@ struct Channel: Codable, Hashable, Identifiable {
     var director2OnFailure: PhaseOnFailure = .stop
 }
 
+enum ThemePreference: String, Codable, CaseIterable, Identifiable {
+    case auto, dark, light
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .dark: return "Night"
+        case .light: return "Day"
+        }
+    }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .auto: return nil
+        case .dark: return .dark
+        case .light: return .light
+        }
+    }
+}
+
 enum TextProviderKind: String, Codable, CaseIterable, Identifiable {
     case apple, gemini, groq, pollinations
     var id: String { rawValue }
@@ -510,6 +530,11 @@ enum FilterStyle: String, Codable, CaseIterable, Identifiable {
 
 struct AppSettings: Codable {
     var onboarded = false
+    /// The mock's own Night/Day/Auto appearance switch (`S.theme`) - this
+    /// app had no in-app override before Skin v2's Settings re-merge, it
+    /// only ever followed the system automatically. `.auto` keeps that
+    /// exact old behaviour (a nil `colorScheme` override).
+    var themePreference: ThemePreference = .auto
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple
