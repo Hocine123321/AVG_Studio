@@ -106,13 +106,13 @@ enum Recovery {
             switch s.image {
             case .gemini: return "gemini-2.5-flash-image"
             case .pollinations: return "flux"
-            default: return nil
+            default: return nil   // Stable Horde: only a user-chosen fallback (above) applies
             }
         case .voice:
             if !s.voiceFallbackModel.isEmpty { return s.voiceFallbackModel }
             switch s.voice {
             case .elevenlabs: return "eleven_flash_v2_5"
-            default: return nil
+            default: return nil   // Gemini voice: only a user-chosen fallback applies
             }
         }
     }
@@ -131,9 +131,18 @@ enum Recovery {
             case .apple: return false
             }
         case .image:
-            return s.image == .gemini ? m != s.geminiImageModel : (s.image == .pollinations ? m != s.pollinationsImageModel : false)
+            switch s.image {
+            case .gemini: return m != s.geminiImageModel
+            case .pollinations: return m != s.pollinationsImageModel
+            case .stablehorde: return m != s.stableHordeModel
+            default: return false
+            }
         case .voice:
-            return s.voice == .elevenlabs ? m != s.elevenModel : false
+            switch s.voice {
+            case .elevenlabs: return m != s.elevenModel
+            case .gemini: return m != s.geminiVoiceModel
+            case .apple: return false
+            }
         }
     }
 
@@ -152,9 +161,18 @@ enum Recovery {
             case .apple: return nil
             }
         case .image:
-            if store.settings.image == .gemini { store.settings.geminiImageModel = m } else { store.settings.pollinationsImageModel = m }
+            switch store.settings.image {
+            case .gemini: store.settings.geminiImageModel = m
+            case .pollinations: store.settings.pollinationsImageModel = m
+            case .stablehorde: store.settings.stableHordeModel = m
+            default: return nil
+            }
         case .voice:
-            store.settings.elevenModel = m
+            switch store.settings.voice {
+            case .elevenlabs: store.settings.elevenModel = m
+            case .gemini: store.settings.geminiVoiceModel = m
+            case .apple: return nil
+            }
         }
         return m
     }

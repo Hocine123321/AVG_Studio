@@ -266,17 +266,47 @@ struct SettingsView: View {
                 Text("Transparency applies to the whole app as soon as you let go of the slider. Font applies right away too; a few fixed-size headings and the tab bar keep their own type.")
             }
 
-            // ── Model fallback ───────────────────────────────────────
+            // ── Model fallback: one section per AI ───────────────────
+            // Each reuses the same cached live model list as the main picker
+            // (no typing ids), for whichever provider is currently in use.
             Section {
-                fallbackRow("Writer", $store.settings.writerFallbackModel,
-                            hint: Recovery.fallbackModel(.writer, store: store))
-                fallbackRow("Images", $store.settings.imageFallbackModel,
-                            hint: Recovery.fallbackModel(.image, store: store))
-                fallbackRow("Voice", $store.settings.voiceFallbackModel,
-                            hint: Recovery.fallbackModel(.voice, store: store))
+                if let c = writerFallbackCatalog {
+                    ModelPickerRow(title: "Fallback model", value: $store.settings.writerFallbackModel, catalog: c)
+                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.writer, store: store) ?? "none")).")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("\(store.settings.text.label) runs on your device, so there is no cheaper model to fall back to.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: { Text("Writer fallback") } footer: {
+                Text("Used when the writer's main model is over quota, out of credit or too expensive.")
+            }
+
+            Section {
+                if let c = imageFallbackCatalog {
+                    ModelPickerRow(title: "Fallback model", value: $store.settings.imageFallbackModel, catalog: c)
+                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.image, store: store) ?? "none")).")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("\(store.settings.image.label) has a single model, so there is no cheaper one to fall back to.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: { Text("Image fallback") } footer: {
+                Text("Used when the image model is over quota, out of credit or too expensive.")
+            }
+
+            Section {
+                if let c = voiceFallbackCatalog {
+                    ModelPickerRow(title: "Fallback model", value: $store.settings.voiceFallbackModel, catalog: c)
+                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.voice, store: store) ?? "none")).")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("\(store.settings.voice.label) has no cheaper model to fall back to.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Toggle("Switch automatically when too expensive", isOn: $store.settings.autoUseFallback)
-            } header: { Text("Model fallback") } footer: {
-                Text("The cheaper model each AI drops to when the main one is over quota, out of credit or too expensive. Leave a field empty to use the built-in light model for the provider you're using. With the switch on, quota and billing errors move to the fallback without asking; otherwise you're asked first.")
+            } header: { Text("Voice fallback") } footer: {
+                Text("With the switch on, a quota or billing error moves the writer, image or voice step to its fallback without asking. Otherwise you're asked first.")
             }
 
             // ── Appearance ───────────────────────────────────────────
@@ -312,14 +342,29 @@ struct SettingsView: View {
         }
     }
 
-    private func fallbackRow(_ title: String, _ value: Binding<String>, hint: String?) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            TextField(hint ?? "None available", text: value)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .foregroundStyle(Theme.ink2)
+    /// The cached catalog matching the provider currently in use for each AI
+    /// (nil when that provider has no model list, e.g. on-device).
+    private var writerFallbackCatalog: ModelCatalog? {
+        switch store.settings.text {
+        case .gemini: return geminiTextCatalog
+        case .groq: return groqTextCatalog
+        case .pollinations: return pollinationsTextCatalog
+        case .apple: return nil
+        }
+    }
+    private var imageFallbackCatalog: ModelCatalog? {
+        switch store.settings.image {
+        case .gemini: return geminiImageCatalog
+        case .pollinations: return pollinationsImageCatalog
+        case .stablehorde: return stableHordeCatalog
+        default: return nil
+        }
+    }
+    private var voiceFallbackCatalog: ModelCatalog? {
+        switch store.settings.voice {
+        case .elevenlabs: return elevenModelsCatalog
+        case .gemini: return geminiVoiceModelCatalog
+        case .apple: return nil
         }
     }
 
