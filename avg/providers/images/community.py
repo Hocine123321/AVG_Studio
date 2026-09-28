@@ -177,7 +177,7 @@ class PollinationsImageProvider:
     def supports(self, aspect_ratio: str) -> bool:
         return aspect_ratio in _POLLINATIONS_SIZE_BY_RATIO
 
-    def generate(self, prompt: str, *, aspect_ratio: str, model: str) -> bytes:
+    def generate(self, prompt: str, *, aspect_ratio: str, model: str, seed: int | None = None) -> bytes:
         size = _POLLINATIONS_SIZE_BY_RATIO.get(aspect_ratio)
         if size is None:
             raise AvgError(ErrorKind.bug, f"Pollinations: unsupported aspect_ratio {aspect_ratio!r}")
@@ -195,6 +195,8 @@ class PollinationsImageProvider:
             "safe": "true",
             "negative_prompt": _DEFAULT_NEGATIVE_PROMPT,
         }
+        if seed is not None:
+            params["seed"] = str(seed)
         query = "&".join(f"{quote(k)}={quote(v)}" for k, v in params.items())
         url = f"{_POLLINATIONS_BASE_URL}/{quote(prompt, safe='')}?{query}"
 
@@ -319,6 +321,7 @@ class StableHordeImageProvider:
         *,
         aspect_ratio: str,
         model: str,
+        seed: int | None = None,
         cancel: Callable[[], bool] | None = None,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> bytes:
@@ -334,22 +337,31 @@ class StableHordeImageProvider:
             "Client-Agent": "AVG-Studio:1.0:local",
         }
 
-        job_id = self._submit(prompt, model, width, height, headers)
+        job_id = self._submit(prompt, model, width, height, headers, seed)
         return self._poll_until_done(job_id, headers, cancel, on_progress)
 
     # -- submit --------------------------------------------------------
 
-    def _submit(self, prompt: str, model: str, width: int, height: int, headers: dict[str, str]) -> str:
+    def _submit(
+        self, prompt: str, model: str, width: int, height: int, headers: dict[str, str], seed: int | None = None
+    ) -> str:
+        params: dict[str, Any] = {
+            "sampler_name": _DEFAULT_SAMPLER,
+            "cfg_scale": _DEFAULT_CFG_SCALE,
+            "steps": _DEFAULT_STEPS,
+            "width": width,
+            "height": height,
+            "n": 1,
+        }
+        if seed is not None:
+            # AI Horde's documented API shape: seed is a string field, not
+            # an integer one, unlike every other numeric param here - kept
+            # as its own explicit assignment rather than folded into the
+            # dict literal above so that distinction stays visible.
+            params["seed"] = str(seed)
         body = {
             "prompt": prompt,
-            "params": {
-                "sampler_name": _DEFAULT_SAMPLER,
-                "cfg_scale": _DEFAULT_CFG_SCALE,
-                "steps": _DEFAULT_STEPS,
-                "width": width,
-                "height": height,
-                "n": 1,
-            },
+            "params": params,
             "models": [model],
             "nsfw": False,
             "censor_nsfw": True,
