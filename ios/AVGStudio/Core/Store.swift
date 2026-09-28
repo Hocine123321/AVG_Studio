@@ -2,7 +2,9 @@ import Foundation
 import Observation
 import UIKit
 
-enum AppTab: Hashable { case library, create, channels, settings }
+/// Order matches the mock's own floating tab bar exactly: Library,
+/// Studio, Create, Channels, Settings.
+enum AppTab: Hashable { case library, studio, create, channels, settings }
 
 struct JobState: Equatable {
     var phase: PhaseID
@@ -35,7 +37,12 @@ final class Store {
     var jobs: [String: JobState] = [:]
     var log: [LogEntry] = []
     var tab: AppTab = .library
-    var libraryPath: [String] = []
+    /// The mock's `S.cur` - which project the (now tab-hosted, not pushed)
+    /// Studio screen shows. `nil` means "nothing explicitly picked yet";
+    /// `currentProject` below falls back to the most recent project (index
+    /// 0, same as `createProject` inserting new ones at the front) exactly
+    /// like the mock's own `S.cur` starting at `0`.
+    var currentProjectID: String?
     /// Set when `load()` finds a phase stuck `.running` from a previous
     /// launch (the app was killed or lost its background grace period
     /// mid-render - see `BackgroundRender`). Surfaced as a "tap to resume"
@@ -105,6 +112,18 @@ final class Store {
     func file(_ p: Project, _ name: String?) -> URL? { name.map { folder(for: p.id).appendingPathComponent($0) } }
 
     func project(_ id: String) -> Project? { projects.first { $0.id == id } }
+
+    /// Whatever Studio (a persistent tab, not a pushed screen - Skin v2)
+    /// should show right now.
+    var currentProject: Project? { currentProjectID.flatMap(project) ?? projects.first }
+
+    /// The mock's "pick" action: set which project Studio shows AND switch
+    /// to it, in one call - tapping a library card is a tab switch now,
+    /// not a push.
+    func selectForStudio(_ id: String) {
+        currentProjectID = id
+        tab = .studio
+    }
 
     func update(_ id: String, _ body: (inout Project) -> Void) {
         guard let i = projects.firstIndex(where: { $0.id == id }) else { return }
@@ -184,7 +203,7 @@ final class Store {
         cancel(id)
         try? FileManager.default.removeItem(at: folder(for: id))
         projects.removeAll { $0.id == id }
-        libraryPath.removeAll { $0 == id }
+        if currentProjectID == id { currentProjectID = nil }
         if interruptedProjectID == id { interruptedProjectID = nil }
     }
 

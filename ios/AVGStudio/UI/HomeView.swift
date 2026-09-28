@@ -27,7 +27,10 @@ struct HomeView: View {
                 } else {
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(visible) { p in
-                            NavigationLink(value: p.id) {
+                            // Tapping a card is a TAB SWITCH now (Skin v2's
+                            // Studio is a persistent tab, not a pushed
+                            // screen) - a plain Button, not a NavigationLink.
+                            Button { store.selectForStudio(p.id) } label: {
                                 ProjectCard(project: p, onArchive: { archiveToggle(p) }, onDelete: { delete(p) })
                             }
                             .buttonStyle(.plain)
@@ -43,7 +46,6 @@ struct HomeView: View {
         }
         .screenBackground()
         .navigationTitle(showArchived ? "Archive" : "Library")
-        .navigationDestination(for: String.self) { StudioView(projectID: $0) }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(showArchived ? "Library" : "Archive", systemImage: showArchived ? "square.grid.2x2" : "archivebox") {
@@ -78,7 +80,7 @@ struct HomeView: View {
             Button("Resume") {
                 let next = PhaseID.allCases.first { p.phase($0).status != .done } ?? .render
                 store.start(p.id, from: next)
-                store.libraryPath = [p.id]
+                store.selectForStudio(p.id)
             }
             .buttonStyle(.glassProminent)
         }

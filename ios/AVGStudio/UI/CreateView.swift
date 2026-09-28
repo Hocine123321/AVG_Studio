@@ -70,7 +70,11 @@ struct CreateView: View {
         let p = store.createProject(topic: topic.trimmed, title: title, channel: ch, aspect: aspect)
         store.start(p.id)
         topic = ""; title = ""; focused = false
+        // Matches the mock's own gen() action - back to Library (with the
+        // new card visible there), NOT straight into Studio; still sets
+        // currentProjectID so a direct tap on the Studio tab shows it.
+        store.currentProjectID = p.id
         store.tab = .library
-        store.libraryPath = [p.id]
+        toast = "Started rendering “" + p.title + "”"
     }
 }

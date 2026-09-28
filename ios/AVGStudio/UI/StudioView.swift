@@ -3,7 +3,6 @@ import AVKit
 
 struct StudioView: View {
     @Environment(Store.self) private var store
-    let projectID: String
     @State private var player: AVPlayer?
     @State private var savedToPhotos = false
     @State private var showLog = false
@@ -16,7 +15,10 @@ struct StudioView: View {
     @State private var isExportingCapCut = false
 
     var body: some View {
-        if let p = store.project(projectID) {
+        // Studio is a persistent tab now (Skin v2), not a pushed screen -
+        // it always shows Store.currentProject (the mock's own S.cur), not a
+        // project id handed to it at construction time.
+        if let p = store.currentProject {
             ScrollView {
                 VStack(spacing: 16) {
                     playerCard(p)
@@ -56,9 +58,16 @@ struct StudioView: View {
             // already-rendered project.
             .onChange(of: p.output) { old, new in if old != new, new != nil { Haptics.success() } }
             .alert("Saved to Photos", isPresented: $savedToPhotos) { Button("OK") {} }
-            .sheet(isPresented: $showLog) { ProjectLogView(projectID: projectID, title: p.title) }
+            .sheet(isPresented: $showLog) { ProjectLogView(projectID: p.id, title: p.title) }
         } else {
-            ContentUnavailableView("Project not found", systemImage: "questionmark.folder")
+            ContentUnavailableView {
+                Label("No videos yet", systemImage: "clapperboard")
+            } description: {
+                Text("Create your first video and it'll show up here.")
+            } actions: {
+                Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
+            }
+            .screenBackground()
         }
     }
 

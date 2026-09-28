@@ -89,9 +89,24 @@ here is unclear rather than trusting this summary alone.
    version), toast primitive, bottom-sheet presentation helper, segmented-
    control/chip/button style helpers. Nothing else can look right until
    this lands.
-2. **Navigation shell** - `App.swift`/`Models.swift`: add `AppTab.studio`,
-   make Library's "pick" action switch tabs instead of pushing, floating
-   scroll-reveal title bar, floating pill tab bar with the new 5-tab set.
+2. **Navigation shell** ✅ done (`<pending>`) - `Store.swift`/`App.swift`/
+   `HomeView.swift`/`CreateView.swift`/`StudioView.swift`: added
+   `AppTab.studio` + `Store.currentProject`/`selectForStudio(_:)` (the
+   mock's `S.cur`/"pick"), Library's card tap and the interrupted-project
+   Resume button now switch to the Studio tab instead of pushing a screen,
+   Studio itself dropped its `projectID` init param in favour of always
+   showing `store.currentProject`, and `App.swift` gained a custom
+   `FloatingTabBar` (the mock's `.tabbar.g`) replacing the native tab bar
+   chrome (`.toolbar(.hidden, for: .tabBar)` + `.safeAreaInset`), 5 tabs in
+   the mock's order. Icons are SF Symbols matching the mock's ICONOGRAPHY
+   (grid/clapperboard/plus/people/gear), not literal ports of its hand-
+   drawn SVG paths - no native equivalent to "trace" a web glyph's exact
+   vector, and Apple's HIG favours system symbols over custom glyphs
+   anyway. Removed `Store.libraryPath` entirely (only existed to drive the
+   old push-to-Studio navigation). Did NOT build the floating
+   scroll-reveal title bar yet - deferred to land per-screen alongside each
+   screen's own restyle (Phases 3+), since it needs that screen's own
+   scroll offset, not a standalone piece.
 3. **Library** - `HomeView.swift`: title bar + search field + segmented
    filter + grid card style (rounded thumbnail, play glyph, status chip,
    progress bar) + selection mode + floating select bar, matching the mock.
