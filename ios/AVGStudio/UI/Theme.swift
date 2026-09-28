@@ -29,48 +29,81 @@ enum Theme {
 }
 
 /// A soft, continuously-flowing colour field behind the glass - the app's
-/// answer to Google Gemini's own moving backdrop, built from the same
-/// `MeshGradient` bones the previous version used but with the motion and
-/// palette doing more work: control points drift in loose, overlapping
-/// orbits (never repeating on a visible cycle - each point's period is
-/// mutually irrational-ish relative to the others) AND every colour's hue
-/// itself slowly rotates through the three brand tones, so the blend
-/// keeps evolving, not just where it sits.
+/// answer to Google Gemini's own moving backdrop.
 ///
-/// Respects Reduce Motion: a user who has it on gets ONE still frame of
-/// the same gradient (evaluated at t=0), not a paused-mid-animation frame -
-/// this was already the standard for Welcome's entrance animation but the
-/// background itself previously ignored the setting entirely.
+/// Rewritten from scratch (was `MeshGradient`-based): a 3x3 mesh pins its
+/// four outer control points to the exact viewport corners by
+/// construction, and interpolates a smooth surface FROM them - on a tall,
+/// narrow phone viewport (nothing like the square-ish canvases mesh
+/// gradients are usually demoed on) that surface can collapse into a
+/// visibly flat, almost-unblended wedge of a single corner colour before
+/// it has room to mix toward the next control point, which is exactly the
+/// "solid white/black corner patches" bug this was rewritten to fix - not
+/// a one-line tweak, a wrong tool for this aspect ratio.
+///
+/// New approach: independent soft "blobs" - each an analytic
+/// `RadialGradient` circle (colour at its centre fading smoothly to fully
+/// transparent at its own edge, well before that edge reaches the
+/// viewport bounds) drifting in slow, mutually-irrational orbits over a
+/// flat base fill. Nothing here is a convolution filter (no `.blur()`)
+/// sampling pixels outside the layer, and no control point is ever pinned
+/// to a corner - so a corner the animation drifts away from just shows
+/// the plain base colour, never a hard-edged patch, regardless of screen
+/// aspect ratio, size class, or how far into an orbit any given blob is.
+///
+/// Respects Reduce Motion: a user who has it on gets ONE still frame (at
+/// t=0), not a paused-mid-animation frame.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// One drifting colour blob. `base`/`orbit*` are fractions of the
+    /// viewport's own size (from `GeometryReader`, not a normalized mesh
+    /// grid) - the actual reason this can't reproduce the old bug: a
+    /// blob's position and size are always relative to the REAL frame
+    /// being drawn into, on every aspect ratio.
+    private struct Blob {
+        let colorPhase: Double // this blob's own phase into the accent->violet->teal drift
+        let baseX: Double, baseY: Double // 0...1, orbit center
+        let orbitX: Double, orbitY: Double // 0...1, how far it wanders from centre
+        let speed: Double
+        let phase: Double // offsets this blob's own orbit, so no two ever sync up
+        let sizeFraction: Double // of max(width, height)
+    }
+
+    private static let blobs: [Blob] = [
+        Blob(colorPhase: 0.0, baseX: 0.22, baseY: 0.16, orbitX: 0.14, orbitY: 0.09, speed: 0.055, phase: 0.6, sizeFraction: 0.62),
+        Blob(colorPhase: 1.8, baseX: 0.80, baseY: 0.22, orbitX: 0.12, orbitY: 0.11, speed: 0.048, phase: 2.1, sizeFraction: 0.68),
+        Blob(colorPhase: 3.4, baseX: 0.28, baseY: 0.84, orbitX: 0.13, orbitY: 0.12, speed: 0.041, phase: 4.0, sizeFraction: 0.64),
+        Blob(colorPhase: 5.0, baseX: 0.76, baseY: 0.80, orbitX: 0.11, orbitY: 0.10, speed: 0.063, phase: 1.2, sizeFraction: 0.58),
+    ]
+
     var body: some View {
-        if reduceMotion {
-            content(t: 0, scheme: scheme).ignoresSafeArea()
-        } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
-                // Was `Float(tl.date.timeIntervalSinceReferenceDate)` - that
-                // property is ~788 million-plus by now (2026), and Float's
-                // 24-bit mantissa only has ~64-unit resolution at that
-                // magnitude. Every sin/cos below effectively saw the SAME
-                // input for ~64 real seconds at a time, then jumped - a
-                // frozen background that suddenly teleports, not an
-                // animation. Fixed by keeping `t` a Double end to end;
-                // only the final small (0…1-ish) per-coordinate offsets
-                // get cast to Float, right where SIMD2<Float> needs it -
-                // at THAT magnitude Float has plenty of precision.
-                content(t: tl.date.timeIntervalSinceReferenceDate, scheme: scheme)
-                    .ignoresSafeArea()
+        GeometryReader { proxy in
+            if reduceMotion {
+                field(t: 0, size: proxy.size, scheme: scheme)
+            } else {
+                // Was `Float(tl.date.timeIntervalSinceReferenceDate)` further
+                // down this file's history - that property is ~788
+                // million-plus by now (2026), and Float's 24-bit mantissa
+                // only has ~64-unit resolution at that magnitude, freezing
+                // the animation for ~64 real seconds at a time then jumping.
+                // `t` stays Double end to end here; only ever cast to
+                // CGFloat for the final on-screen position/size, where
+                // Double has plenty of precision at that magnitude.
+                TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
+                    field(t: tl.date.timeIntervalSinceReferenceDate, size: proxy.size, scheme: scheme)
+                }
             }
         }
+        .ignoresSafeArea()
     }
 
     /// One brand hue slowly rotated toward its neighbour and back - `phase`
-    /// offsets where in that rotation each colour slot sits, so the whole
-    /// mesh never settles on a single "dominant" tone.
+    /// offsets where in that rotation each blob sits, so the whole field
+    /// never settles on a single dominant tone.
     private func drift(_ base: Color, phase: Double, t: Double) -> Color {
-        let cycle = (sin(t * 0.05 + phase) + 1) / 2 // 0…1, ~125s period
+        let cycle = (sin(t * 0.05 + phase) + 1) / 2 // 0...1, ~125s period
         return base.mix(with: nextHue(base), by: cycle * 0.4)
     }
 
@@ -80,38 +113,30 @@ struct AppBackground: View {
         return Theme.accent
     }
 
-    /// Keeps animated control points inside MeshGradient's normalized domain.
-    /// The outer corners stay pinned to the viewport corners; allowing them (or
-    /// edge points) below 0 or above 1 produces transparent/black wedges that
-    /// move as the mesh animates.
-    private func safePoint(_ x: Double, _ y: Double) -> SIMD2<Float> {
-        SIMD2<Float>(
-            Float(min(max(x, 0.02), 0.98)),
-            Float(min(max(y, 0.02), 0.98))
-        )
-    }
-
-    private func content(t: Double, scheme: ColorScheme) -> some View {
+    private func field(t: Double, size: CGSize, scheme: ColorScheme) -> some View {
         let base = scheme == .dark ? Color(white: 0.05) : Color(white: 0.97)
-        return MeshGradient(
-            width: 3, height: 3,
-            points: [
-                SIMD2<Float>(0, 0),
-                safePoint(0.5 + 0.05 * sin(t * 0.11 + 1.3), 0.06 * sin(t * 0.08)),
-                SIMD2<Float>(1, 0),
-                safePoint(0.05 * cos(t * 0.08 + 0.7), 0.45 + 0.16 * sin(t * 0.13)),
-                safePoint(0.5 + 0.22 * sin(t * 0.1), 0.5 + 0.2 * cos(t * 0.085)),
-                safePoint(1 - 0.05 * cos(t * 0.07 + 1.6), 0.55 + 0.16 * cos(t * 0.12)),
-                SIMD2<Float>(0, 1),
-                safePoint(0.5 + 0.05 * cos(t * 0.095 + 0.4), 1 - 0.06 * sin(t * 0.065)),
-                SIMD2<Float>(1, 1),
-            ],
-            colors: [
-                drift(Theme.accent, phase: 0.0, t: t).opacity(0.55), base, drift(Theme.violet, phase: 1.4, t: t).opacity(0.45),
-                base, drift(Theme.violet, phase: 2.8, t: t).opacity(0.35), base,
-                drift(Theme.teal, phase: 4.2, t: t).opacity(0.35), base, drift(Theme.accent, phase: 5.6, t: t).opacity(0.4),
-            ]
-        )
+        let dim = max(size.width, size.height)
+        // Cycle the three brand hues across the four blob slots rather than
+        // hard-assigning one each, so which colour sits where itself drifts.
+        let hues = [Theme.accent, Theme.violet, Theme.teal]
+        return ZStack {
+            base
+            ForEach(Array(Self.blobs.enumerated()), id: \.offset) { i, b in
+                let color = drift(hues[i % hues.count], phase: b.colorPhase, t: t)
+                let cx = (b.baseX + b.orbitX * sin(t * b.speed + b.phase)) * size.width
+                let cy = (b.baseY + b.orbitY * cos(t * b.speed * 0.82 + b.phase)) * size.height
+                let blobDim = dim * b.sizeFraction
+                Circle()
+                    .fill(RadialGradient(
+                        colors: [color.opacity(scheme == .dark ? 0.55 : 0.6), color.opacity(0)],
+                        center: .center, startRadius: 0, endRadius: blobDim / 2
+                    ))
+                    .frame(width: blobDim, height: blobDim)
+                    .position(x: cx, y: cy)
+                    .blendMode(scheme == .dark ? .plusLighter : .normal)
+            }
+        }
+        .compositingGroup()
     }
 }
 
