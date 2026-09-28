@@ -46,7 +46,7 @@ struct WelcomeView: View {
                     .font(.system(size: 60))
                     .foregroundStyle(Theme.accent)
                     .padding(26)
-                    .glassEffect(.regular.interactive(), in: .circle)
+                    .glass(Circle())
             }
             .padding(.top, 12)
 
@@ -74,12 +74,12 @@ struct WelcomeView: View {
                 .submitLabel(.next)
                 .textInputAutocapitalization(.words)
                 .onSubmit { field = .niche }
-                .padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+                .fieldStyle(14)
             TextField("What's it about? (e.g. space facts)", text: $niche)
                 .focused($field, equals: .niche)
                 .submitLabel(.done)
                 .onSubmit { field = nil }
-                .padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
+                .fieldStyle(14)
         }
         .glassCard()
         .opacity(appeared ? 1 : 0)
@@ -96,8 +96,10 @@ struct WelcomeView: View {
                     ? "Apple Intelligence will write your scripts, free and offline."
                     : "Scripts will be written by a free online service. Add your own keys anytime in Settings."
             )
-            featureRow(icon: "photo", tint: Theme.violet, text: "Images from a free online service.")
-            featureRow(icon: "waveform", tint: Theme.teal, text: "Narration with Apple's built-in voices.")
+            // Single accent throughout, not a tint per row - the mock's
+            // own palette has no second/third bright hue to spend on this.
+            featureRow(icon: "photo", tint: Theme.accent, text: "Images from a free online service.")
+            featureRow(icon: "waveform", tint: Theme.accent, text: "Narration with Apple's built-in voices.")
         }
         .glassCard()
         .opacity(appeared ? 1 : 0)

@@ -331,7 +331,7 @@ struct ProjectCard: View {
            let img = UIImage(contentsOfFile: url.path) {
             Image(uiImage: img).resizable().scaledToFill()
         } else {
-            LinearGradient(colors: [Theme.accent.opacity(0.6), Theme.violet.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: [Theme.accent.opacity(0.55), Theme.accent.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 }

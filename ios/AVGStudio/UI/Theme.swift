@@ -43,12 +43,6 @@ enum Theme {
     /// `ok`-coloured fill (`.pi.ok`'s checkmark), same both schemes.
     static let onOk = Color(red: 0.114, green: 0.149, blue: 0.078)
 
-    /// Kept only for screens Skin v2 hasn't reached yet (`HomeView`'s card
-    /// gradient, `WelcomeView`'s feature icons) - not part of the new
-    /// palette above. Retire the call site, not this constant, once that
-    /// screen's own phase in `SKIN_V2_PLAN.md` lands.
-    static let violet = Color(red: 0.52, green: 0.38, blue: 1.0)
-    static let teal = Color(red: 0.2, green: 0.78, blue: 0.82)
 
     /// Parses a "RRGGBB" (optionally "#RRGGBB") hex string into a Color, or
     /// nil for anything blank/unparsable - the channel-level brand accent
