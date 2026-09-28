@@ -68,6 +68,9 @@ struct RootView: View {
         // `.auto` passes `nil` through, which is exactly the old always-
         // follow-the-system behaviour this app had before Settings gained
         // an explicit override.
+        .environment(\.glassLevel, store.settings.glassOpacity)
+        .environment(\.appFontChoice, store.settings.appFont)
+        .font(store.settings.appFont == .caprasimo ? Font.custom("Caprasimo-Regular", size: 17) : nil)
         .preferredColorScheme(store.settings.themePreference.colorScheme)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { BackgroundRender.scheduleIfNeeded(store: store) }

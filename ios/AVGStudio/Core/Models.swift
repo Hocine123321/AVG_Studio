@@ -539,6 +539,8 @@ struct AppSettings: Codable {
     /// own default fill). Drives every glass card AND sheet background so
     /// the main screens and pop-up windows read the same.
     var glassOpacity: Double = 1.0
+    /// App-wide UI font: system or the mock's Caprasimo.
+    var appFont: AppFontChoice = .system
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple
@@ -593,6 +595,48 @@ struct AppSettings: Codable {
     var pauseMs: Double = 700 // matches the PC's _DEFAULT_PAUSE_MS
     var filterStyle: FilterStyle = .none
     var filterIntensity: Double = 50
+
+    /// Tolerant decode: a key missing from an older save (i.e. any field
+    /// added in an update) keeps its default instead of failing the whole
+    /// settings blob - which used to reset EVERY setting on each update.
+    init() {}
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        onboarded = c.value("onboarded", onboarded)
+        themePreference = c.value("themePreference", themePreference)
+        glassOpacity = c.value("glassOpacity", glassOpacity)
+        appFont = c.value("appFont", appFont)
+        text = c.value("text", text)
+        image = c.value("image", image)
+        voice = c.value("voice", voice)
+        geminiModel = c.value("geminiModel", geminiModel)
+        groqModel = c.value("groqModel", groqModel)
+        stableHordeModel = c.value("stableHordeModel", stableHordeModel)
+        pollinationsTextModel = c.value("pollinationsTextModel", pollinationsTextModel)
+        pollinationsImageModel = c.value("pollinationsImageModel", pollinationsImageModel)
+        geminiImageModel = c.value("geminiImageModel", geminiImageModel)
+        geminiVoiceModel = c.value("geminiVoiceModel", geminiVoiceModel)
+        geminiVoiceName = c.value("geminiVoiceName", geminiVoiceName)
+        elevenVoiceID = c.value("elevenVoiceID", elevenVoiceID)
+        elevenModel = c.value("elevenModel", elevenModel)
+        appleVoiceIdentifier = c.value("appleVoiceIdentifier", appleVoiceIdentifier)
+        imageStyle = c.value("imageStyle", imageStyle)
+        fps = c.value("fps", fps)
+        shortEdge = c.value("shortEdge", shortEdge)
+        kenBurns = c.value("kenBurns", kenBurns)
+        kbIntensity = c.value("kbIntensity", kbIntensity)
+        captionsEnabled = c.value("captionsEnabled", captionsEnabled)
+        captionMaxWords = c.value("captionMaxWords", captionMaxWords)
+        captionPosition = c.value("captionPosition", captionPosition)
+        captionFontSize = c.value("captionFontSize", captionFontSize)
+        captionAnimationStyle = c.value("captionAnimationStyle", captionAnimationStyle)
+        dynamicPausesEnabled = c.value("dynamicPausesEnabled", dynamicPausesEnabled)
+        pauseMs = c.value("pauseMs", pauseMs)
+        filterStyle = c.value("filterStyle", filterStyle)
+        filterIntensity = c.value("filterIntensity", filterIntensity)
+        appFont = c.value("appFont", appFont)
+    }
 }
 
 enum AVGError: LocalizedError {
@@ -621,5 +665,71 @@ enum AVGError: LocalizedError {
     var kind: ErrorKind? {
         if case .provider(let k, _, _) = self { return k }
         return nil
+    }
+}
+
+
+/// Dynamic coding key so tolerant decoders can name fields by string.
+extension KeyedDecodingContainer where K == AnyKey {
+    /// The saved value if present AND decodable, else the default.
+    func value<T: Decodable>(_ key: String, _ fallback: T) -> T {
+        (try? decodeIfPresent(T.self, forKey: AnyKey(key))) ?? fallback
+    }
+}
+
+struct AnyKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init(_ s: String) { stringValue = s }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+enum AppFontChoice: String, Codable, CaseIterable, Identifiable {
+    case system, caprasimo
+    var id: String { rawValue }
+    var label: String { self == .system ? "System" : "Caprasimo" }
+}
+
+// Tolerant Channel decoding, in an extension so the struct keeps its
+// synthesized memberwise init (Channel(name:niche:) is used all over).
+// A channel saved before a field existed keeps that field's default
+// instead of the whole channel list failing to load.
+extension Channel {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        var d = Channel(name: c.value("name", "My Channel"))
+        d.id = c.value("id", d.id)
+        d.niche = c.value("niche", d.niche)
+        d.tone = c.value("tone", d.tone)
+        d.language = c.value("language", d.language)
+        d.targetSeconds = c.value("targetSeconds", d.targetSeconds)
+        d.aspectRatio = c.value("aspectRatio", d.aspectRatio)
+        d.accentColorHex = c.value("accentColorHex", d.accentColorHex)
+        d.recycleEnabled = c.value("recycleEnabled", d.recycleEnabled)
+        d.recycleRatio = c.value("recycleRatio", d.recycleRatio)
+        d.voiceTrimAggressiveness = c.value("voiceTrimAggressiveness", d.voiceTrimAggressiveness)
+        d.voiceMaxRemovableSilencePct = c.value("voiceMaxRemovableSilencePct", d.voiceMaxRemovableSilencePct)
+        d.accent1ColorHex = c.value("accent1ColorHex", d.accent1ColorHex)
+        d.accent2ColorHex = c.value("accent2ColorHex", d.accent2ColorHex)
+        d.fontFamily = c.value("fontFamily", d.fontFamily)
+        d.topicResearchEnabled = c.value("topicResearchEnabled", d.topicResearchEnabled)
+        d.imageProviderBackup = c.value("imageProviderBackup", d.imageProviderBackup)
+        d.imageOnFailure = c.value("imageOnFailure", d.imageOnFailure)
+        d.takeoverCardsEnabled = c.value("takeoverCardsEnabled", d.takeoverCardsEnabled)
+        d.explainerCardsEnabled = c.value("explainerCardsEnabled", d.explainerCardsEnabled)
+        d.briefTextProvider = c.value("briefTextProvider", d.briefTextProvider)
+        d.briefTextBackup = c.value("briefTextBackup", d.briefTextBackup)
+        d.briefOnFailure = c.value("briefOnFailure", d.briefOnFailure)
+        d.scriptDraftTextProvider = c.value("scriptDraftTextProvider", d.scriptDraftTextProvider)
+        d.scriptDraftTextBackup = c.value("scriptDraftTextBackup", d.scriptDraftTextBackup)
+        d.scriptDraftOnFailure = c.value("scriptDraftOnFailure", d.scriptDraftOnFailure)
+        d.scriptSegmentationTextProvider = c.value("scriptSegmentationTextProvider", d.scriptSegmentationTextProvider)
+        d.scriptSegmentationTextBackup = c.value("scriptSegmentationTextBackup", d.scriptSegmentationTextBackup)
+        d.scriptSegmentationOnFailure = c.value("scriptSegmentationOnFailure", d.scriptSegmentationOnFailure)
+        d.director2TextProvider = c.value("director2TextProvider", d.director2TextProvider)
+        d.director2TextBackup = c.value("director2TextBackup", d.director2TextBackup)
+        d.director2OnFailure = c.value("director2OnFailure", d.director2OnFailure)
+        self = d
     }
 }

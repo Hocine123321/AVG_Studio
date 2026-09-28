@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var keys: [APIKey: String] = [:]
     @State private var refreshingCatalogs = false
     @State private var editingKey: APIKey?
+    @State private var draftTransparency: Double = 0
 
     // ── Live model catalogues ───────────────────────────────────────
     // One ModelCatalog per provider endpoint (see ModelCatalog.swift's
@@ -117,13 +118,13 @@ struct SettingsView: View {
                 }
                 Toggle("Ken Burns motion", isOn: $store.settings.kenBurns)
                 if store.settings.kenBurns {
-                    Slider(value: $store.settings.kbIntensity, in: 0.2...2) { Text("Motion") }
+                    LabeledPercent("Motion", "\(Int(store.settings.kbIntensity * 100))%") { Slider(value: $store.settings.kbIntensity, in: 0.2...2) }
                 }
                 Picker("Filter style", selection: $store.settings.filterStyle) {
                     ForEach(FilterStyle.allCases) { Text($0.label).tag($0) }
                 }
                 if store.settings.filterStyle != .none {
-                    Slider(value: $store.settings.filterIntensity, in: 0...100) { Text("Filter intensity") }
+                    LabeledPercent("Filter intensity", "\(Int(store.settings.filterIntensity))%") { Slider(value: $store.settings.filterIntensity, in: 0...100) }
                 }
             } header: { Text("Visuals") } footer: {
                 Text("Filters are an on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.")
@@ -180,7 +181,7 @@ struct SettingsView: View {
                 Picker("Position", selection: $store.settings.captionPosition) {
                     ForEach(CaptionPosition.allCases) { Text($0.rawValue.capitalized).tag($0) }
                 }
-                Slider(value: $store.settings.captionFontSize, in: 36...120) { Text("Size") }
+                LabeledPercent("Size", "\(Int(store.settings.captionFontSize)) pt") { Slider(value: $store.settings.captionFontSize, in: 36...120) }
             }
 
             // ── API keys ─────────────────────────────────────────────
@@ -241,25 +242,28 @@ struct SettingsView: View {
                     HStack {
                         Text("Glass transparency")
                         Spacer()
-                        Text("\(Int((1 - store.settings.glassOpacity) / 0.85 * 100))%")
+                        Text("\(Int(draftTransparency * 100))%")
                             .foregroundStyle(Theme.ink2).monospacedDigit()
                     }
-                    // Slider runs left = solid, right = see-through.
-                    Slider(
-                        value: Binding(
-                            get: { (1 - store.settings.glassOpacity) / 0.85 },
-                            set: { store.settings.glassOpacity = 1 - $0 * 0.85 }
-                        ),
-                        in: 0...1
-                    )
-                    GlassPreview(level: store.settings.glassOpacity)
+                    // The slider edits a LOCAL value (cheap: only the small
+                    // preview redraws while dragging) and commits to the
+                    // store - which re-renders the whole app and writes to
+                    // disk - once, when the finger lifts. Writing every tick
+                    // is what made it laggy.
+                    Slider(value: $draftTransparency, in: 0...1) { editing in
+                        if !editing { store.settings.glassOpacity = 1 - draftTransparency * 0.85 }
+                    }
+                    GlassPreview(level: 1 - draftTransparency * 0.85)
                 }
                 .padding(.vertical, 4)
-                if store.settings.glassOpacity != 1 {
-                    Button("Reset to default") { store.settings.glassOpacity = 1 }
+                if store.settings.glassOpacity != 1 || draftTransparency != 0 {
+                    Button("Reset to default") { draftTransparency = 0; store.settings.glassOpacity = 1 }
+                }
+                Picker("Font", selection: $store.settings.appFont) {
+                    ForEach(AppFontChoice.allCases) { Text($0.label).tag($0) }
                 }
             } header: { Text("App related") } footer: {
-                Text("Applies to every card, field and pop-up window. The preview below the slider updates live; the rest of the app follows as you drag.")
+                Text("Transparency applies to the whole app as soon as you let go of the slider. Font applies right away too; a few fixed-size headings and the tab bar keep their own type.")
             }
 
             // ── Appearance ───────────────────────────────────────────
@@ -277,9 +281,15 @@ struct SettingsView: View {
         }
         .screenBackground()
         .tint(Theme.accent)
+        // Switching a provider refreshes that provider's model list (and
+        // its cache) automatically, so nobody has to press refresh first.
+        .onChange(of: store.settings.text) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
+        .onChange(of: store.settings.image) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
+        .onChange(of: store.settings.voice) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
         .navigationTitle("Settings")
         .onAppear {
             for k in APIKey.allCases { keys[k] = Keychain.get(k) ?? "" }
+            draftTransparency = (1 - store.settings.glassOpacity) / 0.85
         }
         .sheet(item: $editingKey) { k in
             APIKeyEditSheet(key: k, value: keys[k] ?? "") { newValue in
@@ -287,6 +297,30 @@ struct SettingsView: View {
                 Keychain.set(k, newValue)
             }
         }
+    }
+
+    /// Refreshes only the catalogs for the providers currently selected
+    /// (cheap, and exactly what the user is about to look at).
+    private func refreshCatalogsForCurrentProviders() async {
+        var cs: [ModelCatalog] = []
+        switch store.settings.text {
+        case .gemini: cs.append(geminiTextCatalog)
+        case .groq: cs.append(groqTextCatalog)
+        case .pollinations: cs.append(pollinationsTextCatalog)
+        default: break
+        }
+        switch store.settings.image {
+        case .stablehorde: cs.append(stableHordeCatalog)
+        case .pollinations: cs.append(pollinationsImageCatalog)
+        case .gemini: cs.append(geminiImageCatalog)
+        default: break
+        }
+        switch store.settings.voice {
+        case .elevenlabs: cs += [elevenVoicesCatalog, elevenModelsCatalog]
+        case .gemini: cs.append(geminiVoiceModelCatalog)
+        default: break
+        }
+        for c in cs { await c.refresh() }
     }
 
     @ViewBuilder private func keyStatusPill(_ k: APIKey) -> some View {
@@ -297,6 +331,22 @@ struct SettingsView: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(saved ? Theme.ok.opacity(0.16) : Theme.fill, in: Capsule())
             .overlay(Capsule().strokeBorder(saved ? Theme.ok.opacity(0.4) : Theme.glassEdge, lineWidth: 0.5))
+    }
+}
+
+/// A slider row with its exact current value shown on the right.
+struct LabeledPercent<Control: View>: View {
+    let title: String
+    let value: String
+    @ViewBuilder var control: Control
+    init(_ title: String, _ value: String, @ViewBuilder control: () -> Control) {
+        self.title = title; self.value = value; self.control = control()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack { Text(title); Spacer(); Text(value).foregroundStyle(Theme.ink2).monospacedDigit() }
+            control
+        }
     }
 }
 

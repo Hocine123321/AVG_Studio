@@ -24,6 +24,20 @@ private struct Meta: Codable {
     var channels: [Channel]
     var activeChannelID: UUID?
     var reusableImages: [ReusableImage] = []
+
+    init(settings: AppSettings, channels: [Channel], activeChannelID: UUID?, reusableImages: [ReusableImage]) {
+        self.settings = settings; self.channels = channels
+        self.activeChannelID = activeChannelID; self.reusableImages = reusableImages
+    }
+    // Each part decodes independently, so one bad/missing part can't take
+    // the others down with it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: AnyKey.self)
+        settings = c.value("settings", AppSettings())
+        channels = c.value("channels", [Channel]())
+        activeChannelID = c.value("activeChannelID", UUID?.none)
+        reusableImages = c.value("reusableImages", [ReusableImage]())
+    }
 }
 
 @MainActor
@@ -70,11 +84,20 @@ final class Store {
         defer { loading = false }
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.projectsDir, withIntermediateDirectories: true)
-        if let d = try? Data(contentsOf: Self.metaURL), let m = try? JSONDecoder.avg.decode(Meta.self, from: d) {
-            settings = m.settings
-            channels = m.channels
-            activeChannelID = m.activeChannelID
-            reusableImages = m.reusableImages
+        if let d = try? Data(contentsOf: Self.metaURL) {
+            if let m = try? JSONDecoder.avg.decode(Meta.self, from: d) {
+                settings = m.settings
+                channels = m.channels
+                activeChannelID = m.activeChannelID
+                reusableImages = m.reusableImages
+            } else {
+                // Unreadable (corrupt, or a future incompatible format):
+                // keep a copy BEFORE anything can overwrite it with
+                // defaults, instead of silently wiping the user's data.
+                let backup = Self.metaURL.deletingLastPathComponent().appendingPathComponent("meta.unreadable-\(Int(Date().timeIntervalSince1970)).json")
+                try? d.write(to: backup, options: .atomic)
+                log.append(LogEntry(message: "Saved settings couldn't be read; a backup copy was kept.", isError: true))
+            }
         }
         if channels.isEmpty {
             let c = Channel(name: "My Channel", niche: "curious facts")

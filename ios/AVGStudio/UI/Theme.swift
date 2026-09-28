@@ -5,6 +5,18 @@ import UIKit
 /// of the owner's HTML mock's `:root` custom properties (and its dark-mode
 /// override block), not a fresh design - if a color/shape/timing looks odd,
 /// check the mock before assuming this file drifted from it.
+private struct GlassLevelKey: EnvironmentKey { static let defaultValue: Double = 1.0 }
+extension EnvironmentValues {
+    /// App-wide glass opacity as an ENVIRONMENT value (set once at the root),
+    /// so every glass view is invalidated the moment it changes - a plain
+    /// static (`Theme.glassLevel`) is invisible to SwiftUI, which is why the
+    /// setting used to need an app restart.
+    var glassLevel: Double {
+        get { self[GlassLevelKey.self] }
+        set { self[GlassLevelKey.self] = newValue }
+    }
+}
+
 enum Theme {
     /// Resolves per the environment's light/dark trait, matching the mock's
     /// `:root` / `prefers-color-scheme:dark` pair - the same technique
@@ -31,8 +43,9 @@ enum Theme {
     nonisolated(unsafe) static var glassLevel: Double = 1.0
     /// Scaled with `glassLevel`, so lowering it lets far more of the
     /// animated background show through every card, field and sheet.
-    static var glassFill: Color {
-        dyn(rgb(255, 255, 255, 0.5 * glassLevel), rgb(255, 255, 255, 0.09 * glassLevel))
+    static var glassFill: Color { glassFill(glassLevel) }
+    static func glassFill(_ level: Double) -> Color {
+        dyn(rgb(255, 255, 255, 0.5 * level), rgb(255, 255, 255, 0.09 * level))
     }
     static let glassEdge = dyn(rgb(255, 255, 255, 0.75), rgb(255, 255, 255, 0.22))
     static let glassShadow = dyn(rgb(90, 60, 30, 0.16), rgb(0, 0, 0, 0.45))
@@ -191,6 +204,7 @@ enum Haptics {
 /// recipe by hand instead.
 private struct GlassSurface<S: InsettableShape>: ViewModifier {
     let shape: S
+    @Environment(\.glassLevel) private var level
 
     func body(content: Content) -> some View {
         content
@@ -200,8 +214,8 @@ private struct GlassSurface<S: InsettableShape>: ViewModifier {
                     // `.ultraThinMaterial` is the closest built-in stand-in;
                     // exact blur radius/saturation aren't independently
                     // tunable the way CSS's are.
-                    shape.fill(.ultraThinMaterial).opacity(Theme.glassLevel)
-                    shape.fill(Theme.glassFill)
+                    shape.fill(.ultraThinMaterial).opacity(level)
+                    shape.fill(Theme.glassFill(level))
                     // `.g::after`'s diagonal sheen.
                     shape.fill(
                         LinearGradient(colors: [.white.opacity(0.3), .white.opacity(0)], startPoint: .topLeading, endPoint: UnitPoint(x: 0.6, y: 0.6))
@@ -263,9 +277,7 @@ extension View {
     /// hairline edge only, no blur/shadow/sheen (search boxes, text
     /// fields aren't full `.g` glass panels in the mock).
     func fieldStyle(_ radius: CGFloat = 18) -> some View {
-        self.padding(12)
-            .background(Theme.glassFill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+        self.modifier(FieldGlass(radius: radius))
     }
 
     /// The mock's `.h2`: small semibold secondary-color label above a
@@ -418,22 +430,56 @@ struct GlassSheet<Content: View>: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .presentationCornerRadius(34)
-        .presentationBackground {
-            Theme.bg1.opacity(0.62 * Theme.glassLevel).background(.ultraThinMaterial.opacity(Theme.glassLevel))
-        }
+        .glassSheetBackground(scroll: false)
     }
 }
 
+
+private struct GlassSheetBackground: ViewModifier {
+    @Environment(\.glassLevel) private var level
+    var scroll: Bool
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(scroll ? .hidden : .automatic)
+            .presentationCornerRadius(34)
+            .presentationBackground {
+                Theme.bg1.opacity(0.62 * level).background(.ultraThinMaterial.opacity(level))
+            }
+    }
+}
 
 extension View {
     /// Same glass backdrop `GlassSheet` uses, for sheets built on a plain
     /// `Form` (ChannelEditor, key editor) so every pop-up window follows
     /// the one app-wide glass-opacity setting.
-    func glassSheetBackground() -> some View {
-        self.scrollContentBackground(.hidden)
-            .presentationCornerRadius(34)
-            .presentationBackground {
-                Theme.bg1.opacity(0.62 * Theme.glassLevel).background(.ultraThinMaterial.opacity(Theme.glassLevel))
-            }
+    func glassSheetBackground(scroll: Bool = true) -> some View {
+        modifier(GlassSheetBackground(scroll: scroll))
+    }
+}
+
+private struct FieldGlass: ViewModifier {
+    @Environment(\.glassLevel) private var level
+    let radius: CGFloat
+    func body(content: Content) -> some View {
+        content.padding(12)
+            .background(Theme.glassFill(level), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+}
+
+// MARK: App font
+
+private struct AppFontKey: EnvironmentKey { static let defaultValue: AppFontChoice = .system }
+extension EnvironmentValues {
+    var appFontChoice: AppFontChoice {
+        get { self[AppFontKey.self] }
+        set { self[AppFontKey.self] = newValue }
+    }
+}
+
+extension Font {
+    /// The user's chosen UI font at `size`: system, or the mock's Caprasimo.
+    static func app(_ size: CGFloat, weight: Font.Weight = .regular, choice: AppFontChoice) -> Font {
+        choice == .caprasimo ? .disp(size) : .system(size: size, weight: weight)
     }
 }
