@@ -35,6 +35,10 @@ enum Theme {
     static let accent = Color(red: 0.878, green: 0.541, blue: 0.306) // #e08a4e, same both schemes
     static let ok = dyn(rgb(111, 135, 87), rgb(174, 191, 146))
     static let bad = Color(red: 0.769, green: 0.329, blue: 0.290) // #c4544a, same both schemes
+    /// The mock's `#2a1508` - dark ink used ON TOP of solid accent fills
+    /// (`.btn.pri`'s text, `.pi.lv`'s icon, a selected `.dot`'s checkmark),
+    /// never a surface colour itself, same both schemes.
+    static let onAccent = Color(red: 0.165, green: 0.082, blue: 0.031)
 
     /// Kept only for screens Skin v2 hasn't reached yet (`HomeView`'s card
     /// gradient, `WelcomeView`'s feature icons) - not part of the new
@@ -235,6 +239,22 @@ extension View {
         self.modifier(GlassSurface(shape: Circle()))
     }
 
+    /// Any other shape needing the full glass recipe - the mock's own
+    /// `.seg`/`.selbar` (rounded rect, not a card/pill/circle) reuse this
+    /// rather than getting a fifth bespoke extension each.
+    func glass<S: InsettableShape>(_ shape: S) -> some View {
+        self.modifier(GlassSurface(shape: shape))
+    }
+
+    /// The mock's `.field`: a flat translucent input background - fill +
+    /// hairline edge only, no blur/shadow/sheen (search boxes, text
+    /// fields aren't full `.g` glass panels in the mock).
+    func fieldStyle(_ radius: CGFloat = 18) -> some View {
+        self.padding(12)
+            .background(Theme.glassFill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+
     /// The mock's `.chip`: small pill label (`background:var(--fl)`, a
     /// hairline inset border, no blur) - status/count badges, not a full
     /// glass surface.
@@ -253,6 +273,44 @@ extension View {
     func screenBackground() -> some View {
         self.scrollContentBackground(.hidden)
             .background(AppBackground())
+    }
+}
+
+/// The mock's `.seg.g`: a custom pill-of-pills filter control (Library's
+/// All/Running/Done/Archived, Settings' Channel/Global, Create's aspect
+/// picker) - NOT SwiftUI's native `.segmented` picker style, which has a
+/// different look entirely. The whole strip is a glass rounded rect; the
+/// selected option gets its own flat `Theme.fill` + hairline-edge chip.
+struct SegmentedFilter<T: Hashable>: View {
+    let options: [T]
+    let label: (T) -> String
+    @Binding var selection: T
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options, id: \.self) { option in
+                let isOn = option == selection
+                Button {
+                    if !isOn { Haptics.light(); selection = option }
+                } label: {
+                    Text(label(option))
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(isOn ? Theme.ink : Theme.ink2)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background {
+                            if isOn {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Theme.fill)
+                                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .glass(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 }
 

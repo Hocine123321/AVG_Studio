@@ -1,61 +1,185 @@
 import SwiftUI
 
+/// The mock's Library screen: `seg(['All','Running','Done','Archived'])`
+/// replaces the old separate "Archive" toolbar toggle entirely - archived
+/// projects are just one more filter option now, not a whole different
+/// screen mode.
+enum LibraryFilter: String, CaseIterable, Hashable {
+    case all = "All", running = "Running", done = "Done", archived = "Archived"
+}
+
 struct HomeView: View {
     @Environment(Store.self) private var store
-    @State private var showArchived = false
+    @State private var filter: LibraryFilter = .all
+    @State private var query = ""
+    // The mock's `S.sm`/`S.sel` - Library's selection mode + which project
+    // ids are checked, driving the floating `.selbar`.
+    @State private var selectMode = false
+    @State private var selected: Set<String> = []
 
-    private var visible: [Project] { store.projects.filter { $0.archived == showArchived } }
-    private let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    private var visible: [Project] {
+        store.projects.filter { p in
+            let statusMatch: Bool
+            switch filter {
+            case .all: statusMatch = !p.archived
+            case .running: statusMatch = !p.archived && p.overallStatus == .running
+            case .done: statusMatch = !p.archived && p.overallStatus == .done
+            case .archived: statusMatch = p.archived
+            }
+            guard statusMatch else { return false }
+            return query.isEmpty || p.title.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    /// Groups `visible` into grid rows: a 16:9 project is the mock's
+    /// `.pc.wide` (spans both columns, alone in its row); everything else
+    /// pairs up two-per-row - `LazyVGrid` has no per-cell column-span, so
+    /// this rebuilds the same effect as plain HStack rows.
+    private var rows: [[Project]] {
+        var out: [[Project]] = []
+        let v = visible
+        var i = 0
+        while i < v.count {
+            if v[i].aspectRatio == .landscape {
+                out.append([v[i]]); i += 1
+            } else if i + 1 < v.count, v[i + 1].aspectRatio != .landscape {
+                out.append([v[i], v[i + 1]]); i += 2
+            } else {
+                out.append([v[i]]); i += 1
+            }
+        }
+        return out
+    }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                if !showArchived, let id = store.interruptedProjectID, let p = store.project(id) {
-                    interruptedBanner(p).padding([.horizontal, .top], 16)
+            VStack(alignment: .leading, spacing: 12) {
+                if !selectMode, let id = store.interruptedProjectID, let p = store.project(id) {
+                    interruptedBanner(p)
                 }
+                TextField("Search projects", text: $query)
+                    .fieldStyle()
+                SegmentedFilter(options: LibraryFilter.allCases, label: { $0.rawValue }, selection: $filter)
+                // The mock's own subtitle counts ALL projects (`P.length`),
+                // not just the filtered set - kept that, added a real
+                // "rendering now" count in place of its fake "job slots,
+                // 1 busy, extra jobs queue" text (this app has no job-slot
+                // limit; every render starts immediately).
+                Text(subtitle)
+                    .font(.system(size: 12.5)).foregroundStyle(Theme.ink2)
+                    .padding(.horizontal, 4)
+
                 if visible.isEmpty {
                     ContentUnavailableView {
-                        Label(showArchived ? "Nothing archived" : "No videos yet", systemImage: "film.stack")
+                        Label(emptyTitle, systemImage: "film.stack")
                     } description: {
-                        Text(showArchived ? "Archived videos show up here." : "Create your first video — everything renders right on your iPhone.")
+                        Text(emptyDescription)
                     } actions: {
-                        if !showArchived {
+                        if filter == .all, query.isEmpty {
                             Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
                         }
                     }
-                    .padding(.top, 80)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
                 } else {
-                    LazyVGrid(columns: cols, spacing: 14) {
-                        ForEach(visible) { p in
-                            // Tapping a card is a TAB SWITCH now (Skin v2's
-                            // Studio is a persistent tab, not a pushed
-                            // screen) - a plain Button, not a NavigationLink.
-                            Button { store.selectForStudio(p.id) } label: {
-                                ProjectCard(project: p, onArchive: { archiveToggle(p) }, onDelete: { delete(p) })
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(p.archived ? "Unarchive" : "Archive", systemImage: "archivebox") { archiveToggle(p) }
-                                Button("Delete", systemImage: "trash", role: .destructive) { delete(p) }
+                    VStack(spacing: 12) {
+                        ForEach(rows.indices, id: \.self) { i in
+                            let row = rows[i]
+                            if row.count == 2 {
+                                HStack(spacing: 12) {
+                                    card(row[0], wide: false)
+                                    card(row[1], wide: false)
+                                }
+                            } else {
+                                card(row[0], wide: row[0].aspectRatio == .landscape)
                             }
                         }
                     }
-                    .padding(16)
                 }
             }
+            .padding(16)
         }
         .screenBackground()
-        .navigationTitle(showArchived ? "Archive" : "Library")
+        .navigationTitle(filter == .archived ? "Archive" : "Library")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(showArchived ? "Library" : "Archive", systemImage: showArchived ? "square.grid.2x2" : "archivebox") {
-                    withAnimation(.spring) { showArchived.toggle() }
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("New", systemImage: "plus") { store.tab = .create }
+                Button {
+                    Haptics.light()
+                    selectMode.toggle()
+                    selected.removeAll()
+                } label: {
+                    Image(systemName: selectMode ? "xmark.circle" : "checkmark.circle")
+                }
+                .accessibilityLabel(selectMode ? "Cancel selection" : "Select")
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            if selectMode { selectBar }
+        }
+    }
+
+    private var subtitle: String {
+        let base = "\(store.projects.count) project\(store.projects.count == 1 ? "" : "s")"
+        let running = store.jobs.count
+        return running > 0 ? "\(base) · \(running) rendering now" : base
+    }
+
+    private var emptyTitle: String {
+        if !query.isEmpty { return "No matches" }
+        switch filter {
+        case .archived: return "Nothing archived"
+        case .running: return "Nothing rendering"
+        case .done: return "Nothing finished yet"
+        case .all: return "No videos yet"
+        }
+    }
+
+    private var emptyDescription: String {
+        if !query.isEmpty { return "Nothing in this view matches \u{201C}\(query)\u{201D}." }
+        switch filter {
+        case .archived: return "Archived videos show up here."
+        case .running: return "Videos currently rendering show up here."
+        case .done: return "Finished videos show up here."
+        case .all: return "Create your first video — everything renders right on your iPhone."
+        }
+    }
+
+    @ViewBuilder private func card(_ p: Project, wide: Bool) -> some View {
+        ProjectCard(
+            project: p, wide: wide, selectMode: selectMode, isSelected: selected.contains(p.id),
+            onTap: {
+                if selectMode {
+                    Haptics.light()
+                    if selected.contains(p.id) { selected.remove(p.id) } else { selected.insert(p.id) }
+                } else {
+                    store.selectForStudio(p.id)
+                }
+            },
+            onArchive: { archiveToggle(p) },
+            onDelete: { delete(p) }
+        )
+    }
+
+    private var selectBar: some View {
+        HStack(spacing: 10) {
+            Text("\(selected.count) selected").fontWeight(.semibold)
+            Spacer()
+            Button("Archive") {
+                Haptics.light()
+                let ids = selected
+                withAnimation(.spring) {
+                    for id in ids { store.setArchived(id, true) }
+                    selectMode = false
+                    selected.removeAll()
+                }
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(selected.isEmpty)
+        }
+        .padding(.leading, 18).padding(.trailing, 8).padding(.vertical, 8)
+        .glass(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 4)
     }
 
     private func archiveToggle(_ p: Project) {
@@ -85,26 +209,75 @@ struct HomeView: View {
             .buttonStyle(.glassProminent)
         }
         .glassCard()
+        .frame(maxWidth: .infinity)
     }
 }
 
+/// The mock's `.pc.g` library card: thumbnail with a play-glyph overlay, a
+/// top row (status chip +, in selection mode, the `.dot` checkbox) and a
+/// bottom row (date + aspect ratio) painted ON the thumbnail, then a
+/// `.meta` panel below with the title and (while rendering) a progress
+/// bar. The existing per-card archive/delete overflow menu is kept
+/// (hidden while selecting) - the plan called for ADDING selection mode,
+/// not removing that affordance.
 struct ProjectCard: View {
     @Environment(Store.self) private var store
     let project: Project
-    /// One-tap archive/delete, mirroring the long-press context menu on
-    /// `HomeView`'s grid - a menu you have to discover by holding is easy
-    /// to miss entirely, so the same two actions get a visible affordance
-    /// too (top-right ellipsis, the standard iOS "card overflow" spot).
+    let wide: Bool
+    let selectMode: Bool
+    let isSelected: Bool
+    var onTap: () -> Void
     var onArchive: () -> Void
     var onDelete: () -> Void
 
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d"; return f
+    }()
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topTrailing) {
-                thumb
-                    .frame(height: 190)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(.rect(cornerRadius: 18))
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 0) {
+                ZStack {
+                    thumb
+                    Image(systemName: "play.fill")
+                        .font(.system(size: wide ? 26 : 30))
+                        .foregroundStyle(.white.opacity(0.8))
+                    VStack {
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(statusText)
+                                .foregroundStyle(statusColor)
+                                .chipStyle()
+                            Spacer()
+                            if selectMode { selectionDot }
+                        }
+                        Spacer()
+                        HStack {
+                            Text("\(Self.dateFormatter.string(from: project.created)), \(project.aspectRatio.rawValue)")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.5), radius: 4, y: 1)
+                            Spacer()
+                        }
+                    }
+                    .padding(10)
+                }
+                .aspectRatio(wide ? 16.0 / 8.0 : 9.0 / 12.0, contentMode: .fill)
+                .clipped()
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(project.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(2)
+                    if let job = store.jobs[project.id] {
+                        progressBar(job.progress)
+                    }
+                }
+                .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(GlassCardShape())
+        .overlay(alignment: .topTrailing) {
+            if !selectMode {
                 Menu {
                     Button(project.archived ? "Unarchive" : "Archive", systemImage: "archivebox", action: onArchive)
                     Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
@@ -113,23 +286,44 @@ struct ProjectCard: View {
                         .font(.footnote.weight(.bold))
                         .foregroundStyle(.white)
                         .frame(width: 28, height: 28)
-                        .glassEffect(.regular.interactive(), in: .circle)
+                        .background(.black.opacity(0.25), in: .circle)
                 }
                 .padding(8)
-                // Icon-only label - VoiceOver would otherwise read nothing
-                // more useful than "ellipsis, button".
                 .accessibilityLabel("More options for \(project.title)")
             }
-            Text(project.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-            if let job = store.jobs[project.id] {
-                ProgressView(value: job.progress) { Text(job.phase.title).font(.caption2) }
-                    .tint(Theme.accent)
-            } else {
-                StatusBadge(status: project.overallStatus)
+        }
+        .contextMenu {
+            Button(project.archived ? "Unarchive" : "Archive", systemImage: "archivebox", action: onArchive)
+            Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+        }
+    }
+
+    private var statusText: String {
+        switch project.overallStatus { case .pending: "Draft"; case .running: "Rendering"; case .done: "Ready"; case .failed: "Failed" }
+    }
+    private var statusColor: Color {
+        switch project.overallStatus { case .pending: Theme.ink2; case .running: Theme.accent; case .done: Theme.ok; case .failed: Theme.bad }
+    }
+
+    private var selectionDot: some View {
+        ZStack {
+            Circle().fill(isSelected ? Theme.accent : .black.opacity(0.25))
+                .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: isSelected ? 0 : 1.5))
+            if isSelected {
+                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.onAccent)
             }
         }
-        .padding(10)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 26))
+        .frame(width: 24, height: 24)
+    }
+
+    private func progressBar(_ value: Double) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.fill)
+                Capsule().fill(Theme.accent).frame(width: geo.size.width * max(0, min(1, value)))
+            }
+        }
+        .frame(height: 5)
     }
 
     @ViewBuilder private var thumb: some View {
@@ -138,7 +332,15 @@ struct ProjectCard: View {
             Image(uiImage: img).resizable().scaledToFill()
         } else {
             LinearGradient(colors: [Theme.accent.opacity(0.6), Theme.violet.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                .overlay(Image(systemName: "sparkles").font(.largeTitle).foregroundStyle(.white.opacity(0.8)))
         }
+    }
+}
+
+/// Thin wrapper so `ProjectCard` gets the mock's exact `.pc{border-
+/// radius:24px;overflow:hidden}` glass card without `glassCard()`'s own
+/// default padding (the card manages its own internal padding per-row).
+private struct GlassCardShape: ViewModifier {
+    func body(content: Content) -> some View {
+        content.glassCard(24, padding: 0)
     }
 }
