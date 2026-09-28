@@ -17,6 +17,7 @@ implementation of it.
 from __future__ import annotations
 
 import asyncio
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -93,6 +94,51 @@ _KEY_SWITCH_KINDS = (ErrorKind.auth, ErrorKind.quota)
 _BACKUP_KEY_NAME = "elevenlabs_backup"
 
 
+def _words_from_alignment(alignment: Any) -> list[dict[str, Any]] | None:
+    """Group ElevenLabs' character-level `/with-timestamps` alignment into
+    words, split at whitespace boundaries - a word's `start` is its first
+    character's start, `end` is its last non-space character's end.
+
+    `None` on anything missing or malformed - never raises, since a timing
+    detail must not turn an already-successful synthesis call into a
+    failure. The caller already has real audio bytes by the time this runs;
+    losing only the timing half is the correct degradation.
+    """
+    if not isinstance(alignment, dict):
+        return None
+    characters = alignment.get("characters")
+    starts = alignment.get("character_start_times_seconds")
+    ends = alignment.get("character_end_times_seconds")
+    if not (isinstance(characters, list) and isinstance(starts, list) and isinstance(ends, list)):
+        return None
+    if not (len(characters) == len(starts) == len(ends)):
+        return None
+
+    words: list[dict[str, Any]] = []
+    current = ""
+    current_start: float | None = None
+    current_end: float | None = None
+    for ch, start, end in zip(characters, starts, ends):
+        if str(ch).isspace():
+            if current:
+                words.append({"text": current, "start": current_start, "end": current_end})
+                current, current_start, current_end = "", None, None
+            continue
+        if current_start is None:
+            try:
+                current_start = float(start)
+            except (TypeError, ValueError):
+                return None
+        current += str(ch)
+        try:
+            current_end = float(end)
+        except (TypeError, ValueError):
+            return None
+    if current:
+        words.append({"text": current, "start": current_start, "end": current_end})
+    return words or None
+
+
 class ElevenLabsVoiceProvider:
     name = "elevenlabs"
 
@@ -108,12 +154,27 @@ class ElevenLabsVoiceProvider:
         failure kind (see the section comment above, especially the 5xx
         case).
         """
+        audio, _words = self._synthesize(text, voice_id=voice_id, model=model, with_timestamps=False)
+        return audio
+
+    def synthesize_with_timing(
+        self, text: str, *, voice_id: str, model: str
+    ) -> tuple[bytes, list[dict[str, Any]] | None]:
+        """Like `synthesize`, plus a per-word timing list from ElevenLabs'
+        `/with-timestamps` endpoint (same request body, a different URL and
+        response shape) - shares this class's own primary/backup key-switch
+        rule via `_synthesize`, rather than restating it a second time."""
+        return self._synthesize(text, voice_id=voice_id, model=model, with_timestamps=True)
+
+    def _synthesize(
+        self, text: str, *, voice_id: str, model: str, with_timestamps: bool
+    ) -> tuple[bytes, list[dict[str, Any]] | None]:
         primary_key = get_key(self.name)
         if not primary_key:
             raise AvgError(ErrorKind.auth, "ElevenLabs API key is not set")
 
         try:
-            return self._call(text, voice_id=voice_id, model=model, key=primary_key)
+            return self._call(text, voice_id=voice_id, model=model, key=primary_key, with_timestamps=with_timestamps)
         except AvgError as exc:
             if exc.kind not in _KEY_SWITCH_KINDS:
                 raise
@@ -128,12 +189,15 @@ class ElevenLabsVoiceProvider:
             # A key switch is not a second attempt at the same thing - it is
             # a different account. Exactly one retry, against the backup,
             # whatever the outcome.
-            return self._call(text, voice_id=voice_id, model=model, key=backup_key)
+            return self._call(text, voice_id=voice_id, model=model, key=backup_key, with_timestamps=with_timestamps)
 
-    def _call(self, text: str, *, voice_id: str, model: str, key: str) -> bytes:
+    def _call(
+        self, text: str, *, voice_id: str, model: str, key: str, with_timestamps: bool = False
+    ) -> tuple[bytes, list[dict[str, Any]] | None]:
+        suffix = "/with-timestamps" if with_timestamps else ""
         response = self._transport.request(
             "POST",
-            f"{_BASE_URL}/text-to-speech/{voice_id}",
+            f"{_BASE_URL}/text-to-speech/{voice_id}{suffix}",
             headers={
                 "xi-api-key": key,
                 "Content-Type": "application/json",
@@ -145,10 +209,25 @@ class ElevenLabsVoiceProvider:
         )
         raise_for_status(response, self.name)
 
-        content = response.content
-        if not content:
+        if not with_timestamps:
+            content = response.content
+            if not content:
+                raise AvgError(ErrorKind.bug, "ElevenLabs returned no audio data")
+            return content, None
+
+        # `/with-timestamps` returns JSON (base64 audio + alignment), not
+        # raw audio bytes - a different response shape, not just a
+        # different URL.
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise AvgError(ErrorKind.bug, "ElevenLabs returned an unparseable with-timestamps response") from exc
+        audio_b64 = data.get("audio_base64")
+        if not audio_b64:
             raise AvgError(ErrorKind.bug, "ElevenLabs returned no audio data")
-        return content
+        content = base64.b64decode(audio_b64)
+        words = _words_from_alignment(data.get("alignment"))
+        return content, words
 
     def list_voices(self) -> list[dict[str, str]]:
         """The account's available voices. Uses the primary key only - a
@@ -308,6 +387,64 @@ class EdgeVoiceProvider:
         if not audio:
             raise AvgError(ErrorKind.bug, "Edge TTS returned no audio data")
         return audio
+
+    def synthesize_with_timing(
+        self, text: str, *, voice_id: str, model: str
+    ) -> tuple[bytes, list[dict[str, Any]] | None]:
+        """Like `synthesize`, plus a per-word timing list - edge-tts's own
+        stream already includes `WordBoundary` chunks alongside the audio
+        ones, previously discarded by `synthesize`'s `_collect`. `offset`/
+        `duration` arrive in 100-nanosecond ticks (edge-tts's own unit);
+        `/ 1e7` converts to seconds.
+
+        Returns `(audio, None)` rather than raising when the word-boundary
+        half of the stream is unusable - the audio this call already
+        produced must not be thrown away over a timing detail. A failure to
+        produce audio at all still raises, exactly like `synthesize`.
+        """
+        del model
+
+        cooldown = provider_health.active_cooldown(self.name)
+        if cooldown is not None:
+            raise provider_health.cooldown_error(cooldown)
+
+        def _collect() -> tuple[bytes, list[dict[str, Any]]]:
+            communicate = _edge().Communicate(text, voice_id)
+            audio = bytearray()
+            words: list[dict[str, Any]] = []
+            for chunk in communicate.stream_sync():
+                if chunk.get("type") == "audio" and chunk.get("data"):
+                    audio.extend(chunk["data"])
+                elif chunk.get("type") == "WordBoundary":
+                    try:
+                        offset_s = float(chunk["offset"]) / 1e7
+                        duration_s = float(chunk["duration"]) / 1e7
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    words.append(
+                        {"text": str(chunk.get("text", "")), "start": offset_s, "end": offset_s + duration_s}
+                    )
+            return bytes(audio), words
+
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            audio, words = pool.submit(_collect).result(timeout=_EDGE_SYNTHESIZE_TIMEOUT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 - re-classified immediately below
+            kind = classify(None, "", exc, self.name)
+            if kind in (ErrorKind.quota, ErrorKind.billing):
+                if kind == ErrorKind.quota:
+                    provider_health.record_cooldown(
+                        self.name, "quota", cooldown_until=provider_health.default_quota_cooldown_until(self.name)
+                    )
+                else:
+                    provider_health.record_cooldown(self.name, "billing")
+            raise AvgError(kind, f"Edge TTS request failed: {exc}", detail=str(exc)) from exc
+        finally:
+            pool.shutdown(wait=False)
+
+        if not audio:
+            raise AvgError(ErrorKind.bug, "Edge TTS returned no audio data")
+        return audio, (words or None)
 
     def list_voices(self) -> list[dict[str, str]]:
         """Microsoft's live voice catalogue - always fetched, never a

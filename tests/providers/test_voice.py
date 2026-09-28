@@ -471,3 +471,130 @@ def test_elevenlabs_quota_failure_on_primary_does_not_block_the_backup_retry(tmp
     with pytest.raises(AvgError) as excinfo:
         provider.synthesize("hi again", voice_id=VOICE_ID, model=MODEL)
     assert excinfo.value.kind == ErrorKind.quota
+
+
+from avg.providers.voice.providers import _words_from_alignment
+
+
+def test_words_from_alignment_groups_characters_at_whitespace():
+    alignment = {
+        "characters": list("hi there"),
+        "character_start_times_seconds": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        "character_end_times_seconds": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+    }
+    words = _words_from_alignment(alignment)
+    assert words == [
+        {"text": "hi", "start": 0.0, "end": 0.2},
+        {"text": "there", "start": 0.3, "end": 0.8},
+    ]
+
+
+def test_words_from_alignment_handles_leading_and_multiple_spaces():
+    alignment = {
+        "characters": list(" a  b"),
+        "character_start_times_seconds": [0.0, 0.1, 0.2, 0.3, 0.4],
+        "character_end_times_seconds": [0.1, 0.2, 0.3, 0.4, 0.5],
+    }
+    words = _words_from_alignment(alignment)
+    assert words == [
+        {"text": "a", "start": 0.1, "end": 0.2},
+        {"text": "b", "start": 0.4, "end": 0.5},
+    ]
+
+
+def test_words_from_alignment_returns_none_on_malformed_input():
+    assert _words_from_alignment(None) is None
+    assert _words_from_alignment({}) is None
+    assert _words_from_alignment({"characters": ["a"], "character_start_times_seconds": []}) is None
+
+
+def test_elevenlabs_synthesize_with_timing_hits_the_with_timestamps_endpoint(monkeypatch, tmp_path):
+    import base64 as base64_module
+
+    _patch_keys(monkeypatch, primary=PRIMARY_KEY, backup=BACKUP_KEY)
+    seen_urls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(
+            200,
+            json={
+                "audio_base64": base64_module.b64encode(FAKE_AUDIO).decode(),
+                "alignment": {
+                    "characters": list("hi"),
+                    "character_start_times_seconds": [0.0, 0.1],
+                    "character_end_times_seconds": [0.1, 0.2],
+                },
+            },
+        )
+
+    provider = ElevenLabsVoiceProvider(transport=_mock_record_transport(tmp_path, handler))
+    audio, words = provider.synthesize_with_timing("hi", voice_id=VOICE_ID, model=MODEL)
+
+    assert audio == FAKE_AUDIO
+    assert words == [{"text": "hi", "start": 0.0, "end": 0.2}]
+    assert seen_urls[0].endswith("/with-timestamps")
+
+
+def test_elevenlabs_synthesize_with_timing_shares_the_key_switch_rule(monkeypatch, tmp_path):
+    _patch_keys(monkeypatch, primary=PRIMARY_KEY, backup=BACKUP_KEY)
+    seen_keys = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = request.headers["xi-api-key"]
+        seen_keys.append(key)
+        if key == PRIMARY_KEY:
+            return httpx.Response(401, json={"detail": {"status": "invalid_api_key"}})
+        import base64 as base64_module
+
+        return httpx.Response(200, json={"audio_base64": base64_module.b64encode(FAKE_AUDIO).decode()})
+
+    provider = ElevenLabsVoiceProvider(transport=_mock_record_transport(tmp_path, handler))
+    audio, words = provider.synthesize_with_timing("hi", voice_id=VOICE_ID, model=MODEL)
+
+    assert audio == FAKE_AUDIO
+    assert words is None  # no alignment in the backup's response
+    assert seen_keys == [PRIMARY_KEY, BACKUP_KEY]
+
+
+def test_edge_synthesize_with_timing_captures_word_boundaries(monkeypatch):
+    class _FakeCommunicate:
+        def __init__(self, *a, **k):
+            pass
+
+        def stream_sync(self):
+            yield {"type": "audio", "data": FAKE_AUDIO}
+            yield {"type": "WordBoundary", "offset": 0, "duration": 1_000_000, "text": "hi"}
+            yield {"type": "WordBoundary", "offset": 1_000_000, "duration": 2_000_000, "text": "there"}
+
+    monkeypatch.setattr(voice_module.edge_tts, "Communicate", _FakeCommunicate)
+
+    provider = EdgeVoiceProvider()
+    audio, words = provider.synthesize_with_timing("hi there", voice_id="en-US-GuyNeural", model="")
+
+    assert audio == FAKE_AUDIO
+    assert words is not None
+    assert len(words) == 2
+    assert words[0]["text"] == "hi"
+    assert words[0]["start"] == pytest.approx(0.0)
+    assert words[0]["end"] == pytest.approx(0.1)
+    assert words[1]["text"] == "there"
+    assert words[1]["start"] == pytest.approx(0.1)
+    assert words[1]["end"] == pytest.approx(0.3)
+
+
+def test_edge_synthesize_with_timing_returns_none_words_when_stream_has_none(monkeypatch):
+    class _FakeCommunicate:
+        def __init__(self, *a, **k):
+            pass
+
+        def stream_sync(self):
+            yield {"type": "audio", "data": FAKE_AUDIO}
+
+    monkeypatch.setattr(voice_module.edge_tts, "Communicate", _FakeCommunicate)
+
+    provider = EdgeVoiceProvider()
+    audio, words = provider.synthesize_with_timing("hi", voice_id="en-US-GuyNeural", model="")
+
+    assert audio == FAKE_AUDIO
+    assert words is None
