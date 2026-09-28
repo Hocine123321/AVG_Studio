@@ -12,6 +12,7 @@ struct AVGStudioApp: App {
         // Belt-and-suspenders alongside Info.plist's UIAppFonts entry - see
         // Theme.registerFonts's own doc comment.
         Theme.registerFonts()
+        Connectivity.shared.start()
     }
 
     var body: some Scene {

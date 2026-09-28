@@ -385,6 +385,7 @@ final class Store {
                     _ = await Connectivity.shared.waitUntilOnline()
                 }
                 try await Pipeline(store: self, projectID: id).execute(phase)
+                Recovery.noteSuccess()
                 return
             } catch is CancellationError {
                 throw CancellationError()

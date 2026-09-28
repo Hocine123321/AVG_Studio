@@ -162,7 +162,7 @@ enum Recovery {
     /// Failures remembered this session, per provider (safeguard 9).
     private static var failures: [String: Int] = [:]
 
-    static func noteSuccess(_ provider: String) { failures[provider] = 0 }
+    static func noteSuccess() { failures.removeAll() }
 
     /// Builds the prompt for a failed phase. `nil` means "nothing useful to
     /// offer" (a plain bug / cancelled) - the caller falls back to the old
@@ -183,7 +183,7 @@ enum Recovery {
         guard case .provider(let kind, let provider, _) = avg else { return nil }
         failures[provider, default: 0] += 1
         let repeated = failures[provider, default: 0] >= 3
-        let others = alternatives(to: provider, store: store)
+        let others = alternatives(to: provider, store: store, phase: phase)
         let switches: [RecoveryAction] = others.prefix(2).map { .otherProvider(name: $0) }
         var plan: RecoveryPlan?
         let canFallback = fallbackIsUseful(aiKind(for: phase), store: store)
@@ -236,12 +236,22 @@ enum Recovery {
 
     /// Providers other than `current`, that are usable right now (have a
     /// key, or need none), best first.
-    static func alternatives(to provider: String, store: Store) -> [String] {
+    static func alternatives(to provider: String, store: Store, phase: PhaseID = .writing) -> [String] {
         let p = provider.lowercased()
         var out: [String] = []
-        if !p.contains("gemini"), Keychain.get(.gemini) != nil { out.append("Google Gemini") }
-        if !p.contains("groq"), Keychain.get(.groq) != nil { out.append("Groq") }
-        if !p.contains("pollinations") { out.append("Pollinations (free)") }
+        // Only providers that actually offer this kind of AI.
+        switch aiKind(for: phase) {
+        case .writer:
+            if !p.contains("gemini"), Keychain.get(.gemini) != nil { out.append("Google Gemini") }
+            if !p.contains("groq"), Keychain.get(.groq) != nil { out.append("Groq") }
+            if !p.contains("pollinations") { out.append("Pollinations (free)") }
+        case .image:
+            if !p.contains("gemini"), Keychain.get(.gemini) != nil { out.append("Google Gemini") }
+            if !p.contains("pollinations") { out.append("Pollinations (free)") }
+        case .voice:
+            if !p.contains("gemini"), Keychain.get(.gemini) != nil { out.append("Google Gemini") }
+            if !p.contains("apple") { out.append("Apple voice (free, on-device)") }
+        }
         return out
     }
 
@@ -302,6 +312,9 @@ final class Connectivity {
     static let shared = Connectivity()
     private let monitor = NWPathMonitor()
     private(set) var online = true
+    /// Call once at launch so the first real network status is known before
+    /// a render needs it (the monitor is otherwise created lazily).
+    func start() {}
     private init() {
         monitor.pathUpdateHandler = { [weak self] path in
             let up = path.status == .satisfied

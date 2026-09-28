@@ -72,7 +72,16 @@ struct CreateView: View {
         }
         .screenBackground()
         .navigationTitle("New video")
-        .onAppear { aspect = store.activeChannel.aspectRatio }
+        .onAppear {
+            aspect = store.activeChannel.aspectRatio
+            // Coming from "Reword the topic and retry": pre-fill the topic
+            // that was blocked so the user edits it instead of retyping.
+            if let id = store.pendingReword, let p = store.project(id) {
+                topic = p.topic; title = p.title
+                store.pendingReword = nil
+                toastMessage = "Edit the topic, then create again"
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
         .toast($toastMessage)
         .sheet(isPresented: $showChannelPicker) { channelSheet }
