@@ -51,11 +51,13 @@ list_image_files` sorts by to pick the project grid's thumbnail) plus
 
 from __future__ import annotations
 
+import random
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from avg.config import provider_health
 from avg.core.errors import AvgError, ErrorKind, report_degradation
@@ -82,6 +84,10 @@ _PROVIDERS: dict[str, type] = {
 }
 _DEFAULT_PROVIDER = "pollinations"
 _DEFAULT_MODEL = "flux"
+
+# The only two providers whose API actually accepts a seed parameter -
+# Gemini/OpenAI/HuggingFace have no such concept in their request shapes.
+_SEED_CAPABLE_PROVIDERS = {"pollinations", "stablehorde"}
 
 # The render phase's identical RAM gate (avg.config.settings.
 # load_render_settings: `worker_cap = 2 if total_ram_gb <= 8 else 4`) -
@@ -200,15 +206,26 @@ class _SceneResult:
 
 
 def _generate_one(
-    provider: ImageProvider, prompt: str, aspect_ratio: str, model: str, scene: int, out_path: Path
+    provider: ImageProvider,
+    prompt: str,
+    aspect_ratio: str,
+    model: str,
+    scene: int,
+    out_path: Path,
+    extra_kwargs: dict[str, Any] | None = None,
 ) -> _SceneResult:
     """Generate and save exactly one scene's image. Never raises - every
     failure (provider `AvgError`, or any other exception a buggy provider
     might throw) becomes a failed `_SceneResult` instead, which is what
     lets one bad call run alongside eleven good ones in the same worker
-    pool without a single `Future.result()` blowing up the whole phase."""
+    pool without a single `Future.result()` blowing up the whole phase.
+
+    `extra_kwargs` carries whatever a specific provider accepts beyond the
+    shared protocol (`seed` for Pollinations/Stable Horde, `reference_image`
+    for Gemini) - built once per call by `_generate_all`'s own
+    `_extra_kwargs`, never guessed here."""
     try:
-        data = provider.generate(prompt, aspect_ratio=aspect_ratio, model=model)
+        data = provider.generate(prompt, aspect_ratio=aspect_ratio, model=model, **(extra_kwargs or {}))
         if not data:
             raise AvgError(ErrorKind.bug, f"{provider.name} returned no image data")
         out_path.write_bytes(data)
@@ -353,6 +370,17 @@ class VisualsPhase:
         model = str(settings.get("image_model") or _DEFAULT_MODEL)
         aspect_ratio = ctx.project.aspect_ratio
 
+        # Assigned once per take, on this phase's first run - reused for
+        # every scene and every later re-run of the same take, locking the
+        # take's whole look rather than one image's. No direct
+        # save_project call: the mutation reaches disk through the exact
+        # mechanism this phase's other side effects already rely on (the
+        # runner's own on_phase_change write-through).
+        if bool(settings.get("visuals_seed_lock", True)) and ctx.project.visual_seed is None:
+            ctx.project.visual_seed = random.randint(0, 2**31 - 1)
+        seed = ctx.project.visual_seed
+        gemini_reference_lock = bool(settings.get("visuals_gemini_reference_lock", False))
+
         transport = ctx.router if isinstance(ctx.router, Transport) else None
         provider = _build_provider(provider_name, transport)
 
@@ -374,28 +402,74 @@ class VisualsPhase:
             ProgressEvent(project_id=ctx.project.id, percent=0, message=f"Generating {len(jobs)} image(s)...")
         )
 
+        def _extra_kwargs(prov: ImageProvider, reference_image: bytes | None) -> dict[str, Any]:
+            kwargs: dict[str, Any] = {}
+            if seed is not None and prov.name in _SEED_CAPABLE_PROVIDERS:
+                kwargs["seed"] = seed
+            if reference_image is not None and prov.name == "gemini":
+                kwargs["reference_image"] = reference_image
+            return kwargs
+
+        def _emit_scene_progress(result: _SceneResult, done: int) -> None:
+            percent = int(done / total * 100)
+            status = "ok" if result.ok else f"failed ({result.error})"
+            ctx.emit(
+                ProgressEvent(
+                    project_id=ctx.project.id,
+                    percent=percent,
+                    message=f"Scene {result.scene}/{total}: {status}",
+                )
+            )
+
         def _generate_all(prov: ImageProvider, mdl: str) -> dict[int, _SceneResult]:
             """One full pass over every scene with one provider."""
             out: dict[int, _SceneResult] = {}
             done = 0
+            remaining = list(jobs)
+
+            reference_image: bytes | None = None
+            if gemini_reference_lock and prov.name == "gemini" and remaining:
+                # Every other scene in this pass can use the first one as a
+                # visual reference once it exists - but "once it exists"
+                # means generating it before the rest are submitted in
+                # parallel, or every scene races a reference that isn't
+                # there yet. A failed first scene simply leaves no
+                # reference for the rest, rather than blocking the phase.
+                first_scene, first_prompt = remaining.pop(0)
+                first_result = _generate_one(
+                    prov,
+                    first_prompt,
+                    aspect_ratio,
+                    mdl,
+                    first_scene,
+                    images_dir / f"{first_scene:03d}.png",
+                    _extra_kwargs(prov, None),
+                )
+                out[first_result.scene] = first_result
+                done += 1
+                _emit_scene_progress(first_result, done)
+                if first_result.ok and first_result.file:
+                    reference_image = (images_dir / first_result.file).read_bytes()
+
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = {
-                    pool.submit(_generate_one, prov, prompt, aspect_ratio, mdl, i, images_dir / f"{i:03d}.png"): i
-                    for i, prompt in jobs
+                    pool.submit(
+                        _generate_one,
+                        prov,
+                        prompt,
+                        aspect_ratio,
+                        mdl,
+                        i,
+                        images_dir / f"{i:03d}.png",
+                        _extra_kwargs(prov, reference_image),
+                    ): i
+                    for i, prompt in remaining
                 }
                 for future in as_completed(futures):
                     result = future.result()
                     out[result.scene] = result
                     done += 1
-                    percent = int(done / total * 100)
-                    status = "ok" if result.ok else f"failed ({result.error})"
-                    ctx.emit(
-                        ProgressEvent(
-                            project_id=ctx.project.id,
-                            percent=percent,
-                            message=f"Scene {result.scene}/{total}: {status}",
-                        )
-                    )
+                    _emit_scene_progress(result, done)
             return out
 
         gen_results = _generate_all(provider, model)

@@ -543,7 +543,7 @@ def test_visuals_phase_falls_back_to_generation_on_out_of_range_pick(tmp_path, m
 
     captured_prompts = []
 
-    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path, extra_kwargs=None):
         captured_prompts.append(prompt)
         out_path.write_bytes(b"generated")
         from avg.pipeline.phases.visuals import _SceneResult
@@ -574,7 +574,7 @@ def test_visuals_phase_falls_back_when_the_pool_file_is_not_a_real_image(tmp_pat
         [{"index": 1, "file": str(bad_image), "description": "A warm sunset."}],
     )
 
-    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path, extra_kwargs=None):
         out_path.write_bytes(b"generated")
         from avg.pipeline.phases.visuals import _SceneResult
 
@@ -596,7 +596,7 @@ def test_visuals_phase_a_scene_with_no_recycle_marker_is_unaffected(tmp_path, mo
     _write_scenes(ctx, ["A regular prompt."])
     # No recycle_pool.json at all - matches "recycling was off" exactly.
 
-    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path):
+    def _fake_generate_one(provider, prompt, aspect_ratio, model, scene, out_path, extra_kwargs=None):
         out_path.write_bytes(b"generated")
         from avg.pipeline.phases.visuals import _SceneResult
 
@@ -1275,3 +1275,143 @@ def test_fallback_message_includes_cooldown_detail_on_quota_failure(tmp_path, mo
     messages = [e.message for e in events if isinstance(e, ProgressEvent)]
     fallback_message = next(m for m in messages if m.startswith("Falling back to"))
     assert "quota" in fallback_message
+
+
+class _FakeSeedCapableProvider:
+    """Named to match `_SEED_CAPABLE_PROVIDERS` - records the `seed` kwarg
+    (or its absence) on every call."""
+
+    name = "pollinations"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int | None]] = []
+
+    def generate(self, prompt: str, *, aspect_ratio: str, model: str, seed: int | None = None) -> bytes:
+        self.calls.append((prompt, seed))
+        return f"fake-image-bytes:{prompt}".encode()
+
+
+class _FakeGeminiReferenceProvider:
+    """Named "gemini" - records the `reference_image` kwarg (or its
+    absence) on every call, real enough bytes returned that a later call
+    can use them as a reference in turn."""
+
+    name = "gemini"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bytes | None]] = []
+
+    def generate(
+        self, prompt: str, *, aspect_ratio: str, model: str, reference_image: bytes | None = None
+    ) -> bytes:
+        self.calls.append((prompt, reference_image))
+        return f"fake-image-bytes:{prompt}".encode()
+
+
+def test_seed_is_assigned_once_and_reused_across_scenes(tmp_path, monkeypatch):
+    fake = _FakeSeedCapableProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_seed_lock": True}))
+    _write_scenes(ctx, ["prompt one", "prompt two", "prompt three"])
+
+    VisualsPhase().run(ctx)
+
+    assert ctx.project.visual_seed is not None
+    seeds_used = {seed for _prompt, seed in fake.calls}
+    assert seeds_used == {ctx.project.visual_seed}
+
+
+def test_seed_is_not_reassigned_on_a_second_run(tmp_path, monkeypatch):
+    fake = _FakeSeedCapableProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_seed_lock": True}))
+    _write_scenes(ctx, ["prompt one"])
+
+    VisualsPhase().run(ctx)
+    first_seed = ctx.project.visual_seed
+    assert first_seed is not None
+
+    VisualsPhase().run(ctx)
+    assert ctx.project.visual_seed == first_seed
+
+
+def test_seed_lock_off_never_assigns_a_seed(tmp_path, monkeypatch):
+    fake = _FakeSeedCapableProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_seed_lock": False}))
+    _write_scenes(ctx, ["prompt one"])
+
+    VisualsPhase().run(ctx)
+
+    assert ctx.project.visual_seed is None
+    assert all(seed is None for _prompt, seed in fake.calls)
+
+
+def test_seed_is_not_sent_to_a_non_seed_capable_provider(tmp_path, monkeypatch):
+    fake = _FakeImageProvider()  # name == "fake", not in _SEED_CAPABLE_PROVIDERS
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_seed_lock": True}))
+    _write_scenes(ctx, ["prompt one"])
+
+    VisualsPhase().run(ctx)  # must not raise a TypeError over an unexpected kwarg
+
+    assert ctx.project.visual_seed is not None  # still assigned - just not sent
+
+
+def test_gemini_reference_lock_off_never_sends_a_reference_image(tmp_path, monkeypatch):
+    fake = _FakeGeminiReferenceProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_gemini_reference_lock": False}))
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    VisualsPhase().run(ctx)
+
+    assert all(ref is None for _prompt, ref in fake.calls)
+
+
+def test_gemini_reference_lock_on_reuses_the_first_scenes_bytes(tmp_path, monkeypatch):
+    fake = _FakeGeminiReferenceProvider()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_gemini_reference_lock": True}))
+    _write_scenes(ctx, ["prompt one", "prompt two", "prompt three"])
+
+    VisualsPhase().run(ctx)
+
+    calls_by_prompt = dict(fake.calls)
+    assert calls_by_prompt["prompt one"] is None  # the first scene has nothing to reference yet
+    expected_reference = b"fake-image-bytes:prompt one"
+    assert calls_by_prompt["prompt two"] == expected_reference
+    assert calls_by_prompt["prompt three"] == expected_reference
+
+
+def test_gemini_reference_lock_on_proceeds_without_a_reference_if_the_first_scene_fails(tmp_path, monkeypatch):
+    class _FailFirst(_FakeGeminiReferenceProvider):
+        def generate(self, prompt, *, aspect_ratio, model, reference_image=None):
+            self.calls.append((prompt, reference_image))
+            if prompt == "prompt one":
+                raise AvgError(ErrorKind.network, "simulated failure on the reference scene")
+            return f"fake-image-bytes:{prompt}".encode()
+
+    fake = _FailFirst()
+    monkeypatch.setattr("avg.pipeline.phases.visuals._build_provider", lambda name, transport: fake)
+
+    project = _project(tmp_path)
+    ctx, _events = _ctx(project, channel=_channel({"visuals_gemini_reference_lock": True}))
+    _write_scenes(ctx, ["prompt one", "prompt two"])
+
+    VisualsPhase().run(ctx)  # must not raise - one failed scene, not a dead phase
+
+    calls_by_prompt = dict(fake.calls)
+    assert calls_by_prompt["prompt two"] is None  # no reference was ever produced
