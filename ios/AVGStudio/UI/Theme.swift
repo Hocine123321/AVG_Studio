@@ -39,6 +39,9 @@ enum Theme {
     /// (`.btn.pri`'s text, `.pi.lv`'s icon, a selected `.dot`'s checkmark),
     /// never a surface colour itself, same both schemes.
     static let onAccent = Color(red: 0.165, green: 0.082, blue: 0.031)
+    /// The mock's `#1d2614` - the same idea as `onAccent` but for a solid
+    /// `ok`-coloured fill (`.pi.ok`'s checkmark), same both schemes.
+    static let onOk = Color(red: 0.114, green: 0.149, blue: 0.078)
 
     /// Kept only for screens Skin v2 hasn't reached yet (`HomeView`'s card
     /// gradient, `WelcomeView`'s feature icons) - not part of the new
@@ -253,6 +256,14 @@ extension View {
         self.padding(12)
             .background(Theme.glassFill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+    }
+
+    /// The mock's `.h2`: small semibold secondary-color label above a
+    /// card group ("Pipeline", "Takes", "API keys"...) - plain system
+    /// font, NOT the Caprasimo display face (that's screen titles and
+    /// sheet headings only).
+    func sectionHeader() -> some View {
+        self.font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink2)
     }
 
     /// The mock's `.chip`: small pill label (`background:var(--fl)`, a
