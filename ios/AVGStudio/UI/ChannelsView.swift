@@ -81,24 +81,33 @@ struct ChannelEditor: View {
     /// the model id for whichever provider IS picked still comes from
     /// Settings' own per-provider fields (e.g. Gemini model), matching the
     /// simplification documented on Channel's phase-override properties.
+    // Phase 3 polish (ios/UI_POLISH_PLAN.md): these 4 phases were 4
+    // separate Sections, each repeating the same header/footer chrome for
+    // 3 near-identical pickers - a third of this sheet's 11 sections were
+    // this one repeated shape. Merged into a single "Per-phase models"
+    // Section below, with each phase as a labelled group of sibling rows
+    // (a bare Text title + 3 Pickers + a caption, the same
+    // "plain Text row as a caption inside a Section" pattern already used
+    // for the Apple-voice download hint in Settings) instead of 4 Section
+    // wrappers.
     @ViewBuilder
-    private func modelPhaseSection(
+    private func modelPhaseGroup(
         title: String, footer: String,
         provider: Binding<TextProviderKind?>, backup: Binding<TextProviderKind?>, onFailure: Binding<PhaseOnFailure>
     ) -> some View {
-        Section {
-            Picker("Model", selection: provider) {
-                Text("Default").tag(TextProviderKind?.none)
-                ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
-            }
-            Picker("Backup", selection: backup) {
-                Text("None").tag(TextProviderKind?.none)
-                ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
-            }
-            Picker("If both fail", selection: onFailure) {
-                ForEach(PhaseOnFailure.allCases) { Text($0.label).tag($0) }
-            }
-        } header: { Text(title) } footer: { Text(footer) }
+        Text(title).font(.subheadline.weight(.semibold))
+        Picker("Model", selection: provider) {
+            Text("Default").tag(TextProviderKind?.none)
+            ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
+        }
+        Picker("Backup", selection: backup) {
+            Text("None").tag(TextProviderKind?.none)
+            ForEach(TextProviderKind.allCases) { Text($0.label).tag(TextProviderKind?.some($0)) }
+        }
+        Picker("If both fail", selection: onFailure) {
+            ForEach(PhaseOnFailure.allCases) { Text($0.label).tag($0) }
+        }
+        Text(footer).font(.caption2).foregroundStyle(.secondary)
     }
 
     private static let fontPresets = ["", "Georgia", "Avenir Next", "Futura", "Times New Roman", "Courier New", "Impact", "custom"]
@@ -194,26 +203,30 @@ struct ChannelEditor: View {
                 // with its own backup and if-both-fail policy. Left blank
                 // (None), a phase just uses Settings → the default text
                 // provider, like an unconfigured PC channel.
-                modelPhaseSection(
-                    title: "Brief",
-                    footer: "Governs the creative brief AND the optional topic-research call ahead of it - the PC's own router shares one model between the two.",
-                    provider: $channel.briefTextProvider, backup: $channel.briefTextBackup, onFailure: $channel.briefOnFailure
-                )
-                modelPhaseSection(
-                    title: "Script · Draft",
-                    footer: "Governs writing the narration itself.",
-                    provider: $channel.scriptDraftTextProvider, backup: $channel.scriptDraftTextBackup, onFailure: $channel.scriptDraftOnFailure
-                )
-                modelPhaseSection(
-                    title: "Script · Segmentation",
-                    footer: "Governs splitting the finished narration into scenes and image prompts.",
-                    provider: $channel.scriptSegmentationTextProvider, backup: $channel.scriptSegmentationTextBackup, onFailure: $channel.scriptSegmentationOnFailure
-                )
-                modelPhaseSection(
-                    title: "Direction (motion & grade)",
-                    footer: "Governs the Director II call that plans each scene's camera move, entrance transition, and the video's one overall colour grade, right before render.",
-                    provider: $channel.director2TextProvider, backup: $channel.director2TextBackup, onFailure: $channel.director2OnFailure
-                )
+                Section {
+                    modelPhaseGroup(
+                        title: "Brief",
+                        footer: "Governs the creative brief AND the optional topic-research call ahead of it - the PC's own router shares one model between the two.",
+                        provider: $channel.briefTextProvider, backup: $channel.briefTextBackup, onFailure: $channel.briefOnFailure
+                    )
+                    modelPhaseGroup(
+                        title: "Script · Draft",
+                        footer: "Governs writing the narration itself.",
+                        provider: $channel.scriptDraftTextProvider, backup: $channel.scriptDraftTextBackup, onFailure: $channel.scriptDraftOnFailure
+                    )
+                    modelPhaseGroup(
+                        title: "Script · Segmentation",
+                        footer: "Governs splitting the finished narration into scenes and image prompts.",
+                        provider: $channel.scriptSegmentationTextProvider, backup: $channel.scriptSegmentationTextBackup, onFailure: $channel.scriptSegmentationOnFailure
+                    )
+                    modelPhaseGroup(
+                        title: "Direction (motion & grade)",
+                        footer: "Governs the Director II call that plans each scene's camera move, entrance transition, and the video's one overall colour grade, right before render.",
+                        provider: $channel.director2TextProvider, backup: $channel.director2TextBackup, onFailure: $channel.director2OnFailure
+                    )
+                } header: { Text("Per-phase models") } footer: {
+                    Text("Leave a phase on Default to use the channel's global text provider above.")
+                }
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)
