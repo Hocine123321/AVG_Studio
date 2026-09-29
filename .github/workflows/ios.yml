@@ -2,7 +2,7 @@ name: iOS build (unsigned IPA)
 on:
   push:
     branches: [ios-native]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["AVGStudio/**", "project.yml", ".github/workflows/ios.yml"]
   workflow_dispatch:
 jobs:
   build:
@@ -15,23 +15,20 @@ jobs:
           X=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
           echo "Using $X"; sudo xcode-select -s "$X"; xcodebuild -version
       - name: Generate project
-        working-directory: ios
         run: brew install xcodegen && xcodegen generate
       - name: Build
-        working-directory: ios
         run: |
           xcodebuild -project AVGStudio.xcodeproj -scheme AVGStudio -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 \
             || { grep -E "error:" build.log | sort -u | head -100; tail -40 build.log; exit 1; }
       - name: Package IPA
-        working-directory: ios
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/AVGStudio.app Payload/
           zip -qry AVGStudio-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
-        with: { name: AVGStudio-ipa, path: ios/AVGStudio-unsigned.ipa }
+        with: { name: AVGStudio-ipa, path: AVGStudio-unsigned.ipa }
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: build-log, path: ios/build.log, if-no-files-found: ignore }
+        with: { name: build-log, path: build.log, if-no-files-found: ignore }

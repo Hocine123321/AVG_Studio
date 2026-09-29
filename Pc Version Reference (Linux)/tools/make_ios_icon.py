@@ -1,4 +1,4 @@
-"""Generate the iOS AppIcon (`ios/AVGStudio/Assets.xcassets/AppIcon.appiconset/
+"""Generate the iOS AppIcon (`AVGStudio/Assets.xcassets/AppIcon.appiconset/
 icon.png`) from the SAME brand mark as `make_icon.py` - the dark "A" on a
 terracotta ground (`.rail__logo` in `web/src/Rail.tsx`) - instead of the
 placeholder committed with the original iOS scaffold (12128c9), which was
@@ -29,8 +29,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / "ios" / "AVGStudio" / "Assets.xcassets" / "AppIcon.appiconset" / "icon.png"
+REPO = Path(__file__).resolve().parent.parent  # the "Pc Version Reference (Linux)" folder
+IOS_ROOT = REPO.parent  # iOS project lives at the repo root
+OUT = IOS_ROOT / "AVGStudio" / "Assets.xcassets" / "AppIcon.appiconset" / "icon.png"
 
 SIZE = 1024
 #: Same two colours as `make_icon.py` - `--accent` and `--canvas` from
