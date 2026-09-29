@@ -192,3 +192,12 @@ def test_visuals_seed_and_reference_lock_settings_exist():
     assert ids["visuals_seed_lock"].scope == "channel"
     assert ids["visuals_gemini_reference_lock"].default is False
     assert ids["visuals_gemini_reference_lock"].invalidates == "visuals"
+
+
+def test_captions_timing_source_setting_exists():
+    ids = {s.id: s for s in SETTINGS}
+    s = ids["captions_timing_source"]
+    assert s.default == "auto"
+    assert s.invalidates == "screen_text"
+    assert s.scope == "channel"
+    assert s.choices == ["auto", "tts_native", "assemblyai", "estimated"]

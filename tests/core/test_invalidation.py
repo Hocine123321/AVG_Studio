@@ -66,13 +66,14 @@ def test_the_whole_catalogue_is_present_and_uniquely_identified():
     `resilience_rate_limit_wait_ceiling_sec` and
     `resilience_quota_cooldown_hours`, and 79 after Slice 32 sub-slice 2
     added the `images` group's `visuals_seed_lock` and
-    `visuals_gemini_reference_lock`. The
+    `visuals_gemini_reference_lock`, and 80 after Slice 32 sub-slice 3
+    added the `captions` group's `captions_timing_source`. The
     count is kept as a
     deliberate tripwire on accidental additions or losses; the uniqueness
     check is what actually matters, since `BY_ID` would silently swallow a
     duplicated id.
     """
-    assert len(SETTINGS) == 79
+    assert len(SETTINGS) == 80
     assert len({s.id for s in SETTINGS}) == len(SETTINGS)
 
 

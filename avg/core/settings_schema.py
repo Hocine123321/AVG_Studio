@@ -399,6 +399,21 @@ SETTINGS: list[SettingSpec] = [
         choices=["", "Arial", "Segoe UI", "Calibri", "Georgia", "Verdana", "Impact", "Times New Roman", "custom"],
         invalidates="screen_text",
     ),
+    SettingSpec(
+        id="captions_timing_source",
+        group="captions",
+        label="Caption timing source",
+        help=(
+            "\"Auto\" prefers native TTS word timing (free, from the voice provider "
+            "itself) over AssemblyAI, over an estimated guess - in that order, using "
+            "whichever is actually available. Force one explicitly to override."
+        ),
+        type="choice",
+        default="auto",
+        scope="channel",
+        choices=["auto", "tts_native", "assemblyai", "estimated"],
+        invalidates="screen_text",
+    ),
     # --- overlay cards (Director II's focused/explainer cards and takeover
     # cards) - three brand colours, read by `avg.media.overlays.resolve_brand`,
     # the one function both a real render (`render_layers`, called from
