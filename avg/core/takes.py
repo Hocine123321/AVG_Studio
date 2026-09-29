@@ -98,7 +98,16 @@ PHASE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # the render engine reads, and a cloned take that kept Visuals but not
     # Render must carry it or the clone cannot be rendered at all.
     "visuals": ("images", "render/index.json", "render/scene_safezones.json"),
-    "voice": ("audio/raw_voice.mp3", "audio/optimized_voice.mp3", "audio/scene_audio_map.json"),
+    # `word_timings.json` is Voice's native-TTS word timing, read by Captions
+    # (`captions_timing_source`, which invalidates screen_text but NOT voice):
+    # a clone that kept Voice but not this would re-run Captions and silently
+    # fall back to AssemblyAI/estimated timing.
+    "voice": (
+        "audio/raw_voice.mp3",
+        "audio/optimized_voice.mp3",
+        "audio/scene_audio_map.json",
+        "audio/word_timings.json",
+    ),
     "director2": (
         "render/direction_plan.json",
         "render/card_plan.json",

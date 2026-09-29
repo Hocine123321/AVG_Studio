@@ -1471,3 +1471,110 @@ def test_director2_prompt_degrades_cleanly_without_video_map_or_safezones(tmp_pa
     assert len(generator.calls) == 1
     _phase, prompt = generator.calls[0]
     assert '[1] "Scene one text."' in prompt
+
+
+def test_captions_prefers_native_tts_timing_over_assemblyai(tmp_path, monkeypatch):
+    """The new default priority: native timing wins even when an
+    AssemblyAI key IS configured - AssemblyAI must not even be called."""
+    called = {"assemblyai": False}
+
+    def _fail_if_called(*a, **k):
+        called["assemblyai"] = True
+        raise AssertionError("AssemblyAI should not have been called")
+
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: True)
+    monkeypatch.setattr(captions_module, "get_key", lambda provider: "fake-key")
+    monkeypatch.setattr(captions_module, "_transcribe_with_assemblyai", _fail_if_called)
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, events = _ctx(project)
+    _write_audio(ctx)
+    write_json(
+        Path(ctx.project.folder) / "audio" / "word_timings.json",
+        {"words": [{"text": "Hello", "start": 0.0, "end": 0.5}, {"text": "world", "start": 0.6, "end": 1.0}]},
+    )
+    _write_scenes(ctx, ["Hello world"])
+
+    ScreenTextPhase().run(ctx)
+
+    assert called["assemblyai"] is False
+    assert any("native TTS timing" in e.message for e in events if isinstance(e, ProgressEvent))
+    source_doc = read_json(render_dir(ctx) / "_transcript_source.json")
+    assert source_doc == {"provider": "tts_native"}
+
+
+def test_captions_timing_source_forced_to_assemblyai_skips_native_even_when_present(tmp_path, monkeypatch):
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: True)
+    monkeypatch.setattr(captions_module, "get_key", lambda provider: "fake-key")
+    monkeypatch.setattr(
+        captions_module,
+        "_transcribe_with_assemblyai",
+        lambda audio_bytes, key: [{"text": "Hi", "start": 0.0, "end": 0.5}],
+    )
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, events = _ctx(project, channel=_channel({"captions_timing_source": "assemblyai"}))
+    _write_audio(ctx)
+    write_json(
+        Path(ctx.project.folder) / "audio" / "word_timings.json",
+        {"words": [{"text": "Hi", "start": 0.0, "end": 0.5}]},
+    )
+    _write_scenes(ctx, ["Hi there"])
+
+    ScreenTextPhase().run(ctx)
+
+    assert any("AssemblyAI" in e.message for e in events if isinstance(e, ProgressEvent))
+    source_doc = read_json(render_dir(ctx) / "_transcript_source.json")
+    assert source_doc == {"provider": "assemblyai"}
+
+
+def test_captions_timing_source_forced_to_estimated_skips_both(tmp_path, monkeypatch):
+    called = {"assemblyai": False}
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: True)
+    monkeypatch.setattr(captions_module, "get_key", lambda provider: "fake-key")
+    monkeypatch.setattr(
+        captions_module,
+        "_transcribe_with_assemblyai",
+        lambda *a, **k: called.__setitem__("assemblyai", True),
+    )
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, events = _ctx(project, channel=_channel({"captions_timing_source": "estimated"}))
+    _write_audio(ctx)
+    write_json(
+        Path(ctx.project.folder) / "audio" / "word_timings.json",
+        {"words": [{"text": "Hi", "start": 0.0, "end": 0.5}]},
+    )
+    _write_scenes(ctx, ["A single simple scene of narration text."])
+
+    ScreenTextPhase().run(ctx)
+
+    assert called["assemblyai"] is False
+    assert any("estimated timing" in e.message for e in events if isinstance(e, ProgressEvent))
+    source_doc = read_json(render_dir(ctx) / "_transcript_source.json")
+    assert source_doc == {"provider": "estimated"}
+
+
+def test_captions_falls_through_to_assemblyai_when_no_native_timing_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(captions_module, "has_key", lambda provider: True)
+    monkeypatch.setattr(captions_module, "get_key", lambda provider: "fake-key")
+    monkeypatch.setattr(
+        captions_module,
+        "_transcribe_with_assemblyai",
+        lambda audio_bytes, key: [{"text": "Hi", "start": 0.0, "end": 0.5}],
+    )
+    _patch_audio_duration(monkeypatch)
+
+    project = _project(tmp_path)
+    ctx, events = _ctx(project)
+    _write_audio(ctx)
+    # No word_timings.json written at all - voice.py's provider didn't
+    # support native timing for this run.
+    _write_scenes(ctx, ["Hi there"])
+
+    ScreenTextPhase().run(ctx)
+
+    assert any("AssemblyAI" in e.message for e in events if isinstance(e, ProgressEvent))

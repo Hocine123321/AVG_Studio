@@ -388,3 +388,12 @@ def test_cloning_a_root_storage_take_reads_the_project_root(tmp_path):
     take2 = clone_take(project, 1, ["brief"])
 
     assert (take_folder(project, take2.id) / "script" / "brief.json").is_file()
+
+
+def test_a_clone_that_keeps_voice_also_carries_its_native_word_timings():
+    """`captions_timing_source` invalidates screen_text but not voice - the
+    clone re-runs Captions, which reads `audio/word_timings.json`. If Voice's
+    artifacts omit it the clone silently falls back to AssemblyAI/estimated."""
+    from avg.core.takes import PHASE_ARTIFACTS
+
+    assert "audio/word_timings.json" in PHASE_ARTIFACTS["voice"]

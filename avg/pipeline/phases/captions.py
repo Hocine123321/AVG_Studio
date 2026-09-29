@@ -278,12 +278,31 @@ def _transcribe_with_assemblyai(audio_bytes: bytes, api_key: str) -> list[dict]:
 
 def _get_words(
     ctx: PhaseContext, audio_path: Path, scene_texts_clean: list[str], scene_windows: dict[int, tuple[float, float]]
-) -> tuple[list[dict], bool]:
-    """`(words, used_assemblyai)`. Tries AssemblyAI only when a key is
-    configured; ANY failure (network, timeout, bad key, empty result)
+) -> tuple[list[dict], str]:
+    """`(words, source)` - `source` is `"tts_native"`, `"assemblyai"`, or
+    `"estimated"`.
+
+    `captions_timing_source` (default `"auto"`) decides priority: native
+    TTS word timing (free, from `avg.pipeline.phases.voice`'s own
+    `audio/word_timings.json` when that phase's provider supported it)
+    ahead of AssemblyAI, ahead of the proportional estimate - a real TTS
+    engine's own account of what it said and when is more reliably in sync
+    with the actual audio than a second transcription of it could be, and
+    it costs nothing. `"assemblyai"`/`"estimated"` force one path
+    explicitly, skipping whatever ranks above it.
+
+    ANY AssemblyAI failure (network, timeout, bad key, empty result)
     degrades to the synthetic estimate rather than raising - see module
-    docstring's "no key OR a failing key" invariant."""
-    if has_key("assemblyai"):
+    docstring's "no key OR a failing key" invariant, unchanged from before
+    this slice."""
+    timing_source = str(ctx.channel_values.get("captions_timing_source") or "auto")
+
+    if timing_source in ("auto", "tts_native"):
+        native = read_json(_audio_dir(ctx) / "word_timings.json")
+        if isinstance(native, dict) and isinstance(native.get("words"), list) and native["words"]:
+            return native["words"], "tts_native"
+
+    if timing_source in ("auto", "assemblyai") and has_key("assemblyai"):
         key = get_key("assemblyai")
         if key:
             try:
@@ -297,8 +316,8 @@ def _get_words(
                 report_degradation(ctx, message)
             else:
                 if words:
-                    return words, True
-    return _synthetic_word_timings(scene_texts_clean, scene_windows), False
+                    return words, "assemblyai"
+    return _synthetic_word_timings(scene_texts_clean, scene_windows), "estimated"
 
 
 # ── card-window resolution (Director II's card_plan.json, refined) ───────
@@ -646,7 +665,7 @@ class ScreenTextPhase:
         total_duration = audio_duration_seconds(audio_path)
         scene_windows = _scene_windows(scene_texts_clean, total_duration)
 
-        words, used_assemblyai = _get_words(ctx, audio_path, scene_texts_clean, scene_windows)
+        words, timing_source = _get_words(ctx, audio_path, scene_texts_clean, scene_windows)
         if not words:
             raise AvgError(ErrorKind.bug, "captions phase: produced no usable words to caption")
 
@@ -685,15 +704,18 @@ class ScreenTextPhase:
         # burns exactly the words these cards were timed against. The
         # provider name is part of the cache key, so it is recorded for
         # Render to pass back rather than guessed there.
-        provider = "assemblyai" if used_assemblyai else "estimated"
-        seed_transcript_cache(Path(ctx.project.folder), audio_path, provider, words)
-        write_json(rdir / "_transcript_source.json", {"provider": provider})
+        seed_transcript_cache(Path(ctx.project.folder), audio_path, timing_source, words)
+        write_json(rdir / "_transcript_source.json", {"provider": timing_source})
 
-        source = "AssemblyAI" if used_assemblyai else "estimated timing"
+        source_label = {
+            "tts_native": "native TTS timing",
+            "assemblyai": "AssemblyAI",
+            "estimated": "estimated timing",
+        }[timing_source]
         ctx.emit(
             ProgressEvent(
                 project_id=ctx.project.id,
                 percent=100,
-                message=f"Captions complete ({len(cues) - suppressed}/{len(cues)} cue(s), {source}).",
+                message=f"Captions complete ({len(cues) - suppressed}/{len(cues)} cue(s), {source_label}).",
             )
         )
