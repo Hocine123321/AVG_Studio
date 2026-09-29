@@ -29,6 +29,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import shutil
+
 import pytest
 
 from avg.config.channels import Channel
@@ -1415,3 +1417,109 @@ def test_gemini_reference_lock_on_proceeds_without_a_reference_if_the_first_scen
 
     calls_by_prompt = dict(fake.calls)
     assert calls_by_prompt["prompt two"] is None  # no reference was ever produced
+
+
+class _FakeTimingVoiceProvider(_FakeVoiceProvider):
+    """`_FakeVoiceProvider` plus `synthesize_with_timing` - one word per
+    segment, spanning a fixed 0.0-1.0s window in that segment's own
+    pre-clean timeline, so the offset math after concatenation is easy to
+    hand-verify."""
+
+    def synthesize_with_timing(self, text, *, voice_id, model):
+        self.calls.append((text, voice_id, model))
+        return f"fake-audio:{text}".encode(), [{"text": text.split()[0], "start": 0.0, "end": 1.0}]
+
+
+class _FakePartialTimingVoiceProvider(_FakeVoiceProvider):
+    """Has `synthesize_with_timing`, but its second call returns no words -
+    the "whole-run, not partial" case."""
+
+    def synthesize_with_timing(self, text, *, voice_id, model):
+        self.calls.append((text, voice_id, model))
+        words = None if len(self.calls) == 2 else [{"text": "word", "start": 0.0, "end": 1.0}]
+        return f"fake-audio:{text}".encode(), words
+
+
+def test_voice_writes_word_timings_when_the_provider_supports_it(tmp_path, monkeypatch):
+    fake = _FakeTimingVoiceProvider()
+    _patch_voice_collaborators(monkeypatch, fake)
+    monkeypatch.setattr("avg.pipeline.phases.voice.audio_duration_seconds", lambda path: 10.0)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_narration(ctx, "First half. [pause] Second half.")
+
+    VoicePhase().run(ctx)
+
+    timings = read_json(script_dir(ctx).parent / "audio" / "word_timings.json")
+    assert timings is not None
+    words = timings["words"]
+    assert [w["text"] for w in words] == ["First", "Second"]
+    assert words[0]["start"] == pytest.approx(0.0)
+    assert words[0]["end"] == pytest.approx(1.0)
+    assert words[1]["start"] > 10.0  # strictly after segment 1's own duration
+
+
+def test_voice_does_not_write_word_timings_without_provider_support(tmp_path, monkeypatch):
+    fake = _FakeVoiceProvider()  # no synthesize_with_timing
+    _patch_voice_collaborators(monkeypatch, fake)
+    monkeypatch.setattr("avg.pipeline.phases.voice.audio_duration_seconds", lambda path: 10.0)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_narration(ctx, "Some narration.")
+
+    VoicePhase().run(ctx)
+
+    assert not (script_dir(ctx).parent / "audio" / "word_timings.json").exists()
+
+
+def test_voice_writes_no_word_timings_when_any_segment_lacks_them(tmp_path, monkeypatch):
+    fake = _FakePartialTimingVoiceProvider()
+    _patch_voice_collaborators(monkeypatch, fake)
+    monkeypatch.setattr("avg.pipeline.phases.voice.audio_duration_seconds", lambda path: 10.0)
+
+    project = _project(tmp_path)
+    ctx, _ = _ctx(project)
+    _write_narration(ctx, "First half. [pause] Second half.")
+
+    VoicePhase().run(ctx)  # must not raise - a missing timing degrades, not a phase failure
+
+    assert not (script_dir(ctx).parent / "audio" / "word_timings.json").exists()
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs real ffmpeg")
+def test_clean_segment_really_remaps_word_timings_through_removed_silence(tmp_path):
+    """Unmocked: real pydub, real ffmpeg, the real vendored
+    `remove_silences_core`. 0.5s tone + 1.0s silence + 0.5s tone; the
+    second word sits after the gap, so it must shift earlier by exactly
+    what was actually removed."""
+    from pydub import AudioSegment
+    from pydub.generators import Sine
+
+    from avg.pipeline.phases.voice import _clean_segment
+
+    raw_path = tmp_path / "raw.mp3"
+    clean_path = tmp_path / "clean.mp3"
+    scene_map_path = tmp_path / "word_map.json"
+    tone = Sine(440).to_audio_segment(duration=500).apply_gain(-10)
+    (tone + AudioSegment.silent(duration=1000) + tone).export(raw_path, format="mp3")
+
+    result = _clean_segment(
+        None,
+        segment_index=1,
+        raw_path=raw_path,
+        clean_path=clean_path,
+        aggressiveness="medium",
+        max_removable_pct=100.0,
+        word_timings=[
+            {"text": "hello", "start": 0.1, "end": 0.4},
+            {"text": "world", "start": 1.6, "end": 1.9},
+        ],
+        scene_map_path=scene_map_path,
+    )
+
+    assert result is not None
+    assert result[0]["start"] == pytest.approx(0.1, abs=0.05)  # before the gap: unchanged
+    assert result[1]["start"] < 1.6 - 0.5  # after the gap: shifted earlier by the removed silence
+    assert result[1]["end"] - result[1]["start"] == pytest.approx(0.3, abs=0.05)  # duration preserved

@@ -259,7 +259,22 @@ class VoicePhase:
                 project_id=ctx.project.id, percent=0, message=f"Synthesizing narration ({len(segments)} part(s))..."
             )
         )
-        raw_audio = [provider.synthesize(segment, voice_id=voice_id, model=model) for segment in segments]
+        raw_audio: list[bytes] = []
+        raw_word_timings: list[list[dict[str, Any]] | None] = []
+        supports_timing = hasattr(provider, "synthesize_with_timing")
+        for segment in segments:
+            if supports_timing:
+                data, words = provider.synthesize_with_timing(segment, voice_id=voice_id, model=model)
+            else:
+                data, words = provider.synthesize(segment, voice_id=voice_id, model=model), None
+            raw_audio.append(data)
+            raw_word_timings.append(words)
+        # Whole-run, not partial: if any segment's timing came back empty,
+        # word_timings.json is not written at all for this run - Captions'
+        # own AssemblyAI/estimated fallback handles the whole track instead,
+        # rather than stitching native timing for some segments and a guess
+        # for others.
+        word_timings_available = supports_timing and all(w is not None for w in raw_word_timings)
 
         gap_ms = _DEFAULT_PAUSE_MS if (pauses_enabled and len(segments) > 1) else 0
         audio_dir = _audio_dir(ctx)
@@ -292,19 +307,29 @@ class VoicePhase:
             max_removable_pct = max(0.0, min(100.0, float(max_removable_pct)))
 
             cleaned_paths = []
+            remapped_word_timings: list[list[dict[str, Any]]] = []
             for i, raw_path in enumerate(raw_paths, start=1):
                 clean_path = tmp_path / f"clean_{i:03d}.mp3"
-                _clean_segment(
+                segment_words = raw_word_timings[i - 1] if word_timings_available else None
+                word_map_path = tmp_path / f"word_map_{i:03d}.json" if segment_words is not None else None
+                remapped = _clean_segment(
                     ctx,
                     segment_index=i,
                     raw_path=raw_path,
                     clean_path=clean_path,
                     aggressiveness=aggressiveness,
                     max_removable_pct=max_removable_pct,
+                    word_timings=segment_words,
+                    scene_map_path=word_map_path,
                 )
                 cleaned_paths.append(clean_path)
+                if word_timings_available:
+                    remapped_word_timings.append(remapped or [])
 
             _assemble_with_gaps(cleaned_paths, gap_ms, audio_dir / "optimized_voice.mp3")
+
+            if word_timings_available and remapped_word_timings:
+                _write_word_timings(audio_dir, remapped_word_timings, cleaned_paths, gap_ms)
 
         # Best-effort: the narration itself is already on disk and usable.
         # A duration probe that fails (a truncated mp3, an ffmpeg that
@@ -332,7 +357,9 @@ def _clean_segment(
     clean_path: Path,
     aggressiveness: str,
     max_removable_pct: float,
-) -> None:
+    word_timings: list[dict[str, Any]] | None = None,
+    scene_map_path: Path | None = None,
+) -> list[dict[str, Any]] | None:
     """Run `remove_silences_core` once at `aggressiveness`; if it removed
     more than `max_removable_pct` of the segment's own original length,
     retry exactly once at one level less aggressive (a no-op retry if
@@ -340,21 +367,58 @@ def _clean_segment(
     over the cap after that, keep the retried result anyway and report
     the degradation - never a second retry, never silently discarding
     audio the user already paid a provider for.
+
+    When `word_timings` is given (this segment's own pre-clean per-word
+    spans, in seconds), `scene_map_path` is used to remap them through
+    whichever call's result is ultimately kept - reusing `remove_silences_
+    core`'s own general-purpose (start, end)-span remap
+    (`_remap_scene_audio_map`, which reads back whatever `{"scenes": [...]}`
+    file it's given regardless of what the spans semantically represent),
+    never a second implementation of the same checkpoint logic. Each call
+    writes a fresh copy from the ORIGINAL `word_timings`, never chained
+    through a prior attempt's remap - `remove_silences_core` computes its
+    checkpoints from the original raw audio every time, so remapping from
+    anything but the original would silently double-apply. Returns the
+    remapped word list, or `None` when no timing was requested.
     """
+
+    def _write_word_scene_map() -> None:
+        if scene_map_path is not None and word_timings is not None:
+            write_json(
+                scene_map_path,
+                {"scenes": [{"text": w["text"], "start": w["start"], "end": w["end"]} for w in word_timings]},
+            )
+
+    def _read_remapped_words() -> list[dict[str, Any]] | None:
+        if scene_map_path is None or word_timings is None:
+            return None
+        remapped = read_json(scene_map_path)
+        if not isinstance(remapped, dict) or not isinstance(remapped.get("scenes"), list):
+            return None
+        return [
+            {"text": w.get("text", ""), "start": w.get("start"), "end": w.get("end")}
+            for w in remapped["scenes"]
+            if isinstance(w, dict) and w.get("start") is not None and w.get("end") is not None
+        ]
+
     thresh, min_sil, keep = _AGGRESSIVENESS_PARAMS[aggressiveness]
+    _write_word_scene_map()
     result = remove_silences_core(  # type: ignore[no-untyped-call]  # the vendored engine is untyped by design
-        str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", ""
+        str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", str(scene_map_path or "")
     )
+    remapped_words = _read_remapped_words()
     removed_pct = _removed_pct(result)
     if removed_pct is None or removed_pct <= max_removable_pct:
-        return
+        return remapped_words
 
     fallback_level = _AGGRESSIVENESS_STEP_DOWN[aggressiveness]
     if fallback_level != aggressiveness:
         thresh, min_sil, keep = _AGGRESSIVENESS_PARAMS[fallback_level]
+        _write_word_scene_map()
         result = remove_silences_core(  # type: ignore[no-untyped-call]  # the vendored engine is untyped by design
-            str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", ""
+            str(raw_path), str(clean_path), thresh, min_sil, keep, "", "", str(scene_map_path or "")
         )
+        remapped_words = _read_remapped_words()
         removed_pct = _removed_pct(result)
         aggressiveness = fallback_level
 
@@ -365,6 +429,37 @@ def _clean_segment(
             f"audio, above the {max_removable_pct:.0f}% cap even at \"{aggressiveness}\" "
             "- kept the result anyway rather than discard synthesized audio.",
         )
+
+    return remapped_words
+
+
+def _write_word_timings(
+    audio_dir: Path, per_segment_words: list[list[dict[str, Any]]], cleaned_paths: list[Path], gap_ms: int
+) -> None:
+    """Offset each segment's own (post-clean, still segment-local) word
+    spans by the cumulative duration of every prior cleaned segment plus
+    every prior gap, producing one flat list spanning `optimized_voice.mp3`
+    - the same concatenation order/arithmetic `_assemble_with_gaps` itself
+    performs, read via `audio_duration_seconds` rather than re-derived by a
+    second formula. Writes `audio/word_timings.json`."""
+    words: list[dict[str, Any]] = []
+    offset = 0.0
+    for i, (segment_words, clean_path) in enumerate(zip(per_segment_words, cleaned_paths)):
+        if i > 0 and gap_ms > 0:
+            offset += gap_ms / 1000.0
+        for w in segment_words:
+            start, end = w.get("start"), w.get("end")
+            if start is None or end is None:
+                continue
+            words.append(
+                {
+                    "text": w.get("text", ""),
+                    "start": round(offset + float(start), 3),
+                    "end": round(offset + float(end), 3),
+                }
+            )
+        offset += audio_duration_seconds(clean_path)
+    write_json(audio_dir / "word_timings.json", {"words": words})
 
 
 def _removed_pct(result: dict[str, Any]) -> float | None:
