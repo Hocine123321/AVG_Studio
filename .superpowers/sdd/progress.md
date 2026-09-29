@@ -1685,3 +1685,31 @@ vanish. Push after every task.
 Pollinations/Horde/Gemini) - never done, costs money. Sub-slice 3 (captions
 native timing) plan exists on `development` docs, not yet ported/implemented.
 Sub-slice 4 (verification gate) has spec only, no plan.
+
+## Slice 32 sub-slice 3 (Captions native timing) - implemented on `linux-port`
+
+4 tasks: `captions_timing_source` setting (`fbb3cda`); `synthesize_with_timing`
+on ElevenLabs (`/with-timestamps`, char->word grouping) and Edge TTS
+(`WordBoundary`) (`0f2e973`); Voice capture -> remap through
+`remove_silences_core` -> offset-merge into `audio/word_timings.json`
+(`3a44859`, proven against real ffmpeg/pydub, not only mocks); Captions
+3-way priority tts_native > assemblyai > estimated (`124bce5`).
+Suite: 1169 passed, 1 skipped, 0 failed.
+
+**Defects found beyond the plan:**
+- **Sub-slice 1 regression (fixed `f8209ac`):** cooldowns were keyed by
+  provider name only, so a quota failure on ElevenLabs' *primary* key blocked
+  its *backup* key's retry (same provider name, different account). Cooldowns
+  are now scoped to the failing credential via `provider_health.
+  fingerprint_headers`. Found by probing the interaction, not by any test;
+  none of sub-slice 1's tests exercised primary->backup with a real 429.
+- **Plan gap:** `audio/word_timings.json` was missing from Voice's
+  `PHASE_ARTIFACTS`. Changing `captions_timing_source` invalidates
+  `screen_text` but keeps `voice`, so the clone would have re-run Captions
+  without the native timing and silently fallen back. Added + tested.
+- Task 1 alone leaves `test_settings_bindings` red (git-grep reader check)
+  until Task 4 lands; tasks 1-3 were pushed in that state.
+
+**Still pending:** sub-slice 4 (verification gate) plan; live-provider
+manual checks for sub-slices 2 and 3 (real ElevenLabs `/with-timestamps`
+alignment shape and Edge `WordBoundary` are only fixture-verified).
