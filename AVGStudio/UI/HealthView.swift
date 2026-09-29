@@ -10,7 +10,10 @@ struct HealthView: View {
     @Environment(Store.self) private var store
 
     private struct Check: Identifiable {
-        let id = UUID()
+        // Stable identity. It used to be `UUID()`, regenerated on every
+        // evaluation of the computed `checks`, so SwiftUI saw a brand-new
+        // list each time.
+        var id: String { title }
         let title: String
         let detail: String
         let ok: Bool
@@ -26,8 +29,14 @@ struct HealthView: View {
         var isKey: Bool = false
     }
 
-    private var checks: [Check] {
-        let s = store.settings
+    /// Computed ONCE per appearance (and when the chosen providers change),
+    /// not on every read. It used to be a computed property that `healthy`,
+    /// `issueCount`, `freeGBText`, `keyChecks` and `body` each re-evaluated -
+    /// 5+ passes of a speech-voice enumeration, a Keychain query per key and
+    /// a disk-capacity read, every time anything on screen changed.
+    @State private var checks: [Check] = []
+
+    private static func makeChecks(_ s: AppSettings) -> [Check] {
         var out: [Check] = []
         out.append(Check(title: "Apple Intelligence", detail: AppleText.isAvailable ? "On-device writer ready" : "Not available — use another writer", ok: AppleText.isAvailable || s.text != .apple, required: s.text == .apple))
         let keyFor: [TextProviderKind: APIKey] = [.gemini: .gemini, .groq: .groq]
@@ -60,12 +69,14 @@ struct HealthView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                if checks.isEmpty { ProgressView().padding(.top, 40) }
+                if !checks.isEmpty {
                 HStack(spacing: 10) {
                     statTile(
                         icon: healthy ? "checkmark.seal.fill" : "xmark.octagon.fill",
                         value: healthy ? "Healthy" : "\(issueCount)",
                         label: healthy ? "All required checks pass" : "issue\(issueCount == 1 ? "" : "s") to fix",
-                        tint: healthy ? .green : .red
+                        tint: healthy ? Theme.ok : Theme.bad
                     )
                     statTile(icon: "internaldrive.fill", value: freeGBText, label: "Free storage", tint: Theme.accent)
                     statTile(
@@ -84,6 +95,7 @@ struct HealthView: View {
                 }
                 .padding(.horizontal, 14)
                 .glassCard(24, padding: 6)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -101,7 +113,7 @@ struct HealthView: View {
                                 if i > 0 { hairline }
                                 HStack(spacing: 10) {
                                     Image(systemName: e.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
-                                        .foregroundStyle(e.isError ? Color.red : Theme.ink2)
+                                        .foregroundStyle(e.isError ? Theme.bad : Theme.ink2)
                                     Text(e.message).font(.footnote).foregroundStyle(Theme.ink).lineLimit(1)
                                     Spacer(minLength: 8)
                                     Text(e.date, style: .time).font(.caption2).foregroundStyle(Theme.ink2)
@@ -118,6 +130,10 @@ struct HealthView: View {
         }
         .screenBackground()
         .navigationTitle("App health")
+        .onAppear { checks = Self.makeChecks(store.settings) }
+        .onChange(of: store.settings.text) { _, _ in checks = Self.makeChecks(store.settings) }
+        .onChange(of: store.settings.image) { _, _ in checks = Self.makeChecks(store.settings) }
+        .onChange(of: store.settings.voice) { _, _ in checks = Self.makeChecks(store.settings) }
     }
 
     private var hairline: some View {
@@ -155,7 +171,7 @@ struct HealthView: View {
         return c.required ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"
     }
     private func color(for c: Check) -> Color {
-        if c.ok { return .green }
-        return c.required ? .red : .yellow
+        if c.ok { return Theme.ok }
+        return c.required ? Theme.bad : Theme.accent
     }
 }

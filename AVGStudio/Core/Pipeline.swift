@@ -7,6 +7,13 @@ import SwiftUI
 struct Pipeline {
     let store: Store
     let projectID: String
+    /// True when this is a RETRY of a phase that already failed once inside
+    /// the same run (the user tapped "Try again" / picked another provider in
+    /// the recovery sheet). Visuals then keeps every scene image that was
+    /// already generated - before, a retry after scene 7 of 8 failed paid to
+    /// regenerate all eight. A deliberate "Redo from Visuals" keeps this
+    /// false, so it still makes fresh art.
+    var resumeExisting = false
 
     private var project: Project {
         get throws {
@@ -296,9 +303,19 @@ struct Pipeline {
         var done = 0
         let pool = store.reusableImages
         let requestedKind = store.settings.image // captured once: read on MainActor, then only passed by value into the concurrent child tasks below, never read from `store` off-actor.
-        for batch in stride(from: 0, to: scenes.count, by: 3) {
+        // Scenes still needing an image. On a retry, anything whose file is
+        // already on disk counts as done (see `resumeExisting`).
+        let pending: [VideoScene] = resumeExisting
+            ? scenes.filter { (s: VideoScene) -> Bool in
+                guard let f = s.imageFile, FileManager.default.fileExists(atPath: folder.appendingPathComponent(f).path) else { return true }
+                done += 1
+                return false
+            }
+            : scenes
+        if done > 0 { store.progress(projectID, Double(done) / Double(scenes.count), "Keeping \(done) image(s) already made") }
+        for batch in stride(from: 0, to: pending.count, by: 3) {
             try Task.checkCancellation()
-            let slice = Array(scenes[batch..<min(batch + 3, scenes.count)])
+            let slice = Array(pending[batch..<min(batch + 3, pending.count)])
             // A `[RECYCLE #k]` scene copies a pool image straight in - no
             // provider call, no cost - mirroring visuals.py's own
             // `_resolve_recycled_scene`. A pick whose file has since gone
@@ -401,7 +418,7 @@ struct Pipeline {
 
         store.progress(projectID, 0.7, "Removing dead air…")
         let ch = store.channel(for: p)
-        let cleanedFiles = try cleanSegments(files, channel: ch, dir: dir)
+        let cleanedFiles = try await cleanSegments(files, channel: ch, dir: dir)
 
         let finalURL: URL
         if cleanedFiles.count == 1 {
@@ -427,19 +444,19 @@ struct Pipeline {
     /// length, retry once at one aggressiveness level down, then keep
     /// whatever that produced either way - never discard synthesized audio
     /// a provider was already paid for.
-    private func cleanSegments(_ files: [URL], channel: Channel, dir: URL) throws -> [URL] {
+    private func cleanSegments(_ files: [URL], channel: Channel, dir: URL) async throws -> [URL] {
         var out: [URL] = []
         for (i, raw) in files.enumerated() {
             let clean = dir.appendingPathComponent("clean_\(i).caf")
             var level = channel.voiceTrimAggressiveness
             var (thresh, minSil, keep) = level.params
-            var result = try SilenceTrim.clean(input: raw, output: clean, thresholdDBFS: thresh, minSilenceMs: minSil, keepMs: keep)
+            var result = try await Self.trim(raw, clean, thresh, minSil, keep)
             let cap = max(0, min(100, channel.voiceMaxRemovableSilencePct))
             if let removed = result.removedPercent, removed > cap {
                 let fallback = level.stepDown
                 if fallback != level {
                     (thresh, minSil, keep) = fallback.params
-                    result = try SilenceTrim.clean(input: raw, output: clean, thresholdDBFS: thresh, minSilenceMs: minSil, keepMs: keep)
+                    result = try await Self.trim(raw, clean, thresh, minSil, keep)
                     level = fallback
                 }
                 if let stillRemoved = result.removedPercent, stillRemoved > cap {
@@ -449,6 +466,17 @@ struct Pipeline {
             out.append(clean)
         }
         return out
+    }
+
+    /// Runs the dead-air scan OFF the main actor. `Pipeline` is
+    /// `@MainActor`, and `SilenceTrim.clean` reads a whole segment into
+    /// memory and walks it window by window - seconds of pure CPU per
+    /// segment that used to freeze the UI (progress bar, scrolling, the
+    /// Cancel button) for the length of the Voice phase.
+    private nonisolated static func trim(_ input: URL, _ output: URL, _ threshold: Double, _ minSilenceMs: Int, _ keepMs: Int) async throws -> SilenceTrim.Result {
+        try await Task.detached(priority: .userInitiated) {
+            try SilenceTrim.clean(input: input, output: output, thresholdDBFS: threshold, minSilenceMs: minSilenceMs, keepMs: keepMs)
+        }.value
     }
 
     /// Concatenates `segments` into one audio file at `folder/narration.m4a`,
@@ -937,9 +965,18 @@ struct Pipeline {
         guard let a = raw.firstIndex(of: "["), let b = raw.lastIndex(of: "]"), a < b,
               let data = String(raw[a...b]).data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
-        return arr.enumerated().compactMap { i, o in
+        let kept: [VideoScene] = arr.compactMap { o in
             guard let text = (o["text"] as? String)?.trimmed, !text.isEmpty else { return nil }
-            return VideoScene(index: i + 1, text: text, imagePrompt: (o["image_prompt"] as? String) ?? "")
+            return VideoScene(index: 0, text: text, imagePrompt: (o["image_prompt"] as? String) ?? "")
+        }
+        // Number AFTER dropping blank entries. Numbering by position in the
+        // model's array left holes (1, 3, 4...) whenever it returned an empty
+        // scene, so "scene 3 of 5" and the scene_NN image names disagreed with
+        // the count everything else uses.
+        return kept.enumerated().map { i, scene in
+            var s = scene
+            s.index = i + 1
+            return s
         }
     }
 

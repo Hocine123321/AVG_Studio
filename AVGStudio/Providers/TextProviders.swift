@@ -35,15 +35,13 @@ struct GeminiText: TextProvider {
     let model: String
 
     func complete(_ prompt: String, system: String?) async throws -> String {
-        // The PC's Gemini backend (avg/providers/text/gemini.py) sends the
-        // key BOTH as the `x-goog-api-key` header AND a `key=` query param -
-        // its own comment calls this "a genuine quirk of Gemini's REST API,
-        // the old code sent both rather than guessing which one Gemini
-        // actually requires". Matching that here rather than trusting the
-        // header alone.
-        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
-        comps.queryItems = [URLQueryItem(name: "key", value: key)]
-        let url = comps.url!
+        // Header-only auth. The PC port sent the key in the header AND a
+        // `key=` query param ("a genuine quirk ... rather than guessing").
+        // On this side that duplicate is pure downside: URLs end up in system
+        // logs, URLError userInfo and proxies. The header is Google's
+        // documented auth, and this app's Gemini model-list call
+        // (ModelCatalogSources) already works with the header alone.
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
         var body: [String: Any] = ["contents": [["role": "user", "parts": [["text": prompt]]]]]
         if let system { body["systemInstruction"] = ["parts": [["text": system]]] }
         let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")

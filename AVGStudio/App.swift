@@ -2,9 +2,14 @@ import SwiftUI
 
 @main
 struct AVGStudioApp: App {
-    @State private var store = Store()
+    @State private var store: Store
 
     init() {
+        // Built here (not in a property initializer) so the very same
+        // instance can be handed to BackgroundRender.
+        let store = Store()
+        _store = State(initialValue: store)
+        BackgroundRender.attach(store)
         // Must be registered before the app finishes launching; a struct
         // App's `init()` runs at that point, which is the documented place
         // to do this in a SwiftUI-lifecycle app.
@@ -30,7 +35,6 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var store = store
-        Theme.glassLevel = store.settings.glassOpacity
         return Group {
             if !store.settings.onboarded {
                 WelcomeView()
@@ -77,6 +81,8 @@ struct RootView: View {
         .font(store.settings.appFont == .caprasimo ? Font.custom("Caprasimo-Regular", size: 17) : nil)
         .preferredColorScheme(store.settings.themePreference.colorScheme)
         .onChange(of: scenePhase) { _, phase in
+            // Write any debounced settings edit before we can be suspended.
+            if phase != .active { store.flushMeta() }
             if phase == .background { BackgroundRender.scheduleIfNeeded(store: store) }
         }
     }

@@ -172,11 +172,9 @@ struct GeminiImages: ImageProvider {
     var model: String = "gemini-2.5-flash-image"
 
     func generate(prompt: String, size: CGSize) async throws -> Data {
-        // Same belt-and-suspenders auth as GeminiText: header AND `key=` query param.
+        // Header-only auth, same as GeminiText (see the note there).
         let bare = model.trimmed.isEmpty ? "gemini-2.5-flash-image" : model.trimmed
-        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bare):generateContent")!
-        comps.queryItems = [URLQueryItem(name: "key", value: key)]
-        let url = comps.url!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bare):generateContent")!
         let ratio = size.width > size.height ? "16:9" : (size.width < size.height ? "9:16" : "1:1")
         let body: [String: Any] = [
             "contents": [["parts": [["text": prompt]]]],

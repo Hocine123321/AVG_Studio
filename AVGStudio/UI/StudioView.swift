@@ -63,7 +63,11 @@ struct StudioView: View {
             .toast($toastMessage)
             .sheet(isPresented: $showLog) { ProjectLogView(projectID: p.id, title: p.title) }
             .sheet(isPresented: $showExportSheet) { exportSheet(p) }
-            .task(id: p.id) { await refreshLogLoop(p.id) }
+            // Keyed on running-ness too: the old `.task(id: p.id)` polled once
+            // and quit if nothing was running yet, so starting a render from
+            // this screen left the Live list frozen until you left and came back.
+            .task(id: LogLoopKey(id: p.id, running: store.isRunning(p.id))) { await refreshLogLoop(p.id) }
+            .onDisappear { player?.pause() }
             .sheet(isPresented: Binding(
                 get: { capcutBundle != nil },
                 set: { if !$0 { discardCapcutBundle() } }
@@ -91,13 +95,15 @@ struct StudioView: View {
     }
 
     private func refreshLogLoop(_ id: String) async {
-        logTail = Array(store.projectLogTail(id, lines: 6).lines.reversed())
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if Task.isCancelled { break }
-            logTail = Array(store.projectLogTail(id, lines: 6).lines.reversed())
-            if !store.isRunning(id) { break }
+        logTail = recentLog(id)
+        while store.isRunning(id), !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            logTail = recentLog(id)
         }
+    }
+
+    private func recentLog(_ id: String) -> [String] {
+        Array(store.projectLogTail(id, lines: 6).lines.reversed())
     }
 
     /// The mock's own `.row` under its `.lt` title: title + a one-line
@@ -257,6 +263,11 @@ struct StudioView: View {
             Haptics.light()
             confirmRedoPhase = ph
         }
+        // A bare tap gesture is invisible to VoiceOver; announce it as the
+        // button it is.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(r.status == .running ? "" : "Redo from this step")
     }
 
     /// Real per-phase provider info in place of the mock's static table
@@ -270,7 +281,7 @@ struct StudioView: View {
         case .visuals: return store.settings.image.label
         case .voice: return store.settings.voice.label
         case .captions: return p.captionsSource == "assemblyai" ? "AssemblyAI" : "On-device, estimated timing"
-        case .render: return "ffmpeg, bundled"
+        case .render: return "On-device, AVFoundation (HEVC)"
         }
     }
 
@@ -364,12 +375,9 @@ struct StudioView: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(p.scenes) { s in
                     HStack(alignment: .top, spacing: 12) {
-                        Group {
-                            if let u = store.file(p, s.imageFile), let img = UIImage(contentsOfFile: u.path) {
-                                Image(uiImage: img).resizable().scaledToFill()
-                            } else {
-                                Rectangle().fill(.quaternary)
-                            }
+                        ZStack {
+                            Rectangle().fill(.quaternary)
+                            CachedThumb(url: store.file(p, s.imageFile), maxPixel: 200)
                         }
                         .frame(width: 64, height: 96).clipShape(.rect(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 4) {
@@ -395,9 +403,16 @@ struct StudioView: View {
                 if let url = store.file(p, p.output) {
                     exportRow("Save to Photos", "square.and.arrow.down") {
                         showExportSheet = false
-                        UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
-                        Haptics.success()
-                        toastMessage = "Saved to Photos"
+                        Task {
+                            do {
+                                try await PhotoSaver.saveVideo(at: url)
+                                Haptics.success()
+                                toastMessage = "Saved to Photos"
+                            } catch {
+                                Haptics.error()
+                                toastMessage = error.localizedDescription
+                            }
+                        }
                     }
                     if let take = p.takes.first(where: { $0.file == p.output }) {
                         exportRow("Send as CapCut draft", "scissors") {
@@ -436,6 +451,13 @@ struct StudioView: View {
         .padding(.vertical, 12)
         .contentShape(.rect)
     }
+}
+
+/// Identity for Studio's Live-list polling task: it must restart when the
+/// project changes OR when a run starts/stops.
+private struct LogLoopKey: Hashable {
+    let id: String
+    let running: Bool
 }
 
 /// The mock's `.pi`: a flat icon circle that fills solid + pulses while

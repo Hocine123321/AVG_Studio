@@ -117,8 +117,8 @@ struct GeminiVoice: VoiceProvider {
     func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
         let bareModel = model.trimmed.isEmpty ? "gemini-2.5-flash-preview-tts" : model.trimmed
         let voice = voiceName.trimmed.isEmpty ? "Kore" : voiceName.trimmed
-        var comps = URLComponents(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bareModel):generateContent")!
-        comps.queryItems = [URLQueryItem(name: "key", value: key)]
+        // Header-only auth, same as GeminiText (see the note there).
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(bareModel):generateContent")!
         let body: [String: Any] = [
             "contents": [["parts": [["text": text]]]],
             "generationConfig": [
@@ -126,7 +126,7 @@ struct GeminiVoice: VoiceProvider {
                 "speechConfig": ["voiceConfig": ["prebuiltVoiceConfig": ["voiceName": voice]]],
             ],
         ]
-        let data = try await HTTP.retrying({ try await HTTP.send(comps.url!, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")
+        let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["x-goog-api-key": key], json: body, provider: "gemini") }, provider: "gemini")
         let o = try HTTP.object(data)
         let parts = (((o["candidates"] as? [[String: Any]])?.first?["content"] as? [String: Any])?["parts"] as? [[String: Any]]) ?? []
         for p in parts {

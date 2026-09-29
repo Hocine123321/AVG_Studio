@@ -2,7 +2,7 @@ name: iOS build (unsigned IPA)
 on:
   push:
     branches: [ios-native]
-    paths: ["AVGStudio/**", "project.yml", ".github/workflows/ios.yml"]
+    paths: ["AVGStudio/**", "AVGStudioTests/**", "project.yml", ".github/workflows/ios.yml"]
   workflow_dispatch:
 jobs:
   build:
@@ -16,6 +16,16 @@ jobs:
           echo "Using $X"; sudo xcode-select -s "$X"; xcodebuild -version
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
+      - name: Unit tests (simulator)
+        run: |
+          # Pick whichever iPhone simulator this runner image has, instead of
+          # hard-coding a device name that changes with every Xcode release.
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) for x in d[k] if x['name'].startswith('iPhone')))")
+          echo "Testing on simulator $UDID"
+          xcodebuild test -project AVGStudio.xcodeproj -scheme AVGStudio \
+            -destination "id=$UDID" -derivedDataPath build-test \
+            CODE_SIGNING_ALLOWED=NO > test.log 2>&1 \
+            || { grep -E "error:|failed|XCTAssert" test.log | sort -u | head -80; tail -40 test.log; exit 1; }
       - name: Build
         run: |
           xcodebuild -project AVGStudio.xcodeproj -scheme AVGStudio -configuration Release \
@@ -31,4 +41,4 @@ jobs:
         with: { name: AVGStudio-ipa, path: AVGStudio-unsigned.ipa }
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: build-log, path: build.log, if-no-files-found: ignore }
+        with: { name: build-logs, path: "*.log", if-no-files-found: ignore }

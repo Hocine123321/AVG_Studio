@@ -16,9 +16,9 @@ One process, one target, no server: SwiftUI + a single `@MainActor @Observable` 
 
 **There is no local toolchain on this machine.** Swift, Xcode and XcodeGen are macOS-only, and the sandbox here is Linux. Do not claim a change "builds" or "passes" unless CI ran it. Say what you checked (reading, grep) and that the compile is unverified.
 
-**The build is the test.** There is no iOS test target and no unit tests. Verification is a green CI build plus running the app. Do not add a test target as a side effect of another change.
+**CI is the only thing that compiles or tests anything.** There is a small XCTest target, `AVGStudioTests/` (26 tests: settings decoding, `ErrorPolicy`, the pure text and timing helpers in `Pipeline`). It exists to pin the code where a mistake is silent. Nothing covers providers, rendering, the `Store` or views. When you change a pure helper (`Pipeline.splitOnPause`, `parseScenes`, `allocateProportional`, `classify`, an `AppSettings` field), **add or update its test in the same commit**. Do not add tests that need the network, a real key or a device.
 
-CI (`.github/workflows/ios.yml`) runs on push to `ios-native` when `AVGStudio/**`, `project.yml` or the workflow itself changes. It runs on `macos-26`, generates the project with XcodeGen, builds Release with signing off, and uploads `AVGStudio-unsigned.ipa` and `build.log`. **Read `build.log`'s `error:` lines to diagnose a red build**; the workflow prints them on failure. Sideload the IPA with Sideloadly or AltStore.
+CI (`.github/workflows/ios.yml`) runs on push to `ios-native` when `AVGStudio/**`, `AVGStudioTests/**`, `project.yml` or the workflow itself changes. It runs on `macos-26`, generates the project with XcodeGen, **runs the unit tests on an iPhone simulator**, builds Release with signing off, and uploads `AVGStudio-unsigned.ipa` and the `*.log` files. A failing test stops the IPA from being built. **Read the `error:` / `XCTAssert` lines in the job output (or `test.log` / `build.log`) to diagnose a red run**; the workflow prints them on failure. Sideload the IPA with Sideloadly or AltStore.
 
 Local, on a Mac only, from the repo root:
 
@@ -42,6 +42,8 @@ AVGStudio/Providers/  text / image / voice / transcription backends, HTTP, error
 **The `Store` is the boundary.** It plays the role `avg/api/` plays on PC. Below it, nothing touches UI state: a phase reports progress through a closure and fails with a typed `AVGError`; the `Store` decides whether that becomes a log line, a banner or a `RecoverySheet`. There is no `print` or `NSLog` anywhere in the app. Keep it that way: use `store.record(...)` (or `RenderLog.emit`, inside providers) so the line lands in the project's log.
 
 **`@MainActor` is the concurrency contract.** `Store`, `Pipeline`, `Recovery` and `CapCutExporter` are main-actor. Concurrent work (image batches in a `withThrowingTaskGroup`) **captures what it needs by value on the main actor first** and never reads or mutates `store` from a child task. Copy the pattern in `Pipeline.visuals()`, don't invent a new one.
+
+**There is exactly one `Store`.** `AVGStudioApp` builds it and passes that instance to `RootView` and to `BackgroundRender.attach(_:)`. The background handler once built its own `Store()`, giving two copies of the library writing the same project files. Never construct a second one.
 
 **Several projects may run at once.** `Store.tasks` holds one `Task` per project id and `start(_:from:)` refuses a second start for the same id. `RenderLog.record` is a `@TaskLocal` precisely so two runs never write into each other's log. Never replace it with a mutable global.
 
@@ -83,7 +85,9 @@ Logs are one `take.log` per **project** (not per take); each run begins with a `
 
 Each of these has caused a real defect, or is a documented invariant carried over from a PC defect.
 
-- **API keys live only in the Keychain.** Never in `project.json`, `.avg-meta.json`, `UserDefaults`, a log line, an error message, a `CustomStringConvertible`, or a committed file. `Keychain.require` throws `AVGError.missingKey`; use it rather than reading an empty string. Log lines from `HTTP.retrying` carry only the provider, the `ErrorKind` and the timing; keep it that way, and never put a request header or URL query (Gemini sends the key as `key=`) into a message.
+- **API keys live only in the Keychain.** Never in `project.json`, `.avg-meta.json`, `UserDefaults`, a log line, an error message, a `CustomStringConvertible`, or a committed file. `Keychain.require` throws `AVGError.missingKey`; use it rather than reading an empty string. Keys are stored `AfterFirstUnlockThisDeviceOnly`, so they stay out of backups. `Keychain.set` returns whether the write landed and updates in place; never go back to delete-then-add, which destroyed the saved key when the add failed.
+- **The UI learns only *whether* a key exists, never its value.** `SettingsView` keeps a `Set<APIKey>`, and `APIKeySheet` never pre-fills a saved key. To replace a key the user pastes a new one; to remove it they tap Remove. Do not read a key into `@State`.
+- **Send API keys in a header, never in a URL.** Gemini used to get the key twice (`x-goog-api-key` and `?key=`), and the query copy ended up in system logs, `URLError` and proxies. It is header-only now; do not put a key in a query string, a URL, or any log or error text.
 - **`[pause]` becomes real silence, never spoken text.** The narration is split at each marker *before* synthesis, and the marker text never reaches `AVSpeechSynthesizer`, ElevenLabs or Gemini. `dynamicPausesEnabled` may turn deliberate pauses off; the "never spoken" half is not optional. Dead air is trimmed **per segment before the gap is joined**, otherwise the deliberate gap is crunched with the rest.
 - **Never discard audio a provider already charged for.** If a trim removes more than `voiceMaxRemovableSilencePct`, retry once one aggressiveness step lower; do not throw the synthesis away.
 - **A takeover card owns its whole scene window.** No scene image, no Ken Burns, no crossfade and no captions underneath it; it cuts in and out instantly.
@@ -98,12 +102,19 @@ Each of these has caused a real defect, or is a documented invariant carried ove
 - **Do not pass foreign model ids to Pollinations.** `normalizeModel` maps `gpt-image*`, `dall-e*`, `imagen*`, `gemini*`, empty or slashed ids to `flux`.
 - **AssemblyAI is never required.** No key, or a failing one, degrades to estimated caption timing. It must not fail the `captions` phase.
 - **A log that cannot be written must never break a run.** `Store.appendToProjectLog` swallows its own write errors.
-- **Reduce Motion is honoured.** The animated background falls back to one still frame, the onboarding slide to a cross-fade, and the phase halo stops pulsing. New motion checks `accessibilityReduceMotion`.
+- **Reduce Motion and Low Power Mode are honoured.** The animated background falls back to one still frame (the two blurred orbs cost real battery and compete with the video encoder), the onboarding slide to a cross-fade, and the phase halo stops pulsing. New motion checks `accessibilityReduceMotion`.
 - **One filled call to action per screen** (`.buttonStyle(.glassProminent)`). Terracotta `#e08a4e` is the brand accent and appears freely as identity (tint, selection, focus); what is scarce is the filled button.
 - **Take colours, radii, spacing and fonts from `Theme.swift`.** Two controls doing the same gesture with different corner radii is a defect, just a quiet one. Thumbnail overlays (white or black at some opacity over an image) are the deliberate exception, since they sit on arbitrary photos.
 - **Glass is `Theme`'s hand-rolled `GlassSurface`, not `.glassEffect`.** Apple's material exposes no fill or blur controls, and Skin v2 is a pixel-level port of a mock. The tab bar is the exception: it is the native iOS 26 tab bar. A hand-rolled `FloatingTabBar` was tried and removed (`680410e`); do not reintroduce it.
 - **Fonts are bundled, not fetched.** Caprasimo ships in `AVGStudio/Resources/` (OFL) and is registered in `project.yml` (`UIAppFonts`) and again in `Theme.registerFonts()`. `Theme.disp` falls back to system serif. Never load a web font.
 - **Sizes and durations in CapCut export use integer milliseconds**, never float seconds, so SRT timestamps do not drift.
+- **A `beginBackgroundTask` expiration handler must end the task, synchronously.** `Store` uses `BackgroundTaskBox` for this; an empty handler makes iOS kill the app as a watchdog violation, and hopping through a `Task` ends it too late.
+- **Do not do CPU-heavy work on the main actor.** `Pipeline` is `@MainActor`, so the silence scan runs in `Task.detached` via `Pipeline.trim`. Image decoding goes through `ImageCache` / `CachedThumb`, never `UIImage(contentsOfFile:)` inside a view `body` (every card re-decoded on every progress tick).
+- **A retry must not repay for finished work.** `Pipeline(resumeExisting:)` keeps scene images already on disk when the recovery sheet retries a phase; only an explicit "Redo from…" regenerates. New paid steps should follow the same rule.
+- **Settings writes are debounced.** `Store.settings` and `reusableImages` call `scheduleMetaSave()`; `flushMeta()` runs when the scene leaves `.active`. Do not call `saveMeta()` from a `didSet` or a slider handler.
+- **Saving to Photos reports its outcome.** Use `PhotoSaver.saveVideo(at:)`, which asks for add-only access and throws a readable error. Never go back to fire-and-forget `UISaveVideoAtPathToSavedPhotosAlbum`, which showed "Saved" even when access was denied.
+- **Glass level comes from the environment.** Read `@Environment(\.glassLevel)`; do not reintroduce a `Theme.glassLevel` static mutated during `body`.
+- **Use `Theme.ok` / `Theme.bad` / `Theme.accent` for status colour,** not `.red`, `.green` or `.yellow`.
 - **Never hand-edit a generated file, and never commit one.** See Commands.
 - **`Pc Version Reference (Linux)/` is read-only**, and `avg/media/vendor/` inside it is protected byte-for-byte (`-text` in `.gitattributes`). A change that seems to need an edit there is a change to the Swift port instead.
 
@@ -120,7 +131,7 @@ Commits follow the branch's existing style: a short imperative subject, `iOS:` o
 
 ## State of the port (what you can and cannot exercise)
 
-Ported and working: five-phase pipeline, four text providers, four image providers, three voice providers, AssemblyAI timing, per-phase provider / backup / on-failure routing, model fallback for the writer, image and voice AIs, the nine-safeguard recovery flow, takes, CapCut bundle export, reusable-image pool, takeover cards (focused and explainer), Ken Burns and Director II motion, transitions, colour grades, six caption animations, film-grain and light-leak filters, silence trimming, on-device HEVC render, interrupted-render resume, first-run onboarding, App Health, error log.
+Ported and working: five-phase pipeline, on-device unit tests for the pure logic, four text providers, four image providers, three voice providers, AssemblyAI timing, per-phase provider / backup / on-failure routing, model fallback for the writer, image and voice AIs, the nine-safeguard recovery flow, takes, CapCut bundle export, reusable-image pool, takeover cards (focused and explainer), Ken Burns and Director II motion, transitions, colour grades, six caption animations, film-grain and light-leak filters, silence trimming, on-device HEVC render, interrupted-render resume, first-run onboarding, App Health, error log.
 
 Deliberately not ported: `director1` (iOS always makes one image per scene), Hugging Face, Edge TTS, the settings schema and `invalidates`, the take clone, the HTTP layer, the PC's `max_parallel_jobs` queue (a run here starts immediately, one per project), and chapter cards (the PC's takeover-card switch covers Focused, Explainer and Chapters; here only the first two exist).
 

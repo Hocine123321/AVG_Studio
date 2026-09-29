@@ -20,7 +20,10 @@ import AVFoundation
 /// defaults, same as before the merge.
 struct SettingsView: View {
     @Environment(Store.self) private var store
-    @State private var keys: [APIKey: String] = [:]
+    /// Which providers have a key saved - names only, never the secrets
+    /// themselves (the old `keys: [APIKey: String]` held every key in
+    /// plaintext @State for as long as this screen lived).
+    @State private var savedKeys: Set<APIKey> = []
     @State private var refreshingCatalogs = false
     @State private var editingKey: APIKey?
     @State private var draftTransparency: Double = 0
@@ -195,7 +198,7 @@ struct SettingsView: View {
                         HStack {
                             Text(k.label).foregroundStyle(Theme.ink)
                             Spacer()
-                            keyStatusPill(k)
+                            KeyStatusPill(saved: savedKeys.contains(k))
                         }
                     }
                     .buttonStyle(.plain)
@@ -331,15 +334,16 @@ struct SettingsView: View {
         .onChange(of: store.settings.voice) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
         .navigationTitle("Settings")
         .onAppear {
-            for k in APIKey.allCases { keys[k] = Keychain.get(k) ?? "" }
+            refreshSavedKeys()
             draftTransparency = (1 - store.settings.glassOpacity) / 0.85
         }
         .sheet(item: $editingKey) { k in
-            APIKeyEditSheet(key: k, value: keys[k] ?? "") { newValue in
-                keys[k] = newValue
-                Keychain.set(k, newValue)
-            }
+            APIKeySheet(key: k) { refreshSavedKeys() }
         }
+    }
+
+    private func refreshSavedKeys() {
+        savedKeys = Set(APIKey.allCases.filter { Keychain.has($0) })
     }
 
     /// The cached catalog matching the provider currently in use for each AI
@@ -390,16 +394,6 @@ struct SettingsView: View {
         default: break
         }
         for c in cs { await c.refresh() }
-    }
-
-    @ViewBuilder private func keyStatusPill(_ k: APIKey) -> some View {
-        let saved = Keychain.has(k)
-        Text(saved ? "Connected" : "Add key")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(saved ? Theme.ok : Theme.ink2)
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(saved ? Theme.ok.opacity(0.16) : Theme.fill, in: Capsule())
-            .overlay(Capsule().strokeBorder(saved ? Theme.ok.opacity(0.4) : Theme.glassEdge, lineWidth: 0.5))
     }
 }
 
@@ -457,62 +451,5 @@ private struct GlassPreview: View {
             shape.fill(Color.white.opacity(0.09 * level))
         }
         .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 0.5))
-    }
-}
-
-/// The mock's key-entry sheet: one `SecureField` plus Save, and Remove
-/// when a key is already saved - opened by tapping a Settings API-key
-/// row instead of that row being an inline always-visible field.
-private struct APIKeyEditSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let key: APIKey
-    @State var value: String
-    let onSave: (String) -> Void
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    SecureField("API key", text: $value)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                } footer: {
-                    Text("Stored in your iPhone's Keychain, never in a project file.")
-                }
-                if !value.trimmed.isEmpty {
-                    Button("Remove key", role: .destructive) {
-                        value = ""
-                        onSave("")
-                        dismiss()
-                    }
-                }
-            }
-            .glassSheetBackground()
-            .navigationTitle(key.label)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { onSave(value); dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
-
-struct ErrorLogView: View {
-    @Environment(Store.self) private var store
-    var body: some View {
-        List(store.log) { e in
-            VStack(alignment: .leading, spacing: 4) {
-                Label(e.message, systemImage: e.isError ? "exclamationmark.triangle.fill" : "checkmark.circle")
-                    .foregroundStyle(e.isError ? .red : .primary)
-                Text(e.date, style: .time).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .overlay { if store.log.isEmpty { ContentUnavailableView("No activity yet", systemImage: "list.bullet.rectangle") } }
-        .screenBackground()
-        .navigationTitle("Activity")
     }
 }

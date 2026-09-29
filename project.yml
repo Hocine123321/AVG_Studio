@@ -45,6 +45,19 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  AVGStudioTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AVGStudioTests
+    dependencies:
+      - target: AVGStudio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.avgstudio.app.tests
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
 schemes:
   AVGStudio:
     build:
@@ -52,5 +65,9 @@ schemes:
         AVGStudio: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - AVGStudioTests
     archive:
       config: Release

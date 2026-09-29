@@ -8,9 +8,9 @@ import UIKit
 private struct GlassLevelKey: EnvironmentKey { static let defaultValue: Double = 1.0 }
 extension EnvironmentValues {
     /// App-wide glass opacity as an ENVIRONMENT value (set once at the root),
-    /// so every glass view is invalidated the moment it changes - a plain
-    /// static (`Theme.glassLevel`) is invisible to SwiftUI, which is why the
-    /// setting used to need an app restart.
+    /// so every glass view is invalidated the moment it changes. (A plain
+    /// static is invisible to SwiftUI - that is why the setting once needed
+    /// an app restart - and the static has since been deleted outright.)
     var glassLevel: Double {
         get { self[GlassLevelKey.self] }
         set { self[GlassLevelKey.self] = newValue }
@@ -41,12 +41,11 @@ enum Theme {
     static let ink2 = dyn(rgb(36, 26, 18, 0.6), rgb(246, 239, 230, 0.62))
     // --gl (glass fill) / --ed (glass edge) / --sh (glass shadow) / --fl
     // (subtle fill - segmented-inactive bg, switch track, chip bg)
-    /// 0.15...1.0, set from Settings → App (RootView pushes it in on every
-    /// change and re-renders). 1.0 == the mock's exact fill.
-    nonisolated(unsafe) static var glassLevel: Double = 1.0
-    /// Scaled with `glassLevel`, so lowering it lets far more of the
-    /// animated background show through every card, field and sheet.
-    static var glassFill: Color { glassFill(glassLevel) }
+    /// Glass fill at an opacity `level` of 0.15...1.0 (Settings → App). The
+    /// level always arrives through `EnvironmentValues.glassLevel`; the old
+    /// `Theme.glassLevel` static, mutated from inside `RootView.body`, is
+    /// gone - a side effect during view evaluation that SwiftUI could not
+    /// see (and that needed `nonisolated(unsafe)` to compile).
     static func glassFill(_ level: Double) -> Color {
         dyn(rgb(255, 255, 255, 0.5 * level), rgb(255, 255, 255, 0.09 * level))
     }
@@ -132,10 +131,15 @@ extension Font {
 /// `@media(prefers-reduced-motion:reduce){*{animation:none}}` rule.
 struct AppBackground: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // The animated field blurs two 300pt circles many times a second on every
+    // screen - real GPU/battery cost, and it competes with the video encoder
+    // during a render. Low Power Mode gets the same still frame Reduce Motion
+    // does.
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     var body: some View {
         GeometryReader { proxy in
-            if reduceMotion {
+            if reduceMotion || lowPower {
                 field(t: 0, size: proxy.size)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in
@@ -144,6 +148,9 @@ struct AppBackground: View {
             }
         }
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
     }
 
     /// One 0...1 cycle of the mock's `dr` keyframe (`translate(-40px,60px)

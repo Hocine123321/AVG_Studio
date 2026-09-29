@@ -38,20 +38,39 @@ enum Keychain {
         return s.isEmpty ? nil : s
     }
 
-    static func set(_ key: APIKey, _ value: String) {
+    /// Saves (or, for a blank value, removes) a key. Returns whether the
+    /// Keychain accepted it. Updates an existing item in place instead of
+    /// delete-then-add, so a failed write can no longer destroy the key that
+    /// was already saved - and re-saving migrates older items to the
+    /// device-only accessibility class below.
+    @discardableResult
+    static func set(_ key: APIKey, _ value: String) -> Bool {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key.rawValue,
         ]
-        SecItemDelete(base as CFDictionary)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(trimmed.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+        guard !trimmed.isEmpty else {
+            let status = SecItemDelete(base as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+        let attrs: [String: Any] = [
+            kSecValueData as String: Data(trimmed.utf8),
+            // ThisDeviceOnly: provider keys should not travel in backups or
+            // to a new phone; the user re-enters them (they can be revoked).
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = base
+            add.merge(attrs) { _, new in new }
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        }
+        return status == errSecSuccess
     }
+
+    static func remove(_ key: APIKey) { set(key, "") }
 
     static func has(_ key: APIKey) -> Bool { get(key) != nil }
 

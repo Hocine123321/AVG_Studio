@@ -19,9 +19,22 @@ enum BackgroundRender {
     static let taskID = "com.avgstudio.app.render"
     private static let pendingKey = "AVGPendingRenderProjectID"
 
+    /// The app's ONE `Store`, attached at launch by `AVGStudioApp`. The old
+    /// handler built a second `Store()` inside the background task: two
+    /// independent copies of the library writing the same project files, the
+    /// foreground one never learning what the background one did. There is
+    /// now a single source of truth.
+    @MainActor private static weak var store: Store?
+
+    @MainActor static func attach(_ store: Store) { Self.store = store }
+
     static func register() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskID, using: nil) { task in
-            handle(task as! BGProcessingTask)
+            guard let processing = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            handle(processing)
         }
     }
 
@@ -45,14 +58,14 @@ enum BackgroundRender {
     private static func handle(_ task: BGProcessingTask) {
         let work = Task { @MainActor in
             defer { UserDefaults.standard.removeObject(forKey: pendingKey) }
-            guard let id = UserDefaults.standard.string(forKey: pendingKey) else { return }
-            let store = Store()
-            guard let p = store.project(id) else { return }
+            guard let id = UserDefaults.standard.string(forKey: pendingKey),
+                  let store = BackgroundRender.store,
+                  let p = store.project(id) else { return }
             let next = PhaseID.allCases.first { p.phase($0).status != .done } ?? .render
             store.start(id, from: next)
             while store.isRunning(id) {
                 if Task.isCancelled { store.cancel(id); break }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(for: .milliseconds(500))
             }
         }
         task.expirationHandler = { work.cancel() }

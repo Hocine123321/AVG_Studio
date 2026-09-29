@@ -235,7 +235,7 @@ struct WelcomeView: View {
             .glassCard(24, padding: 6)
 
             Text("Keys stay in your iPhone's Keychain, on this device only. Add or change them any time in Settings.")
-                .font(.system(size: 12.5)).foregroundStyle(Theme.ink2)
+                .font(.caption).foregroundStyle(Theme.ink2)
                 .padding(.horizontal, 4)
         }
     }
@@ -344,6 +344,26 @@ struct WelcomeView: View {
 
     private func primaryAction() {
         step == lastStep ? finish(to: .create) : goForward()
+    }
+
+    // MARK: Shared pieces
+
+    private var hairline: some View {
+        Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+    }
+
+    private func titleText(_ text: String) -> some View {
+        Text(text)
+            .font(.disp(titleSize))
+            .foregroundStyle(Theme.ink)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func leadText(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(Theme.ink2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Actions

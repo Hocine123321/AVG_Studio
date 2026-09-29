@@ -36,7 +36,7 @@ never above.
 
 ```
 AVGStudio/UI/         SwiftUI screens; read and write only through Store
-AVGStudio/Core/       Store, Pipeline, Recovery, models, export, audio
+AVGStudio/Core/       Store, Pipeline, Recovery, models, export, audio, image cache
 AVGStudio/Render/     Core Graphics frames + AVAssetWriter HEVC + AVFoundation mux
 AVGStudio/Providers/  text / image / voice / transcription backends,
                       HTTP transport, error taxonomy, model catalogues
@@ -44,7 +44,8 @@ AVGStudio/Providers/  text / image / voice / transcription backends,
 
 Nothing in `Providers/` imports from `UI/`. `UI/` never calls a provider
 directly, except `ModelPickerRow` and the catalogue refresh, which go through
-`ModelCatalog`.
+`ModelCatalog`. Tests live beside the app in `AVGStudioTests/` and reach in
+with `@testable import AVGStudio`.
 
 ---
 
@@ -55,11 +56,13 @@ directly, except `ModelPickerRow` and the catalogue refresh, which go through
 | File | Responsibility | Must not know about |
 |---|---|---|
 | `Models.swift` | Every `Codable` document: `Project`, `Take`, `PhaseRecord`, `Channel`, `AppSettings`, plus the enums (`PhaseID`, `MotionType`, `GradeLook`, provider kinds). Decoding is **tolerant**: a missing key takes its default | SwiftUI, providers |
-| `Store.swift` | The one state container: projects, channels, settings, jobs, log, the recovery plan. Owns persistence and starts/cancels runs | Views |
+| `Store.swift` | The one state container: projects, channels, settings, jobs, log, the recovery plan. Owns persistence and starts/cancels runs. Settings writes are **debounced** (0.4 s); `flushMeta()` forces one when the app leaves the foreground | Views |
 | `Pipeline.swift` | `Pipeline.execute(_ phase:)` and the five phase bodies. Provider resolution, routing, cost recording, prompt-marker parsing | HTTP status codes |
 | `Recovery.swift` | Maps a failure to a `RecoveryPlan` (nine safeguards), the fallback-model logic, `Connectivity` (`NWPathMonitor`), and `RecoverySheet` | Which view shows it |
-| `BackgroundRender.swift` | `BGProcessingTask` registration and the "interrupted render" flag | Phase internals |
-| `Keychain.swift` | **The only file that reads or writes API keys.** `APIKey`, `Keychain.get/set/has/require` | Providers' request shapes |
+| `BackgroundRender.swift` | `BGProcessingTask` registration and the "interrupted render" flag. Uses the app's **one** `Store`, attached at launch with `attach(_:)` | Phase internals |
+| `Keychain.swift` | **The only file that reads or writes API keys.** `APIKey`, `Keychain.get/set/has/remove/require`. `set` returns `Bool` and updates in place | Providers' request shapes |
+| `ImageCache.swift` | `ImageCache` (ImageIO downsample off the main actor into an `NSCache`) and `CachedThumb`, the view every thumbnail uses | Which screen shows the picture |
+| `PhotoSaver.swift` | `PhotoSaver.saveVideo(at:)`: add-only Photos permission, waits for the save, throws a readable error | Share sheets |
 | `SilenceTrim.swift` | Dead-air removal on PCM audio (20 ms windows), the port of `remove_silences_core` | Where the audio came from |
 | `CapCutExport.swift` | Builds the CapCut import bundle in `temporaryDirectory` | Share sheets |
 
@@ -92,8 +95,10 @@ directly, except `ModelPickerRow` and the catalogue refresh, which go through
 | `StudioView.swift` | The current project: player, five phase rows, live list, takes, scenes, brief, export sheet |
 | `CreateView.swift` | New-video form: topic, title, shape, channel |
 | `ChannelsView.swift` | Channel list and `ChannelEditor` (identity, videos, brand colours and font, recycling, cards, image backup, voice cleanup, per-phase models) |
-| `SettingsView.swift` | One page: Writing, Visuals, Voice, Captions, keys, model cache, appearance, health links |
-| `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity |
+| `SettingsView.swift` | One page: Writing, Visuals, Voice, Captions, keys, model cache, appearance, health links. Holds only *which* keys exist, never a key's value |
+| `APIKeySheet.swift` | `KeyStatusPill` and `APIKeySheet`: the one key-entry sheet, shared by Settings and Welcome. Never shows a saved key |
+| `ErrorLogView.swift` | The Activity screen: All / Errors filter over `store.log` |
+| `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
 | `WelcomeView.swift` | First-run five-step onboarding |
 | `ModelPickerRow.swift` | A picker over a `ModelCatalog`, falling back to a plain text field |
 | `ProjectLogView.swift` | The live log sheet |
@@ -105,7 +110,8 @@ directly, except `ModelPickerRow` and the catalogue refresh, which go through
 | File | Responsibility |
 |---|---|
 | `project.yml` | XcodeGen spec. **`Info.plist` and `AVGStudio.xcodeproj` are generated from it and never committed** |
-| `.github/workflows/ios.yml` | Builds an unsigned IPA on every push that touches `AVGStudio/**` or `project.yml` |
+| `.github/workflows/ios.yml` | Runs the unit tests on a simulator, then builds an unsigned IPA, on every push that touches `AVGStudio/**`, `AVGStudioTests/**` or `project.yml` |
+| `AVGStudioTests/` | The unit tests (26). See §10 |
 | `AVGStudio/Resources/` | `Caprasimo-Regular.ttf` and its OFL licence |
 | `AVGStudio/Assets.xcassets/` | The app icon (light, dark and tinted variants) |
 | `SKIN_V2_PLAN.md`, `UI_POLISH_PLAN.md` | The design plans. Skin v2 is complete; see §7 |
@@ -129,7 +135,9 @@ accident. Each difference below is a decision recorded in a comment.
 | `avg/api/` | `Store` | No HTTP, no token, no WebSocket |
 | `takes/<id>/` folders | `render/take_<id>.mp4` | A take is a rendered file, not a snapshot of every artifact. See §6 |
 | `take.log` per take | one `take.log` per **project** | Each run starts with a `▶ Started…` separator line |
-| DPAPI `secrets.dat` | Keychain | Service `com.avgstudio.keys` |
+| DPAPI `secrets.dat` | Keychain | Service `com.avgstudio.keys`, device-only (`AfterFirstUnlockThisDeviceOnly`), so keys are not in backups |
+| Gemini key as header **and** `key=` query | header only | The query copy leaked into URLs, logs and `URLError`; the PC quirk was deliberately dropped |
+| `GET /api/keys` returns booleans | `Keychain.has`, `savedKeys: Set<APIKey>` | Same rule: the UI learns whether a key exists, never its value |
 | Edge TTS | `AVSpeechSynthesizer` | On-device, free, always available |
 | Groq, Hugging Face, Pollinations text | Apple Intelligence, Gemini, Groq, Pollinations | Hugging Face has no iOS backend, and its error patterns were left out on purpose |
 | `SETTINGS` catalogue (75 specs) | hand-built `AppSettings` and `Channel` | See §5 |
@@ -147,9 +155,9 @@ copy, so change them together.
 
 | # | `PhaseID` | What it does | Writes |
 |---|---|---|---|
-| 1 | `writing` | Optional topic research, ~120-word brief, narration (~150 wpm) with `[pause]` and `((question))` markers, then a JSON scene split. Falls back to `sentenceScenes` if the JSON fails | `project.json` fields |
-| 2 | `visuals` | One image per scene. A `[RECYCLE #k]` pick reuses a pool image instead of generating | `images/scene_NN.jpg` |
-| 3 | `voice` | Splits at `[pause]`, synthesises each segment, trims dead air per segment, joins with silent gaps in an `AVMutableComposition` | `audio/segment_N.caf`, `clean_N.caf`, `narration.m4a` |
+| 1 | `writing` | Optional topic research, ~120-word brief, narration (~150 wpm) with `[pause]` and `((question))` markers, then a JSON scene split. Scenes are numbered **after** blank entries are dropped, so indices never have holes. Falls back to `sentenceScenes` if the JSON fails | `project.json` fields |
+| 2 | `visuals` | One image per scene, three at a time. A `[RECYCLE #k]` pick reuses a pool image instead of generating. On a **retry** inside the same run (`resumeExisting`), scenes whose image is already on disk are kept, so a failure at scene 7 of 8 does not pay for all eight again. A deliberate "Redo from Visuals" still makes fresh art | `images/scene_NN.jpg` |
+| 3 | `voice` | Splits at `[pause]`, synthesises each segment, trims dead air per segment (the scan runs **off the main actor**, so the UI stays live), joins with silent gaps in an `AVMutableComposition` | `audio/segment_N.caf`, `clean_N.caf`, `narration.m4a` |
 | 4 | `captions` | Word timings (AssemblyAI or estimated), caption cues, takeover-card plan (~1 card per 3 scenes at most) | `project.json` fields |
 | 5 | `render` | Direction plan, then `VideoRenderer`, then a new `Take` | `render/take_<id>.mp4` |
 
@@ -242,7 +250,7 @@ money.
 (`TextProvider`, `ImageProvider`, `VoiceProvider`). Add its case to the kind
 enum in `Models.swift` (`TextProviderKind` etc.) and to that phase's resolver
 in `Pipeline` (`textProvider(for:)`, `imageProvider(for:)`, `voiceProvider()`).
-Add its `APIKey` case in `Keychain.swift` if it needs one. Wrap every network
+Add its `APIKey` case in `Keychain.swift` if it needs one, and send the key in a **header**, never a query string. Wrap every network
 call in `HTTP.retrying(provider:)`. The `provider:` argument is **required**,
 because the provider-specific patterns in `ErrorPolicy.swift` key off it. Add
 its patterns there, add a catalogue source in `ModelCatalogSources.swift` if
@@ -273,7 +281,9 @@ value is a direct copy of the mock's custom property.
 | Display font | Caprasimo, bundled, with a system-serif fallback baked into `Theme.disp` |
 | Radii | card 24, inner 18, sheet 34, player 26, selection bar 26, sheet handle 38×5 |
 | Glass | hand-rolled `GlassSurface`: fill + blur + top-left sheen + 0.5 pt stroke + top highlight + drop shadow. Deliberately **not** `.glassEffect`, which exposes no fill or blur knobs. Buttons still use the system `.glassProminent` style |
-| Background | two animated orbs, one still frame under Reduce Motion |
+| Background | two animated orbs; one still frame under Reduce Motion **or Low Power Mode** |
+| Glass level | `Settings → glassOpacity`, delivered through `EnvironmentValues.glassLevel` (`.environment(\.glassLevel, …)` in `RootView`). There is no `Theme.glassLevel` static any more |
+| Status colours | `Theme.ok` (sage), `Theme.bad` (`#c4544a`), `Theme.accent`. Screens do not use `.red` / `.green` / `.yellow` |
 
 The tab bar is the **native iOS 26 Liquid Glass tab bar**. A hand-rolled
 `FloatingTabBar` was tried and removed (`680410e`); `SKIN_V2_PLAN.md` still
@@ -289,12 +299,14 @@ Dynamic Type check in the simulator.
 | `project.json` | `Documents/Projects/<projectID>/` | `Store.save(_:)` is the only writer |
 | Images, audio, renders | `…/<projectID>/images/`, `audio/`, `render/` | `Pipeline` |
 | `take.log` | `…/<projectID>/` | `Store.appendToProjectLog`; a failed write never breaks a run |
-| `.avg-meta.json` | `Documents/` | settings, channels, active channel, reusable-image descriptors. An unreadable file is kept as `meta.unreadable-<timestamp>.json` |
+| `.avg-meta.json` | `Documents/` | settings, channels, active channel, reusable-image descriptors. Written ~0.4 s after the last edit (debounced) and immediately when the app leaves the foreground. An unreadable file is kept as `meta.unreadable-<timestamp>.json` |
 | Reusable images | `Documents/ReusableImages/<UUID>.jpg` | `Store.addReusableImage` |
 | Model catalogues | `Application Support/ModelCatalogs/<key>.json` | `ModelCatalog`. Replaced only by a **non-empty** successful fetch |
-| API keys | Keychain, service `com.avgstudio.keys`, `AfterFirstUnlock` | `Keychain.swift` only |
+| API keys | Keychain, service `com.avgstudio.keys`, `AfterFirstUnlockThisDeviceOnly` | `Keychain.swift` only |
 | Pending render id | `UserDefaults` `AVGPendingRenderProjectID` | `BackgroundRender` |
 | CapCut bundle | `temporaryDirectory/CapCut Export - <title> - <take>/` | `CapCutExporter`, handed to the share sheet |
+| Thumbnails | in memory only (`NSCache`, 300 items / 80 MB), keyed by path, size and modification date | `ImageCache`. Redoing Visuals overwrites files in place, and the date in the key stops a stale picture showing |
+| Saved videos | the Photos library | `PhotoSaver`, add-only permission (`NSPhotoLibraryAddUsageDescription`) |
 
 The Documents folder is exposed to the Files app (`UIFileSharingEnabled`), so
 `Projects/` is visible to the user.
@@ -308,7 +320,7 @@ ElevenLabs $0.00003 per character, AssemblyAI $0.01 per minute.
 
 ## 9. Where state lives
 
-The `Store`, one instance for the process lifetime:
+The `Store`, one instance for the process lifetime. `AVGStudioApp` builds it and hands the same instance to `RootView` and to `BackgroundRender.attach`:
 
 | Property | Meaning |
 |---|---|
@@ -337,9 +349,20 @@ Views keep almost none. Anything a screen shows comes from `store`; local
   (`CODE_SIGNING_ALLOWED=NO`).
 - **Local:** `brew install xcodegen && xcodegen generate && open AVGStudio.xcodeproj`
   from the repo root.
-- **Tests:** there is **no iOS test target**. Verification is the CI build
-  plus running the app. The PC test suite in the reference folder tests
-  Python and does not cover this code.
+- **Tests:** `AVGStudioTests/` is a `bundle.unit-test` target (26 tests, XCTest,
+  `@testable import AVGStudio`). CI runs it on an iPhone simulator **before**
+  the release build, and a failing test stops the IPA from being produced.
+  Coverage is deliberately narrow, on the code where a mistake is silent:
+  - `ModelsTests` (4): `AppSettings` decodes `{}` to defaults, ignores unknown
+    keys, round-trips, and `PhaseID.allCases` is the documented order.
+  - `ErrorPolicyTests` (5): `classify` / `classifyURLError` results, and that
+    every `ErrorKind` has a coherent `POLICY` row.
+  - `PipelineTextTests` (17): `[pause]` splitting, `spoken`, question markers,
+    proportional timing, JSON extraction, scene parsing and the sentence
+    fallback, and the recycle-pool tokens.
+
+  Nothing tests providers, rendering, the `Store` or any view; that is still
+  the CI build plus running the app. From Xcode: `⌘U`.
 - **Needs on device:** iOS 26 and Apple Intelligence for the default on-device
   writer. Without it, choose Gemini, Groq or Pollinations in Settings.
 

@@ -69,11 +69,10 @@ struct ReusableImagesView: View {
         editingID = nil
     }
 
-    @ViewBuilder private func thumb(_ r: ReusableImage) -> some View {
-        if let img = UIImage(contentsOfFile: store.reusableImageURL(r).path) {
-            Image(uiImage: img).resizable().scaledToFill()
-        } else {
+    private func thumb(_ r: ReusableImage) -> some View {
+        ZStack {
             Rectangle().fill(.quaternary)
+            CachedThumb(url: store.reusableImageURL(r), maxPixel: 168)
         }
     }
 }

@@ -164,11 +164,14 @@ struct HomeView: View {
         HStack(spacing: 10) {
             Text("\(selected.count) selected").fontWeight(.semibold)
             Spacer()
-            Button("Archive") {
+            // In the Archived filter the same action must UN-archive - it used
+            // to say "Archive" and re-archive things that were already there.
+            Button(filter == .archived ? "Unarchive" : "Archive") {
                 Haptics.light()
                 let ids = selected
+                let archive = filter != .archived
                 withAnimation(.spring) {
-                    for id in ids { store.setArchived(id, true) }
+                    for id in ids { store.setArchived(id, archive) }
                     selectMode = false
                     selected.removeAll()
                 }
@@ -326,12 +329,12 @@ struct ProjectCard: View {
         .frame(height: 5)
     }
 
-    @ViewBuilder private var thumb: some View {
-        if let url = store.file(project, project.scenes.first(where: { $0.imageFile != nil })?.imageFile),
-           let img = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: img).resizable().scaledToFill()
-        } else {
+    /// Placeholder gradient underneath; the real first-scene image fades in
+    /// on top once `ImageCache` has decoded it off the main thread.
+    private var thumb: some View {
+        ZStack {
             LinearGradient(colors: [Theme.accent.opacity(0.55), Theme.accent.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            CachedThumb(url: store.file(project, project.scenes.first(where: { $0.imageFile != nil })?.imageFile), maxPixel: 720)
         }
     }
 }

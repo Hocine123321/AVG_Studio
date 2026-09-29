@@ -46,8 +46,11 @@ final class Store {
     var projects: [Project] = []
     var channels: [Channel] = []
     var activeChannelID: UUID?
-    var settings = AppSettings() { didSet { saveMeta() } }
-    var reusableImages: [ReusableImage] = [] { didSet { saveMeta() } }
+    // Debounced: a TextField bound to `settings` used to rewrite the whole
+    // meta file (pretty-printed JSON, synchronously, on the main thread) on
+    // every keystroke and every slider tick.
+    var settings = AppSettings() { didSet { scheduleMetaSave() } }
+    var reusableImages: [ReusableImage] = [] { didSet { scheduleMetaSave() } }
     var jobs: [String: JobState] = [:]
     var log: [LogEntry] = []
     var tab: AppTab = .library
@@ -73,6 +76,7 @@ final class Store {
 
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var loading = false
+    @ObservationIgnored private var metaSaveTask: Task<Void, Never>?
 
     static let root: URL = {
         let u = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -124,6 +128,27 @@ final class Store {
             }
             return p
         }.sorted { $0.created > $1.created }
+    }
+
+    /// Coalesces a burst of settings edits into one write ~0.4s after the last.
+    private func scheduleMetaSave() {
+        guard !loading else { return }
+        metaSaveTask?.cancel()
+        metaSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            self.metaSaveTask = nil
+            self.saveMeta()
+        }
+    }
+
+    /// Writes any pending settings change immediately. Called when the app
+    /// leaves the foreground so a debounced edit can never be lost.
+    func flushMeta() {
+        guard metaSaveTask != nil else { return }
+        metaSaveTask?.cancel()
+        metaSaveTask = nil
+        saveMeta()
     }
 
     func saveMeta() {
@@ -336,8 +361,12 @@ final class Store {
         // multi-minute pipeline. `BackgroundRender` is the opportunistic
         // continuation for when this runs out; see its doc comment for why
         // neither mechanism can promise the render finishes unattended.
-        let bg = UIApplication.shared.beginBackgroundTask(withName: "AVG render") {}
-        defer { UIApplication.shared.endBackgroundTask(bg) }
+        // The expiration handler MUST end the task: with the old empty `{}`
+        // iOS treats a task that outlives its grace period without ending
+        // as a watchdog violation and terminates the app.
+        let bg = BackgroundTaskBox()
+        bg.begin(name: "AVG render")
+        defer { bg.end() }
         record(id, "▶ Started “\(project(id)?.title ?? id)” from \(start.title).")
         for phase in PhaseID.allCases where phase.order >= start.order {
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
@@ -376,6 +405,7 @@ final class Store {
     /// then applies the choice and runs the phase again - looping until it
     /// succeeds, the user stops, or the failure has nothing useful to offer.
     private func executeWithRecovery(_ phase: PhaseID, id: String) async throws {
+        var isRetry = false // true once this phase has failed at least once in this run
         while true {
             do {
                 // Safeguard 7: offline -> wait for the connection instead of failing.
@@ -384,12 +414,13 @@ final class Store {
                     jobs[id]?.message = "Waiting for internet…"
                     _ = await Connectivity.shared.waitUntilOnline()
                 }
-                try await Pipeline(store: self, projectID: id).execute(phase)
+                try await Pipeline(store: self, projectID: id, resumeExisting: isRetry).execute(phase)
                 Recovery.noteSuccess()
                 return
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
+                isRetry = true
                 // Model fallback: on a "too expensive" failure (quota / billing),
                 // drop to the fallback model by itself when the user opted in,
                 // once per phase, instead of interrupting them.
@@ -437,6 +468,29 @@ final class Store {
         j.progress = value
         j.message = message
         jobs[id] = j
+    }
+}
+
+/// Owns one `UIBackgroundTaskIdentifier` so the expiration handler and the
+/// normal-completion path can both end it, exactly once. Main-actor only:
+/// iOS runs the expiration handler on the main thread and requires it to
+/// call `endBackgroundTask` BEFORE returning, so ending must be synchronous
+/// there (an earlier draft hopped through a `Task` and would have ended it
+/// too late).
+@MainActor
+private final class BackgroundTaskBox {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+
+    func begin(name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated { self?.end() }
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }
 
