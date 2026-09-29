@@ -1193,7 +1193,7 @@ def test_the_fallback_is_skipped_when_the_backup_names_the_same_provider(tmp_pat
 
 def test_visuals_module_does_not_require_pillow_at_import_time():
     """Real, reproduced regression: `tools/dev_serve_linux.py` (and
-    `build_flatpak.sh`'s "Launch from source") installs `.[dev]` only,
+    `build_flatpak.ps1`'s "Launch from source") installs `.[dev]` only,
     deliberately never `.[dev,media]` - see that venv's own setup
     comment. `GET /api/settings` calls `suggest_output_root()`
     (`avg/config/settings.py`), which imports `avg.config.legacy_import`,

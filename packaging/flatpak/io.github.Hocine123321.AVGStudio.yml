@@ -30,9 +30,9 @@
 #   flatpak-builder --user --install --force-clean build-dir \
 #       packaging/flatpak/io.github.Hocine123321.AVGStudio.yml
 #   flatpak run io.github.Hocine123321.AVGStudio
-# Or just: tools/build_flatpak.sh
+# Or just: pwsh tools/build_flatpak.ps1
 #
-# Prerequisite runtimes (one-time; tools/build_flatpak.sh does this for
+# Prerequisite runtimes (one-time; tools/build_flatpak.ps1 does this for
 # you automatically now):
 #   flatpak install flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 #
@@ -53,7 +53,7 @@ runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 command: avg-studio
 # Named explicitly rather than left as flatpak-builder's default
-# ("master") - "stable" is what `tools/build_flatpak.sh`'s installer
+# ("master") - "stable" is what `tools/build_flatpak.ps1`'s installer
 # path passes to `flatpak build-bundle`, and what shows up in
 # `flatpak list`/`flatpak run` for anyone the resulting .flatpak file
 # gets handed to.

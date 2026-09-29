@@ -5,7 +5,7 @@ and isn't touched here (see docs/linux-port/WINDOWS_VS_LINUX.md - this
 branch doesn't retrofit cross-platform branching into files that already
 work fine for their own platform).
 
-The point of this file: `tools/build_flatpak.sh`'s "Build flatpak
+The point of this file: `tools/build_flatpak.ps1`'s "Build flatpak
 package" always does a real rebuild of this app's own module, by
 flatpak-builder's own design - `type: dir` sources are documented as
 not supporting caching at all ("they will be rebuilt each time"),
@@ -14,12 +14,12 @@ unlike archive/git sources. That isn't a bug to chase away; it's what a
 rebuilding its installer either - it runs this exact same script, no
 PyInstaller, no Inno Setup, nothing to package. Use this file the same
 way: for iterating on avg/ or web/ code, this starts in under a
-second. Reserve `tools/build_flatpak.sh`'s package option for what
+second. Reserve `tools/build_flatpak.ps1`'s package option for what
 only it can tell you - whether the actual sandboxed package
 (permissions, the bundled Qt/krb5 resolution) still works - not for
 every source change.
 
-Normally launched via `tools/build_flatpak.sh`'s "Launch from source"
+Normally launched via `tools/build_flatpak.ps1`'s "Launch from source"
 option, which sets up (or reuses) a local editable-install dev venv and
 runs this automatically. To run it by hand instead:
     python3 -m venv .venv-linux && . .venv-linux/bin/activate

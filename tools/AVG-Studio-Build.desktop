@@ -1,38 +1,23 @@
 [Desktop Entry]
-# Double-click this file in a file manager to run build_flatpak.sh in a
-# real, visible terminal - no need to open a terminal and type the
-# command by hand. First use: most file managers (Dolphin, Nautilus,
-# Thunar, ...) will ask you to confirm you trust/want to execute this
-# specific file before honouring it - that is the file manager's own
-# one-time safety prompt for a freshly-downloaded .desktop file, not a
-# problem with this one.
+# Double-click this file in a file manager to run build_flatpak.ps1 in a
+# real, visible terminal - no need to open one and type the command.
+# First use: most file managers ask you to confirm you trust this
+# specific file before running it (their own one-time safety prompt).
 #
-# `Terminal=true` is the actual fix: it is the standard freedesktop.org
-# Desktop Entry key that tells the file manager to open a terminal
-# emulator and run `Exec` inside it, rather than running the command
-# invisibly in the background - the file manager picks whichever
-# terminal emulator is configured/installed (Konsole, GNOME Terminal,
-# ...), so this works the same way regardless of desktop environment.
-#
-# `%k` is the standard field code for "this .desktop file's own path" -
-# it is how `Exec` finds build_flatpak.sh sitting right beside it
-# without a hardcoded, machine-specific absolute path baked into the
-# file (which would break the moment anyone else clones this repo
-# somewhere else). build_flatpak.sh resolves ITS OWN location the same
-# way internally (`REPO_ROOT` from `${BASH_SOURCE[0]}`), so once `Exec`
-# hands it its own real path, everything past that point already works
-# from any working directory - this file only has to get that one path
-# right.
-#
-# The final `read` line is why the terminal window does not just vanish
-# the instant the script finishes (Terminal=true closes the window as
-# soon as `Exec` exits) - without it, a failed build's error, or the
-# finished "Build flatpak package" option's own printed `flatpak
-# install --user ...` command, would flash past unread.
+# `Terminal=true` is the standard freedesktop.org key that makes the
+# launcher open a terminal emulator and run `Exec` inside it. `%k` is the
+# standard field code for this .desktop file's own path, used to find
+# build_flatpak.ps1 sitting beside it without a hardcoded absolute path.
+# Exec is NOT run through a shell by the spec - it has its own quoting
+# rules (double quotes only, backslash-escaped $ " ` \) - so the shell
+# logic lives in one `bash -c` string. The build tool is PowerShell
+# (`pwsh`); if it is missing the launcher says so instead of vanishing,
+# and the final `read` keeps the window open after the script exits so
+# a build error or the final `flatpak install` hint is readable.
 Type=Application
 Name=AVG Studio — Build / Launch
 Comment=Interactive menu: launch AVG Studio from source, or build the Flatpak package
-Exec=bash -c "d=\$(dirname \"\$1\"); \"\$d/build_flatpak.sh\"; echo; read -n 1 -s -r -p \"Press any key to close this window...\"" bash %k
+Exec=bash -c "d=\$(dirname \"\$1\"); if command -v pwsh >/dev/null 2>&1; then pwsh -NoProfile -File \"\$d/build_flatpak.ps1\"; else echo \"pwsh (PowerShell 7+) is not installed - build_flatpak.ps1 needs it. On CachyOS/Arch: yay -S powershell-bin\"; fi; echo; read -n 1 -s -r -p \"Press any key to close this window...\"" bash %k
 Icon=utilities-terminal
 Terminal=true
 Categories=Development;

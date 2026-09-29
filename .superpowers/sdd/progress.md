@@ -1713,3 +1713,6 @@ Suite: 1169 passed, 1 skipped, 0 failed.
 **Still pending:** sub-slice 4 (verification gate) plan; live-provider
 manual checks for sub-slices 2 and 3 (real ElevenLabs `/with-timestamps`
 alignment shape and Edge `WordBoundary` are only fixture-verified).
+## build_flatpak.sh ported to build_flatpak.ps1 (2026-09-29)
+
+Directive: the Linux build tool becomes a PowerShell script. Done: `tools/build_flatpak.ps1` (house style of `make_release.ps1`), launcher + installer now invoke `pwsh` with a friendly missing-pwsh message, old `.sh` deleted, live references updated (manifest, .gitignore, dev_serve_linux.py, a test docstring, port docs). Verified with PowerShell 7.6.6 against faked flatpak/npm/python3/du/xdg-open: menu (valid/invalid/quit), `-Launch`, `-BuildPackage`, `-SkipWebBuild` (+ missing-dist guard), mutual-exclusion guard, missing/present flathub remote and runtimes, failing-command abort with exit code, and the launchers (validator + parsed Exec executed for real). NOT verified: a real `flatpak-builder` run, and the launcher's "press any key" prompt under a real tty. Two Linux-PowerShell gotchas found and fixed: `Start-Job` dies with the parent; array `-ArgumentList` silently drops args.

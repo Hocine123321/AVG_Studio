@@ -45,7 +45,7 @@ dist/
 # ignore rule lives in that build's own .gitignore.
 vendor/ffmpeg/
 
-# tools/build_flatpak.sh scratch/output - flatpak-builder's own build
+# tools/build_flatpak.ps1 scratch/output - flatpak-builder's own build
 # cache and the exported repo + .flatpak bundle "Build installer"
 # produces. Regenerated, not committed - same reasoning as build/ above.
 build-dir/

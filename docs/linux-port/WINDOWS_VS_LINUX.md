@@ -49,7 +49,7 @@ public API - the two are drop-in for each other at the call-site level.
 | GUI window/rendering backend | `pywebview` with its default Windows backend (Edge WebView2) | `pywebview` with `gui="qt"` passed explicitly in `avg/shell.py::main()`, backed by `PySide6`+`PySide6-Addons` (pip-installable, self-contained - bundles their own Qt6 + QtWebEngine Chromium, no system webkit2gtk/GTK dependency). Chosen over GTK+WebKit2GTK: PySide6 is fully pip-installable with no OS-level GObject-introspection typelib dependency, which keeps the Flatpak build a plain `pip install` rather than needing `org.gnome.Platform`'s system WebKitGTK; Qt also matches the target desktop (KDE Plasma) better for window chrome/theming. Verified end-to-end on this branch: `pip install pyside6 qtpy`, then `webview.create_window()` + `webview.start(gui="qt")` under `QT_QPA_PLATFORM=offscreen` actually creates a window, runs its event loop, and exits cleanly |
 | Chromium's internal sandbox vs. Flatpak's own | N/A - no nested sandboxing on Windows | `--env=QTWEBENGINE_DISABLE_SANDBOX=1` in the Flatpak manifest's `finish-args`. Confirmed necessary by direct reproduction on this branch: without it, `webview.start(gui="qt")` fails with `Running as root without --no-sandbox is not supported` - Chromium's own sandbox refuses to nest inside another sandbox (bwrap). Flatpak's outer sandbox is already the real containment boundary for an app that only ever loads its own bundled UI from `127.0.0.1`, so disabling Chromium's inner one is not a meaningful security loss here |
 | ffmpeg/ffprobe discovery at runtime | PyInstaller-frozen build: `sys.frozen`/`sys._MEIPASS` is set, so `avg/media/environment.py::bundled_ffmpeg_dir()` finds the copy PyInstaller placed next to the exe | **Not frozen at all** - this branch doesn't use PyInstaller (see "Packaging shape" below), so `bundled_ffmpeg_dir()` naturally returns `None` and `ffmpeg_exe()`/`ffprobe_exe()` already fall back to bare `"ffmpeg"`/`"ffprobe"` (PATH lookup) with zero code changes. The Flatpak manifest installs `tools/fetch_ffmpeg.py`'s output straight to `/app/bin`, which is already on `PATH` for any Flatpak app - the existing not-frozen fallback path is what actually resolves them |
-| Packaging shape | `tools/build.py` + `avg.spec`: PyInstaller builds a frozen onefolder exe, then Inno Setup (`installer/avg.iss`) wraps it into an installer | **No PyInstaller.** `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` does a plain `pip3 install --prefix=/app .` of the `avg` package plus its declared dependencies, copies the pre-built `web/dist` next to wherever `avg` landed under `site-packages` (matching `avg/api/app.py`'s existing `WEB_DIST` path resolution, `parents[2]` from `avg/api/app.py` - verified end-to-end on this branch: real `pip install .` into a throwaway prefix, `WEB_DIST` resolved correctly, `create_app()` constructed successfully), and installs a two-line launcher script. `tools/build_flatpak.sh` is this branch's `Build Installer.bat`/`make_release.ps1` equivalent |
+| Packaging shape | `tools/build.py` + `avg.spec`: PyInstaller builds a frozen onefolder exe, then Inno Setup (`installer/avg.iss`) wraps it into an installer | **No PyInstaller.** `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` does a plain `pip3 install --prefix=/app .` of the `avg` package plus its declared dependencies, copies the pre-built `web/dist` next to wherever `avg` landed under `site-packages` (matching `avg/api/app.py`'s existing `WEB_DIST` path resolution, `parents[2]` from `avg/api/app.py` - verified end-to-end on this branch: real `pip install .` into a throwaway prefix, `WEB_DIST` resolved correctly, `create_app()` constructed successfully), and installs a two-line launcher script. `tools/build_flatpak.ps1` is this branch's `Build Installer.bat`/`make_release.ps1` equivalent |
 | `pyproject.toml` packaging | No `[build-system]` table - `pip install .` had never actually been run on this repo before (Windows dev flow is PYTHONPATH-based; release flow is PyInstaller, which doesn't build a wheel). Still true on `main`/`development` | Added `[build-system]` + `[tool.setuptools.packages.find] include = ["avg*"]`, needed for the Flatpak manifest's `pip install .` step to work at all - without it, setuptools refuses with "Multiple top-level packages discovered in a flat-layout" (`web`, `avg`, `assets`, `vendor`, `packaging`, `installer` all sit at the repo root). This gap exists on the Windows build too and should probably be back-ported the same way `edge-tts`'s missing dependency was, independent of anything Linux-specific |
 | Missing `edge-tts` dependency | Not declared in either build's `pyproject.toml` before this branch found it (imported lazily by `avg/providers/voice/providers.py`, never added to `dependencies`) | Fixed here, should be back-ported to the Windows build's `pyproject.toml` too - this was never actually a Windows/Linux difference, just a pre-existing gap this port happened to surface |
 | Missing `httpx` dependency | Declared only under `[project.optional-dependencies].dev`, despite being imported directly by `avg/providers/transport.py` and every provider base class (text/images/voice) for every live HTTP call this app makes - a hard runtime requirement, not a test tool. Masked on every platform until now: the Windows dev/build venv always installs with `[dev]` extras too (see CLAUDE.md's Commands), so `httpx` was always present there by coincidence. Found the same way as `edge-tts` above - a real `pip install .` with no extras, the first one this repo has ever had run against it on any platform, surfaced by an actual `flatpak run` crashing with `No module named 'httpx'` after the krb5 fix let the app get that far | Moved to the main `dependencies` list. Same back-port recommendation as `edge-tts` - checked every other third-party import in `avg/` against `pyproject.toml` after finding this one (via an AST walk over every `.py` file, not by inspection) and found no further gaps |
@@ -90,7 +90,7 @@ public API - the two are drop-in for each other at the call-site level.
 ## Removed from this branch: committed Windows build outputs
 
 None of this was intentional - found by inspection after a report that
-`tools/build_flatpak.sh` "did nothing" (still being diagnosed at the time;
+`tools/build_flatpak.ps1` "did nothing" (still being diagnosed at the time;
 resolved later - see `tools/AVG-Studio-Build.desktop`/
 `tools/install_desktop_launcher.sh` below - the script was never broken,
 there was just no way to launch it except by typing the command into an
@@ -129,7 +129,7 @@ New in this branch, not a port of anything - Windows has an installer
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.yml` - the manifest.
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.desktop` - app-grid launcher entry.
 - `packaging/flatpak/io.github.Hocine123321.AVGStudio.metainfo.xml` - AppStream metadata (`project_license` is a `LicenseRef-proprietary` placeholder - no LICENSE file exists in this repo on any branch yet; fix this in the same commit as whichever one adds one).
-- `tools/build_flatpak.sh` - interactive (`select`-based) menu with two
+- `tools/build_flatpak.ps1` - interactive (`Read-Host`-based) menu with two
   actions: **Launch from source** (sets up/reuses a local editable-
   install dev venv, builds `web/`, runs `tools/dev_serve_linux.py` - no
   Flatpak involved at all, this branch's `Build Installer.bat`
@@ -148,7 +148,7 @@ New in this branch, not a port of anything - Windows has an installer
   be the fast option and made "refresh but don't bundle" pointless as
   its own choice; see the dev-loop entry below for why.
 - `tools/AVG-Studio-Build.desktop` / `tools/install_desktop_launcher.sh`
-  - a real freedesktop.org launcher for `build_flatpak.sh`, added after
+  - a real freedesktop.org launcher for `build_flatpak.ps1`, added after
   a report that clicking the script did nothing useful (no file manager
   runs a bare `.sh` in a visible terminal by default, and this branch's
   target environments include minimal Wayland compositors - niri,
@@ -175,7 +175,7 @@ New in this branch, not a port of anything - Windows has an installer
   build's fast dev loop (`tools/_dev_serve.py`). No packaging step at
   all - bare `uvicorn.run(create_app(...))`, opened in a regular
   browser tab. Use this while iterating on `avg/`/`web/` code;
-  `tools/build_flatpak.sh`'s package option answers a different
+  `tools/build_flatpak.ps1`'s package option answers a different
   question (does the actual sandboxed package still work) and was
   never going to be fast for this one - see the dev-loop entry below.
 
@@ -213,7 +213,7 @@ at first - removing `--device=dri` alone didn't stop the row from
 downloading during the bare-runtime prerequisite install, because
 "related refs" install alongside a runtime *by default* regardless of
 any app's finish-args (flatpak/flatpak#3004); `flatpak install
---no-related` (what `tools/build_flatpak.sh` uses for the Platform/Sdk
+--no-related` (what `tools/build_flatpak.ps1` uses for the Platform/Sdk
 prerequisite step) is what actually controls that step specifically.
 None of that ended up mattering for the app's own install, though:
 running the actual packaged app without `--device=dri` meant
@@ -264,7 +264,7 @@ write-up; `25.08` has security support into 2027.
 
 ## "Refresh app" is slow, and that's structural, not a bug to chase
 
-Reported directly: repeat `tools/build_flatpak.sh` refreshes felt like a
+Reported directly: repeat `tools/build_flatpak.ps1` refreshes felt like a
 full clean build every time, re-downloading things a previous run had
 already fetched, and were nowhere near the Windows build's dev-loop
 speed. Two separate things were actually going on.
@@ -312,11 +312,11 @@ even imported), adapted only in its `output_root` default
 (`avg.shell.resolve_output_root()` instead of a hardcoded `D:\...`
 path). Verified directly in this container: starts, serves a real
 HTTP 200, on a source layout without any Flatpak packaging involved at
-all. `tools/build_flatpak.sh` is for the question only it can answer -
+all. `tools/build_flatpak.ps1` is for the question only it can answer -
 does the actual sandboxed package still work (permissions, the bundled
 Qt/krb5 resolution) - not for iterating on `avg/`/`web/` code.
 
-**Outcome: `tools/build_flatpak.sh`'s menu changed to match.** "Refresh
+**Outcome: `tools/build_flatpak.ps1`'s menu changed to match.** "Refresh
 app" (fast-ish incremental install, no bundle) and "Build installer"
 (force-clean, bundle only) were two flavors of the same underlying
 operation - once `tools/dev_serve_linux.py` existed to actually be the
@@ -468,7 +468,7 @@ confirmed directly rather than assumed:
   run here; this container has neither the tool nor a path to the
   runtime downloads. First real run (CachyOS/KDE Plasma) found
   `flatpak-builder` itself wasn't installed, then the runtime/SDK
-  weren't - both now fixed (`build_flatpak.sh` checks and installs each
+  weren't - both now fixed (`build_flatpak.ps1` checks and installs each
   itself) - and surfaced the `org.kde.Platform` → `org.freedesktop.Platform`
   correction above, plus the CWD-shadowing bug in the section right
   above this one. Still not confirmed: an actual completed build and a
@@ -478,3 +478,25 @@ confirmed directly rather than assumed:
 - **No LICENSE file anywhere in this repo.** Blocks giving
   `metainfo.xml`'s `project_license` a real value - currently
   `LicenseRef-proprietary` as an honest placeholder, not a guess.
+
+## Build tool ported from bash to PowerShell
+
+`tools/build_flatpak.sh` was replaced by `tools/build_flatpak.ps1` (run with
+`pwsh`; on CachyOS/Arch `yay -S powershell-bin`), matching the Windows side's
+`tools/make_release.ps1` so the project's build tooling is one language. Same
+menu, same `-Launch` / `-BuildPackage` / `-SkipWebBuild` behaviour (the old
+`--launch` / `--build-package` / `--skip-web-build` flags became PowerShell
+switches). Older sections above that mention `build_flatpak.sh` describe
+decisions made when it was bash; the logic they describe carried over
+unchanged.
+
+Two PowerShell-on-Linux behaviours found by testing, not assumed, and worked
+around in the script (comments there explain each): `Start-Job` is killed
+when the script exits (bash's `&` background subshell survives), and
+`Start-Process -ArgumentList` given an array silently fails to pass its
+arguments to the child on Linux - only the single-string form works. The
+launcher (`tools/AVG-Studio-Build.desktop`, `tools/install_desktop_launcher.sh`)
+now runs `pwsh -File build_flatpak.ps1` and prints a clear message instead of
+vanishing if `pwsh` is missing. `install_desktop_launcher.sh` is deliberately
+the one bash script left in `tools/`: it bootstraps the clickable launcher and
+needs nothing but bash.
