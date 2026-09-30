@@ -30,7 +30,7 @@ struct CatalogEntry: Identifiable, Codable, Equatable, Hashable {
 /// AI-suggestion worker) this port is not taking on right now. What IS
 /// ported from the PC's `ModelPicker.tsx` is its one load-bearing UX rule:
 /// when nothing comes back, fall back to a plain text field rather than
-/// leaving the setting impossible to change (see `ModelPickerRow.swift`).
+/// leaving the setting impossible to change (see `ModelRow.swift`).
 @MainActor
 @Observable
 final class ModelCatalog {

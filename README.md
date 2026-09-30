@@ -23,7 +23,7 @@ One process, one target, no server. `App.swift` builds a single `Store`
 `UI/` reads and writes through it. There is no HTTP layer and no WebSocket:
 the `Store` **is** the boundary, and it plays the role that `avg/api/` plays on
 PC. Below it, `Core/Pipeline.swift` runs the five phases, `Providers/` talks to
-AI backends, and `Render/VideoRenderer.swift` draws frames with Core Graphics
+AI backends, and `Render/VideoRenderer.swift` composes frames on the GPU (Core Image on Metal, with a Core Graphics fallback)
 and encodes them with the iPhone's hardware HEVC encoder, replacing the PC's
 ffmpeg child process. Nothing below `Store` touches UI state: a phase reports
 progress through a closure, failures surface as typed `AVGError`s, and the
@@ -37,13 +37,13 @@ never above.
 ```
 AVGStudio/UI/         SwiftUI screens; read and write only through Store
 AVGStudio/Core/       Store, Pipeline, Recovery, models, export, audio, image cache
-AVGStudio/Render/     Core Graphics frames + AVAssetWriter HEVC + AVFoundation mux
+AVGStudio/Render/     Core Image (GPU) or Core Graphics (CPU) frames + AVAssetWriter HEVC + AVFoundation mux
 AVGStudio/Providers/  text / image / voice / transcription backends,
                       HTTP transport, error taxonomy, model catalogues
 ```
 
 Nothing in `Providers/` imports from `UI/`. `UI/` never calls a provider
-directly, except `ModelPickerRow` and the catalogue refresh, which go through
+directly, except `ModelRow` and the catalogue refresh, which go through
 `ModelCatalog`. Tests live beside the app in `AVGStudioTests/` and reach in
 with `@testable import AVGStudio`.
 
@@ -83,7 +83,8 @@ with `@testable import AVGStudio`.
 
 | File | Responsibility |
 |---|---|
-| `VideoRenderer.swift` | `VideoRenderer.render(_:progress:)`. Per-frame Core Graphics drawing, Ken Burns, transitions, one-time Core Image grade bake, takeover cards, six caption animations, film-grain/light-leak filters, HEVC encode, passthrough mux |
+| `VideoRenderer.swift` | `VideoRenderer.render(_:progress:) -> RenderStats`. `plan(t:…)` decides **once** what each frame contains (`FramePlan`); `composeGPU` (Core Image on Metal) and `draw(into:…)` (Core Graphics) both draw from that plan. Images are graded and normalised once up front; captions and takeover cards are rasterised only when their look changes. The encoder pulls frames through `requestMediaDataWhenReady`. Ken Burns, transitions, six caption animations, film-grain/light-leak filters, HEVC encode, passthrough mux |
+| `RenderSupport.swift` | `RenderStats` (frames, GPU vs CPU frames, prepare / frame / mux seconds), `AppActivity` (may the GPU be used right now?), `CancelFlag`, and `Duration.seconds` |
 
 ### `AVGStudio/UI/`: the screens.
 
@@ -95,12 +96,15 @@ with `@testable import AVGStudio`.
 | `StudioView.swift` | The current project: player, five phase rows, live list, takes, scenes, brief, export sheet |
 | `CreateView.swift` | New-video form: topic, title, shape, channel |
 | `ChannelsView.swift` | Channel list and `ChannelEditor` (identity, videos, brand colours and font, recycling, cards, image backup, voice cleanup, per-phase models) |
-| `SettingsView.swift` | One page: Writing, Visuals, Voice, Captions, keys, model cache, appearance, health links. Holds only *which* keys exist, never a key's value |
+| `SettingsView.swift` | The Settings **hub**: ten big rows that each show their current value, a search field and a Quick settings button docked at the bottom, and the `SettingsCatalogs` instance shared by every sub-screen |
+| `SettingsScreens.swift` | One page per category: `WritingSettingsPage`, `ImagesSettingsPage`, `VoiceSettingsPage`, `CaptionsSettingsPage`, `VideoSettingsPage`, `KeysSettingsPage`, `FallbacksSettingsPage`, `AppearanceSettingsPage`. The keys page holds only *which* keys exist, never a key's value |
+| `SettingsKit.swift` | Routing (`SettingsCategory`, `SettingAnchor`, `SettingsRoute`), the **search index** (`SettingsIndex`), and the row components (`ToggleRow`, `ChoiceRow`, `SliderRow`, `StepperRow`, `SegmentRow`, `FieldRow`, `NavRow`, `SettingsGroup`, `SettingsPage`) |
+| `SettingsCatalogs.swift` | The nine live `ModelCatalog`s, created once by the hub so every screen shows the same loaded lists |
 | `APIKeySheet.swift` | `KeyStatusPill` and `APIKeySheet`: the one key-entry sheet, shared by Settings and Welcome. Never shows a saved key |
 | `ErrorLogView.swift` | The Activity screen: All / Errors filter over `store.log` |
 | `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
 | `WelcomeView.swift` | First-run five-step onboarding |
-| `ModelPickerRow.swift` | A picker over a `ModelCatalog`, falling back to a plain text field |
+| `ModelRow.swift` | One 56 pt row over a `ModelCatalog`; tapping opens a bottom sheet with search and Refresh. Always editable: typing an id works with no list |
 | `ProjectLogView.swift` | The live log sheet |
 | `ReusableImagesView.swift` | The recycle-pool manager (photo import, descriptions) |
 | `ActivityShareSheet.swift` | `UIActivityViewController` wrapper |
@@ -111,7 +115,7 @@ with `@testable import AVGStudio`.
 |---|---|
 | `project.yml` | XcodeGen spec. **`Info.plist` and `AVGStudio.xcodeproj` are generated from it and never committed** |
 | `.github/workflows/ios.yml` | Runs the unit tests on a simulator, then builds an unsigned IPA, on every push that touches `AVGStudio/**`, `AVGStudioTests/**` or `project.yml` |
-| `AVGStudioTests/` | The unit tests (26). See §10 |
+| `AVGStudioTests/` | The unit tests. See §10 |
 | `AVGStudio/Resources/` | `Caprasimo-Regular.ttf` and its OFL licence |
 | `AVGStudio/Assets.xcassets/` | The app icon (light, dark and tinted variants) |
 | `SKIN_V2_PLAN.md`, `UI_POLISH_PLAN.md` | The design plans. Skin v2 is complete; see §7 |
@@ -142,7 +146,7 @@ accident. Each difference below is a decision recorded in a comment.
 | Groq, Hugging Face, Pollinations text | Apple Intelligence, Gemini, Groq, Pollinations | Hugging Face has no iOS backend, and its error patterns were left out on purpose |
 | `SETTINGS` catalogue (75 specs) | hand-built `AppSettings` and `Channel` | See §5 |
 | `invalidates` + clone-a-take | *not ported* | Tapping a phase row asks "Redo from X?" and re-runs X and everything after it. Phase files are overwritten; each render adds a new `take_<id>.mp4`, so earlier videos are kept |
-| Pillow takeover-card renderer | Core Graphics, `drawCard` | Same rule: a card owns its scene's whole window |
+| Pillow takeover-card renderer | Core Graphics, `drawCard` (drawn to a bitmap, then composited on the GPU path) | Same rule: a card owns its scene's whole window |
 | `film_grain.mov`, `light_leak.mov` | procedural 128×128 grain tile, light-leak gradient | No bundled video overlays |
 
 ---
@@ -228,8 +232,9 @@ toggle, because not every field has both a global default and a channel
 override.
 
 Adding a setting is: a field with a default in the struct, a line in its
-tolerant `init(from:)` (`c.value("key", key)`), a control in `SettingsView` or
-`ChannelEditor`, and the code that reads it.
+tolerant `init(from:)` (`c.value("key", key)`), a control on the right page in
+`SettingsScreens.swift` (or `ChannelEditor`), a `SettingAnchor` and a
+`SettingsIndex` entry so search finds it, and the code that reads it.
 
 ---
 
@@ -237,8 +242,10 @@ tolerant `init(from:)` (`c.value("key", key)`), a control in `SettingsView` or
 
 **Add a setting.** Add a field with a default to `AppSettings` (or `Channel`)
 and a `c.value(...)` line in its `init(from:)`. If you skip the decode line, an
-existing user's saved settings will reset to the default. Add the control in
-`SettingsView` or `ChannelEditor`. Read it where it is used, through `store`.
+existing user's saved settings will reset to the default. Add the control on the matching page in
+`SettingsScreens.swift` (or in `ChannelEditor`), give it a `SettingAnchor` and an
+entry in `SettingsIndex` (a test fails if you forget), and read it where it is
+used, through `store`.
 
 **Add a phase.** Add a case to `PhaseID` in `Models.swift`, **in order**. Add
 its body to `Pipeline` and a `case` in `Pipeline.execute`. Add its label in
@@ -349,7 +356,7 @@ Views keep almost none. Anything a screen shows comes from `store`; local
   (`CODE_SIGNING_ALLOWED=NO`).
 - **Local:** `brew install xcodegen && xcodegen generate && open AVGStudio.xcodeproj`
   from the repo root.
-- **Tests:** `AVGStudioTests/` is a `bundle.unit-test` target (26 tests, XCTest,
+- **Tests:** `AVGStudioTests/` is a `bundle.unit-test` target (42 tests, XCTest,
   `@testable import AVGStudio`). CI runs it on an iPhone simulator **before**
   the release build, and a failing test stops the IPA from being produced.
   Coverage is deliberately narrow, on the code where a mistake is silent:
@@ -360,8 +367,13 @@ Views keep almost none. Anything a screen shows comes from `store`; local
   - `PipelineTextTests` (17): `[pause]` splitting, `spoken`, question markers,
     proportional timing, JSON extraction, scene parsing and the sentence
     fallback, and the recycle-pool tokens.
+  - `RenderPlanTests` (8): `VideoRenderer.plan` (scene placement, crossfade,
+    takeover card ownership, slide and fade entrances, a missing image) and
+    the `RenderStats` summary text.
+  - `SettingsIndexTests` (8): every `SettingAnchor` and category is
+    searchable, titles are unique, ranking and multi-word queries.
 
-  Nothing tests providers, rendering, the `Store` or any view; that is still
+  Nothing tests providers, the pixels the renderer produces, the `Store` or any view; that is still
   the CI build plus running the app. From Xcode: `⌘U`.
 - **Needs on device:** iOS 26 and Apple Intelligence for the default on-device
   writer. Without it, choose Gemini, Groq or Pollinations in Settings.

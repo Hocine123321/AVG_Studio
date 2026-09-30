@@ -332,6 +332,9 @@ struct SegmentedFilter<T: Hashable>: View {
     let options: [T]
     let label: (T) -> String
     @Binding var selection: T
+    /// 8 keeps the compact 34pt strip Library/Create use; Settings passes 12
+    /// for ~44pt segments a thumb can hit without aiming.
+    var verticalPadding: CGFloat = 8
 
     var body: some View {
         HStack(spacing: 4) {
@@ -344,7 +347,7 @@ struct SegmentedFilter<T: Hashable>: View {
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(isOn ? Theme.ink : Theme.ink2)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, verticalPadding)
                         .background {
                             if isOn {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)

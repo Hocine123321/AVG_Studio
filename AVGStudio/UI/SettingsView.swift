@@ -1,455 +1,226 @@
 import SwiftUI
-import AVFoundation
 
-/// The mock's `set()` screen, re-merged back onto ONE page (Skin v2 Phase
-/// 7) after `UI_POLISH_PLAN.md` had split it into three destinations
-/// (AI Providers / Video & Render / Captions). Grouped under the mock's
-/// own section names (Writing/Visuals/Voice/Captions) as closely as this
-/// app's REAL fields actually correspond - Quality/FPS/Ken Burns/Filters
-/// all fold into "Visuals" since the mock has no separate Video section.
-///
-/// One thing deliberately NOT ported: the mock's Channel/Global segmented
-/// mode (`S.mode`) toggle, which assumes every field here has BOTH a
-/// global default AND a per-channel override sitting right behind it.
-/// That isn't how this app's real settings are shaped - provider choice/
-/// video quality/captions are global-only, tone/niche/per-phase-model/
-/// recycling/cards/brand are per-channel-only (Channels → tap a channel,
-/// Skin v2 Phase 6) - there's no uniform pair to flip between. Building
-/// that toggle here would only ever show a value with nothing behind it
-/// to switch to. This screen stays what it honestly is: the global
-/// defaults, same as before the merge.
+/// Settings hub. See SettingsKit.swift for the reasoning: a short list of big
+/// rows that each show their current value, a search field and a Quick
+/// settings button docked at the BOTTOM (the thumb zone, not a nav bar), and
+/// one sub-screen per category - never more than two taps to any setting.
 struct SettingsView: View {
     @Environment(Store.self) private var store
-    /// Which providers have a key saved - names only, never the secrets
-    /// themselves (the old `keys: [APIKey: String]` held every key in
-    /// plaintext @State for as long as this screen lived).
-    @State private var savedKeys: Set<APIKey> = []
-    @State private var refreshingCatalogs = false
-    @State private var editingKey: APIKey?
-    @State private var draftTransparency: Double = 0
+    @State private var catalogs = SettingsCatalogs()
+    @State private var query = ""
+    @State private var showQuick = false
+    @State private var savedKeyCount = 0
+    @FocusState private var searchFocused: Bool
 
-    // ── Live model catalogues ───────────────────────────────────────
-    // One ModelCatalog per provider endpoint (see ModelCatalog.swift's
-    // doc comment for why this is small closures rather than near-
-    // identical classes). Held as @State so the SAME instance - and its
-    // fetched entries/disk cache - survives this view's body being
-    // re-evaluated on every settings change.
-    @State private var geminiTextCatalog = ModelCatalog(cacheKey: "gemini_text") {
-        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
-        return try await ModelCatalogSources.geminiText(key: key)
-    }
-    @State private var groqTextCatalog = ModelCatalog(cacheKey: "groq_text") {
-        guard let key = Keychain.get(.groq) else { throw AVGError.missingKey(APIKey.groq.label) }
-        return try await ModelCatalogSources.groqText(key: key)
-    }
-    @State private var stableHordeCatalog = ModelCatalog(cacheKey: "stablehorde_image") {
-        try await ModelCatalogSources.stableHordeImage()
-    }
-    @State private var elevenVoicesCatalog = ModelCatalog(cacheKey: "elevenlabs_voices") {
-        guard let key = Keychain.get(.elevenlabs) else { throw AVGError.missingKey(APIKey.elevenlabs.label) }
-        return try await ModelCatalogSources.elevenlabsVoices(key: key)
-    }
-    @State private var elevenModelsCatalog = ModelCatalog(cacheKey: "elevenlabs_models") {
-        guard let key = Keychain.get(.elevenlabs) else { throw AVGError.missingKey(APIKey.elevenlabs.label) }
-        return try await ModelCatalogSources.elevenlabsModels(key: key)
-    }
-    @State private var pollinationsTextCatalog = ModelCatalog(cacheKey: "pollinations_text") {
-        try await ModelCatalogSources.pollinationsText(key: Keychain.get(.pollinations))
-    }
-    @State private var pollinationsImageCatalog = ModelCatalog(cacheKey: "pollinations_image") {
-        try await ModelCatalogSources.pollinationsImage(key: Keychain.get(.pollinations))
-    }
-    @State private var geminiImageCatalog = ModelCatalog(cacheKey: "gemini_image") {
-        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
-        return try await ModelCatalogSources.geminiImageModels(key: key)
-    }
-    @State private var geminiVoiceModelCatalog = ModelCatalog(cacheKey: "gemini_voice_model") {
-        guard let key = Keychain.get(.gemini) else { throw AVGError.missingKey(APIKey.gemini.label) }
-        return try await ModelCatalogSources.geminiVoiceModels(key: key)
-    }
-
-    private var allCatalogs: [ModelCatalog] {
-        [geminiTextCatalog, groqTextCatalog, stableHordeCatalog, elevenVoicesCatalog,
-         elevenModelsCatalog, pollinationsTextCatalog, pollinationsImageCatalog,
-         geminiImageCatalog, geminiVoiceModelCatalog]
+    private var searching: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        @Bindable var store = store
-        Form {
-            // ── Writing ──────────────────────────────────────────────
-            Section {
-                Picker("Writer", selection: $store.settings.text) {
-                    ForEach(TextProviderKind.allCases) { Text($0.label).tag($0) }
-                }
-                if store.settings.text == .gemini {
-                    ModelPickerRow(title: "Gemini model", value: $store.settings.geminiModel, catalog: geminiTextCatalog)
-                } else if store.settings.text == .groq {
-                    ModelPickerRow(title: "Groq model", value: $store.settings.groqModel, catalog: groqTextCatalog)
-                } else if store.settings.text == .pollinations {
-                    ModelPickerRow(title: "Pollinations model", value: $store.settings.pollinationsTextModel, catalog: pollinationsTextCatalog)
-                }
-                Toggle("Dynamic pauses", isOn: $store.settings.dynamicPausesEnabled)
-                if store.settings.dynamicPausesEnabled {
-                    Stepper("Pause length: \(Int(store.settings.pauseMs)) ms", value: $store.settings.pauseMs, in: 200...2000, step: 100)
-                }
-            } header: { Text("Writing") } footer: {
-                Text("When the writer inserts [pause], on becomes a real held silence between two separately-recorded segments. Off just collapses it to a beat, spoken as part of one take.")
+        ScrollView {
+            VStack(spacing: 20) {
+                if searching { results } else { hub }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .screenBackground()
+        .tint(Theme.accent)
+        .navigationTitle("Settings")
+        .safeAreaInset(edge: .bottom) { dock }
+        .navigationDestination(for: SettingsRoute.self) { destination($0) }
+        .sheet(isPresented: $showQuick) { QuickSettingsSheet() }
+        .onAppear { savedKeyCount = APIKey.allCases.filter { Keychain.has($0) }.count }
+        // Switching a provider refreshes that provider's model list (and its
+        // cache) automatically, so nobody has to press refresh first. Lives
+        // on the hub, which stays alive underneath every pushed screen.
+        .onChange(of: store.settings.text) { _, _ in Task { await catalogs.refreshCurrent(store.settings) } }
+        .onChange(of: store.settings.image) { _, _ in Task { await catalogs.refreshCurrent(store.settings) } }
+        .onChange(of: store.settings.voice) { _, _ in Task { await catalogs.refreshCurrent(store.settings) } }
+    }
 
-            // ── Visuals ──────────────────────────────────────────────
-            // Folds in Quality/FPS/Ken Burns/Filters too - the mock has
-            // no separate "Video" section, everything about how a take
-            // LOOKS lives here.
-            Section {
-                Picker("Images", selection: $store.settings.image) {
-                    ForEach(ImageProviderKind.allCases) { Text($0.label).tag($0) }
-                }
-                if store.settings.image == .stablehorde {
-                    ModelPickerRow(title: "Stable Horde model", value: $store.settings.stableHordeModel, catalog: stableHordeCatalog)
-                } else if store.settings.image == .pollinations {
-                    ModelPickerRow(title: "Pollinations model", value: $store.settings.pollinationsImageModel, catalog: pollinationsImageCatalog)
-                } else if store.settings.image == .gemini {
-                    ModelPickerRow(title: "Gemini image model", value: $store.settings.geminiImageModel, catalog: geminiImageCatalog)
-                }
-                TextField("Image style", text: $store.settings.imageStyle, axis: .vertical)
-                Picker("Quality", selection: $store.settings.shortEdge) {
-                    Text("720p").tag(720); Text("1080p").tag(1080); Text("1440p").tag(1440)
-                }
-                Picker("Frame rate", selection: $store.settings.fps) {
-                    Text("24").tag(24); Text("30").tag(30); Text("60").tag(60)
-                }
-                Toggle("Ken Burns motion", isOn: $store.settings.kenBurns)
-                if store.settings.kenBurns {
-                    LabeledPercent("Motion", "\(Int(store.settings.kbIntensity * 100))%") { Slider(value: $store.settings.kbIntensity, in: 0.2...2) }
-                }
-                Picker("Filter style", selection: $store.settings.filterStyle) {
-                    ForEach(FilterStyle.allCases) { Text($0.label).tag($0) }
-                }
-                if store.settings.filterStyle != .none {
-                    LabeledPercent("Filter intensity", "\(Int(store.settings.filterIntensity))%") { Slider(value: $store.settings.filterIntensity, in: 0...100) }
-                }
-            } header: { Text("Visuals") } footer: {
-                Text("Filters are an on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.")
-            }
+    // MARK: Hub
 
-            Section {
-                NavigationLink("Reusable images", destination: ReusableImagesView())
-            } footer: {
-                Text("A shared pool the writer can pull from instead of generating fresh art. Each channel decides how heavily to use it under Channels → Recycling.")
+    private var hub: some View {
+        VStack(spacing: 20) {
+            SettingsGroup(title: "Create") {
+                row(.writing, writingSummary)
+                row(.images, imagesSummary)
+                row(.voice, store.settings.voice.label)
+                row(.captions, captionsSummary)
+                row(.video, videoSummary)
             }
+            SettingsGroup(title: "Accounts") {
+                row(.keys, "\(savedKeyCount) of \(APIKey.allCases.count) connected")
+                row(.fallbacks, store.settings.autoUseFallback ? "Switches automatically when a model is too expensive" : "Asks before switching models")
+            }
+            SettingsGroup(title: "App") {
+                row(.appearance, "\(store.settings.themePreference.label) · \(store.settings.appFont.label)")
+                NavigationLink(value: SettingsRoute.health) {
+                    NavRow(symbol: "heart.text.square", title: "App health", detail: "Providers, keys and storage")
+                }
+                .buttonStyle(.plain)
+                NavigationLink(value: SettingsRoute.activity) {
+                    NavRow(symbol: "list.bullet.rectangle", title: "Activity & errors", detail: errorSummary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
 
-            // ── Voice ────────────────────────────────────────────────
-            Section("Voice") {
-                Picker("Voice provider", selection: $store.settings.voice) {
-                    ForEach(VoiceProviderKind.allCases) { Text($0.label).tag($0) }
-                }
-            }
-            switch store.settings.voice {
-            case .apple:
-                Section {
-                    Picker("Voice", selection: $store.settings.appleVoiceIdentifier) {
-                        Text("Automatic").tag("")
-                        ForEach(AppleVoice.voices(), id: \.identifier) { v in
-                            Text("\(v.name) · \(v.language)\(v.quality == .premium ? " · Premium" : (v.quality == .enhanced ? " · Enhanced" : ""))")
-                                .tag(v.identifier)
-                        }
-                    }
-                    Text("Download better voices in iOS Settings → Accessibility → Spoken Content → Voices.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            case .elevenlabs:
-                Section {
-                    ModelPickerRow(title: "Voice ID", value: $store.settings.elevenVoiceID, catalog: elevenVoicesCatalog)
-                    ModelPickerRow(title: "Model", value: $store.settings.elevenModel, catalog: elevenModelsCatalog)
-                }
-            case .gemini:
-                Section {
-                    Picker("Voice", selection: $store.settings.geminiVoiceName) {
-                        ForEach(GeminiVoice.prebuiltVoices, id: \.self) { Text($0).tag($0) }
-                    }
-                    ModelPickerRow(title: "TTS model", value: $store.settings.geminiVoiceModel, catalog: geminiVoiceModelCatalog)
-                } footer: {
-                    Text("Not a PC provider - added as a third voice option alongside ElevenLabs and Apple voices.")
-                }
-            }
+    private func row(_ category: SettingsCategory, _ detail: String) -> some View {
+        NavigationLink(value: SettingsRoute.category(category, focus: nil)) {
+            NavRow(symbol: category.symbol, title: category.title, detail: detail)
+        }
+        .buttonStyle(.plain)
+    }
 
-            // ── Captions ─────────────────────────────────────────────
-            Section("Captions") {
-                Toggle("Burn in captions", isOn: $store.settings.captionsEnabled)
-                Picker("Animation", selection: $store.settings.captionAnimationStyle) {
-                    ForEach(CaptionAnimationStyle.allCases) { Text($0.label).tag($0) }
-                }
-                Stepper("Words per caption: \(store.settings.captionMaxWords)", value: $store.settings.captionMaxWords, in: 1...10)
-                Picker("Position", selection: $store.settings.captionPosition) {
-                    ForEach(CaptionPosition.allCases) { Text($0.rawValue.capitalized).tag($0) }
-                }
-                LabeledPercent("Size", "\(Int(store.settings.captionFontSize)) pt") { Slider(value: $store.settings.captionFontSize, in: 36...120) }
-            }
+    // Live summaries: the hub answers "what is it set to?" without a tap.
 
-            // ── API keys ─────────────────────────────────────────────
-            // The mock's own row: label + a "Connected"/"Add key" status
-            // pill, tap to edit - not a bare always-visible SecureField
-            // list. Editing itself still happens in a SecureField, just
-            // inside `keyEditor`'s sheet instead of inline.
-            Section {
-                ForEach(APIKey.allCases) { k in
-                    Button { editingKey = k } label: {
-                        HStack {
-                            Text(k.label).foregroundStyle(Theme.ink)
-                            Spacer()
-                            KeyStatusPill(saved: savedKeys.contains(k))
-                        }
+    private var writingSummary: String {
+        let s = store.settings
+        switch s.text {
+        case .gemini: return "\(s.text.label) · \(s.geminiModel)"
+        case .groq: return "\(s.text.label) · \(s.groqModel)"
+        case .pollinations: return "\(s.text.label) · \(s.pollinationsTextModel)"
+        case .apple: return s.text.label
+        }
+    }
+
+    private var imagesSummary: String {
+        let s = store.settings
+        switch s.image {
+        case .stablehorde: return "\(s.image.label) · \(s.stableHordeModel)"
+        case .pollinations: return "\(s.image.label) · \(s.pollinationsImageModel)"
+        case .gemini: return "\(s.image.label) · \(s.geminiImageModel)"
+        default: return s.image.label
+        }
+    }
+
+    private var captionsSummary: String {
+        store.settings.captionsEnabled ? "On · \(store.settings.captionAnimationStyle.label)" : "Off"
+    }
+
+    private var videoSummary: String {
+        let s = store.settings
+        return "\(s.shortEdge)p · \(s.fps) fps · Ken Burns \(s.kenBurns ? "on" : "off")"
+    }
+
+    private var errorSummary: String {
+        let n = store.log.filter(\.isError).count
+        return n == 0 ? "No errors" : (n == 1 ? "1 error" : "\(n) errors")
+    }
+
+    // MARK: Search results
+
+    @ViewBuilder private var results: some View {
+        let found = SettingsIndex.search(query)
+        if found.isEmpty {
+            ContentUnavailableView.search(text: query).padding(.top, 40)
+        } else {
+            SettingsGroup {
+                ForEach(found) { entry in
+                    NavigationLink(value: entry.route) {
+                        NavRow(symbol: entry.symbol, title: entry.title, detail: entry.place)
                     }
                     .buttonStyle(.plain)
                 }
-            } header: { Text("API keys") } footer: {
-                Text("Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy.")
             }
+        }
+    }
 
-            // ── Model cache ──────────────────────────────────────────
-            // The mock's own "Rebuild cache" button, minus its static
-            // "Proven working: Groq 5 of 10..." text - this app has no
-            // real per-provider probe history to report, just each
-            // provider's live model LIST, which is exactly what this
-            // refreshes: every ModelPickerRow's catalog above, at once,
-            // instead of one at a time.
-            Section {
-                Button {
-                    Task {
-                        refreshingCatalogs = true
-                        // Sequential, not a TaskGroup: ModelCatalog is
-                        // @MainActor and isn't Sendable, so this stays a
-                        // plain chain of awaited calls on the same actor
-                        // rather than fanning capture-across-actors out to
-                        // concurrent child tasks - a few extra seconds for
-                        // an occasional manual refresh is a fine trade for
-                        // not fighting the concurrency checker over it.
-                        for c in allCatalogs { await c.refresh() }
-                        refreshingCatalogs = false
+    // MARK: Bottom dock
+
+    private var dock: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.ink2)
+                TextField("Search settings", text: $query)
+                    .focused($searchFocused)
+                    .submitLabel(.search)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.ink2).frame(width: 32, height: 32)
                     }
-                } label: {
-                    HStack {
-                        Text("Refresh all model lists")
-                        if refreshingCatalogs { Spacer(); ProgressView() }
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
                 }
-                .disabled(refreshingCatalogs)
-            } header: { Text("Model cache") } footer: {
-                Text("Re-fetches every provider's live model list at once, instead of one at a time from its own picker.")
             }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .glass(Capsule())
 
-            // ── App related ──────────────────────────────────────────
-            Section {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Glass transparency")
-                        Spacer()
-                        Text("\(Int(draftTransparency * 100))%")
-                            .foregroundStyle(Theme.ink2).monospacedDigit()
-                    }
-                    // The slider edits a LOCAL value (cheap: only the small
-                    // preview redraws while dragging) and commits to the
-                    // store - which re-renders the whole app and writes to
-                    // disk - once, when the finger lifts. Writing every tick
-                    // is what made it laggy.
-                    Slider(value: $draftTransparency, in: 0...1) { editing in
-                        if !editing { store.settings.glassOpacity = 1 - draftTransparency * 0.85 }
-                    }
-                    GlassPreview(level: 1 - draftTransparency * 0.85)
-                }
-                .padding(.vertical, 4)
-                if store.settings.glassOpacity != 1 || draftTransparency != 0 {
-                    Button("Reset to default") { draftTransparency = 0; store.settings.glassOpacity = 1 }
-                }
-                Picker("Font", selection: $store.settings.appFont) {
-                    ForEach(AppFontChoice.allCases) { Text($0.label).tag($0) }
-                }
-            } header: { Text("App related") } footer: {
-                Text("Transparency applies to the whole app as soon as you let go of the slider. Font applies right away too; a few fixed-size headings and the tab bar keep their own type.")
+            Button {
+                Haptics.light()
+                searchFocused = false
+                showQuick = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 48, height: 48)
+                    .glassCircle()
             }
-
-            // ── Model fallback: one section per AI ───────────────────
-            // Each reuses the same cached live model list as the main picker
-            // (no typing ids), for whichever provider is currently in use.
-            Section {
-                if let c = writerFallbackCatalog {
-                    ModelPickerRow(title: "Fallback model", value: $store.settings.writerFallbackModel, catalog: c)
-                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.writer, store: store) ?? "none")).")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("\(store.settings.text.label) runs on your device, so there is no cheaper model to fall back to.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            } header: { Text("Writer fallback") } footer: {
-                Text("Used when the writer's main model is over quota, out of credit or too expensive.")
-            }
-
-            Section {
-                if let c = imageFallbackCatalog {
-                    ModelPickerRow(title: "Fallback model", value: $store.settings.imageFallbackModel, catalog: c)
-                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.image, store: store) ?? "none")).")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("\(store.settings.image.label) has a single model, so there is no cheaper one to fall back to.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-            } header: { Text("Image fallback") } footer: {
-                Text("Used when the image model is over quota, out of credit or too expensive.")
-            }
-
-            Section {
-                if let c = voiceFallbackCatalog {
-                    ModelPickerRow(title: "Fallback model", value: $store.settings.voiceFallbackModel, catalog: c)
-                    Text("Empty = built-in light model (\(Recovery.fallbackModel(.voice, store: store) ?? "none")).")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("\(store.settings.voice.label) has no cheaper model to fall back to.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Toggle("Switch automatically when too expensive", isOn: $store.settings.autoUseFallback)
-            } header: { Text("Voice fallback") } footer: {
-                Text("With the switch on, a quota or billing error moves the writer, image or voice step to its fallback without asking. Otherwise you're asked first.")
-            }
-
-            // ── Appearance ───────────────────────────────────────────
-            Section("Appearance") {
-                Picker("Theme", selection: $store.settings.themePreference) {
-                    ForEach(ThemePreference.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section {
-                NavigationLink("App health", destination: HealthView())
-                NavigationLink("Activity & errors", destination: ErrorLogView())
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Quick settings")
         }
-        .screenBackground()
-        .tint(Theme.accent)
-        // Switching a provider refreshes that provider's model list (and
-        // its cache) automatically, so nobody has to press refresh first.
-        .onChange(of: store.settings.text) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
-        .onChange(of: store.settings.image) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
-        .onChange(of: store.settings.voice) { _, _ in Task { await refreshCatalogsForCurrentProviders() } }
-        .navigationTitle("Settings")
-        .onAppear {
-            refreshSavedKeys()
-            draftTransparency = (1 - store.settings.glassOpacity) / 0.85
-        }
-        .sheet(item: $editingKey) { k in
-            APIKeySheet(key: k) { refreshSavedKeys() }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: Destinations
+
+    @ViewBuilder private func destination(_ route: SettingsRoute) -> some View {
+        switch route {
+        case .category(let category, let focus):
+            page(category, focus: focus).environment(catalogs)
+        case .health:
+            HealthView()
+        case .activity:
+            ErrorLogView()
+        case .reusableImages:
+            ReusableImagesView()
         }
     }
 
-    private func refreshSavedKeys() {
-        savedKeys = Set(APIKey.allCases.filter { Keychain.has($0) })
-    }
-
-    /// The cached catalog matching the provider currently in use for each AI
-    /// (nil when that provider has no model list, e.g. on-device).
-    private var writerFallbackCatalog: ModelCatalog? {
-        switch store.settings.text {
-        case .gemini: return geminiTextCatalog
-        case .groq: return groqTextCatalog
-        case .pollinations: return pollinationsTextCatalog
-        case .apple: return nil
-        }
-    }
-    private var imageFallbackCatalog: ModelCatalog? {
-        switch store.settings.image {
-        case .gemini: return geminiImageCatalog
-        case .pollinations: return pollinationsImageCatalog
-        case .stablehorde: return stableHordeCatalog
-        default: return nil
-        }
-    }
-    private var voiceFallbackCatalog: ModelCatalog? {
-        switch store.settings.voice {
-        case .elevenlabs: return elevenModelsCatalog
-        case .gemini: return geminiVoiceModelCatalog
-        case .apple: return nil
-        }
-    }
-
-    /// Refreshes only the catalogs for the providers currently selected
-    /// (cheap, and exactly what the user is about to look at).
-    private func refreshCatalogsForCurrentProviders() async {
-        var cs: [ModelCatalog] = []
-        switch store.settings.text {
-        case .gemini: cs.append(geminiTextCatalog)
-        case .groq: cs.append(groqTextCatalog)
-        case .pollinations: cs.append(pollinationsTextCatalog)
-        default: break
-        }
-        switch store.settings.image {
-        case .stablehorde: cs.append(stableHordeCatalog)
-        case .pollinations: cs.append(pollinationsImageCatalog)
-        case .gemini: cs.append(geminiImageCatalog)
-        default: break
-        }
-        switch store.settings.voice {
-        case .elevenlabs: cs += [elevenVoicesCatalog, elevenModelsCatalog]
-        case .gemini: cs.append(geminiVoiceModelCatalog)
-        default: break
-        }
-        for c in cs { await c.refresh() }
-    }
-}
-
-/// A slider row with its exact current value shown on the right.
-struct LabeledPercent<Control: View>: View {
-    let title: String
-    let value: String
-    @ViewBuilder var control: Control
-    init(_ title: String, _ value: String, @ViewBuilder control: () -> Control) {
-        self.title = title; self.value = value; self.control = control()
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack { Text(title); Spacer(); Text(value).foregroundStyle(Theme.ink2).monospacedDigit() }
-            control
+    @ViewBuilder private func page(_ category: SettingsCategory, focus: SettingAnchor?) -> some View {
+        switch category {
+        case .writing: WritingSettingsPage(focus: focus)
+        case .images: ImagesSettingsPage(focus: focus)
+        case .voice: VoiceSettingsPage(focus: focus)
+        case .captions: CaptionsSettingsPage(focus: focus)
+        case .video: VideoSettingsPage(focus: focus)
+        case .keys: KeysSettingsPage(focus: focus)
+        case .fallbacks: FallbacksSettingsPage(focus: focus)
+        case .appearance: AppearanceSettingsPage(focus: focus)
         }
     }
 }
 
-/// Live miniature of the app (colored orbs, a glass card with a row, a
-/// pill button) drawn with the SAME fill/material math as the real glass,
-/// at the slider's current level, so the effect is visible before it's
-/// applied everywhere.
-private struct GlassPreview: View {
-    let level: Double
+/// The handful of settings people flip most, one tap from the hub and in a
+/// bottom sheet - so the commonest changes never need a navigation at all.
+private struct QuickSettingsSheet: View {
+    @Environment(Store.self) private var store
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Theme.bg1, Theme.bg2], startPoint: .topLeading, endPoint: .bottomTrailing)
-            Circle().fill(Theme.accent).frame(width: 110, height: 110).blur(radius: 26).offset(x: -70, y: -20)
-            Circle().fill(Theme.ok).frame(width: 120, height: 120).blur(radius: 28).offset(x: 80, y: 30)
-            VStack(spacing: 10) {
-                HStack {
-                    Text("Library").font(.footnote.weight(.semibold))
-                    Spacer()
-                    Text("Done").font(.caption).foregroundStyle(Theme.ink2)
-                }
-                .padding(12)
-                .background(previewGlass(RoundedRectangle(cornerRadius: 16, style: .continuous)))
-                Text("Create a video")
-                    .font(.footnote.weight(.semibold)).foregroundStyle(Theme.onAccent)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .background(Theme.accent, in: Capsule())
+        @Bindable var store = store
+        GlassSheet(title: "Quick settings") {
+            SettingsGroup {
+                SegmentRow(title: "Theme", options: Array(ThemePreference.allCases), label: { $0.label },
+                           selection: $store.settings.themePreference)
+                ToggleRow(title: "Burn in captions", isOn: $store.settings.captionsEnabled)
+                ToggleRow(title: "Ken Burns motion", isOn: $store.settings.kenBurns)
+                SegmentRow(title: "Quality", options: [720, 1080, 1440], label: { "\($0)p" },
+                           selection: $store.settings.shortEdge)
+                SegmentRow(title: "Frame rate", options: [24, 30, 60], label: { "\($0) fps" },
+                           selection: $store.settings.fps)
             }
-            .padding(.horizontal, 24)
         }
-        .frame(height: 150)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
-    }
-
-    private func previewGlass<S: InsettableShape>(_ shape: S) -> some View {
-        ZStack {
-            shape.fill(.ultraThinMaterial).opacity(level)
-            shape.fill(Color.white.opacity(0.09 * level))
-        }
-        .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 0.5))
     }
 }

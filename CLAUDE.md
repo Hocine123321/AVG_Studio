@@ -8,7 +8,7 @@ AVG Studio for iPhone: a native SwiftUI app that turns a topic into a short-form
 
 It is a port of the desktop app in `Pc Version Reference (Linux)/`. **That folder is read-only reference.** Do not edit it, do not run its tooling, and do not treat its docs as describing this app: its `CLAUDE.md` and `README.md` describe the Python/React/Windows app and were written for the old repo layout. Swift comments throughout this repo cite the Python file and function each piece replaces, and the bug it exists to prevent. Read the comment before changing a file; it usually explains why the obvious approach was rejected.
 
-One process, one target, no server: SwiftUI + a single `@MainActor @Observable` `Store`. Frames are drawn with Core Graphics and encoded by the iPhone's hardware HEVC encoder, replacing the PC's ffmpeg child process. Deployment target is **iOS 26**; the default on-device writer needs Apple Intelligence.
+One process, one target, no server: SwiftUI + a single `@MainActor @Observable` `Store`. Frames are composed on the GPU (Core Image on Metal, with a Core Graphics fallback) and encoded by the iPhone's hardware HEVC encoder, replacing the PC's ffmpeg child process. Deployment target is **iOS 26**; the default on-device writer needs Apple Intelligence.
 
 `README.md` is the map: every file, the PC-to-iOS correspondence table, the recipes. Read it before touching the tree.
 
@@ -16,7 +16,7 @@ One process, one target, no server: SwiftUI + a single `@MainActor @Observable` 
 
 **There is no local toolchain on this machine.** Swift, Xcode and XcodeGen are macOS-only, and the sandbox here is Linux. Do not claim a change "builds" or "passes" unless CI ran it. Say what you checked (reading, grep) and that the compile is unverified.
 
-**CI is the only thing that compiles or tests anything.** There is a small XCTest target, `AVGStudioTests/` (26 tests: settings decoding, `ErrorPolicy`, the pure text and timing helpers in `Pipeline`). It exists to pin the code where a mistake is silent. Nothing covers providers, rendering, the `Store` or views. When you change a pure helper (`Pipeline.splitOnPause`, `parseScenes`, `allocateProportional`, `classify`, an `AppSettings` field), **add or update its test in the same commit**. Do not add tests that need the network, a real key or a device.
+**CI is the only thing that compiles or tests anything.** There is a small XCTest target, `AVGStudioTests/` (42 tests: settings decoding, `ErrorPolicy`, the pure text and timing helpers in `Pipeline`, `VideoRenderer.plan`, the Settings search index). It exists to pin the code where a mistake is silent. Nothing covers providers, rendering, the `Store` or views. When you change a pure helper (`Pipeline.splitOnPause`, `parseScenes`, `allocateProportional`, `classify`, an `AppSettings` field), **add or update its test in the same commit**. Do not add tests that need the network, a real key or a device.
 
 CI (`.github/workflows/ios.yml`) runs on push to `ios-native` when `AVGStudio/**`, `AVGStudioTests/**`, `project.yml` or the workflow itself changes. It runs on `macos-26`, generates the project with XcodeGen, **runs the unit tests on an iPhone simulator**, builds Release with signing off, and uploads `AVGStudio-unsigned.ipa` and the `*.log` files. A failing test stops the IPA from being built. **Read the `error:` / `XCTAssert` lines in the job output (or `test.log` / `build.log`) to diagnose a red run**; the workflow prints them on failure. Sideload the IPA with Sideloadly or AltStore.
 
@@ -35,7 +35,7 @@ Strict layering, enforced by convention. A file may use its own layer and the la
 ```
 AVGStudio/UI/         SwiftUI screens; read and write only through Store
 AVGStudio/Core/       Store, Pipeline, Recovery, models, export, audio
-AVGStudio/Render/     Core Graphics frames + AVAssetWriter HEVC + AVFoundation mux
+AVGStudio/Render/     Core Image (GPU) or Core Graphics (CPU) frames + AVAssetWriter HEVC + AVFoundation mux
 AVGStudio/Providers/  text / image / voice / transcription backends, HTTP, error taxonomy, catalogues
 ```
 
@@ -62,12 +62,12 @@ AVGStudio/Providers/  text / image / voice / transcription backends, HTTP, error
 | Writing settings, channels, the pool manifest | `Store.saveMeta()` to `.avg-meta.json` |
 | Which colours, radii, glass and fonts exist | `UI/Theme.swift`. Take values from there or from the nearest existing control doing the same job |
 | Pause handling | `Pipeline.splitOnPause` / `stripPauseMarkers`. The marker never reaches a TTS engine |
-| Ken Burns, ease, transition and grade maths | `Render/VideoRenderer.swift` (`ease`, `drawScene`, `gradeImage`). The grade values are copied verbatim from the PC's `_GRADE_PRESETS` |
+| Ken Burns, ease, transition and grade maths | `Render/VideoRenderer.swift` (`plan`, `ease`, `gradeImage`). The grade values are copied verbatim from the PC's `_GRADE_PRESETS` |
 | Model lists a picker may offer | `Providers/ModelCatalog.swift`, one class, nine instances, disk-cached |
 
 ### Settings (no schema catalogue, no inheritance)
 
-Settings are two hand-written `Codable` structs in `Core/Models.swift`. `AppSettings` is global; `Channel` is per channel. There is no `SettingSpec`, no `invalidates` and no merge layer. Adding a setting is a field with a default **and a matching line in that struct's tolerant `init(from:)`** (`c.value("key", key)`). Skip the decode line and every existing user's saved value silently resets to the default: this has happened (`608f7e9`, "Fix settings reset on update").
+Settings are two hand-written `Codable` structs in `Core/Models.swift`. `AppSettings` is global; `Channel` is per channel. There is no `SettingSpec`, no `invalidates` and no merge layer. Adding a setting is a field with a default **and a matching line in that struct's tolerant `init(from:)`** (`c.value("key", key)`), then a control on the right page in `SettingsScreens.swift`, a `SettingAnchor` case, and a `SettingsIndex` entry so search finds it (`SettingsIndexTests` fails if you skip that). Skip the decode line and every existing user's saved value silently resets to the default: this has happened (`608f7e9`, "Fix settings reset on update").
 
 Decoding is tolerant on purpose. A missing key takes its default; an unreadable `.avg-meta.json` is copied to `meta.unreadable-<timestamp>.json` rather than overwritten. A schema change must never cost a user their channels or their keys' companion settings.
 
@@ -86,7 +86,7 @@ Logs are one `take.log` per **project** (not per take); each run begins with a `
 Each of these has caused a real defect, or is a documented invariant carried over from a PC defect.
 
 - **API keys live only in the Keychain.** Never in `project.json`, `.avg-meta.json`, `UserDefaults`, a log line, an error message, a `CustomStringConvertible`, or a committed file. `Keychain.require` throws `AVGError.missingKey`; use it rather than reading an empty string. Keys are stored `AfterFirstUnlockThisDeviceOnly`, so they stay out of backups. `Keychain.set` returns whether the write landed and updates in place; never go back to delete-then-add, which destroyed the saved key when the add failed.
-- **The UI learns only *whether* a key exists, never its value.** `SettingsView` keeps a `Set<APIKey>`, and `APIKeySheet` never pre-fills a saved key. To replace a key the user pastes a new one; to remove it they tap Remove. Do not read a key into `@State`.
+- **The UI learns only *whether* a key exists, never its value.** `KeysSettingsPage` keeps a `Set<APIKey>`, and `APIKeySheet` never pre-fills a saved key. To replace a key the user pastes a new one; to remove it they tap Remove. Do not read a key into `@State`.
 - **Send API keys in a header, never in a URL.** Gemini used to get the key twice (`x-goog-api-key` and `?key=`), and the query copy ended up in system logs, `URLError` and proxies. It is header-only now; do not put a key in a query string, a URL, or any log or error text.
 - **`[pause]` becomes real silence, never spoken text.** The narration is split at each marker *before* synthesis, and the marker text never reaches `AVSpeechSynthesizer`, ElevenLabs or Gemini. `dynamicPausesEnabled` may turn deliberate pauses off; the "never spoken" half is not optional. Dead air is trimmed **per segment before the gap is joined**, otherwise the deliberate gap is crunched with the rest.
 - **Never discard audio a provider already charged for.** If a trim removes more than `voiceMaxRemovableSilencePct`, retry once one aggressiveness step lower; do not throw the synthesis away.
@@ -98,7 +98,7 @@ Each of these has caused a real defect, or is a documented invariant carried ove
 - **A render interrupted by the app closing is never silently resumed.** `BackgroundRender` cannot promise completion (`BGProcessingTask` runs later, on iOS's schedule, and might not run). The honest behaviour is `Store.interruptedProjectID` plus a visible "Resume" banner. Do not "improve" this into auto-resume: it would re-fire paid API calls without the user asking.
 - **`BackgroundRender.register()` runs in `App.init()`**, before launch finishes. Moving it into a view or `.task` makes iOS reject the identifier.
 - **A catalogue refresh replaces the cache only on a non-empty success.** A failed or empty fetch keeps the last good list.
-- **`ModelPickerRow` always falls back to an editable text field** when no catalogue exists. A disabled picker on a fresh install leaves the user unable to set a model at all.
+- **`ModelRow` is always editable.** With no catalogue you can type a model id; with one you can still use an id that is not in it, and the current value stays selectable even after it drops out of the list. A disabled picker on a fresh install leaves the user unable to set a model at all.
 - **Do not pass foreign model ids to Pollinations.** `normalizeModel` maps `gpt-image*`, `dall-e*`, `imagen*`, `gemini*`, empty or slashed ids to `flux`.
 - **AssemblyAI is never required.** No key, or a failing one, degrades to estimated caption timing. It must not fail the `captions` phase.
 - **A log that cannot be written must never break a run.** `Store.appendToProjectLog` swallows its own write errors.
@@ -115,6 +115,10 @@ Each of these has caused a real defect, or is a documented invariant carried ove
 - **Saving to Photos reports its outcome.** Use `PhotoSaver.saveVideo(at:)`, which asks for add-only access and throws a readable error. Never go back to fire-and-forget `UISaveVideoAtPathToSavedPhotosAlbum`, which showed "Saved" even when access was denied.
 - **Glass level comes from the environment.** Read `@Environment(\.glassLevel)`; do not reintroduce a `Theme.glassLevel` static mutated during `body`.
 - **Use `Theme.ok` / `Theme.bad` / `Theme.accent` for status colour,** not `.red`, `.green` or `.yellow`.
+- **The GPU and CPU render paths must agree.** `VideoRenderer.plan` decides what every frame contains and both `composeGPU` and `draw(into:)` draw from it. Change a look (motion, transition, caption, filter, card) in **both**, and put the decision in `plan` where `RenderPlanTests` can pin it. Nothing else compares their pixels.
+- **The renderer asks `AppActivity.shared.isActive` before every frame.** iOS refuses GPU work in the background, so a background frame is drawn on the CPU; a `BackgroundRender` job runs entirely on the CPU path. Do not submit Metal work without that check. `-avg.render.forceCPU YES` forces the CPU path for A/B timing.
+- **Every render logs a `Render:` line** (`RenderStats.summary`: frame count, GPU vs CPU, prepare / frames / mux seconds) and each phase logs how long it took. Use those numbers before claiming a speed-up. `Store.progress(…, log: false)` keeps the render percentage out of the Live List.
+- **A new setting needs a `SettingAnchor` and a `SettingsIndex` entry,** or `SettingsIndexTests` fails.
 - **Never hand-edit a generated file, and never commit one.** See Commands.
 - **`Pc Version Reference (Linux)/` is read-only**, and `avg/media/vendor/` inside it is protected byte-for-byte (`-text` in `.gitattributes`). A change that seems to need an edit there is a change to the Swift port instead.
 
