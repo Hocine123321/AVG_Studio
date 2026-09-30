@@ -168,6 +168,26 @@ def _normalize_model(model: str) -> str:
     return model
 
 
+def _pollinations_params(model: str, width: int, height: int, seed: int | None = None) -> dict[str, str]:
+    """The query parameters for one Pollinations request - pure, no I/O.
+
+    Its own function (not inline in `generate`) so the Deep Check can prove
+    a seed really reaches the request Pollinations would receive, without
+    ever calling Pollinations: `avg.core.health`'s deep stage may not touch
+    a network provider, free or not.
+    """
+    params = {
+        "model": _normalize_model(model),
+        "width": str(width),
+        "height": str(height),
+        "safe": "true",
+        "negative_prompt": _DEFAULT_NEGATIVE_PROMPT,
+    }
+    if seed is not None:
+        params["seed"] = str(seed)
+    return params
+
+
 class PollinationsImageProvider:
     name = "pollinations"
 
@@ -188,15 +208,7 @@ class PollinationsImageProvider:
         if key:
             headers["Authorization"] = f"Bearer {key}"
 
-        params = {
-            "model": _normalize_model(model),
-            "width": str(width),
-            "height": str(height),
-            "safe": "true",
-            "negative_prompt": _DEFAULT_NEGATIVE_PROMPT,
-        }
-        if seed is not None:
-            params["seed"] = str(seed)
+        params = _pollinations_params(model, width, height, seed)
         query = "&".join(f"{quote(k)}={quote(v)}" for k, v in params.items())
         url = f"{_POLLINATIONS_BASE_URL}/{quote(prompt, safe='')}?{query}"
 

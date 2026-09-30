@@ -10,6 +10,7 @@ and the refresh flag defeats it.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 
 import pytest
@@ -335,3 +336,59 @@ def test_provider_cooldowns_check_never_raises_even_if_the_file_is_corrupt(tmp_p
     safeguards = next(s for s in result if s.key == "safeguards")
     row = next(c for c in safeguards.checks if c.name == "Provider cooldowns")
     assert row.ok is True
+
+
+def test_provider_health_deep_row_passes():
+    row = health._check_provider_health_round_trip()
+    assert row.ok, row.detail
+
+
+def test_provider_health_deep_row_fails_if_one_credentials_cooldown_blocks_another(monkeypatch):
+    """The regression this row exists for: cooldowns keyed by provider name
+    alone let ElevenLabs' primary-key cooldown block its backup key. Simulate
+    that old behaviour (ignore the fingerprint) and the row must go red."""
+    from avg.config import provider_health
+
+    real = provider_health.active_cooldown
+
+    def ignores_fingerprint(provider, *, key_fingerprint=None, path=None):
+        return real(provider, key_fingerprint=None, path=path)
+
+    monkeypatch.setattr(provider_health, "active_cooldown", ignores_fingerprint)
+    row = health._check_provider_health_round_trip()
+    assert not row.ok
+    assert "different credential" in row.detail
+
+
+def test_provider_health_deep_row_never_touches_the_real_cooldown_file(tmp_path, monkeypatch):
+    from avg.config import provider_health
+
+    real_path = tmp_path / "real_provider_health.json"
+    monkeypatch.setattr(provider_health, "default_provider_health_path", lambda: real_path)
+    health._check_provider_health_round_trip()
+    assert not real_path.exists()
+
+
+def test_seed_request_deep_row_passes():
+    row = health._check_seed_request_params()
+    assert row.ok, row.detail
+
+
+def test_seed_request_deep_row_fails_if_the_seed_is_dropped(monkeypatch):
+    monkeypatch.setattr(
+        "avg.providers.images.community._pollinations_params",
+        lambda model, width, height, seed=None: {"model": model},
+    )
+    assert not health._check_seed_request_params().ok
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs real ffmpeg")
+def test_word_timing_deep_row_passes():
+    row = health._check_word_timing_remap()
+    assert row.ok, row.detail
+
+
+def test_word_timing_deep_row_fails_if_remapping_returns_nothing(monkeypatch):
+    monkeypatch.setattr("avg.pipeline.phases.voice._clean_segment", lambda *a, **k: None)
+    row = health._check_word_timing_remap()
+    assert not row.ok

@@ -39,6 +39,7 @@ import tempfile
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from importlib import metadata
 from pathlib import Path
 
@@ -450,7 +451,11 @@ def _deep_checks(*, output_root: Path | None) -> list[Component]:
         sealed = _protect(b"avg-deep-check")
         opened = _unprotect(sealed) if sealed is not None else None
         ok = opened == b"avg-deep-check"
-        detail = "DPAPI sealed and opened a throwaway value" if ok else "DPAPI did not round-trip"
+        detail = (
+            "the secret store sealed and opened a throwaway value"
+            if ok
+            else "the secret store did not round-trip (is a keyring / Secret Service running and unlocked?)"
+        )
         checks.append(Component(name="Secret round-trip", ok=ok, detail=detail))
     except Exception as exc:  # noqa: BLE001
         checks.append(Component(name="Secret round-trip", ok=False, detail=str(exc)))
@@ -510,7 +515,116 @@ def _deep_checks(*, output_root: Path | None) -> list[Component]:
     except Exception as exc:  # noqa: BLE001
         checks.append(Component(name="FFmpeg encode", ok=False, detail=str(exc)))
 
+    # The three rows below prove what Slice 32 added. Same rule as every row
+    # above: real code, throwaway data, nothing on a network, nothing left
+    # behind.
+    checks.append(_check_provider_health_round_trip())
+    checks.append(_check_seed_request_params())
+    checks.append(_check_word_timing_remap())
+
     return checks
+
+
+def _check_provider_health_round_trip() -> Component:
+    """Cooldowns persist, expire per credential, and clear.
+
+    Runs against a temp file with an explicit `key_fingerprint`, so neither
+    the machine's real cooldown state nor its real keys are read or changed.
+    The second assertion is the one that matters most: a cooldown recorded
+    against one credential must NOT block a different credential of the same
+    provider. ElevenLabs' primary and backup keys share one provider name,
+    and this exact scoping bug once silently disabled the backup key.
+    """
+    name = "Provider health round-trip"
+    try:
+        from avg.config import provider_health  # noqa: PLC0415
+
+        provider = "__avg_deep_check__"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "provider_health.json"
+            until = datetime.now(timezone.utc) + timedelta(hours=1)
+            provider_health.record_cooldown(
+                provider, "quota", cooldown_until=until, key_fingerprint="credential-a", path=path
+            )
+            active_same = provider_health.is_in_cooldown(provider, key_fingerprint="credential-a", path=path)
+            active_other = provider_health.is_in_cooldown(provider, key_fingerprint="credential-b", path=path)
+            provider_health.clear_cooldown(provider, path=path)
+            active_after = provider_health.is_in_cooldown(provider, key_fingerprint="credential-a", path=path)
+        if not active_same:
+            return Component(name=name, ok=False, detail="a recorded cooldown was not reported")
+        if active_other:
+            return Component(name=name, ok=False, detail="one credential's cooldown blocked a different credential")
+        if active_after:
+            return Component(name=name, ok=False, detail="a cleared cooldown was still reported")
+        return Component(name=name, ok=True, detail="recorded, scoped to its credential, and cleared")
+    except Exception as exc:  # noqa: BLE001
+        return Component(name=name, ok=False, detail=str(exc))
+
+
+def _check_seed_request_params() -> Component:
+    """A seed reaches the request Pollinations would send - and only when given.
+
+    Proves the request-building half only (`_pollinations_params` is pure);
+    it never calls Pollinations, since this stage may not touch a network
+    provider, free or not.
+    """
+    name = "Seed request parameters"
+    try:
+        from avg.providers.images.community import _pollinations_params  # noqa: PLC0415
+
+        with_seed = _pollinations_params("flux", 512, 512, 424242)
+        without_seed = _pollinations_params("flux", 512, 512, None)
+        ok = with_seed.get("seed") == "424242" and "seed" not in without_seed
+        detail = "a seed is sent when given and omitted when not" if ok else "the seed did not reach the request"
+        return Component(name=name, ok=ok, detail=detail)
+    except Exception as exc:  # noqa: BLE001
+        return Component(name=name, ok=False, detail=str(exc))
+
+
+def _check_word_timing_remap() -> Component:
+    """Word timings survive dead-air removal.
+
+    A synthetic tone / silence / tone clip with two words, one on each side
+    of the gap, goes through the real `_clean_segment` (real ffmpeg, real
+    silence removal). The word after the gap must move earlier, and keep its
+    length. No provider is involved - the audio is generated in place.
+    """
+    name = "Word-timing remap"
+    try:
+        from pydub import AudioSegment  # noqa: PLC0415
+        from pydub.generators import Sine  # noqa: PLC0415
+
+        from avg.pipeline.phases.voice import _clean_segment  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw.mp3"
+            tone = Sine(440).to_audio_segment(duration=500).apply_gain(-10)
+            (tone + AudioSegment.silent(duration=1000) + tone).export(raw, format="mp3")
+            remapped = _clean_segment(
+                None,  # type: ignore[arg-type]  # never reached: the cap below is 100%
+                segment_index=1,
+                raw_path=raw,
+                clean_path=Path(tmp) / "clean.mp3",
+                aggressiveness="medium",
+                max_removable_pct=100.0,
+                word_timings=[
+                    {"text": "hello", "start": 0.1, "end": 0.4},
+                    {"text": "world", "start": 1.6, "end": 1.9},
+                ],
+                scene_map_path=Path(tmp) / "word_map.json",
+            )
+        if not remapped or len(remapped) != 2:
+            return Component(name=name, ok=False, detail="no remapped timings came back")
+        before, after = remapped
+        if abs(before["start"] - 0.1) > 0.05:
+            return Component(name=name, ok=False, detail="a word before the gap moved")
+        if not after["start"] < 1.6 - 0.5:
+            return Component(name=name, ok=False, detail="a word after the gap did not move earlier")
+        if abs((after["end"] - after["start"]) - 0.3) > 0.05:
+            return Component(name=name, ok=False, detail="a remapped word changed length")
+        return Component(name=name, ok=True, detail="words after removed silence shifted, before did not")
+    except Exception as exc:  # noqa: BLE001
+        return Component(name=name, ok=False, detail=str(exc))
 
 
 def report(
