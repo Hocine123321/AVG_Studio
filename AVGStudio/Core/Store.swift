@@ -414,7 +414,11 @@ final class Store {
                     jobs[id]?.message = "Waiting for internet…"
                     _ = await Connectivity.shared.waitUntilOnline()
                 }
+                let phaseStart = ContinuousClock.now
                 try await Pipeline(store: self, projectID: id, resumeExisting: isRetry).execute(phase)
+                // Where the time goes, per phase, in the Live List - so a
+                // slow video can be diagnosed instead of guessed at.
+                record(id, "\(phase.title) took \(String(format: "%.1f", (ContinuousClock.now - phaseStart).seconds))s.")
                 Recovery.noteSuccess()
                 return
             } catch is CancellationError {
@@ -455,7 +459,11 @@ final class Store {
         recoveryContinuation = nil
     }
 
-    func progress(_ id: String, _ value: Double, _ message: String) {
+    /// `log: false` updates the bar and message without adding a Live List
+    /// line. The renderer reports a new percentage every 15 frames; each used
+    /// to become its own log line (and its own file append) because the text
+    /// changed each time.
+    func progress(_ id: String, _ value: Double, _ message: String, log: Bool = true) {
         guard var j = jobs[id] else { return }
         // Every meaningfully NEW step message also becomes a log line -
         // the bulk of "everything happening" for the Log panel, at zero
@@ -464,7 +472,7 @@ final class Store {
         // actually changing (not just the progress fraction ticking up) so
         // a percentage-only update doesn't spam the log with a line per
         // frame, mirroring TakeLog's own repeat-collapsing intent.
-        if message != j.message { record(id, message) }
+        if log, message != j.message { record(id, message) }
         j.progress = value
         j.message = message
         jobs[id] = j

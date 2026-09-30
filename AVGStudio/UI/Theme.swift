@@ -136,10 +136,14 @@ struct AppBackground: View {
     // during a render. Low Power Mode gets the same still frame Reduce Motion
     // does.
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    // Two full-screen blurred circles redrawn 60x a second fight the video
+    // encoder for the same chip. While any render or pipeline is running the
+    // field holds still.
+    @Environment(Store.self) private var store
 
     var body: some View {
         GeometryReader { proxy in
-            if reduceMotion || lowPower {
+            if reduceMotion || lowPower || !store.jobs.isEmpty {
                 field(t: 0, size: proxy.size)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { tl in

@@ -754,7 +754,16 @@ struct Pipeline {
         var ch = store.channel(for: p)
         if s.kenBurns {
             do {
+                // Director II is an AI call that runs INSIDE the Render phase
+                // (and is skipped when the script hasn't changed). Timed
+                // separately so its network wait isn't mistaken for frame
+                // rendering time.
+                let planStart = ContinuousClock.now
                 try await planDirection()
+                let planSeconds = (ContinuousClock.now - planStart).seconds
+                if planSeconds > 0.25 {
+                    store.record(projectID, "Direction plan took \(String(format: "%.1f", planSeconds))s (AI call, not frame rendering).")
+                }
                 p = try project
                 ch = store.channel(for: p)
             } catch {
@@ -795,9 +804,13 @@ struct Pipeline {
         )
         let id = projectID
         let st = store
-        try await VideoRenderer().render(input) { value in
-            Task { @MainActor in st.progress(id, value, "Rendering \(Int(value * 100))%") }
+        st.progress(id, 0, "Rendering frames…")
+        let stats = try await VideoRenderer().render(input) { value in
+            // log: false - the percentage changes every few frames and must
+            // not write a Live List line (and a disk append) each time.
+            Task { @MainActor in st.progress(id, value, "Rendering \(Int(value * 100))%", log: false) }
         }
+        store.record(projectID, "Render: \(stats.summary)")
         store.update(projectID) {
             $0.output = name
             $0.takes.append(Take(id: takeID, label: "Take \(takeID)", created: Date(), file: name))

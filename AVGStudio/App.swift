@@ -10,6 +10,9 @@ struct AVGStudioApp: App {
         let store = Store()
         _store = State(initialValue: store)
         BackgroundRender.attach(store)
+        // The renderer asks this before every frame to know whether the GPU
+        // may be used (it may not, in the background).
+        AppActivity.shared.start()
         // Must be registered before the app finishes launching; a struct
         // App's `init()` runs at that point, which is the documented place
         // to do this in a SwiftUI-lifecycle app.
