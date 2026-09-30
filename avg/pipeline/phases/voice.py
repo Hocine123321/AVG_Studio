@@ -83,7 +83,7 @@ from avg.pipeline.phases._common import (
     write_json,
 )
 from avg.providers.transport import Transport
-from avg.providers.voice.base import VoiceProvider
+from avg.providers.voice.base import TimedVoiceProvider, VoiceProvider
 from avg.providers.voice.providers import EdgeVoiceProvider, ElevenLabsVoiceProvider
 
 # Case/whitespace-tolerant, matching the legacy Convert-VoicePauseMarker regex
@@ -261,9 +261,9 @@ class VoicePhase:
         )
         raw_audio: list[bytes] = []
         raw_word_timings: list[list[dict[str, Any]] | None] = []
-        supports_timing = hasattr(provider, "synthesize_with_timing")
+        supports_timing = isinstance(provider, TimedVoiceProvider)
         for segment in segments:
-            if supports_timing:
+            if isinstance(provider, TimedVoiceProvider):
                 data, words = provider.synthesize_with_timing(segment, voice_id=voice_id, model=model)
             else:
                 data, words = provider.synthesize(segment, voice_id=voice_id, model=model), None

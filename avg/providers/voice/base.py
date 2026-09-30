@@ -23,7 +23,7 @@ what the parameter does. What every provider *does* share is `name`,
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
@@ -56,6 +56,30 @@ class VoiceProvider(Protocol):
         may also be present). Never a hardcoded list - always fetched from
         the provider's own live/local catalogue.
         """
+        ...
+
+
+@runtime_checkable
+class TimedVoiceProvider(VoiceProvider, Protocol):
+    """A `VoiceProvider` that can also report per-word timing.
+
+    Separate from `VoiceProvider` on purpose: timing is optional, and a
+    provider without it (or a test fake) must still satisfy the base
+    protocol. `avg.pipeline.phases.voice` narrows with
+    `isinstance(provider, TimedVoiceProvider)` - a structural, runtime
+    check for the method's presence, which mypy can also follow, unlike the
+    bare `hasattr` this replaced.
+
+    The word list is `None` (never an exception) when the audio was
+    produced but its timing was unusable - the caller already has real
+    audio by then and must not lose it over a timing detail.
+    """
+
+    def synthesize_with_timing(
+        self, text: str, *, voice_id: str, model: str
+    ) -> tuple[bytes, list[dict[str, Any]] | None]:
+        """Audio bytes plus `[{"text", "start", "end"}, ...]` in seconds, or
+        `None` for the words."""
         ...
 
 

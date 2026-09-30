@@ -258,7 +258,7 @@ def active_cooldown(
 
     return ProviderCooldown(
         provider=provider,
-        status=status,  # type: ignore[arg-type]
+        status=status,
         since=since,
         cooldown_until=cooldown_until,
         note=str(entry.get("note", "")),
