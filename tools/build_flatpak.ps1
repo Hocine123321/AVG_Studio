@@ -27,6 +27,11 @@
         pwsh tools/build_flatpak.ps1 -BuildPackage       skip the menu
         Either of the above also takes -SkipWebBuild, to reuse an
         already-built web/dist instead of rebuilding it.
+
+        -BuildPackage runs tools/verify_release.py first and stops if it
+        fails, so a broken tree never becomes a bundle. -SkipVerification
+        bypasses that: for iterating on packaging itself, never for a
+        release you publish.
 #>
 [CmdletBinding()]
 param(
@@ -39,7 +44,11 @@ param(
     # Reuse an existing web/dist instead of running npm install/build -
     # for the fast dev loop, once the frontend has already been built and
     # nothing under web/ has changed since.
-    [switch]$SkipWebBuild
+    [switch]$SkipWebBuild,
+
+    # Package without running the release gate (tools/verify_release.py).
+    # Prints a warning. Never for a build you intend to publish.
+    [switch]$SkipVerification
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,6 +76,10 @@ $BundlePath = Join-Path $DistDir 'AVGStudio.flatpak'
 # never media/gui extras) never fights with whatever else those other
 # two venvs are used for.
 $DevVenv = Join-Path $Repo '.venv-linux'
+# The release gate's own venv - '.[dev,media]', which the dev venv above
+# deliberately never is (see Install-DevVenv). Separate on purpose: putting
+# media in the dev venv would stop it catching the bug class it exists for.
+$VerifyVenv = Join-Path $Repo '.venv-verify'
 $DevPort = 8756
 $DevToken = 'devtoken'
 
@@ -215,8 +228,33 @@ function Test-FlatpakPrerequisites {
     Note "org.freedesktop.Platform/Sdk//$RuntimeVersion installed"
 }
 
+function Invoke-Verification {
+    if ($SkipVerification) {
+        Write-Warning '-SkipVerification: building WITHOUT the release gate. Do not publish this.'
+        return
+    }
+    Step 'Verifying the tree (tools/verify_release.py)'
+    if (-not (Test-CommandExists 'python3')) {
+        throw "python3 is not installed."
+    }
+    if (-not (Test-Path $VerifyVenv)) {
+        Note "creating $VerifyVenv"
+        Invoke-External 'python3 -m venv' { python3 -m venv $VerifyVenv }
+        Invoke-External 'pip upgrade' { & "$VerifyVenv/bin/pip" install -q --upgrade pip }
+    }
+    # The tests and the Deep Check need the media extra (numpy/Pillow/pydub -
+    # Voice has no path without it). Fast once already satisfied.
+    Note "pip install -e '.[dev,media]' (fast once already satisfied)"
+    Invoke-External "pip install -e '.[dev,media]'" { & "$VerifyVenv/bin/pip" install -q -e '.[dev,media]' }
+    & "$VerifyVenv/bin/python" (Join-Path $Repo 'tools/verify_release.py')
+    if ($LASTEXITCODE -ne 0) {
+        throw "verification failed - not building. Fix the failure above, or pass -SkipVerification to package anyway."
+    }
+}
+
 function Build-FlatpakPackage {
     Test-FlatpakPrerequisites
+    Invoke-Verification
     Build-Web
 
     Step 'Building (clean build - installs locally and exports a bundle)'

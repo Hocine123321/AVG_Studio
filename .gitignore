@@ -22,6 +22,7 @@ build/
 
 installer/AVG-Setup.exe
 .venv-linux/
+.venv-verify/
 web/node_modules/
 web/dist/
 
