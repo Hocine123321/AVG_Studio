@@ -222,6 +222,12 @@ struct Project: Codable, Hashable, Identifiable {
     /// changed since, rendering again (a new take) reuses the existing
     /// plan instead of spending another AI call on an unchanged script.
     var directionSignature: String = ""
+    /// Per-step progress inside each phase (see Steps.swift), keyed
+    /// "<phase>.<step>". OPTIONAL on purpose: `Project` uses the compiler's
+    /// own Codable, which fails on a missing non-optional key, so a plain
+    /// `[String: StepRecord] = [:]` would make every project saved before
+    /// this field existed unreadable.
+    var stepRecords: [String: StepRecord]?
 
     func phase(_ p: PhaseID) -> PhaseRecord { phases[p.rawValue] ?? PhaseRecord() }
 
@@ -604,6 +610,10 @@ struct AppSettings: Codable {
     var pauseMs: Double = 700 // matches the PC's _DEFAULT_PAUSE_MS
     var filterStyle: FilterStyle = .none
     var filterIntensity: Double = 50
+    /// How many videos may run their pipeline at once; extra ones queue and
+    /// start as slots free (the PC's `max_parallel_jobs`, default 2). Renders
+    /// take turns regardless - see RenderLease.
+    var maxParallelJobs = 2
 
     /// Tolerant decode: a key missing from an older save (i.e. any field
     /// added in an update) keeps its default instead of failing the whole
@@ -648,6 +658,7 @@ struct AppSettings: Codable {
         pauseMs = c.value("pauseMs", pauseMs)
         filterStyle = c.value("filterStyle", filterStyle)
         filterIntensity = c.value("filterIntensity", filterIntensity)
+        maxParallelJobs = c.value("maxParallelJobs", maxParallelJobs)
         appFont = c.value("appFont", appFont)
     }
 }

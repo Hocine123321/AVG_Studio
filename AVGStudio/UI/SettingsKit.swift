@@ -55,7 +55,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case imageProvider, imageModel, imageStyle, reusableImages
     case voiceProvider, voicePick, voiceModel
     case captionsToggle, captionAnimation, captionWords, captionPosition, captionSize
-    case quality, fps, kenBurns, motion, filterStyle, filterIntensity
+    case quality, fps, kenBurns, motion, filterStyle, filterIntensity, parallelJobs
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
     case theme, font, glass
@@ -107,6 +107,7 @@ enum SettingsIndex {
         e("Frame rate", .video, .fps, "fps 24 30 60 smooth"),
         e("Ken Burns motion", .video, .kenBurns, "zoom pan movement camera"),
         e("Motion amount", .video, .motion, "ken burns intensity strength"),
+        e("Videos at once", .video, .parallelJobs, "queue parallel jobs simultaneous concurrent render at the same time"),
         e("Film filter", .video, .filterStyle, "filter grain light leak look"),
         e("Filter intensity", .video, .filterIntensity, "filter strength amount grain leak"),
         e("API keys", .keys, .apiKeys, "keychain gemini groq openai elevenlabs assemblyai stable horde pollinations"),

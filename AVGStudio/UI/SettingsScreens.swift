@@ -203,6 +203,13 @@ struct VideoSettingsPage: View {
                     .anchored(.fps)
             }
 
+            SettingsGroup(title: "Queue",
+                          footer: "Extra videos wait in line and start as a slot frees. Renders always take turns, whatever this is set to.") {
+                SegmentRow(title: "Videos at once", options: [1, 2, 3], label: { "\($0)" },
+                           selection: $store.settings.maxParallelJobs)
+                    .anchored(.parallelJobs)
+            }
+
             SettingsGroup(title: "Camera motion") {
                 ToggleRow(title: "Ken Burns motion", subtitle: "Slow zoom and pan on each picture", isOn: $store.settings.kenBurns)
                     .anchored(.kenBurns)

@@ -21,6 +21,9 @@ struct StudioView: View {
     // phase - and its provider call - off a single accidental tap) with a
     // lighter confirmationDialog instead of a full second sheet type.
     @State private var confirmRedoPhase: PhaseID?
+    /// Which phase rows are expanded to show their steps. The running phase
+    /// opens by itself (see `phasesCard`); everything else is the user's call.
+    @State private var expandedPhases: Set<PhaseID> = []
 
     var body: some View {
         // Studio is a persistent tab now (Skin v2), not a pushed screen -
@@ -141,6 +144,13 @@ struct StudioView: View {
                             ProgressView(value: job.progress).tint(Theme.accent).frame(width: 180)
                             Text(job.message).font(.footnote).foregroundStyle(.white)
                         }
+                    } else if let place = store.queuePosition(p.id) {
+                        VStack(spacing: 6) {
+                            Image(systemName: "clock").font(.title2).foregroundStyle(.white.opacity(0.85))
+                            Text(place == 1 ? "Next in the queue" : "Queued, \(place - 1) ahead")
+                                .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                            Text("Starts when a slot frees").font(.caption).foregroundStyle(.white.opacity(0.7))
+                        }
                     } else {
                         Image(systemName: "play.slash").font(.largeTitle).foregroundStyle(.white.opacity(0.7))
                     }
@@ -151,8 +161,8 @@ struct StudioView: View {
             .clipShape(.rect(cornerRadius: 26))
 
             HStack(spacing: 12) {
-                if store.isRunning(p.id) {
-                    Button("Cancel", systemImage: "stop.fill", role: .destructive) {
+                if store.isBusy(p.id) {
+                    Button(store.isQueued(p.id) ? "Leave queue" : "Cancel", systemImage: "stop.fill", role: .destructive) {
                         Haptics.light()
                         store.cancel(p.id)
                     }
@@ -195,16 +205,21 @@ struct StudioView: View {
     /// The mock's `.ph.g` rows: each phase is its OWN floating glass card
     /// (not one shared card with hairline dividers), an icon circle that
     /// fills solid + pulses while running, and a trailing Done/percent
-    /// readout. Kept at the real app's 5 stored `PhaseID`s, not the
-    /// mock's 8 (Brief/Script/Director I/Director II live only as
-    /// progress-message text inside `.writing` - see SKIN_V2_PLAN.md's
-    /// "known mismatches").
+    /// readout. Kept at the real app's 5 stored `PhaseID`s; the PC's eight
+    /// (Brief, Script, Director I/II...) show up as each phase's expandable
+    /// STEPS instead - tap a row to see them (see Steps.swift).
     @ViewBuilder private func phasesCard(_ p: Project) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Pipeline").sectionHeader().padding(.leading, 6)
             ForEach(PhaseID.allCases) { ph in
                 phaseRow(p, ph)
             }
+        }
+        // The phase that is running opens by itself, so what it is doing is
+        // visible without a tap; collapsing it afterwards is the user's call.
+        .onAppear { if let running = store.jobs[p.id]?.phase { expandedPhases.insert(running) } }
+        .onChange(of: store.jobs[p.id]?.phase) { _, running in
+            if let running { withAnimation(.snappy) { _ = expandedPhases.insert(running) } }
         }
         .confirmationDialog(
             "Redo from \(confirmRedoPhase?.title ?? "")?",
@@ -223,6 +238,32 @@ struct StudioView: View {
 
     @ViewBuilder private func phaseRow(_ p: Project, _ ph: PhaseID) -> some View {
         let r = p.phase(ph)
+        let open = expandedPhases.contains(ph)
+        VStack(spacing: 0) {
+            Button {
+                Haptics.light()
+                withAnimation(.snappy) {
+                    if open { expandedPhases.remove(ph) } else { expandedPhases.insert(ph) }
+                }
+            } label: {
+                phaseHeader(p, ph, r, open: open)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(open ? "Hides this phase's steps" : "Shows this phase's steps")
+
+            if open { stepsList(p, ph, r) }
+        }
+        .glass(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        // Redo used to be the row's only tap. The tap now expands the row, so
+        // redo moved to a button inside it - and stays one long-press away.
+        .contextMenu {
+            if r.status != .running, !store.isBusy(p.id) {
+                Button("Redo from \(ph.title)", systemImage: "arrow.counterclockwise") { confirmRedoPhase = ph }
+            }
+        }
+    }
+
+    private func phaseHeader(_ p: Project, _ ph: PhaseID, _ r: PhaseRecord, open: Bool) -> some View {
         HStack(spacing: 12) {
             PhaseIcon(status: r.status)
             VStack(alignment: .leading, spacing: 2) {
@@ -254,20 +295,73 @@ struct StudioView: View {
             }
             Spacer(minLength: 8)
             trailingText(r.status, p, ph)
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Theme.ink2)
+                .rotationEffect(.degrees(open ? 180 : 0))
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .contentShape(.rect)
-        .glass(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onTapGesture {
-            guard r.status != .running, !store.isRunning(p.id) else { return }
-            Haptics.light()
-            confirmRedoPhase = ph
+    }
+
+    /// The expanded part of a phase row: one line per step with its state,
+    /// a one-line result, and how long it took - then the redo button.
+    @ViewBuilder private func stepsList(_ p: Project, _ ph: PhaseID, _ r: PhaseRecord) -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+            ForEach(ph.steps) { def in
+                stepRow(p, ph, def, phaseRunning: r.status == .running)
+            }
+            if r.status != .running, !store.isBusy(p.id) {
+                Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+                Button {
+                    Haptics.light()
+                    confirmRedoPhase = ph
+                } label: {
+                    Label("Redo from \(ph.title)", systemImage: "arrow.counterclockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        // A bare tap gesture is invisible to VoiceOver; announce it as the
-        // button it is.
+        .transition(.opacity)
+    }
+
+    private func stepRow(_ p: Project, _ ph: PhaseID, _ def: StepDef, phaseRunning: Bool) -> some View {
+        let rec = p.step(ph, def.key)
+        let status = p.displayStatus(ph, def.key)
+        let live = (status == .running && phaseRunning) ? store.jobs[p.id]?.message : nil
+        return HStack(alignment: .top, spacing: 12) {
+            StepIcon(status: status)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(def.title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(status == .skipped || status == .pending ? Theme.ink2 : Theme.ink)
+                if let live {
+                    Text(live).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
+                } else if status == .failed, let e = p.phase(ph).error {
+                    Text(e).font(.caption).foregroundStyle(Theme.bad).lineLimit(3)
+                } else if let detail = rec.detail, !detail.isEmpty {
+                    Text(detail).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            if status == .done, let t = rec.elapsed {
+                Text(Self.formatSeconds(t)).font(.caption.monospacedDigit()).foregroundStyle(Theme.ink2)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(r.status == .running ? "" : "Redo from this step")
+    }
+
+    private static func formatSeconds(_ t: Double) -> String {
+        if t < 1 { return "<1s" }
+        if t < 60 { return String(format: "%.0fs", t) }
+        return String(format: "%dm %02ds", Int(t) / 60, Int(t) % 60)
     }
 
     /// Real per-phase provider info in place of the mock's static table
@@ -459,6 +553,58 @@ private struct LogLoopKey: Hashable {
     let id: String
     let running: Bool
 }
+
+/// Small status mark for one step row: filled check when done, a pulsing dot
+/// while running, a red mark on failure, a dash when skipped, a hollow ring
+/// when waiting.
+private struct StepIcon: View {
+    let status: StepStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            switch status {
+            case .done:
+                Circle().fill(Theme.ok)
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.onOk)
+            case .running:
+                Circle().fill(Theme.accent)
+                if !reduceMotion {
+                    Circle().strokeBorder(Theme.accent.opacity(0.6), lineWidth: 1.5)
+                        .scaleEffect(pulse ? 1.8 : 1)
+                        .opacity(pulse ? 0 : 1)
+                }
+            case .failed:
+                Circle().fill(Theme.bad)
+                Image(systemName: "exclamationmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+            case .skipped:
+                Circle().strokeBorder(Theme.glassEdge, lineWidth: 0.5)
+                Image(systemName: "minus").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.ink2)
+            case .pending:
+                Circle().strokeBorder(Theme.glassEdge, lineWidth: 0.5)
+            }
+        }
+        .frame(width: 20, height: 20)
+        .padding(.leading, 7) // lines the mark up under the phase icon's centre
+        .onAppear {
+            guard status == .running, !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) { pulse = true }
+        }
+        .accessibilityLabel(label)
+    }
+
+    private var label: String {
+        switch status {
+        case .done: return "Done"
+        case .running: return "Running"
+        case .failed: return "Failed"
+        case .skipped: return "Skipped"
+        case .pending: return "Waiting"
+        }
+    }
+}
+
 
 /// The mock's `.pi`: a flat icon circle that fills solid + pulses while
 /// `.running` (`@keyframes pulse` - an outward ring, respected for Reduce

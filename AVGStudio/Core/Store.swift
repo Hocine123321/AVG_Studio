@@ -52,6 +52,11 @@ final class Store {
     var settings = AppSettings() { didSet { scheduleMetaSave() } }
     var reusableImages: [ReusableImage] = [] { didSet { scheduleMetaSave() } }
     var jobs: [String: JobState] = [:]
+    /// Projects waiting for a free slot, in the order they were started.
+    var queuedIDs: [String] = []
+    @ObservationIgnored private var pendingStarts: [String: PhaseID] = [:]
+    /// Serialises the render phase across all running videos (RenderLease.swift).
+    @ObservationIgnored let renderLease = RenderLease()
     var log: [LogEntry] = []
     var tab: AppTab = .library
     /// The failure prompt currently waiting on the user (nil = none), and
@@ -197,6 +202,54 @@ final class Store {
         }
     }
 
+    // MARK: Steps (see Steps.swift)
+
+    /// Records one step's state. Repeating "running" for a step that is
+    /// already running is ignored, so progress callbacks can call it freely.
+    func setStep(_ id: String, _ phase: PhaseID, _ key: String, _ status: StepStatus, detail: String? = nil, seconds: Double? = nil) {
+        guard let current = project(id), !(status == .running && current.step(phase, key).status == .running) else { return }
+        update(id) { p in
+            var all = p.stepRecords ?? [:]
+            let k = p.stepKey(phase, key)
+            var r = all[k] ?? StepRecord()
+            switch status {
+            case .running:
+                r = StepRecord(status: .running, started: Date())
+            case .done, .failed, .skipped:
+                let now = Date()
+                r.finished = now
+                if r.started == nil { r.started = now }
+            case .pending:
+                r = StepRecord()
+            }
+            r.status = status
+            if let detail { r.detail = detail }
+            if let seconds { r.seconds = seconds }
+            all[k] = r
+            p.stepRecords = all
+        }
+    }
+
+    /// Forgets every step of `phase` and the phases after it - called when a
+    /// run restarts from there, so stale "done" ticks never outlive a redo.
+    func clearSteps(_ id: String, from phase: PhaseID) {
+        update(id) { p in
+            guard var all = p.stepRecords else { return }
+            let stale = Set(PhaseID.allCases.filter { $0.order >= phase.order }.map { $0.rawValue + "." })
+            all = all.filter { entry in !stale.contains { entry.key.hasPrefix($0) } }
+            p.stepRecords = all.isEmpty ? nil : all
+        }
+    }
+
+    /// When a phase ends abnormally, whichever step was mid-flight ends the
+    /// same way: failed after an error, back to pending after a cancel.
+    func settleRunningSteps(_ id: String, _ phase: PhaseID, as status: StepStatus) {
+        guard let p = project(id) else { return }
+        for def in phase.steps where p.step(phase, def.key).status == .running {
+            setStep(id, phase, def.key, status)
+        }
+    }
+
     // MARK: Channels
 
     var activeChannel: Channel { channels.first { $0.id == activeChannelID } ?? channels.first ?? Channel(name: "Default") }
@@ -328,11 +381,33 @@ final class Store {
     // MARK: Jobs
 
     func isRunning(_ id: String) -> Bool { tasks[id] != nil }
+    func isQueued(_ id: String) -> Bool { queuedIDs.contains(id) }
+    /// 1-based place in the queue (1 = next to start), or nil when not queued.
+    func queuePosition(_ id: String) -> Int? { queuedIDs.firstIndex(of: id).map { $0 + 1 } }
+    /// Running OR waiting for a slot - what "is something already happening to
+    /// this project" means for disabling its Render / Redo buttons.
+    func isBusy(_ id: String) -> Bool { isRunning(id) || isQueued(id) }
     var runningProjectID: String? { tasks.keys.first }
 
+    /// Starts a run, or QUEUES it when `maxParallelJobs` are already going.
+    /// Queued, never refused (the PC's rule): with a cap of 1 this means one
+    /// video at a time in the order asked for. Starting a project that is
+    /// already running or queued is ignored - two runners on one
+    /// `project.json` is the bug that guard exists for.
     func start(_ id: String, from phase: PhaseID = .writing) {
-        guard tasks[id] == nil else { return }
+        guard !isBusy(id) else { return }
         if interruptedProjectID == id { interruptedProjectID = nil }
+        let cap = max(1, settings.maxParallelJobs)
+        if tasks.count >= cap {
+            queuedIDs.append(id)
+            pendingStarts[id] = phase
+            record(id, "Queued: \(tasks.count) video\(tasks.count == 1 ? " is" : "s are") already running. Starts when a slot frees.")
+            return
+        }
+        launch(id, from: phase)
+    }
+
+    private func launch(_ id: String, from phase: PhaseID) {
         tasks[id] = Task { [weak self] in
             // Binds this render's project id as the `@TaskLocal` HTTP.swift
             // reads on a retry/give-up. Bound around just the `run()` call
@@ -347,10 +422,28 @@ final class Store {
             }
             self?.tasks[id] = nil
             self?.jobs[id] = nil
+            self?.startNextQueued()
+        }
+    }
+
+    /// Fills any free slots from the front of the queue.
+    private func startNextQueued() {
+        let cap = max(1, settings.maxParallelJobs)
+        while tasks.count < cap, !queuedIDs.isEmpty {
+            let next = queuedIDs.removeFirst()
+            let phase = pendingStarts.removeValue(forKey: next) ?? .writing
+            launch(next, from: phase)
         }
     }
 
     func cancel(_ id: String) {
+        // Still waiting for a slot: just leave the queue.
+        if let i = queuedIDs.firstIndex(of: id) {
+            queuedIDs.remove(at: i)
+            pendingStarts[id] = nil
+            record(id, "Removed from the queue.")
+            return
+        }
         tasks[id]?.cancel()
         if recoveryPlan?.projectID == id { resolveRecovery(.stop) }
     }
@@ -371,6 +464,7 @@ final class Store {
         for phase in PhaseID.allCases where phase.order >= start.order {
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
         }
+        clearSteps(id, from: start)
         for phase in PhaseID.allCases where phase.order >= start.order {
             if Task.isCancelled { break }
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .running, started: Date()) }
@@ -384,11 +478,13 @@ final class Store {
                 }
                 record(id, "\(phase.title) done.")
             } catch is CancellationError {
+                settleRunningSteps(id, phase, as: .pending)
                 update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
                 record(id, "Render cancelled: \(project(id)?.title ?? id)")
                 break
             } catch {
                 let msg = error.localizedDescription
+                settleRunningSteps(id, phase, as: .failed)
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .failed
                     $0.phases[phase.rawValue]?.error = msg
