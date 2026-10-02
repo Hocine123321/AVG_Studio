@@ -598,3 +598,27 @@ def test_edge_synthesize_with_timing_returns_none_words_when_stream_has_none(mon
 
     assert audio == FAKE_AUDIO
     assert words is None
+
+
+def test_elevenlabs_with_both_keys_exhausted_stops_calling_the_network(tmp_path, monkeypatch):
+    """Regression: with one cooldown entry per provider, the two keys overwrote
+    each other's and every synthesis still made two doomed network calls."""
+    from avg.config import provider_health
+
+    monkeypatch.setattr(
+        provider_health, "default_provider_health_path", lambda: tmp_path / "provider_health.json"
+    )
+    _patch_keys(monkeypatch, primary=PRIMARY_KEY, backup=BACKUP_KEY)
+    seen_keys: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_keys.append(request.headers["xi-api-key"])
+        return httpx.Response(429, json={"detail": {"status": "quota_exceeded", "message": "quota"}})
+
+    provider = ElevenLabsVoiceProvider(transport=_mock_record_transport(tmp_path, handler))
+    for _ in range(3):
+        with pytest.raises(AvgError) as excinfo:
+            provider.synthesize("hi", voice_id=VOICE_ID, model=MODEL)
+        assert excinfo.value.kind == ErrorKind.quota
+
+    assert seen_keys == [PRIMARY_KEY, BACKUP_KEY]  # first call tried both; calls 2 and 3 never reached the network

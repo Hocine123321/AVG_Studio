@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -188,3 +189,54 @@ def test_key_fingerprint_omitted_preserves_original_behavior(path: Path, monkeyp
     assert ph.is_in_cooldown("elevenlabs", path=path) is True
     monkeypatch.setattr(ph, "get_key", lambda provider: "new-key")
     assert ph.is_in_cooldown("elevenlabs", path=path) is False
+
+
+def test_two_credentials_of_one_provider_keep_separate_cooldowns(path: Path):
+    """Regression: one entry per provider let each key overwrite the other's."""
+    until = datetime.now(timezone.utc) + timedelta(hours=1)
+    ph.record_cooldown("elevenlabs", "quota", cooldown_until=until, key_fingerprint="a", path=path)
+    ph.record_cooldown("elevenlabs", "quota", cooldown_until=until, key_fingerprint="b", path=path)
+    assert ph.is_in_cooldown("elevenlabs", key_fingerprint="a", path=path)
+    assert ph.is_in_cooldown("elevenlabs", key_fingerprint="b", path=path)
+    assert not ph.is_in_cooldown("elevenlabs", key_fingerprint="c", path=path)
+
+
+def test_re_recording_the_same_credential_replaces_its_own_entry(path: Path):
+    soon = datetime.now(timezone.utc) + timedelta(minutes=1)
+    later = datetime.now(timezone.utc) + timedelta(hours=5)
+    ph.record_cooldown("groq", "quota", cooldown_until=soon, key_fingerprint="a", path=path)
+    ph.record_cooldown("groq", "quota", cooldown_until=later, key_fingerprint="a", path=path)
+    assert ph.active_cooldown("groq", key_fingerprint="a", path=path).cooldown_until == later
+
+
+def test_clear_removes_every_credentials_entry(path: Path):
+    until = datetime.now(timezone.utc) + timedelta(hours=1)
+    ph.record_cooldown("elevenlabs", "quota", cooldown_until=until, key_fingerprint="a", path=path)
+    ph.record_cooldown("elevenlabs", "quota", cooldown_until=until, key_fingerprint="b", path=path)
+    ph.record_cooldown("groq", "quota", cooldown_until=until, key_fingerprint="g", path=path)
+    ph.clear_cooldown("elevenlabs", path=path)
+    assert not ph.is_in_cooldown("elevenlabs", key_fingerprint="a", path=path)
+    assert not ph.is_in_cooldown("elevenlabs", key_fingerprint="b", path=path)
+    assert ph.is_in_cooldown("groq", key_fingerprint="g", path=path)  # another provider untouched
+
+
+def test_summary_lookup_without_a_fingerprint_sees_any_credentials_cooldown(path: Path):
+    until = datetime.now(timezone.utc) + timedelta(hours=1)
+    ph.record_cooldown("elevenlabs", "quota", cooldown_until=until, key_fingerprint="b", path=path)
+    assert ph.active_cooldown("elevenlabs", path=path) is not None  # what the health row and fallback message use
+
+
+def test_a_legacy_bare_name_entry_is_still_honoured(path: Path):
+    """Files written before cooldowns were per-credential keyed by provider name alone."""
+    until = datetime.now(timezone.utc) + timedelta(hours=1)
+    path.write_text(
+        json.dumps({"version": 1, "providers": {"groq": {
+            "status": "quota", "since": datetime.now(timezone.utc).isoformat(),
+            "cooldown_until": until.isoformat(), "note": "", "key_fingerprint": "old",
+        }}}),
+        encoding="utf-8",
+    )
+    assert ph.is_in_cooldown("groq", key_fingerprint="old", path=path)
+    assert not ph.is_in_cooldown("groq", key_fingerprint="other", path=path)
+    ph.clear_cooldown("groq", path=path)
+    assert not ph.is_in_cooldown("groq", key_fingerprint="old", path=path)

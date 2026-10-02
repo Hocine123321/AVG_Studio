@@ -548,12 +548,22 @@ def _check_provider_health_round_trip() -> Component:
             )
             active_same = provider_health.is_in_cooldown(provider, key_fingerprint="credential-a", path=path)
             active_other = provider_health.is_in_cooldown(provider, key_fingerprint="credential-b", path=path)
+            # The second failure: a provider's other key failing too must not
+            # erase the first's cooldown (it once did, so neither ever blocked).
+            provider_health.record_cooldown(
+                provider, "quota", cooldown_until=until, key_fingerprint="credential-b", path=path
+            )
+            both_kept = provider_health.is_in_cooldown(
+                provider, key_fingerprint="credential-a", path=path
+            ) and provider_health.is_in_cooldown(provider, key_fingerprint="credential-b", path=path)
             provider_health.clear_cooldown(provider, path=path)
             active_after = provider_health.is_in_cooldown(provider, key_fingerprint="credential-a", path=path)
         if not active_same:
             return Component(name=name, ok=False, detail="a recorded cooldown was not reported")
         if active_other:
             return Component(name=name, ok=False, detail="one credential's cooldown blocked a different credential")
+        if not both_kept:
+            return Component(name=name, ok=False, detail="a second credential's cooldown erased the first's")
         if active_after:
             return Component(name=name, ok=False, detail="a cleared cooldown was still reported")
         return Component(name=name, ok=True, detail="recorded, scoped to its credential, and cleared")

@@ -171,6 +171,30 @@ def _save(providers: dict[str, dict[str, object]], path: Path | None) -> None:
         raise
 
 
+def _entries_for(providers: dict[str, dict[str, object]], provider: str) -> list[dict[str, object]]:
+    """Every stored entry for `provider`, one per credential that has failed.
+
+    Entries are stored under `"<provider>:<fingerprint>"` with the provider
+    repeated inside the entry; a legacy entry (a bare provider-name key from
+    before cooldowns were per-credential) has no such field and is matched by
+    its key instead, so an existing file keeps working.
+    """
+    wanted = _provider_key(provider)
+    found: list[dict[str, object]] = []
+    for storage_key, entry in providers.items():
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("provider", storage_key.split(":", 1)[0])) == wanted:
+            found.append(entry)
+    return found
+
+
+def _configured_fingerprints(provider: str) -> set[str]:
+    """Fingerprints of the keys currently configured for `provider` - its
+    own, and the `<provider>_backup` slot `avg.config.secrets` also knows."""
+    return {_fingerprint(get_key(provider)), _fingerprint(get_key(f"{provider}_backup"))}
+
+
 def record_cooldown(
     provider: str,
     status: CooldownStatus,
@@ -180,27 +204,32 @@ def record_cooldown(
     key_fingerprint: str | None = None,
     path: Path | None = None,
 ) -> None:
-    """Persist a cooldown for `provider`. Overwrites any existing entry for
-    the same provider (case-insensitive).
+    """Persist a cooldown for one credential of `provider`.
 
-    `key_fingerprint`, when given (`Transport` passes
-    `fingerprint_headers(headers)`), records exactly which credential
-    failed, so `active_cooldown`'s own `key_fingerprint` check can tell a
-    provider's backup key apart from its primary. When omitted, falls back
-    to fingerprinting `avg.config.secrets.get_key(provider)` - this
-    module's original, still-correct behaviour for any provider with only
-    one key.
+    One entry per (provider, credential), never one per provider: a provider
+    with a primary and a backup key (ElevenLabs) can have BOTH exhausted, and
+    a single per-provider entry let each key's failure overwrite the other's,
+    so neither ever blocked a call. Re-recording the same credential replaces
+    its own entry.
+
+    `key_fingerprint` (`Transport` passes `fingerprint_headers(headers)`)
+    names which credential failed. When omitted it falls back to fingerprinting
+    `avg.config.secrets.get_key(provider)` - correct for any single-key
+    provider.
     """
-    key = _provider_key(provider)
+    name = _provider_key(provider)
+    fingerprint = key_fingerprint if key_fingerprint is not None else _fingerprint(get_key(provider))
     with _LOCK:
         providers = _load(path)
-        providers[key] = {
+        providers[f"{name}:{fingerprint}"] = {
+            "provider": name,
             "status": status,
             "since": datetime.now(timezone.utc).isoformat(),
             "cooldown_until": cooldown_until.isoformat() if cooldown_until else None,
             "note": note,
-            "key_fingerprint": key_fingerprint if key_fingerprint is not None else _fingerprint(get_key(provider)),
+            "key_fingerprint": fingerprint,
         }
+        providers.pop(name, None)  # a legacy bare-name entry is superseded
         _save(providers, path)
 
 
@@ -209,60 +238,56 @@ def active_cooldown(
 ) -> ProviderCooldown | None:
     """The active cooldown for `provider`, or `None` if there isn't one.
 
+    `key_fingerprint` given (`Transport`'s pre-flight check passes the
+    credential its request is about to use): only that credential's own entry
+    counts, so one key's cooldown never blocks another's. Omitted (summary
+    callers - the health row, the Visuals fallback message - which have no
+    request in hand): the most recent active entry across all of the
+    provider's credentials.
+
     A `quota` entry expires on its own once `cooldown_until` passes. A
-    `billing` entry clears when the provider's currently configured key no
-    longer matches the fingerprint stored at write time (including "the
-    key was removed entirely").
-
-    `key_fingerprint`, when given, is compared against the stored entry's
-    fingerprint FIRST, for either status: a mismatch means the credential
-    behind this specific call has not been tried yet, so there is no
-    cooldown to apply to it, however the provider-as-a-whole looks - this
-    is what lets `Transport`'s pre-flight check tell ElevenLabs' primary
-    key's cooldown apart from its backup's. Omitted (the default, used by
-    every caller that predates this parameter), this function behaves
-    exactly as it always has.
+    `billing` entry has no timer: with a `key_fingerprint` it stays active
+    while that credential is the one in use; without one, it counts only
+    while the credential it was recorded against is still configured (so
+    replacing the key clears it, including "the key was removed").
     """
-    key = _provider_key(provider)
     with _LOCK:
-        entry = _load(path).get(key)
-    if not isinstance(entry, dict):
-        return None
+        entries = _entries_for(_load(path), provider)
 
-    status = entry.get("status")
-    if status not in ("quota", "billing"):
-        return None
-
-    try:
-        since = datetime.fromisoformat(str(entry.get("since")))
-    except (TypeError, ValueError):
-        return None
-
-    cooldown_until: datetime | None = None
-    raw_until = entry.get("cooldown_until")
-    if raw_until:
+    now = datetime.now(timezone.utc)
+    best: ProviderCooldown | None = None
+    for entry in entries:
+        status = entry.get("status")
+        if status not in ("quota", "billing"):
+            continue
+        if key_fingerprint is not None and entry.get("key_fingerprint", "") != key_fingerprint:
+            continue
         try:
-            cooldown_until = datetime.fromisoformat(str(raw_until))
+            since = datetime.fromisoformat(str(entry.get("since")))
         except (TypeError, ValueError):
-            cooldown_until = None
-
-    if key_fingerprint is not None and key_fingerprint != entry.get("key_fingerprint", ""):
-        return None
-
-    if status == "quota":
-        if cooldown_until is not None and datetime.now(timezone.utc) >= cooldown_until:
-            return None
-    elif key_fingerprint is None:  # billing, and the caller left the live check to us
-        if _fingerprint(get_key(provider)) != entry.get("key_fingerprint", ""):
-            return None
-
-    return ProviderCooldown(
-        provider=provider,
-        status=status,
-        since=since,
-        cooldown_until=cooldown_until,
-        note=str(entry.get("note", "")),
-    )
+            continue
+        cooldown_until: datetime | None = None
+        raw_until = entry.get("cooldown_until")
+        if raw_until:
+            try:
+                cooldown_until = datetime.fromisoformat(str(raw_until))
+            except (TypeError, ValueError):
+                cooldown_until = None
+        if status == "quota":
+            if cooldown_until is not None and now >= cooldown_until:
+                continue
+        elif key_fingerprint is None and entry.get("key_fingerprint", "") not in _configured_fingerprints(provider):
+            continue
+        candidate = ProviderCooldown(
+            provider=provider,
+            status=status,
+            since=since,
+            cooldown_until=cooldown_until,
+            note=str(entry.get("note", "")),
+        )
+        if best is None or candidate.since > best.since:
+            best = candidate
+    return best
 
 
 def is_in_cooldown(provider: str, *, key_fingerprint: str | None = None, path: Path | None = None) -> bool:
@@ -271,13 +296,13 @@ def is_in_cooldown(provider: str, *, key_fingerprint: str | None = None, path: P
 
 
 def clear_cooldown(provider: str, *, path: Path | None = None) -> None:
-    """Remove `provider`'s entry, if any. A no-op if there isn't one."""
-    key = _provider_key(provider)
+    """Remove every credential's entry for `provider`. A no-op if none."""
+    wanted = _provider_key(provider)
     with _LOCK:
         providers = _load(path)
-        if key in providers:
-            del providers[key]
-            _save(providers, path)
+        keep = {k: e for k, e in providers.items() if e not in _entries_for(providers, wanted)}
+        if len(keep) != len(providers):
+            _save(keep, path)
 
 
 def default_quota_cooldown_until(provider: str) -> datetime:

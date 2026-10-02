@@ -360,6 +360,23 @@ def test_provider_health_deep_row_fails_if_one_credentials_cooldown_blocks_anoth
     assert "different credential" in row.detail
 
 
+def test_provider_health_deep_row_fails_if_a_second_credential_erases_the_first(monkeypatch):
+    """The other half of the scoping bug: one entry per provider let key B's
+    failure overwrite key A's. Simulate it and the row must go red."""
+    from avg.config import provider_health
+
+    real = provider_health.record_cooldown
+
+    def one_entry_per_provider(provider, status, **kwargs):
+        provider_health.clear_cooldown(provider, path=kwargs.get("path"))
+        real(provider, status, **kwargs)
+
+    monkeypatch.setattr(provider_health, "record_cooldown", one_entry_per_provider)
+    row = health._check_provider_health_round_trip()
+    assert not row.ok
+    assert "erased" in row.detail
+
+
 def test_provider_health_deep_row_never_touches_the_real_cooldown_file(tmp_path, monkeypatch):
     from avg.config import provider_health
 
