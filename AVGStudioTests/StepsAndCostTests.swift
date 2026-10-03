@@ -38,7 +38,7 @@ final class StepsTests: XCTestCase {
         ]
         let progress = p.stepProgress(.writing)
         XCTAssertEqual(progress.finished, 2)
-        XCTAssertEqual(progress.total, 4)
+        XCTAssertEqual(progress.total, 5, "research, brief, narration, scene split, story map")
     }
 
     func testElapsedPrefersExplicitSeconds() {

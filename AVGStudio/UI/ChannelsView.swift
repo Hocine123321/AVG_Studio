@@ -168,6 +168,35 @@ struct ChannelEditor: View {
         Text(footer).font(.caption2).foregroundStyle(.secondary)
     }
 
+    // Creative: the PC's content_shape / visual_tone / style_lock / brand_preset.
+    private static let toneOptions = OptionCatalog.options("video_tone")
+    private static let brandOptions = OptionCatalog.options("brand_presets")
+
+    /// The visual tone, with "custom" standing for any free text a person
+    /// typed rather than a catalogue id (exactly how the PC stores it).
+    private var toneSelection: Binding<String> {
+        Binding(
+            get: { Self.toneOptions.contains { $0.id == channel.visualTone } ? channel.visualTone : "custom" },
+            set: { new in
+                if new == "custom" {
+                    if Self.toneOptions.contains(where: { $0.id == channel.visualTone }) { channel.visualTone = "" }
+                } else {
+                    channel.visualTone = new
+                }
+            }
+        )
+    }
+
+    /// Picking a brand also seeds the channel's three accent colours from it,
+    /// so the preset visibly does something right away; each colour can still
+    /// be changed afterwards in the Brand section below.
+    private func applyBrandColors(_ id: String) {
+        func clean(_ key: String) -> String? { Brand.accentHex(id, key)?.replacingOccurrences(of: "#", with: "") }
+        if let c = clean("accent1") { channel.accent1ColorHex = c }
+        if let c = clean("accent2") { channel.accent2ColorHex = c }
+        if let c = clean("highlight") { channel.accentColorHex = c }
+    }
+
     private static let fontPresets = ["", "Georgia", "Avenir Next", "Futura", "Times New Roman", "Courier New", "Impact", "custom"]
     private var fontPickerSelection: Binding<String> {
         Binding(
@@ -193,6 +222,42 @@ struct ChannelEditor: View {
                     Toggle("Research the topic first", isOn: $channel.topicResearchEnabled)
                 } header: { Text("Videos") } footer: {
                     Text("Research spends one extra AI call gathering facts about the topic before the brief is written, matching the PC's topic_research.")
+                }
+
+                Section {
+                    if !Personality.all.isEmpty {
+                        Picker("Personality", selection: $channel.contentShape) {
+                            ForEach(Personality.all) { Text($0.name.replacingOccurrences(of: "_", with: " ").capitalized).tag($0.name) }
+                            // A saved value the file no longer has stays selectable
+                            // (it degrades to the first preset when written).
+                            if !Personality.all.contains(where: { $0.name == channel.contentShape }) {
+                                Text(channel.contentShape.isEmpty ? "Default" : channel.contentShape).tag(channel.contentShape)
+                            }
+                        }
+                    }
+                    if !Self.toneOptions.isEmpty {
+                        Picker("Visual tone", selection: toneSelection) {
+                            ForEach(Self.toneOptions) { Text($0.label).tag($0.id) }
+                        }
+                    }
+                    if Self.toneOptions.isEmpty || toneSelection.wrappedValue == "custom" {
+                        TextField("Describe the look", text: $channel.visualTone, axis: .vertical)
+                            .lineLimit(1...3)
+                    }
+                    TextField("Style lock (appended to every image prompt)", text: $channel.styleLock, axis: .vertical)
+                        .lineLimit(1...3)
+                    if !Self.brandOptions.isEmpty {
+                        Picker("Brand preset", selection: $channel.brandPreset) {
+                            ForEach(Self.brandOptions) { Text($0.label).tag($0.id) }
+                            if !Self.brandOptions.contains(where: { $0.id == channel.brandPreset }) {
+                                Text(channel.brandPreset.isEmpty ? "None" : channel.brandPreset).tag(channel.brandPreset)
+                            }
+                        }
+                        .onChange(of: channel.brandPreset) { _, new in applyBrandColors(new) }
+                    }
+                } header: { Text("Creative") } footer: {
+                    Text(Personality.preset(named: channel.contentShape).description
+                         + " Visual tone steers the brief, the narration voice and every image prompt. A style lock is added to the end of each image prompt so the pictures look like one set. The brand preset sets the motion feel and transitions the AI editor works toward, and fills in the colours below when you pick it.")
                 }
                 Section {
                     ColorPicker("Highlight", selection: accentBinding, supportsOpacity: false)

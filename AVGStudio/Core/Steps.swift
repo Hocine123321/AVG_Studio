@@ -9,8 +9,10 @@ import Foundation
 /// expanded to show what it is actually doing and which part is slow or
 /// failed:
 ///
-///   Script   - Topic research, Creative brief, Narration, Scene split
-///              (PC: optional research, Brief, Script draft + segmentation)
+///   Script   - Topic research, Creative brief, Narration, Scene split,
+///              Story map
+///              (PC: optional research, Brief, Script draft + segmentation,
+///              Director I)
 ///   Visuals  - Scene images
 ///   Voice    - Record narration, Remove dead air, Join with pauses
 ///              (PC: Voice & audio)
@@ -57,7 +59,8 @@ extension PhaseID {
             return [StepDef(key: "research", title: "Topic research"),
                     StepDef(key: "brief", title: "Creative brief"),
                     StepDef(key: "draft", title: "Narration"),
-                    StepDef(key: "segmentation", title: "Scene split")]
+                    StepDef(key: "segmentation", title: "Scene split"),
+                    StepDef(key: "story", title: "Story map")]
         case .visuals:
             return [StepDef(key: "images", title: "Scene images")]
         case .voice:

@@ -210,34 +210,38 @@ struct Pipeline {
             step(.writing, "research", .skipped, "Off for this channel")
         }
 
+        let inputs = creativeInputs(p, ch)
+
+        // The PC feeds the research to the NARRATION, not the brief ("the script
+        // then draws on it"), so it is carried into `extraContext` below.
+        let researchContext = researchBlock.trimmed
+
         step(.writing, "brief", .running)
         store.progress(projectID, 0.1, "Writing the creative brief…")
-        let briefPrompt = """
-        \(researchBlock)Write a short creative brief for a ~\(ch.targetSeconds)-second video about: \(p.topic)
-        Cover the hook, the angle, the emotional arc and the tone. Max 120 words. Plain text, no headings.
-        """
-        let (brief, briefProvider) = try await routedComplete(
+        let briefPrompt = CreativePrompts.brief(inputs)
+        let (briefRaw, briefProvider) = try await routedComplete(
             primary: ch.briefTextProvider, backup: ch.briefTextBackup, onFailure: ch.briefOnFailure,
             briefPrompt, system: system
         )
-        costText(briefProvider, chars: briefPrompt.count + brief.count)
-        store.update(projectID) { $0.brief = brief.trimmed }
+        costText(briefProvider, chars: briefPrompt.count + briefRaw.count)
+        // The PC rejects a brief with no emotional_arc as a failed generation.
+        // Here a reply that isn't the requested JSON is kept as free text
+        // instead - a usable direction is worth more than stopping the run - and
+        // the Live List says so.
+        var brief = CreativePrompts.parseBrief(briefRaw)
+        if brief == nil {
+            let text = String(briefRaw.trimmed.prefix(500))
+            store.record(projectID, "The brief wasn't valid JSON, so its text was used as written.")
+            brief = CreativePrompts.Brief(emotionalArc: text.isEmpty ? "A clear, engaging telling of the topic." : text)
+        }
+        let briefValue = brief ?? CreativePrompts.Brief(emotionalArc: "A clear, engaging telling of the topic.")
+        store.update(projectID) { $0.brief = briefValue.displayText }
         step(.writing, "brief", .done, briefProvider.label)
 
         step(.writing, "draft", .running)
         store.progress(projectID, 0.4, "Writing the narration…")
-        let words = max(40, ch.targetSeconds * 150 / 60)
-        let narrationPrompt = """
-        Creative brief:
-        \(brief)
-
-        Write the narration a narrator speaks for a video about: \(p.topic)
-        About \(words) words. Flowing prose only: no headings, no scene numbers, no stage directions, \
-        no emojis, no quotation marks around the whole text. You may insert [pause] for a dramatic pause.
-        Separately, wrap any short rhetorical question or punchy hook in double parentheses, e.g. \
-        "((But why?))" - at most a couple across the whole script, only genuine brief questions/hooks, \
-        never a whole sentence. These become full-screen emphasis cards; the words inside are still spoken normally.
-        """
+        let extraContext = [briefValue.directionBlock, researchContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let narrationPrompt = CreativePrompts.narration(inputs, extraContext: extraContext)
         let (narrationRaw, narrationProvider) = try await routedComplete(
             primary: ch.scriptDraftTextProvider, backup: ch.scriptDraftTextBackup, onFailure: ch.scriptDraftOnFailure,
             narrationPrompt, system: system
@@ -256,28 +260,24 @@ struct Pipeline {
         let pool = store.reusableImages
         let recycleRatio = max(0, min(100, ch.recycleRatio))
         let useRecyclePool = ch.recycleEnabled && recycleRatio > 0 && !pool.isEmpty
-        var splitInstructions = "Split the narration below into 5 to 12 scenes WITHOUT changing, adding or removing a single word. For each scene write a vivid image prompt describing the visual (no text, no letters in the image)."
-        if useRecyclePool {
-            let poolLines = pool.enumerated().map { "\($0 + 1). \($1.description)" }.joined(separator: "\n")
-            let rule = recycleRatio >= 100
-                ? "For EVERY scene's image_prompt, ALWAYS use the token \"[RECYCLE #k]\" naming the pool image (by its number below) that best fits. Never write a fresh description."
-                : "For each scene's image_prompt, use the token \"[RECYCLE #k]\" naming a pool image ONLY when it genuinely fits (at most \(Int(recycleRatio))% of scenes) - otherwise write a fresh image_prompt as usual."
-            splitInstructions += "\n\nYou also have a pool of existing reusable images:\n\(poolLines)\n\n\(rule)"
-        }
-        let splitPrompt = """
-        \(splitInstructions)
-
-        Reply with ONLY a JSON array like [{"text": "...", "image_prompt": "..."}].
-
-        NARRATION:
-        \(narration)
-        """
+        let poolEntries = useRecyclePool
+            ? pool.enumerated().map { CreativePrompts.PoolEntry(index: $0.offset + 1, description: $0.element.description) }
+            : []
+        let splitPrompt = CreativePrompts.segmentation(
+            inputs, narration: narration, pool: poolEntries, recycleRatio: useRecyclePool ? Int(recycleRatio) : 0
+        )
         let (raw, splitProvider) = try await routedComplete(
             primary: ch.scriptSegmentationTextProvider, backup: ch.scriptSegmentationTextBackup,
             onFailure: ch.scriptSegmentationOnFailure, splitPrompt, system: nil
         )
         costText(splitProvider, chars: splitPrompt.count + raw.count)
-        var scenes = Self.parseScenes(raw)
+        let blocks = CreativePrompts.parseSceneBlocks(raw)
+        var scenes: [VideoScene] = blocks.enumerated().map {
+            VideoScene(index: $0.offset + 1, text: $0.element.text, imagePrompt: $0.element.imagePrompt, label: $0.element.label)
+        }
+        // A model that ignored the @@SCENE@@ format and answered with the older
+        // JSON array still gets its scenes used.
+        if scenes.isEmpty { scenes = Self.parseScenes(raw) }
         var splitBySentence = false
         if scenes.isEmpty || Self.norm(scenes.map(\.text).joined(separator: " ")) != Self.norm(narration) {
             store.record(projectID, "Scene split changed the wording, so scenes were split by sentence instead.")
@@ -288,13 +288,66 @@ struct Pipeline {
             Self.normalizeRecyclePicks(&scenes, poolSize: pool.count)
             if recycleRatio >= 100 { Self.forceFillAllMode(&scenes, poolSize: pool.count) }
         }
+        // The prompt asks the model to end every image prompt with the style
+        // tag, but models forget; this makes it certain.
+        Self.applyStyleLock(&scenes, lock: ch.styleLock)
         store.update(projectID) {
             $0.narration = narration
             $0.scenes = scenes
             $0.audioFile = nil
             $0.output = nil
+            $0.storyMap = nil
         }
         step(.writing, "segmentation", .done, "\(scenes.count) scenes" + (splitBySentence ? " (split by sentence)" : ""))
+
+        // Director I: the visual structure of the finished script. It enriches
+        // the motion plan but is not needed to make a video, so unlike the
+        // PC (where a failure stops the phase) a failure here degrades to a
+        // neutral map and the run carries on.
+        step(.writing, "story", .running)
+        store.progress(projectID, 0.9, "Planning the story map…")
+        let mapPrompt = CreativePrompts.director1(inputs, sceneTexts: scenes.map(\.text))
+        do {
+            let (mapRaw, mapProvider) = try await routedComplete(
+                primary: nil, backup: nil, onFailure: .stop, mapPrompt, system: "You return only strict JSON, nothing else."
+            )
+            costText(mapProvider, chars: mapPrompt.count + mapRaw.count)
+            let map = StoryMap.parse(mapRaw, sceneCount: scenes.count)
+            store.update(projectID) { $0.storyMap = map }
+            let planned = map.scenes.filter { !$0.role.isEmpty }.count
+            step(.writing, "story", .done, planned == 0 ? "No roles returned" : "\(planned) scene roles · \(mapProvider.label)")
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            store.record(projectID, "Story map failed (\(error.localizedDescription)); scenes use neutral roles.")
+            store.update(projectID) { $0.storyMap = StoryMap.neutral(sceneCount: scenes.count) }
+            step(.writing, "story", .skipped, "Failed; used neutral roles")
+        }
+    }
+
+    /// The brief's emotional-arc line, for Director II's style block. The
+    /// project stores the brief as display text ("Emotional arc: ...").
+    static func emotionalArc(from brief: String?) -> String {
+        guard let brief else { return "" }
+        for line in brief.components(separatedBy: "\n") {
+            let t = line.trimmed
+            if t.lowercased().hasPrefix("emotional arc:") { return String(t.dropFirst("emotional arc:".count)).trimmed }
+        }
+        return brief.trimmed
+    }
+
+    /// The channel's creative settings in the form the prompt builders take.
+    private func creativeInputs(_ p: Project, _ ch: Channel) -> CreativeInputs {
+        CreativeInputs(
+            topic: p.topic,
+            contentShape: ch.contentShape,
+            visualTone: ch.visualTone,
+            styleLock: ch.styleLock,
+            brandPreset: ch.brandPreset,
+            formLabel: p.aspectRatio == .landscape ? "Long-form (16:9)" : "Short-form (9:16)",
+            aspectRatio: p.aspectRatio.rawValue,
+            durationSeconds: ch.targetSeconds
+        )
     }
 
     // MARK: Phase — visuals
@@ -304,7 +357,11 @@ struct Pipeline {
         let ch = store.channel(for: p)
         let provider = try imageProvider()
         let size = p.aspectRatio.size(shortEdge: 1024)
-        let style = store.settings.imageStyle
+        // A channel's style lock already ends every generated prompt (see
+        // `applyStyleLock`), so the app-wide style suffix is only added when
+        // there is no lock - otherwise "cinematic, dramatic lighting" would be
+        // stacked onto, say, a flat wireframe style.
+        let style = ch.styleLock.trimmed.isEmpty ? store.settings.imageStyle : ""
         let dir = folder.appendingPathComponent("images", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let scenes = p.scenes
@@ -363,7 +420,8 @@ struct Pipeline {
             let backupProvider: ImageProvider? = (backupKind != nil && backupKind != requestedKind) ? try imageProvider(for: backupKind!) : nil
             try await withThrowingTaskGroup(of: (Int, Data, ImageProviderKind).self) { group in
                 for s in toGenerate {
-                    let prompt = "\(s.imagePrompt.isEmpty ? s.text : s.imagePrompt). \(style)"
+                    let base = s.imagePrompt.isEmpty ? s.text : s.imagePrompt
+                    let prompt = style.isEmpty ? base : "\(base). \(style)"
                     group.addTask {
                         do { return (s.index, try await provider.generate(prompt: prompt, size: size), requestedKind) }
                         catch let e as AVGError {
@@ -703,6 +761,20 @@ struct Pipeline {
         guard p.sceneDirections.count != scenes.count || p.directionSignature != signature else { return }
 
         store.progress(projectID, 0, "Planning motion and grade…")
+        // What Director I decided about each scene's job. Lets the motion ride
+        // the story (a HIT punches in, a PAUSE holds) instead of being chosen
+        // from the narration text alone.
+        var storyHints = ""
+        if let hints = p.storyMap?.directorHints, !hints.isEmpty {
+            storyHints = """
+
+            STORY STRUCTURE (from the structure director - let motion and transitions follow it:
+            HIT = hard punch, PAUSE = held breath so favour 'still' or a slow move, ZOOM = push in,
+            SLOWDOWN = lower energy; hook scenes open strong, reveal scenes land hard):
+            \(hints)
+
+            """
+        }
         let numbered = scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "\n")
         let prompt = """
         You are the DIRECTOR / EDITOR of a short AI-generated video built from still images with
@@ -711,11 +783,11 @@ struct Pipeline {
         authority over pacing, camera movement, transitions and colour. Use contrast (calm vs.
         punchy scenes) and motion that rides the narration's energy — but stay coherent.
 
-        VIDEO STYLE (keep the whole piece feeling consistent with this):
+        \(CreativePrompts.styleBible(creativeInputs(p, ch), emotionalArc: Self.emotionalArc(from: p.brief)))
         - niche: \(ch.niche.isEmpty ? "general" : ch.niche)
         - tone: \(ch.tone)
         - length: ~\(ch.targetSeconds) seconds, \(p.aspectRatio.rawValue)
-
+        \(storyHints)
         SCENES (number, narration):
         \(numbered)
 
@@ -867,9 +939,22 @@ struct Pipeline {
         let engine = stats.gpuFrames == stats.frames ? "GPU" : (stats.gpuFrames == 0 ? "CPU" : "GPU + CPU")
         step(.render, "frames", .done, "\(stats.frames) frames · \(engine)", seconds: stats.frameSeconds)
         step(.render, "mux", .done, nil, seconds: stats.muxSeconds)
-        store.update(projectID) {
-            $0.output = name
-            $0.takes.append(Take(id: takeID, label: "Take \(takeID)", created: Date(), file: name))
+        // The take remembers the content it was made from (so it can be
+        // continued from later) and where it came from. Store.run marks the
+        // Render phase done only AFTER this returns, so its record is built
+        // here for the snapshot.
+        let context = store.takeContext[projectID]
+        let renderInputs = store.currentInputs(.render, for: projectID)
+        store.update(projectID) { proj in
+            proj.output = name
+            var snapshotSource = proj
+            snapshotSource.phases[PhaseID.render.rawValue] = PhaseRecord(status: .done, started: Date(), finished: Date(), inputs: renderInputs)
+            var take = Take(id: takeID, label: "Take \(takeID)", created: Date(), file: name)
+            take.snapshot = TakeSnapshot.capture(snapshotSource)
+            take.basedOn = context?.basedOn
+            take.note = context?.note
+            proj.takes.append(take)
+            proj.workingTakeID = takeID
         }
         store.record(projectID, "Finished “\(p.title)” (take \(takeID)).")
     }
@@ -941,6 +1026,22 @@ struct Pipeline {
     /// A loosely-written recycle pick becomes the canonical `"[RECYCLE #k]"`
     /// token every downstream reader expects; an out-of-range pick is
     /// stripped instead, leaving whatever prose (if any) came with it.
+    /// Makes sure every GENERATED image prompt ends with the channel's style
+    /// tag (the PC's `style_lock`). Pool picks (`[RECYCLE #k]`) and empty
+    /// prompts are left alone; a prompt that already ends with the tag is
+    /// not given a second copy.
+    static func applyStyleLock(_ scenes: inout [VideoScene], lock: String) {
+        let tag = lock.trimmed
+        guard !tag.isEmpty else { return }
+        for i in scenes.indices {
+            let prompt = scenes[i].imagePrompt.trimmed
+            guard !prompt.isEmpty, recycleIndex(prompt) == nil else { continue }
+            if prompt.lowercased().hasSuffix(tag.lowercased()) { continue }
+            let joiner = (prompt.hasSuffix(".") || prompt.hasSuffix(",")) ? " " : ". "
+            scenes[i].imagePrompt = prompt + joiner + tag
+        }
+    }
+
     static func normalizeRecyclePicks(_ scenes: inout [VideoScene], poolSize: Int) {
         for i in scenes.indices {
             let text = scenes[i].imagePrompt
@@ -1025,7 +1126,9 @@ struct Pipeline {
     /// prose/fences around the JSON far more often than not, so this reads
     /// the substring between the first `{` and the last `}` rather than
     /// require the WHOLE reply to already be bare JSON.
-    static func extractJSONObject(_ raw: String) -> String? {
+    /// Pure string handling, deliberately `nonisolated`: the creative prompt
+    /// parsers in Creative.swift call it from outside the main actor.
+    nonisolated static func extractJSONObject(_ raw: String) -> String? {
         guard let a = raw.firstIndex(of: "{"), let b = raw.lastIndex(of: "}"), a < b else { return nil }
         return String(raw[a...b])
     }

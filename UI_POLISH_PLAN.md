@@ -97,5 +97,5 @@ before pushing.
 
 - Each phase gets its own commit + a GitHub Actions build check before
   moving to the next, same discipline as the Director II port.
-- This plan lives at `UI_POLISH_PLAN.md` — update the checked-off state
+- This plan lives at `ios/UI_POLISH_PLAN.md` — update the checked-off state
   here as phases land, instead of just letting it go stale.

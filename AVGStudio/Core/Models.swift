@@ -33,6 +33,10 @@ struct PhaseRecord: Codable, Hashable {
     var started: Date?
     var finished: Date?
     var error: String?
+    /// What this phase's output depended on when it finished (see
+    /// `PhaseInputs`); compared with the settings now to spot a stale phase.
+    /// Optional so records saved before takes existed still decode.
+    var inputs: [String: String]?
 }
 
 struct VideoScene: Codable, Hashable, Identifiable {
@@ -40,6 +44,10 @@ struct VideoScene: Codable, Hashable, Identifiable {
     var text: String
     var imagePrompt: String
     var imageFile: String?
+    /// One or two words naming the scene's job ("Hook", "Reveal"), written by
+    /// the scene splitter as the PC's `scenes.json` does. Optional so projects
+    /// saved before it existed still decode.
+    var label: String?
     var id: Int { index }
 }
 
@@ -98,6 +106,18 @@ struct Take: Codable, Hashable, Identifiable {
     var label: String
     var created: Date
     var file: String
+    // Everything below is OPTIONAL: takes saved before real takes existed are
+    // just a video file and still decode, show and export - they simply can't
+    // be restored (see `Take.canRestore`).
+    /// The project's content when this take finished; see Takes.swift.
+    var snapshot: TakeSnapshot?
+    /// Folder (relative to the project) holding this take's saved images and
+    /// audio, or nil while those files are still the working copy.
+    var archive: String?
+    /// The take this one was branched from.
+    var basedOn: Int?
+    /// Why it exists, e.g. "Changed: Narrator, Frame rate" or "Redo from Voice".
+    var note: String?
 }
 
 /// Camera move for one scene, chosen by the Director II AI plan below -
@@ -228,6 +248,12 @@ struct Project: Codable, Hashable, Identifiable {
     /// `[String: StepRecord] = [:]` would make every project saved before
     /// this field existed unreadable.
     var stepRecords: [String: StepRecord]?
+    /// Director I's plan (each scene's role, beat and visual intent), fed to
+    /// Director II's motion prompt. Optional for the same reason as above.
+    var storyMap: StoryMap?
+    /// The take whose content the working copy (the project's own fields and
+    /// files) currently equals; nil once a run has started changing it.
+    var workingTakeID: Int?
 
     func phase(_ p: PhaseID) -> PhaseRecord { phases[p.rawValue] ?? PhaseRecord() }
 
@@ -296,6 +322,18 @@ struct Channel: Codable, Hashable, Identifiable {
     /// about the topic before the brief is written, so the script draws
     /// on it.
     var topicResearchEnabled: Bool = false
+    /// The writing "personality" preset (`personality.txt`): the PC's
+    /// `content_shape`. Its full text opens the narration prompt.
+    var contentShape: String = "documentary"
+    /// A visual-tone catalogue id, or free text (the "custom" tone): the PC's
+    /// `visual_tone`. Steers the brief, the narration voice and image prompts.
+    var visualTone: String = "documentary_cinematic"
+    /// Free-text style tag appended to every generated image prompt so the
+    /// pictures look like one set: the PC's `style_lock`.
+    var styleLock: String = ""
+    /// A brand-preset catalogue id: its motion feel, transitions and grade
+    /// steer Director II; its colours seed the channel's accents when picked.
+    var brandPreset: String = "modern_dark"
     /// Mirrors the PC's `image_provider_backup`/`image_on_failure` exactly,
     /// including its default: "stop" - a scene whose only configured
     /// provider fails stops the run, UNLESS a backup provider is set AND
@@ -738,6 +776,10 @@ extension Channel {
         d.accent2ColorHex = c.value("accent2ColorHex", d.accent2ColorHex)
         d.fontFamily = c.value("fontFamily", d.fontFamily)
         d.topicResearchEnabled = c.value("topicResearchEnabled", d.topicResearchEnabled)
+        d.contentShape = c.value("contentShape", d.contentShape)
+        d.visualTone = c.value("visualTone", d.visualTone)
+        d.styleLock = c.value("styleLock", d.styleLock)
+        d.brandPreset = c.value("brandPreset", d.brandPreset)
         d.imageProviderBackup = c.value("imageProviderBackup", d.imageProviderBackup)
         d.imageOnFailure = c.value("imageOnFailure", d.imageOnFailure)
         d.takeoverCardsEnabled = c.value("takeoverCardsEnabled", d.takeoverCardsEnabled)

@@ -55,6 +55,12 @@ final class Store {
     /// Projects waiting for a free slot, in the order they were started.
     var queuedIDs: [String] = []
     @ObservationIgnored private var pendingStarts: [String: PhaseID] = [:]
+    /// What a run is about to record on the take it produces: which take it
+    /// branched from and why (see Takes.swift). Set when the run starts, read
+    /// by the render phase when it creates the take.
+    struct TakeContext { var basedOn: Int?; var note: String? }
+    @ObservationIgnored var takeContext: [String: TakeContext] = [:]
+    @ObservationIgnored private var pendingNotes: [String: String] = [:]
     /// Serialises the render phase across all running videos (RenderLease.swift).
     @ObservationIgnored let renderLease = RenderLease()
     var log: [LogEntry] = []
@@ -200,6 +206,116 @@ final class Store {
             p.costs.append(CostEntry(label: label, amountUSD: amountUSD))
             if p.costs.count > 200 { p.costs.removeFirst(p.costs.count - 200) }
         }
+    }
+
+    // MARK: Takes (see Takes.swift)
+
+    /// What `phase` would depend on if it ran right now.
+    func currentInputs(_ phase: PhaseID, for id: String) -> [String: String] {
+        guard let p = project(id) else { return [:] }
+        return PhaseInputs.describe(phase, settings: settings, channel: channel(for: p), hasTranscriptionKey: Keychain.has(.assemblyai))
+    }
+
+    /// Which finished phases the CURRENT settings have made out of date.
+    func staleReport(_ p: Project) -> StaleReport {
+        guard p.phases.values.contains(where: { $0.inputs != nil }) else { return StaleReport() }
+        return StaleReport.compute(project: p, settings: settings, channel: channel(for: p), hasTranscriptionKey: Keychain.has(.assemblyai))
+    }
+
+    /// Re-runs from the earliest phase the settings made stale, as a NEW take
+    /// (the old one is kept), noting what changed.
+    func updateToSettings(_ id: String) {
+        guard let p = project(id), !isBusy(id) else { return }
+        let report = staleReport(p)
+        guard let first = report.firstPhase else { return }
+        let labels = report.changedLabels
+        let shown = labels.prefix(4).joined(separator: ", ")
+        let note = "Changed: " + shown + (labels.count > 4 ? " +\(labels.count - 4) more" : "")
+        start(id, from: first, note: note)
+    }
+
+    /// Called when a run starts. If the run would rewrite the working files
+    /// (anything from Voice back), the files behind every not-yet-archived
+    /// take are copied aside first, so those takes stay restorable. Returns the
+    /// take this run branches from. A failed copy is logged and the run
+    /// carries on - the take stays watchable, just not restorable.
+    private func prepareBranch(_ id: String, from start: PhaseID) -> Int? {
+        guard let p = project(id) else { return nil }
+        let based = p.workingTakeID ?? p.takes.last?.id
+        // Captions and Render only rewrite JSON (which every take's snapshot
+        // already holds) and the take's own video file; the images and audio
+        // are untouched, so nothing needs saving and the working copy still
+        // equals its take.
+        guard start.order <= PhaseID.voice.order else { return based }
+        archiveUnarchivedTakes(id)
+        update(id) { $0.workingTakeID = nil }
+        return based
+    }
+
+    /// Every take whose files are still the working copy shares them (an
+    /// invariant: any run that rewrites them archives first), so ONE copy
+    /// serves them all.
+    private func archiveUnarchivedTakes(_ id: String) {
+        guard let p = project(id) else { return }
+        let waiting = p.takes.filter { $0.snapshot != nil && $0.archive == nil }
+        guard let newest = waiting.map(\.id).max() else { return }
+        do {
+            let rel = try TakeArchive.archive(takeID: newest, projectFolder: folder(for: id))
+            update(id) { proj in
+                for i in proj.takes.indices where proj.takes[i].snapshot != nil && proj.takes[i].archive == nil {
+                    proj.takes[i].archive = rel
+                }
+            }
+        } catch {
+            record(id, "Couldn't keep a copy of the earlier take's files (\(error.localizedDescription)); it can still be watched but not continued from.", error: true)
+        }
+    }
+
+    /// Makes `takeID` the working version again: its content and files come
+    /// back, and its video becomes the project's output. The version being
+    /// replaced is saved first, so nothing is lost.
+    func restoreTake(_ id: String, takeID: Int) throws {
+        guard let p = project(id), let take = p.takes.first(where: { $0.id == takeID }) else { return }
+        guard !isBusy(id) else { throw AVGError.message("Wait for this video to finish first.") }
+        guard let snapshot = take.snapshot else { throw AVGError.message("This take was made before takes could be continued from.") }
+        let wasArchived = take.archive != nil
+        archiveUnarchivedTakes(id)
+        if wasArchived, let rel = project(id)?.takes.first(where: { $0.id == takeID })?.archive {
+            try TakeArchive.restore(archive: rel, projectFolder: folder(for: id))
+        }
+        update(id) { proj in
+            snapshot.apply(to: &proj)
+            proj.output = take.file
+            proj.workingTakeID = takeID
+        }
+        record(id, "Continuing from \(take.label).")
+    }
+
+    /// Removes a take: its video, its saved snapshot and - once no other take
+    /// uses it - its archived files. If it was the one on show, the newest
+    /// remaining take takes over.
+    func deleteTake(_ id: String, takeID: Int) {
+        guard let p = project(id), !isBusy(id), let take = p.takes.first(where: { $0.id == takeID }) else { return }
+        let orphans = TakeArchive.orphanedArchives(takes: p.takes, deleting: takeID)
+        try? FileManager.default.removeItem(at: folder(for: id).appendingPathComponent(take.file))
+        for rel in orphans { TakeArchive.remove(archive: rel, projectFolder: folder(for: id)) }
+        update(id) { proj in
+            proj.takes.removeAll { $0.id == takeID }
+            if proj.workingTakeID == takeID { proj.workingTakeID = nil }
+            if proj.output == take.file { proj.output = proj.takes.last?.file }
+        }
+        record(id, "Deleted \(take.label).")
+    }
+
+    /// A take's own content and where its files are: its snapshot applied to
+    /// a copy of the project, rooted at its archive when it has one. A take
+    /// with no snapshot (made before takes existed) is just the project as is.
+    func takeContent(_ p: Project, _ take: Take) -> (project: Project, root: URL) {
+        guard let snapshot = take.snapshot else { return (p, folder(for: p.id)) }
+        var content = p
+        snapshot.apply(to: &content)
+        let root = take.archive.map { folder(for: p.id).appendingPathComponent($0, isDirectory: true) } ?? folder(for: p.id)
+        return (content, root)
     }
 
     // MARK: Steps (see Steps.swift)
@@ -394,8 +510,9 @@ final class Store {
     /// video at a time in the order asked for. Starting a project that is
     /// already running or queued is ignored - two runners on one
     /// `project.json` is the bug that guard exists for.
-    func start(_ id: String, from phase: PhaseID = .writing) {
+    func start(_ id: String, from phase: PhaseID = .writing, note: String? = nil) {
         guard !isBusy(id) else { return }
+        if let note { pendingNotes[id] = note }
         if interruptedProjectID == id { interruptedProjectID = nil }
         let cap = max(1, settings.maxParallelJobs)
         if tasks.count >= cap {
@@ -461,12 +578,18 @@ final class Store {
         bg.begin(name: "AVG render")
         defer { bg.end() }
         record(id, "▶ Started “\(project(id)?.title ?? id)” from \(start.title).")
+        let basedOn = prepareBranch(id, from: start)
+        takeContext[id] = TakeContext(basedOn: basedOn, note: pendingNotes.removeValue(forKey: id))
+        defer { takeContext[id] = nil }
         for phase in PhaseID.allCases where phase.order >= start.order {
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
         }
         clearSteps(id, from: start)
         for phase in PhaseID.allCases where phase.order >= start.order {
             if Task.isCancelled { break }
+            // Captured BEFORE the phase runs: a setting changed mid-run must be
+            // reported as a change next time, not silently absorbed.
+            let inputs = currentInputs(phase, for: id)
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .running, started: Date()) }
             jobs[id] = JobState(phase: phase, progress: 0, message: "\(phase.title)…")
             record(id, "— \(phase.title) —")
@@ -475,6 +598,7 @@ final class Store {
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .done
                     $0.phases[phase.rawValue]?.finished = Date()
+                    $0.phases[phase.rawValue]?.inputs = inputs
                 }
                 record(id, "\(phase.title) done.")
             } catch is CancellationError {

@@ -65,15 +65,16 @@ enum CostTable {
     /// function of its inputs, so it is testable and cheap to recompute as
     /// the Create screen's pickers change.
     ///
-    /// Text is modelled as the narration passing through four calls (brief,
-    /// narration, scene split, motion plan), each carrying roughly the script
-    /// in its prompt AND its reply, plus a fixed allowance for instructions.
+    /// Text is modelled as the narration passing through five calls (brief,
+    /// narration, scene split, story map, motion plan), each carrying roughly
+    /// the script in its prompt AND its reply, plus a fixed allowance for
+    /// instructions.
     static func estimate(targetSeconds: Int, settings s: AppSettings, channel: Channel,
                          hasTranscriptionKey: Bool, poolSize: Int) -> Estimate {
         let seconds = Double(max(10, targetSeconds))
         let scriptChars = seconds * spokenCharsPerSecond
 
-        let textChars = scriptChars * 4 * 2 + 4_000
+        let textChars = scriptChars * 5 * 2 + 5_500
         let text = textChars * textRate(s.text)
 
         // About one scene per 7 seconds, between 5 and 12 (what the scene

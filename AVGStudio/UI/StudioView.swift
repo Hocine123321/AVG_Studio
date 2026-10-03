@@ -24,6 +24,9 @@ struct StudioView: View {
     /// Which phase rows are expanded to show their steps. The running phase
     /// opens by itself (see `phasesCard`); everything else is the user's call.
     @State private var expandedPhases: Set<PhaseID> = []
+    /// A take waiting on a confirmation before it is continued from / deleted.
+    @State private var takeToContinue: Take?
+    @State private var takeToDelete: Take?
 
     var body: some View {
         // Studio is a persistent tab now (Skin v2), not a pushed screen -
@@ -34,6 +37,7 @@ struct StudioView: View {
                 VStack(spacing: 16) {
                     header(p)
                     playerCard(p)
+                    staleBanner(p)
                     phasesCard(p)
                     liveListCard(p)
                     if !p.takes.isEmpty { takesCard(p) }
@@ -211,8 +215,9 @@ struct StudioView: View {
     @ViewBuilder private func phasesCard(_ p: Project) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Pipeline").sectionHeader().padding(.leading, 6)
+            let stale = store.staleReport(p).stale
             ForEach(PhaseID.allCases) { ph in
-                phaseRow(p, ph)
+                phaseRow(p, ph, stale: stale[ph] != nil)
             }
         }
         // The phase that is running opens by itself, so what it is doing is
@@ -227,16 +232,16 @@ struct StudioView: View {
             titleVisibility: .visible
         ) {
             Button("Redo", role: .destructive) {
-                if let ph = confirmRedoPhase { store.start(p.id, from: ph) }
+                if let ph = confirmRedoPhase { store.start(p.id, from: ph, note: "Redo from \(ph.title)") }
                 confirmRedoPhase = nil
             }
             Button("Cancel", role: .cancel) { confirmRedoPhase = nil }
         } message: {
-            Text("Runs \(confirmRedoPhase?.title ?? "this phase") again and everything after it in this take.")
+            Text("Runs \(confirmRedoPhase?.title ?? "this phase") again and everything after it as a new take. The current take is kept.")
         }
     }
 
-    @ViewBuilder private func phaseRow(_ p: Project, _ ph: PhaseID) -> some View {
+    @ViewBuilder private func phaseRow(_ p: Project, _ ph: PhaseID, stale: Bool) -> some View {
         let r = p.phase(ph)
         let open = expandedPhases.contains(ph)
         VStack(spacing: 0) {
@@ -246,7 +251,7 @@ struct StudioView: View {
                     if open { expandedPhases.remove(ph) } else { expandedPhases.insert(ph) }
                 }
             } label: {
-                phaseHeader(p, ph, r, open: open)
+                phaseHeader(p, ph, r, open: open, stale: stale)
             }
             .buttonStyle(.plain)
             .accessibilityHint(open ? "Hides this phase's steps" : "Shows this phase's steps")
@@ -263,12 +268,18 @@ struct StudioView: View {
         }
     }
 
-    private func phaseHeader(_ p: Project, _ ph: PhaseID, _ r: PhaseRecord, open: Bool) -> some View {
+    private func phaseHeader(_ p: Project, _ ph: PhaseID, _ r: PhaseRecord, open: Bool, stale: Bool) -> some View {
         HStack(spacing: 12) {
             PhaseIcon(status: r.status)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(ph.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    if r.status == .done, stale {
+                        Text("Out of date")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Theme.accent.opacity(0.15), in: .capsule)
+                    }
                     if ph == .captions, r.status == .done, !p.cards.isEmpty {
                         Text("\(p.cards.count) card\(p.cards.count == 1 ? "" : "s")")
                             .font(.caption2.weight(.semibold)).foregroundStyle(Theme.accent)
@@ -415,6 +426,32 @@ struct StudioView: View {
         }
     }
 
+    /// Settings changed since this video was made: say which, and offer to
+    /// re-run only what they affect as a new take (the PC's selective redo).
+    @ViewBuilder private func staleBanner(_ p: Project) -> some View {
+        let report = store.staleReport(p)
+        if !report.isEmpty, !store.isBusy(p.id) {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Settings changed", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                Text(report.changedLabels.joined(separator: ", "))
+                    .font(.footnote).foregroundStyle(Theme.ink2)
+                Text("Updating re-runs \(report.willRerun.map(\.title).joined(separator: ", ")) as a new take and keeps the rest. This take stays.")
+                    .font(.caption).foregroundStyle(Theme.ink2)
+                Button {
+                    Haptics.light()
+                    store.updateToSettings(p.id)
+                } label: {
+                    Text("Update with new settings")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.glass)
+            }
+            .glassCard()
+        }
+    }
+
     @ViewBuilder private func takesCard(_ p: Project) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -422,24 +459,96 @@ struct StudioView: View {
                 Spacer()
                 if isExportingCapCut { ProgressView().controlSize(.small) }
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(p.takes.reversed()) { take in
-                        Button(take.label, systemImage: take.file == p.output ? "checkmark.circle.fill" : "film") {
-                            store.update(p.id) { $0.output = take.file }
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(isExportingCapCut)
-                        .contextMenu {
-                            Button("Export to CapCut", systemImage: "square.and.arrow.up") {
-                                exportToCapCut(p, take)
-                            }
-                        }
-                    }
+            VStack(spacing: 0) {
+                ForEach(Array(p.takes.reversed().enumerated()), id: \.element.id) { i, take in
+                    if i > 0 { Rectangle().fill(Theme.glassEdge).frame(height: 0.5) }
+                    takeRow(p, take)
                 }
+            }
+            .confirmationDialog(
+                "Delete \(takeToDelete?.label ?? "this take")?",
+                isPresented: Binding(get: { takeToDelete != nil }, set: { if !$0 { takeToDelete = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let t = takeToDelete { store.deleteTake(p.id, takeID: t.id) }
+                    takeToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { takeToDelete = nil }
+            } message: {
+                Text("Removes its video and saved files. Other takes are not affected.")
             }
         }
         .glassCard()
+        .confirmationDialog(
+            "Continue from \(takeToContinue?.label ?? "this take")?",
+            isPresented: Binding(get: { takeToContinue != nil }, set: { if !$0 { takeToContinue = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Continue from it") {
+                if let t = takeToContinue {
+                    do { try store.restoreTake(p.id, takeID: t.id); Haptics.success() }
+                    catch { toastMessage = error.localizedDescription; Haptics.error() }
+                }
+                takeToContinue = nil
+            }
+            Button("Cancel", role: .cancel) { takeToContinue = nil }
+        } message: {
+            Text("Its script, images and narration become the working version. Every finished take is kept; only changes from a run that never finished are replaced.")
+        }
+    }
+
+    private func takeRow(_ p: Project, _ take: Take) -> some View {
+        let showing = take.file == p.output
+        let working = take.id == p.workingTakeID
+        return HStack(spacing: 12) {
+            Button {
+                Haptics.light()
+                store.update(p.id) { $0.output = take.file }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: showing ? "checkmark.circle.fill" : "film")
+                        .foregroundStyle(showing ? Theme.accent : Theme.ink2)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(take.label).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                            if working { sceneChip("Working version") }
+                        }
+                        Text(takeSubtitle(take)).font(.caption).foregroundStyle(Theme.ink2).lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .frame(minHeight: 52)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(showing ? .isSelected : [])
+
+            Menu {
+                if take.canRestore, !working {
+                    Button("Continue from this take", systemImage: "arrow.uturn.backward") { takeToContinue = take }
+                        .disabled(store.isBusy(p.id))
+                }
+                Button("Export to CapCut", systemImage: "square.and.arrow.up") { exportToCapCut(p, take) }
+                    .disabled(isExportingCapCut)
+                Button("Delete", systemImage: "trash", role: .destructive) { takeToDelete = take }
+                    .disabled(store.isBusy(p.id))
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 20)).foregroundStyle(Theme.ink2)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("More for \(take.label)")
+        }
+    }
+
+    /// "Today 14:05 · Changed: Narrator · from Take 1".
+    private func takeSubtitle(_ take: Take) -> String {
+        var parts = [take.created.formatted(date: .abbreviated, time: .shortened)]
+        if let note = take.note, !note.isEmpty { parts.append(note) }
+        if let from = take.basedOn { parts.append("from Take \(from)") }
+        return parts.joined(separator: " · ")
     }
 
     private func exportToCapCut(_ p: Project, _ take: Take) {
@@ -475,7 +584,17 @@ struct StudioView: View {
                         }
                         .frame(width: 64, height: 96).clipShape(.rect(cornerRadius: 12))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Scene \(s.index)").font(.caption.weight(.bold)).foregroundStyle(Theme.accent)
+                            HStack(spacing: 6) {
+                                Text("Scene \(s.index)").font(.caption.weight(.bold)).foregroundStyle(Theme.accent)
+                                // The scene's job from the splitter ("Hook"), and the
+                                // role/beat the story map gave it - what Director II
+                                // works from.
+                                if let label = s.label, !label.isEmpty { sceneChip(label) }
+                                if let entry = p.storyMap?.scenes.first(where: { $0.scene == s.index }) {
+                                    if !entry.role.isEmpty { sceneChip(entry.role.capitalized) }
+                                    if entry.beat != "none" { sceneChip(entry.beat.capitalized) }
+                                }
+                            }
                             Text(Pipeline.spoken(s.text)).font(.callout)
                         }
                     }
@@ -483,6 +602,15 @@ struct StudioView: View {
             }
             .glassCard()
         }
+    }
+
+    private func sceneChip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(Theme.ink2)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Theme.fill, in: .capsule)
+            .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
     }
 
     /// The mock's Export sheet: three rows (Save/CapCut/Share). All three
