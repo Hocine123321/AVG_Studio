@@ -155,7 +155,7 @@ final class CreativeTests: XCTestCase {
         XCTAssertTrue(partial.contains("<the image prompt, or [RECYCLE #k]>"))
         let all = CreativePrompts.segmentation(inputs, narration: "x", pool: pool, recycleRatio: 100)
         XCTAssertTrue(all.contains("ALWAYS the token [RECYCLE #k]"))
-        XCTAssertFalse(all.contains("at most"))
+        XCTAssertFalse(all.contains("of the scenes"), "all-pool mode has no re-use percentage cap")
         let off = CreativePrompts.segmentation(inputs, narration: "x", pool: pool, recycleRatio: 0)
         XCTAssertFalse(off.contains("POOL"))
     }
