@@ -109,8 +109,8 @@ struct SettingsView: View {
     }
 
     private var errorSummary: String {
-        let n = store.log.filter(\.isError).count
-        return n == 0 ? "No errors" : (n == 1 ? "1 error" : "\(n) errors")
+        let n = store.errorHistory.count
+        return n == 0 ? "No errors" : (n == 1 ? "1 saved error" : "\(n) saved errors")
     }
 
     // MARK: Search results

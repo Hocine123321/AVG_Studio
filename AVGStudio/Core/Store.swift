@@ -64,6 +64,10 @@ final class Store {
     /// Serialises the render phase across all running videos (RenderLease.swift).
     @ObservationIgnored let renderLease = RenderLease()
     var log: [LogEntry] = []
+    /// Model favourites and proven-working results (ModelPrefs.swift).
+    let modelPrefs = ModelPrefs()
+    /// Errors, kept across launches (see ErrorHistory.swift), newest first.
+    var errorHistory: [ErrorRecord] = []
     var tab: AppTab = .library
     /// The failure prompt currently waiting on the user (nil = none), and
     /// the continuation the paused render resumes from once they choose.
@@ -96,6 +100,7 @@ final class Store {
     static var projectsDir: URL { root.appendingPathComponent("Projects", isDirectory: true) }
     static var reusableImagesDir: URL { root.appendingPathComponent("ReusableImages", isDirectory: true) }
     private static var metaURL: URL { root.appendingPathComponent(".avg-meta.json") }
+    private static var errorsURL: URL { root.appendingPathComponent(".avg-errors.json") }
 
     init() { load() }
 
@@ -104,6 +109,7 @@ final class Store {
     func load() {
         loading = true
         defer { loading = false }
+        errorHistory = ErrorHistory.load(Self.errorsURL)
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.projectsDir, withIntermediateDirectories: true)
         if let d = try? Data(contentsOf: Self.metaURL) {
@@ -449,9 +455,23 @@ final class Store {
     /// so distinct attempts stay visually distinguishable without needing
     /// a second on-disk layout.
     func record(_ id: String?, _ message: String, error: Bool = false) {
+        // Nothing credential-shaped reaches the screen, the project log (which
+        // the Files app can show) or the error history. Errors also scrub the
+        // exact stored key values; routine lines only the cheap patterns.
+        let secrets = error ? APIKey.allCases.compactMap { Keychain.get($0) } : []
+        let message = Redactor.scrub(message, secrets: secrets)
         log.insert(LogEntry(message: message, isError: error), at: 0)
         if log.count > 300 { log.removeLast() }
         if let id { appendToProjectLog(id, message) }
+        if error {
+            let title = id.flatMap { project($0)?.title }
+            errorHistory = ErrorHistory.append(ErrorRecord(date: Date(), message: message, project: title), to: Self.errorsURL)
+        }
+    }
+
+    func clearErrorHistory() {
+        ErrorHistory.clear(Self.errorsURL)
+        errorHistory = []
     }
 
     private static let logStamp: DateFormatter = {
