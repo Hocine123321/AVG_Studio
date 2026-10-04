@@ -232,7 +232,7 @@ enum Recovery {
             plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) blocked this topic",
                 reason: "The safety filter flagged the request. Switching model won't change that, but rewording the topic or trying another provider often does.",
                 actions: [.reword] + switches + [.stop])
-        case .dependency, .bug:
+        case .dependency, .bug, .malformedOutput:
             return nil
         }
         if var p = plan {

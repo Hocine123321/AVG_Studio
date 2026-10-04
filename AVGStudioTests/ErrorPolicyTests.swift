@@ -32,7 +32,7 @@ final class ErrorPolicyTests: XCTestCase {
 
     func testEveryKindHasAPolicyAndTheRulesAreCoherent() {
         let all: [ErrorKind] = [.auth, .quota, .billing, .rateLimit, .modelMissing,
-                                .contentFilter, .network, .timeout, .dependency, .bug]
+                                .contentFilter, .network, .timeout, .dependency, .bug, .malformedOutput]
         for kind in all {
             guard let rule = POLICY[kind] else { return XCTFail("no POLICY entry for \(kind)") }
             XCTAssertGreaterThanOrEqual(rule.maxAttempts, 1)
@@ -46,5 +46,36 @@ final class ErrorPolicyTests: XCTestCase {
         XCTAssertEqual(POLICY[.auth]?.onExhausted, .switchKey)
         XCTAssertEqual(POLICY[.modelMissing]?.onExhausted, .switchModel)
         XCTAssertEqual(POLICY[.contentFilter]?.onExhausted, .fail)
+    }
+
+    // MARK: Malformed tool calls (the in-app assistant)
+
+    func testMalformedOutputIsNeverRetriedAsTransport() {
+        let rule = POLICY[.malformedOutput]
+        XCTAssertEqual(rule?.retryable, false)
+        XCTAssertEqual(rule?.maxAttempts, 1)
+        XCTAssertEqual(rule?.onExhausted, .fail)
+    }
+
+    func testGroqToolUseFailedIsMalformedOutput() {
+        let body = #"{"error":{"message":"Failed to call a function. Please adjust your prompt.","type":"invalid_request_error","code":"tool_use_failed","failed_generation":"<function=list_projects>{}"}}"#
+        XCTAssertEqual(classify(status: 400, body: body, provider: "groq"), .malformedOutput)
+    }
+
+    func testToolUseFailedWinsOverWordsInsideTheModelsOwnOutput() {
+        // The model's failed_generation can say anything; the structural code decides.
+        let body = #"{"error":{"message":"Failed to call a function.","code":"tool_use_failed","failed_generation":"rate limit exceeded, harmful content, quota exceeded, unauthorized"}}"#
+        XCTAssertEqual(classify(status: 400, body: body, provider: "groq"), .malformedOutput)
+    }
+
+    func testToolUseFailedIsGroqSpecific() {
+        let body = #"{"error":{"code":"tool_use_failed"}}"#
+        XCTAssertNotEqual(classify(status: 400, body: body, provider: "gemini"), .malformedOutput)
+    }
+
+    func testOrdinaryGroqErrorsAreUnchanged() {
+        XCTAssertEqual(classify(status: 429, body: "", provider: "groq"), .rateLimit)
+        XCTAssertEqual(classify(status: 401, body: "", provider: "groq"), .auth)
+        XCTAssertEqual(classify(status: 400, body: #"{"error":{"message":"tool calling is not supported with this model"}}"#, provider: "groq"), .bug)
     }
 }

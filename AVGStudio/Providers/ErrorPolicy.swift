@@ -14,6 +14,11 @@ import Foundation
 /// HuggingFace provider for them to ever match against.
 enum ErrorKind: String, Sendable {
     case auth, quota, billing, rateLimit, modelMissing, contentFilter, network, timeout, dependency, bug
+    /// The model produced a tool call the provider could not parse (Groq's
+    /// HTTP 400 `tool_use_failed`, Gemini's `Malformed_Function_Call`). Not a
+    /// transport problem: repeating the identical request is pointless, so
+    /// the agent loop answers it by asking the model to try again.
+    case malformedOutput
 }
 
 /// What `POLICY[kind].onExhausted` means once retrying is no longer an
@@ -47,6 +52,7 @@ let POLICY: [ErrorKind: RetryRule] = [
     .contentFilter: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .fail),
     .bug: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .fail),
     .dependency: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .fail),
+    .malformedOutput: RetryRule(retryable: false, maxAttempts: 1, backoffSeconds: 0, onExhausted: .fail),
 ]
 
 /// One human sentence for `onExhausted`, appended to the final error so a
@@ -79,7 +85,7 @@ private func matches(_ text: String, _ patterns: [NSRegularExpression]) -> Bool 
 /// before quota (a cap that resets on its own), matching the PC's own
 /// `_CHECK_ORDER` reasoning: a body mentioning both loses to billing, the
 /// more actionable, more specific claim.
-private let checkOrder: [ErrorKind] = [.contentFilter, .auth, .billing, .quota, .modelMissing, .rateLimit, .network, .timeout]
+private let checkOrder: [ErrorKind] = [.malformedOutput, .contentFilter, .auth, .billing, .quota, .modelMissing, .rateLimit, .network, .timeout]
 
 /// Patterns holding regardless of provider - ported verbatim from
 /// `avg/providers/errors.py`'s `_GENERIC` table.
@@ -120,8 +126,13 @@ private let providerSpecific: [String: [ErrorKind: [NSRegularExpression]]] = [
         .contentFilter: ["\\bsafety\\b", "prohibited_content", "blockreason"].map(rx),
         .auth: ["permission_denied"].map(rx),
     ],
-    // openai / groq: no provider-specific vocabulary found in the PC's own
-    // legacy classifier either - generic patterns apply as-is.
+    // Groq's structural error code for a malformed tool call. It is checked
+    // FIRST (see `checkOrder`) because the same body carries the model's own
+    // `failed_generation` text, which can contain any words at all - "rate
+    // limit", "harmful content" - and must not be classified by them.
+    "groq": [.malformedOutput: ["tool_use_failed"].map(rx)],
+    // openai: no provider-specific vocabulary found in the PC's own legacy
+    // classifier either - generic patterns apply as-is.
 ]
 
 private func providerKey(_ provider: String) -> String {
