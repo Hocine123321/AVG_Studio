@@ -97,8 +97,14 @@ extension AgentMessage {
     }
 }
 
+/// `Agent.host` is weak (the real host, `Store`, owns the agent), so a test
+/// that passes `FakeAgentHost()` inline would lose it the moment `makeAgent`
+/// returns. Keeping them here for the life of the test run is harmless.
+@MainActor private var retainedHosts: [FakeAgentHost] = []
+
 @MainActor
 func makeAgent(_ provider: ScriptedProvider, host: FakeAgentHost) -> Agent {
+    retainedHosts.append(host)
     let a = Agent()
     a.host = host
     a.makeProvider = { _ in provider }
