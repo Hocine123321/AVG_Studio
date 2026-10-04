@@ -127,39 +127,30 @@ struct Pipeline {
     // Flat, clearly-labelled guesses (see CostEntry's doc comment) - not
     // real billing. Free/on-device providers never post a cost.
 
+    // The rates themselves live in `CostRates` so the assistant's pre-start
+    // estimate and these recorded lines can never disagree.
+
     private func costText(_ kind: TextProviderKind, chars: Int) {
-        let rate: Double
-        switch kind {
-        case .apple, .pollinations: return
-        case .gemini: rate = 0.00000025 // ~$0.25 / 1M chars, ballpark for a flash-tier model
-        case .groq: rate = 0.00000015
-        }
+        let rate = CostRates.text(kind)
+        guard rate > 0 else { return }
         store.addCost(projectID, "\(kind.label) · \(chars) chars", Double(chars) * rate)
     }
 
     private func costImage(_ kind: ImageProviderKind) {
-        let flat: Double
-        switch kind {
-        case .pollinations, .stablehorde: return
-        case .gemini: flat = 0.02
-        case .openai: flat = 0.04
-        }
+        let flat = CostRates.image(kind)
+        guard flat > 0 else { return }
         store.addCost(projectID, "\(kind.label) image", flat)
     }
 
     private func costVoice(_ kind: VoiceProviderKind, chars: Int) {
-        switch kind {
-        case .apple: return
-        case .elevenlabs: store.addCost(projectID, "ElevenLabs · \(chars) chars", Double(chars) * 0.00003)
-        // Ballpark for a preview-tier Gemini TTS model, same "flat,
-        // clearly-labelled guess" spirit as every other rate in this
-        // method - not real billing.
-        case .gemini: store.addCost(projectID, "Gemini TTS · \(chars) chars", Double(chars) * 0.00002)
-        }
+        let rate = CostRates.voice(kind)
+        guard rate > 0 else { return }
+        let name = kind == .elevenlabs ? "ElevenLabs" : "Gemini TTS"
+        store.addCost(projectID, "\(name) · \(chars) chars", Double(chars) * rate)
     }
 
     private func costTranscription(seconds: Double) {
-        store.addCost(projectID, "AssemblyAI · \(Int(seconds))s audio", seconds / 60.0 * 0.01)
+        store.addCost(projectID, "AssemblyAI · \(Int(seconds))s audio", seconds / 60.0 * CostRates.transcriptionPerMinute)
     }
 
     // MARK: Phase 0+1 — brief, narration, scenes
