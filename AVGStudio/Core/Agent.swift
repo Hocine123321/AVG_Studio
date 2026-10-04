@@ -78,7 +78,10 @@ final class Agent {
         guard !trimmed.isEmpty, !isWorking, host != nil else { return Task {} }
         isWorking = true
         lines.append(Line(kind: .user, text: trimmed))
-        let task = Task { [weak self] in await self?.runTurn(trimmed) }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.runTurn(trimmed)
+        }
         turnTask = task
         return task
     }
