@@ -75,6 +75,8 @@ final class Store {
     var interruptedProjectID: String?
 
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
+    /// The in-app chat assistant. It drives this store through `AgentHost`.
+    let agent = Agent()
     @ObservationIgnored private var loading = false
     @ObservationIgnored private var metaSaveTask: Task<Void, Never>?
 
@@ -86,7 +88,10 @@ final class Store {
     static var reusableImagesDir: URL { root.appendingPathComponent("ReusableImages", isDirectory: true) }
     private static var metaURL: URL { root.appendingPathComponent(".avg-meta.json") }
 
-    init() { load() }
+    init() {
+        load()
+        agent.host = self
+    }
 
     // MARK: Persistence
 

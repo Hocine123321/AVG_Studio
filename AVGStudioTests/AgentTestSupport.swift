@@ -59,3 +59,58 @@ extension AgentContext {
 func toolCall(_ name: String, _ json: String = "{}", id: String = "call_1") -> AgentToolCall {
     AgentToolCall(id: id, name: name, argumentsJSON: json)
 }
+
+/// A provider that plays back a script and records every request it was sent.
+final class ScriptedProvider: AgentProvider, @unchecked Sendable {
+    struct Call { let system: String; let messages: [AgentMessage]; let tools: [AgentToolSpec] }
+
+    private let lock = NSLock()
+    private var script: (Int, [AgentMessage]) -> Result<AgentMessage, Error>
+    private var recorded: [Call] = []
+
+    /// `script` gets the zero-based call number and the messages it was sent.
+    init(_ script: @escaping (Int, [AgentMessage]) -> Result<AgentMessage, Error>) {
+        self.script = script
+    }
+
+    /// Plays these replies in order; asking for more fails the test run's turn.
+    convenience init(queue: [Result<AgentMessage, Error>]) {
+        self.init { i, _ in i < queue.count ? queue[i] : .failure(AVGError.message("script exhausted")) }
+    }
+
+    var calls: [Call] { lock.lock(); defer { lock.unlock() }; return recorded }
+
+    private func next(_ call: Call) -> Result<AgentMessage, Error> {
+        lock.lock(); defer { lock.unlock() }
+        recorded.append(call)
+        return script(recorded.count - 1, call.messages)
+    }
+
+    func respond(system: String, messages: [AgentMessage], tools: [AgentToolSpec]) async throws -> AgentMessage {
+        try next(Call(system: system, messages: messages, tools: tools)).get()
+    }
+}
+
+extension AgentMessage {
+    static func calling(_ name: String, _ json: String = "{}", id: String = "call_1") -> AgentMessage {
+        .assistant(text: "", calls: [toolCall(name, json, id: id)])
+    }
+}
+
+@MainActor
+func makeAgent(_ provider: ScriptedProvider, host: FakeAgentHost) -> Agent {
+    let a = Agent()
+    a.host = host
+    a.makeProvider = { _ in provider }
+    a.makeContext = { AgentContext.test($0) }
+    return a
+}
+
+@MainActor
+func waitFor(_ what: String = "condition", _ cond: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+    for _ in 0..<600 {
+        if cond() { return }
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
+    XCTFail("timed out waiting for \(what)", file: file, line: line)
+}
