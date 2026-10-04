@@ -518,3 +518,6 @@ extension JSONDecoder {
         return d
     }
 }
+
+// The agent drives the app through exactly these members; see AgentTools.swift.
+extension Store: AgentHost {}
