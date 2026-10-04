@@ -39,7 +39,6 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(PhaseID.allCases, [.writing, .visuals, .voice, .captions, .render])
         XCTAssertEqual(PhaseID.render.order, 4)
     }
-}
 
     // MARK: Assistant settings
 
