@@ -605,6 +605,28 @@ struct AppSettings: Codable {
     var filterStyle: FilterStyle = .none
     var filterIntensity: Double = 50
 
+    // MARK: Assistant (the in-app chat agent; see AgentSettings.swift)
+    var agentProvider: AgentProviderKind = .groq
+    var agentGroqModel = "llama-3.3-70b-versatile"
+    var agentGeminiModel = "gemini-2.5-flash"
+    /// If the chosen service is rate-limited or out of quota, try the other
+    /// one (when its key exists) - but only before any tool has run.
+    var agentFailover = true
+    /// A turned-off action is not even offered to the model.
+    var agentAllowCreate = true
+    var agentAllowRedo = true
+    var agentAllowCancel = true
+    var agentApproval: AgentApprovalMode = .always
+    /// Most the assistant may have approved in one chat (USD estimate).
+    var agentChatSpendCapUSD = AgentSettingsRules.spendCapDefault
+    var agentReplyStyle: AgentReplyStyle = .brief
+    /// Post "ready" / "stopped" in the chat for videos the assistant started.
+    var agentAnnounceResults = true
+    /// Save the conversation (your messages and its answers) across launches.
+    var agentKeepChat = false
+    /// Standing preferences added to the system prompt; capped at 400.
+    var agentInstructions = ""
+
     /// Tolerant decode: a key missing from an older save (i.e. any field
     /// added in an update) keeps its default instead of failing the whole
     /// settings blob - which used to reset EVERY setting on each update.
@@ -649,6 +671,19 @@ struct AppSettings: Codable {
         filterStyle = c.value("filterStyle", filterStyle)
         filterIntensity = c.value("filterIntensity", filterIntensity)
         appFont = c.value("appFont", appFont)
+        agentProvider = c.value("agentProvider", agentProvider)
+        agentGroqModel = c.value("agentGroqModel", agentGroqModel)
+        agentGeminiModel = c.value("agentGeminiModel", agentGeminiModel)
+        agentFailover = c.value("agentFailover", agentFailover)
+        agentAllowCreate = c.value("agentAllowCreate", agentAllowCreate)
+        agentAllowRedo = c.value("agentAllowRedo", agentAllowRedo)
+        agentAllowCancel = c.value("agentAllowCancel", agentAllowCancel)
+        agentApproval = c.value("agentApproval", agentApproval)
+        agentChatSpendCapUSD = c.value("agentChatSpendCapUSD", agentChatSpendCapUSD)
+        agentReplyStyle = c.value("agentReplyStyle", agentReplyStyle)
+        agentAnnounceResults = c.value("agentAnnounceResults", agentAnnounceResults)
+        agentKeepChat = c.value("agentKeepChat", agentKeepChat)
+        agentInstructions = c.value("agentInstructions", agentInstructions)
     }
 }
 
