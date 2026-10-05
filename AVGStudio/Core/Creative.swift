@@ -647,6 +647,37 @@ enum CreativePrompts {
         - emotional arc: \(emotionalArc)\(brandSection)
         """
     }
+
+    /// The chapter cards in Director I's `parts` array. A part becomes a card
+    /// BEFORE its first scene, so part 1 (which starts at scene 1) never gets
+    /// one - the video opens on its first scene, and cards only sit BETWEEN
+    /// parts, exactly the PC's `_normalize_part_entry`. Entries naming no real
+    /// scene, or with no title, are dropped; duration is kept to 1-3 seconds.
+    static func parseChapters(_ raw: String, sceneCount: Int) -> [Chapter] {
+        guard let json = Pipeline.extractJSONObject(raw),
+              let obj = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+              let parts = obj["parts"] as? [Any] else { return [] }
+        func int(_ v: Any?) -> Int? {
+            if let i = v as? Int { return i }
+            if let d = v as? Double { return Int(d) }
+            if let s = v as? String { return Int(s.trimmingCharacters(in: .whitespaces)) }
+            return nil
+        }
+        var seen = Set<Int>()
+        var out: [Chapter] = []
+        for entry in parts {
+            guard let e = entry as? [String: Any] else { continue }
+            let scenes = ((e["scenes"] as? [Any]) ?? []).compactMap(int).filter { $0 >= 1 && $0 <= sceneCount }.sorted()
+            guard let first = scenes.first, first > 1, seen.insert(first).inserted else { continue }
+            let title = ((e["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            let sub = ((e["sub"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let seconds = (e["duration_sec"] as? Double) ?? Double(int(e["duration_sec"]) ?? 0)
+            out.append(Chapter(beforeScene: first, title: title, subtitle: sub.isEmpty ? nil : sub,
+                               duration: seconds > 0 ? min(Chapter.maxDuration, max(Chapter.minDuration, seconds)) : Chapter.defaultDuration))
+        }
+        return out.sorted { $0.beforeScene < $1.beforeScene }
+    }
 }
 
 // MARK: - Story map (Director I's result)
@@ -722,37 +753,6 @@ struct StoryMap: Codable, Hashable {
         }
         let notes = ((obj["notes"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return StoryMap(imageCount: count, scenes: scenes, zoomWords: zoom, notes: notes)
-    }
-
-    /// The chapter cards in Director I's `parts` array. A part becomes a card
-    /// BEFORE its first scene, so part 1 (which starts at scene 1) never gets
-    /// one - the video opens on its first scene, and cards only sit BETWEEN
-    /// parts, exactly the PC's `_normalize_part_entry`. Entries naming no real
-    /// scene, or with no title, are dropped; duration is kept to 1-3 seconds.
-    static func parseChapters(_ raw: String, sceneCount: Int) -> [Chapter] {
-        guard let json = Pipeline.extractJSONObject(raw),
-              let obj = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
-              let parts = obj["parts"] as? [Any] else { return [] }
-        func int(_ v: Any?) -> Int? {
-            if let i = v as? Int { return i }
-            if let d = v as? Double { return Int(d) }
-            if let s = v as? String { return Int(s.trimmingCharacters(in: .whitespaces)) }
-            return nil
-        }
-        var seen = Set<Int>()
-        var out: [Chapter] = []
-        for entry in parts {
-            guard let e = entry as? [String: Any] else { continue }
-            let scenes = ((e["scenes"] as? [Any]) ?? []).compactMap(int).filter { $0 >= 1 && $0 <= sceneCount }.sorted()
-            guard let first = scenes.first, first > 1, seen.insert(first).inserted else { continue }
-            let title = ((e["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty else { continue }
-            let sub = ((e["sub"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let seconds = (e["duration_sec"] as? Double) ?? Double(int(e["duration_sec"]) ?? 0)
-            out.append(Chapter(beforeScene: first, title: title, subtitle: sub.isEmpty ? nil : sub,
-                               duration: seconds > 0 ? min(Chapter.maxDuration, max(Chapter.minDuration, seconds)) : Chapter.defaultDuration))
-        }
-        return out.sorted { $0.beforeScene < $1.beforeScene }
     }
 
     /// One line per scene for Director II's prompt, e.g. `[3] role=reveal beat=HIT intent=POP`.
