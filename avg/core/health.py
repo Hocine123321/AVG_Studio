@@ -372,28 +372,6 @@ def _safeguard_checks(output_root: Path | None) -> list[Component]:
     except Exception as exc:  # noqa: BLE001
         checks.append(Component(name="Provider keys", ok=False, detail=str(exc)))
 
-    try:
-        from avg.config import provider_health
-
-        # An active cooldown is informative, not a broken install (see
-        # Component.required's own docstring) - other providers may still
-        # work, so this never blocks a run the way "Provider keys" can.
-        active = []
-        for name in ("groq", "gemini", "elevenlabs", "assemblyai"):
-            cooldown = provider_health.active_cooldown(name)
-            if cooldown is not None:
-                active.append(f"{name}{provider_health.cooldown_message_suffix(cooldown)}")
-        checks.append(
-            Component(
-                name="Provider cooldowns",
-                ok=not active,
-                required=False,
-                detail="; ".join(active) if active else "none active",
-            )
-        )
-    except Exception as exc:  # noqa: BLE001
-        checks.append(Component(name="Provider cooldowns", ok=True, required=False, detail=f"could not check: {exc}"))
-
     return checks
 
 

@@ -36,13 +36,8 @@ beyond the standard library and `avg.core.errors`.
 
 from __future__ import annotations
 
-import json
 import re
-from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Literal
 
 from avg.core.errors import ErrorKind
@@ -329,45 +324,3 @@ def classify(status: int | None, body: str, exc: Exception | None, provider: str
         return _classify_exception(exc)
 
     return ErrorKind.bug
-
-
-def retry_after_seconds(headers: Mapping[str, str] | None, body: str) -> float | None:
-    """How long a provider says to wait before retrying, in seconds.
-
-    Checked in this order: a `Retry-After` response header (the seconds
-    form, or an HTTP-date — RFC 9110 §10.2.3 allows both, though only the
-    seconds form has been seen from any provider this app actually calls),
-    then a Gemini-shaped JSON body's `error.details[].retryDelay` (e.g.
-    `"15s"`). Returns `None` when neither is present or neither parses —
-    the caller's own fixed backoff formula is exactly that fallback,
-    unaffected by this function existing.
-
-    Never raises. `headers` is intentionally untyped beyond `Mapping[str,
-    str]` — an `httpx.Headers` object satisfies this without a cast.
-    """
-    if headers:
-        raw = headers.get("Retry-After") or headers.get("retry-after")
-        if raw:
-            raw = raw.strip()
-            if raw.isdigit():
-                return float(raw)
-            with suppress(Exception):
-                parsed = parsedate_to_datetime(raw)
-                if parsed is not None:
-                    if parsed.tzinfo is None:
-                        parsed = parsed.replace(tzinfo=timezone.utc)
-                    delta = (parsed - datetime.now(timezone.utc)).total_seconds()
-                    if delta > 0:
-                        return delta
-
-    if body:
-        with suppress(Exception):
-            data = json.loads(body)
-            details = data.get("error", {}).get("details", [])
-            if isinstance(details, list):
-                for detail in details:
-                    if isinstance(detail, dict) and "retryDelay" in detail:
-                        value = str(detail["retryDelay"]).strip()
-                        return float(value[:-1]) if value.endswith("s") else float(value)
-
-    return None

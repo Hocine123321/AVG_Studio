@@ -1,7 +1,7 @@
 import pytest
 
 from avg.core.errors import ErrorKind
-from avg.providers.errors import POLICY, RetryRule, classify, retry_after_seconds
+from avg.providers.errors import POLICY, RetryRule, classify
 
 # ---------------------------------------------------------------------------
 # POLICY — every row of the brief's table, verbatim.
@@ -273,51 +273,3 @@ def test_classify_never_returns_resource():
     ]
     for status, body, exc, provider in samples:
         assert classify(status, body, exc, provider) != ErrorKind.resource
-
-
-def test_retry_after_seconds_reads_the_seconds_form_of_the_header():
-    assert retry_after_seconds({"Retry-After": "30"}, "") == 30.0
-
-
-def test_retry_after_seconds_is_case_insensitive_on_header_name():
-    assert retry_after_seconds({"retry-after": "15"}, "") == 15.0
-
-
-def test_retry_after_seconds_reads_an_http_date_header():
-    from datetime import datetime, timedelta, timezone
-    from email.utils import format_datetime
-
-    future = datetime.now(timezone.utc) + timedelta(seconds=45)
-    header = format_datetime(future, usegmt=True)
-    value = retry_after_seconds({"Retry-After": header}, "")
-    assert value is not None
-    assert 40.0 < value <= 45.0
-
-
-def test_retry_after_seconds_reads_a_past_http_date_as_none():
-    from datetime import datetime, timedelta, timezone
-    from email.utils import format_datetime
-
-    past = datetime.now(timezone.utc) - timedelta(seconds=45)
-    header = format_datetime(past, usegmt=True)
-    assert retry_after_seconds({"Retry-After": header}, "") is None
-
-
-def test_retry_after_seconds_reads_geminis_body_shaped_retry_delay():
-    body = (
-        '{"error": {"code": 429, "message": "quota", "details": '
-        '[{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}]}}'
-    )
-    assert retry_after_seconds(None, body) == 15.0
-
-
-def test_retry_after_seconds_returns_none_when_neither_is_present():
-    assert retry_after_seconds({}, "") is None
-    assert retry_after_seconds(None, "not json") is None
-    assert retry_after_seconds({"Content-Type": "application/json"}, "{}") is None
-
-
-def test_retry_after_seconds_never_raises_on_garbage_input():
-    assert retry_after_seconds({"Retry-After": "not-a-number-or-date"}, "") is None
-    assert retry_after_seconds(None, '{"error": {"details": "not-a-list"}}') is None
-    assert retry_after_seconds(None, '{"error": {"details": [{"retryDelay": "abc"}]}}') is None

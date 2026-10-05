@@ -744,13 +744,6 @@ SETTINGS: list[SettingSpec] = [
     SettingSpec(id="assemblyai", group="keys", label="AssemblyAI API key",
                 help="Used for AssemblyAI caption transcription.", type="secret", default=None, scope="app",
                 invalidates=None),
-    SettingSpec(id="resilience_rate_limit_wait_ceiling_sec", group="app", label="Rate-limit wait ceiling (seconds)",
-                help="The longest this app will ever sleep for a single rate-limit retry, even if a provider "
-                     "reports a longer wait.", type="int", default=120, scope="app", invalidates=None),
-    SettingSpec(id="resilience_quota_cooldown_hours", group="app", label="Quota cooldown (hours)",
-                help="How long a provider is skipped after its quota is reported exhausted, when the provider "
-                     "itself gives no better reset time.", type="float", default=24.0, scope="app",
-                invalidates=None),
 ]
 
 BY_ID: dict[str, SettingSpec] = {s.id: s for s in SETTINGS}
