@@ -59,7 +59,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "mypy"]
-media = ["numpy", "Pillow", "pydub"]
+# `audioop-lts`: pydub 0.25.1 still does `import audioop`, which PEP 594
+# removed from the stdlib in Python 3.13. Without this the Voice phase
+# (silence removal, narration assembly) dies at import time on 3.13+.
+media = [
+    "numpy",
+    "Pillow",
+    "pydub",
+    "audioop-lts; python_version >= '3.13'",
+]
 # The native-window UI stack - pywebview plus its Qt backend on this
 # fork. Split out from the base `dependencies` list, not bundled in
 # unconditionally: avg.api.app (the FastAPI server, every provider,

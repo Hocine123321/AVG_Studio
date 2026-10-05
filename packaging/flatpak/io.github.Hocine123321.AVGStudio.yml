@@ -194,6 +194,12 @@ modules:
       #    app - which genuinely needs the native window, unlike
       #    tools/dev_serve_linux.py - has to ask for it explicitly.
       #
+      #    `,media` too: numpy/Pillow/pydub are imported at call time by
+      #    the Voice, Visuals and render phases, so a build without them
+      #    installs and launches fine and then fails on the first
+      #    pipeline run. (Plus audioop-lts on Python >= 3.13, which
+      #    the extra pulls in by marker.)
+      #
       #    Not --no-cache-dir: that flag was forcing a full re-download
       #    of every wheel (PySide6/PySide6-Addons alone is ~280-300MB)
       #    on every single refresh, even when pyproject.toml's
@@ -206,7 +212,7 @@ modules:
       #    avoid re-running this build-commands list itself - see the
       #    `skip:` comment above for why that part is unavoidable for a
       #    `dir` source.
-      - pip3 install --prefix=/app ".[gui]"
+      - pip3 install --prefix=/app ".[gui,media]"
 
       # 2. web/dist next to wherever `avg` actually landed under
       #    site-packages. avg/api/app.py's WEB_DIST constant is
