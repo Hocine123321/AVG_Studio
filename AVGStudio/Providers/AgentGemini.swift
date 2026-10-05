@@ -81,10 +81,13 @@ struct GeminiAgent: AgentProvider {
             }
         }
 
+        // Typed explicitly: an untyped `["temperature": 0.2, "maxOutputTokens": 4096]`
+        // literal infers [String: Double], which would send the token limit as 4096.0.
+        let generation: [String: Any] = ["temperature": 0.2, "maxOutputTokens": 4096]
         var body: [String: Any] = [
             "systemInstruction": ["parts": [["text": system]]],
             "contents": contents,
-            "generationConfig": ["temperature": 0.2, "maxOutputTokens": 4096],
+            "generationConfig": generation,
         ]
         if !tools.isEmpty {
             body["tools"] = [["functionDeclarations": tools.map { declaration($0) }]]
