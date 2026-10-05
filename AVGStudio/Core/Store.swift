@@ -352,6 +352,7 @@ final class Store {
             }
             self?.tasks[id] = nil
             self?.jobs[id] = nil
+            self?.agent.projectFinished(id)
         }
     }
 

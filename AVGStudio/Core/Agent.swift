@@ -45,6 +45,17 @@ final class Agent {
     private(set) var isWorking = false
     private(set) var pendingApproval: AgentApproval?
     var isOpen = false
+    /// Sum of the estimates of everything approved (or auto-started) in this
+    /// chat. Checked against the per-chat spend limit; zeroed by `reset()`.
+    private(set) var approvedSpendUSD = 0.0
+
+    struct Announcement: Equatable {
+        let id: UUID
+        let ok: Bool
+    }
+    /// The newest "ready" / "stopped" announcement; the sheet watches it to
+    /// fire a haptic.
+    private(set) var lastAnnouncement: Announcement?
 
     // MARK: Wiring (not UI state)
 
@@ -61,6 +72,10 @@ final class Agent {
     /// Bumped by `reset()`. A turn that was already running when the chat was
     /// cleared must not write into the new, empty chat.
     @ObservationIgnored private var epoch = 0
+    /// Projects this assistant started or redid, so only those are announced.
+    @ObservationIgnored private var startedByAgent: Set<String> = []
+    /// At most one action per message may start without a tap.
+    @ObservationIgnored private var autoStartedThisMessage = false
 
     init() {
         makeProvider = { [weak self] kind in
@@ -102,6 +117,7 @@ final class Agent {
         stop()
         lines = []
         wire = []
+        approvedSpendUSD = 0
     }
 
     private func resolveApproval(_ approved: Bool) {
@@ -130,11 +146,12 @@ final class Agent {
             wire.append(m)
         }
 
+        autoStartedThisMessage = false
         remember(.user(userText))
         let settings = host.settings
         let context = makeContext(settings)
         let tools = AgentTools.specs(for: settings)
-        let system = Self.systemPrompt(for: settings)
+        let system = AgentPrompt.system(settings: settings)
         var steps = 0
         var nudges = 0
 
@@ -178,7 +195,7 @@ final class Agent {
                 case .result(let text):
                     result = text
                 case .needsApproval(let approval):
-                    result = await ask(approval, host: host)
+                    result = await handle(approval, host: host, settings: settings)
                 }
                 remember(.tool(callID: call.id, name: call.name, text: result))
             }
@@ -189,9 +206,19 @@ final class Agent {
         }
     }
 
-    /// Shows the approval and waits for the person. Returns the text the model
-    /// gets back as the tool result.
-    private func ask(_ approval: AgentApproval, host: any AgentHost) async -> String {
+    /// Applies the spend limit and the approval policy to a gated action and
+    /// returns the text the model gets back as the tool result.
+    private func handle(_ approval: AgentApproval, host: any AgentHost, settings: AppSettings) async -> String {
+        let cap = AgentSettingsRules.spendCap(settings.agentChatSpendCapUSD)
+        if case .overLimit = AgentPolicy.spendVerdict(approvedSoFar: approvedSpendUSD, adding: approval.estimateUSD, cap: cap) {
+            return "This chat's spend limit (\(Self.dollars(cap))) would be passed. Tell the user; they can raise it in Settings > Assistant or start a new chat."
+        }
+        // Free work may start without a tap if the person chose that - once
+        // per message. A second one in the same message asks like any other.
+        if !AgentPolicy.needsTap(approval, settings: settings), !autoStartedThisMessage {
+            autoStartedThisMessage = true
+            return carryOut(approval, host: host)
+        }
         // Stopped before we got here: there is nobody to ask, and a
         // continuation set now would never be resumed.
         guard !Task.isCancelled else { return "The user declined." }
@@ -200,7 +227,36 @@ final class Agent {
             approvalContinuation = c
         }
         guard approved else { return "The user declined." }
-        return AgentTools.perform(approval.action, host: host).text
+        return carryOut(approval, host: host)
+    }
+
+    private func carryOut(_ approval: AgentApproval, host: any AgentHost) -> String {
+        approvedSpendUSD += approval.estimateUSD
+        let done = AgentTools.perform(approval.action, host: host)
+        if let id = done.projectID { startedByAgent.insert(id) }
+        return done.text
+    }
+
+    // MARK: Announcements
+
+    /// Called by `Store` when any pipeline run ends. Says so in the chat, for
+    /// projects this assistant started, if the person wants that. Never calls
+    /// the provider, so it costs no tokens.
+    func projectFinished(_ id: String) {
+        guard startedByAgent.contains(id), let host, host.settings.agentAnnounceResults,
+              let project = host.projects.first(where: { $0.id == id }) else { return }
+        let title = project.title
+        if let failed = PhaseID.allCases.first(where: { project.phase($0).status == .failed }) {
+            startedByAgent.remove(id)
+            let why = project.phase(failed).error ?? "no details"
+            lines.append(Line(kind: .announcement, text: "“\(title)” stopped at \(failed.title): \(why)"))
+            lastAnnouncement = Announcement(id: UUID(), ok: false)
+        } else if PhaseID.allCases.allSatisfy({ project.phase($0).status == .done }) {
+            startedByAgent.remove(id)
+            lines.append(Line(kind: .announcement, text: "“\(title)” is ready."))
+            lastAnnouncement = Announcement(id: UUID(), ok: true)
+        }
+        // Neither (cancelled, or still going): say nothing.
     }
 
     // MARK: Self-test
@@ -239,10 +295,7 @@ final class Agent {
         }
     }
 
-    /// Replaced by `AgentPrompt.system(settings:)` once the policy task lands.
-    static func systemPrompt(for settings: AppSettings) -> String {
-        "You control the app AVG Studio, which makes short videos. Use the tools to help. Never claim a video started unless a tool result says so."
-    }
+    static func dollars(_ v: Double) -> String { String(format: "$%.2f", v) }
 
     static func activityText(for tool: String) -> String {
         switch tool {
