@@ -51,6 +51,7 @@ struct SettingsView: View {
                 row(.voice, store.settings.voice.label)
                 row(.captions, captionsSummary)
                 row(.video, videoSummary)
+                row(.assistant, assistantSummary)
             }
             SettingsGroup(title: "Accounts") {
                 row(.keys, "\(savedKeyCount) of \(APIKey.allCases.count) connected")
@@ -101,6 +102,11 @@ struct SettingsView: View {
 
     private var captionsSummary: String {
         store.settings.captionsEnabled ? "On · \(store.settings.captionAnimationStyle.label)" : "Off"
+    }
+
+    private var assistantSummary: String {
+        let s = store.settings
+        return "\(s.agentProvider.label) · \(s.agentProvider == .groq ? s.agentGroqModel : s.agentGeminiModel)"
     }
 
     private var videoSummary: String {
@@ -196,6 +202,7 @@ struct SettingsView: View {
         case .voice: VoiceSettingsPage(focus: focus)
         case .captions: CaptionsSettingsPage(focus: focus)
         case .video: VideoSettingsPage(focus: focus)
+        case .assistant: AssistantSettingsPage(focus: focus)
         case .keys: KeysSettingsPage(focus: focus)
         case .fallbacks: FallbacksSettingsPage(focus: focus)
         case .appearance: AppearanceSettingsPage(focus: focus)

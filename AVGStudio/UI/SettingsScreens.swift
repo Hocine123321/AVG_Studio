@@ -441,3 +441,170 @@ private struct GlassPreview: View {
         .overlay(shape.strokeBorder(Theme.glassEdge, lineWidth: 0.5))
     }
 }
+
+
+// MARK: - Assistant
+
+struct AssistantSettingsPage: View {
+    @Environment(Store.self) private var store
+    @Environment(SettingsCatalogs.self) private var catalogs
+    var focus: SettingAnchor?
+    @State private var testing = false
+    @State private var testResult: Agent.SelfTestResult?
+    @State private var cleared = false
+
+    var body: some View {
+        @Bindable var store = store
+        SettingsPage(title: "Assistant", focus: focus) {
+            SettingsGroup(title: "Model",
+                          footer: "Your chats are sent to the service you pick. Models known to support tools: llama-3.3-70b-versatile, gpt-oss-120b, gpt-oss-20b.") {
+                ChoiceRow(title: "Assistant provider",
+                          options: AgentProviderKind.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.agentProvider)
+                    .anchored(.assistantProvider)
+                switch store.settings.agentProvider {
+                case .groq:
+                    ModelRow(title: "Groq model", value: $store.settings.agentGroqModel, catalog: catalogs.groqText)
+                        .anchored(.assistantModel)
+                case .gemini:
+                    ModelRow(title: "Gemini model", value: $store.settings.agentGeminiModel, catalog: catalogs.geminiText)
+                        .anchored(.assistantModel)
+                }
+                testRow.anchored(.assistantTest)
+            }
+
+            SettingsGroup(title: "Reliability",
+                          footer: "Separate from the writer's fallbacks. Needs a key for the other service.") {
+                ToggleRow(title: "Switch assistant on limits",
+                          subtitle: "If this service is rate-limited or out of quota, try the other one.",
+                          isOn: $store.settings.agentFailover)
+                    .anchored(.assistantFailover)
+            }
+
+            SettingsGroup(title: "What it may do",
+                          footer: "A turned-off action is not offered to the assistant at all.") {
+                ToggleRow(title: "Assistant can start videos", isOn: $store.settings.agentAllowCreate)
+                    .anchored(.assistantAllowCreate)
+                ToggleRow(title: "Assistant can redo steps", isOn: $store.settings.agentAllowRedo)
+                    .anchored(.assistantAllowRedo)
+                ToggleRow(title: "Assistant can cancel", isOn: $store.settings.agentAllowCancel)
+                    .anchored(.assistantAllowCancel)
+            }
+
+            SettingsGroup(title: "Asking and spending",
+                          footer: "Videos that cost money always ask. The limit counts approved estimates, resets on New chat and on relaunch, and is a guard rail, not a bill.") {
+                ChoiceRow(title: "Ask before starting",
+                          options: AgentApprovalMode.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.agentApproval)
+                    .anchored(.assistantApproval)
+                StepperRow(title: "Spend limit per chat",
+                           valueText: Agent.dollars(AgentSettingsRules.spendCap(store.settings.agentChatSpendCapUSD)),
+                           value: $store.settings.agentChatSpendCapUSD,
+                           range: AgentSettingsRules.spendCapRange,
+                           step: AgentSettingsRules.spendCapStep)
+                    .anchored(.assistantSpendCap)
+            }
+
+            SettingsGroup(title: "Replies") {
+                SegmentRow(title: "Reply length", options: AgentReplyStyle.allCases, label: { $0.label },
+                           selection: $store.settings.agentReplyStyle)
+                    .anchored(.assistantReplyStyle)
+                ToggleRow(title: "Announce finished videos",
+                          subtitle: "Posts \u{201C}ready\u{201D} or \u{201C}stopped\u{201D} in the chat for videos it started. Uses no tokens.",
+                          isOn: $store.settings.agentAnnounceResults)
+                    .anchored(.assistantAnnounce)
+            }
+
+            SettingsGroup(title: "Memory",
+                          footer: "Saves only your messages and its answers, on this phone.") {
+                ToggleRow(title: "Keep chat", isOn: $store.settings.agentKeepChat)
+                    .anchored(.assistantKeepChat)
+                clearRow.anchored(.assistantClear)
+            }
+
+            SettingsGroup(title: "Custom instructions",
+                          footer: "Sent with every message. They never turn off asking. Don't put keys here.") {
+                FieldRow(title: "Custom instructions", placeholder: "For example: use my Facts channel",
+                         text: Binding(
+                            get: { store.settings.agentInstructions },
+                            set: { store.settings.agentInstructions = String($0.prefix(AgentSettingsRules.instructionsLimit)) }))
+                    .anchored(.assistantInstructions)
+                Text("\(store.settings.agentInstructions.count)/\(AgentSettingsRules.instructionsLimit)")
+                    .font(.caption2).foregroundStyle(Theme.ink2)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.bottom, 8)
+            }
+        }
+        .onChange(of: store.settings.agentProvider) { _, _ in testResult = nil }
+        .onChange(of: store.settings.agentKeepChat) { _, on in
+            if !on { store.agent.deleteSavedChat() }
+        }
+    }
+
+    private var testRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Haptics.light()
+                runTest()
+            } label: {
+                HStack(spacing: 12) {
+                    Text("Test assistant").foregroundStyle(Theme.ink)
+                    Spacer(minLength: 8)
+                    if testing {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "checkmark.seal").foregroundStyle(Theme.ink2)
+                    }
+                }
+                .frame(minHeight: settingsRowMinHeight)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .disabled(testing)
+            .accessibilityLabel("Test assistant")
+            if let result = testResult {
+                switch result {
+                case .ok(let label):
+                    Label("Works: \(label)", systemImage: "checkmark.circle.fill")
+                        .font(.footnote).foregroundStyle(Theme.ok)
+                case .failed(let why):
+                    Label(why, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote).foregroundStyle(Theme.bad)
+                }
+            }
+        }
+        .padding(.bottom, testResult == nil ? 0 : 10)
+    }
+
+    private var clearRow: some View {
+        Button {
+            Haptics.light()
+            store.agent.deleteSavedChat()
+            cleared = true
+        } label: {
+            HStack(spacing: 12) {
+                Text("Clear saved chat").foregroundStyle(Theme.ink)
+                Spacer(minLength: 8)
+                if cleared {
+                    Text("Cleared").font(.footnote).foregroundStyle(Theme.ink2)
+                } else {
+                    Image(systemName: "trash").foregroundStyle(Theme.ink2)
+                }
+            }
+            .frame(minHeight: settingsRowMinHeight)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Clear saved chat")
+    }
+
+    private func runTest() {
+        testing = true
+        testResult = nil
+        Task {
+            let result = await store.agent.selfTest()
+            testResult = result
+            testing = false
+        }
+    }
+}

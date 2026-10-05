@@ -55,4 +55,19 @@ final class SettingsIndexTests: XCTestCase {
             XCTAssertTrue(places.contains(category.title), "\(category.title) is unreachable by search")
         }
     }
+
+    func testAssistantSettingsAreSearchable() {
+        XCTAssertEqual(SettingsIndex.search("budget").first?.title, "Spend limit per chat")
+        XCTAssertTrue(SettingsIndex.search("approve").contains { $0.title == "Ask before starting" })
+        XCTAssertTrue(SettingsIndex.search("memory").contains { $0.title == "Keep chat" })
+        XCTAssertTrue(SettingsIndex.search("assistant").count >= 14, "every Assistant setting answers to its category name")
+        XCTAssertTrue(SettingsIndex.search("assistant").allSatisfy { $0.place == "Assistant" })
+    }
+
+    func testAssistantEntriesLandOnTheAssistantPage() {
+        for entry in SettingsIndex.all where entry.place == "Assistant" {
+            guard case .category(let category, _) = entry.route else { return XCTFail(entry.title) }
+            XCTAssertEqual(category, .assistant, entry.title)
+        }
+    }
 }

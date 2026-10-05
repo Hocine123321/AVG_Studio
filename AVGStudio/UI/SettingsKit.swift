@@ -19,7 +19,7 @@ import SwiftUI
 
 /// Every screen the hub can open a setting on.
 enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
-    case writing, images, voice, captions, video, keys, fallbacks, appearance
+    case writing, images, voice, captions, video, assistant, keys, fallbacks, appearance
     var id: String { rawValue }
 
     var title: String {
@@ -29,6 +29,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "Voice"
         case .captions: return "Captions"
         case .video: return "Video"
+        case .assistant: return "Assistant"
         case .keys: return "API keys"
         case .fallbacks: return "Fallbacks"
         case .appearance: return "Appearance"
@@ -42,6 +43,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "waveform"
         case .captions: return "captions.bubble"
         case .video: return "film"
+        case .assistant: return "sparkle"
         case .keys: return "key.fill"
         case .fallbacks: return "arrow.triangle.branch"
         case .appearance: return "circle.lefthalf.filled"
@@ -59,6 +61,10 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
     case theme, font, glass
+    case assistantProvider, assistantModel, assistantTest, assistantFailover
+    case assistantAllowCreate, assistantAllowRedo, assistantAllowCancel
+    case assistantApproval, assistantSpendCap, assistantReplyStyle, assistantAnnounce
+    case assistantKeepChat, assistantClear, assistantInstructions
 }
 
 enum SettingsRoute: Hashable {
@@ -109,6 +115,20 @@ enum SettingsIndex {
         e("Motion amount", .video, .motion, "ken burns intensity strength"),
         e("Film filter", .video, .filterStyle, "filter grain light leak look"),
         e("Filter intensity", .video, .filterIntensity, "filter strength amount grain leak"),
+        e("Assistant provider", .assistant, .assistantProvider, "assistant agent chat ai groq gemini service"),
+        e("Assistant model", .assistant, .assistantModel, "assistant agent chat model groq gemini llama"),
+        e("Test assistant", .assistant, .assistantTest, "assistant agent check connection key works tools verify"),
+        e("Switch assistant on limits", .assistant, .assistantFailover, "assistant agent failover backup other rate limit quota"),
+        e("Assistant can start videos", .assistant, .assistantAllowCreate, "assistant agent permission allow create make new"),
+        e("Assistant can redo steps", .assistant, .assistantAllowRedo, "assistant agent permission allow redo rerun restart"),
+        e("Assistant can cancel", .assistant, .assistantAllowCancel, "assistant agent permission allow stop cancel"),
+        e("Ask before starting", .assistant, .assistantApproval, "assistant agent approve approval confirm ask tap paid free"),
+        e("Spend limit per chat", .assistant, .assistantSpendCap, "assistant agent budget cost money dollars cap"),
+        e("Reply length", .assistant, .assistantReplyStyle, "assistant agent brief short long verbose answers"),
+        e("Announce finished videos", .assistant, .assistantAnnounce, "assistant agent notify ready done finished haptic"),
+        e("Keep chat", .assistant, .assistantKeepChat, "assistant agent memory history save remember conversation"),
+        e("Clear saved chat", .assistant, .assistantClear, "assistant agent delete erase memory history conversation"),
+        e("Custom instructions", .assistant, .assistantInstructions, "assistant agent prompt rules preferences standing system"),
         e("API keys", .keys, .apiKeys, "keychain gemini groq openai elevenlabs assemblyai stable horde pollinations"),
         e("Refresh model lists", .keys, .refreshLists, "model cache catalog update"),
         e("Switch automatically", .fallbacks, .autoFallback, "fallback quota billing expensive cheaper"),
