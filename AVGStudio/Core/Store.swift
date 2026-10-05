@@ -49,7 +49,7 @@ final class Store {
     // Debounced: a TextField bound to `settings` used to rewrite the whole
     // meta file (pretty-printed JSON, synchronously, on the main thread) on
     // every keystroke and every slider tick.
-    var settings = AppSettings() { didSet { scheduleMetaSave() } }
+    var settings = AppSettings() { didSet { scheduleMetaSave(); refreshIdleTimer() } }
     var reusableImages: [ReusableImage] = [] { didSet { scheduleMetaSave() } }
     var jobs: [String: JobState] = [:]
     /// Projects waiting for a free slot, in the order they were started.
@@ -544,7 +544,15 @@ final class Store {
         launch(id, from: phase)
     }
 
+    /// Stops the screen auto-locking while anything is being made (when the
+    /// setting allows). A locked screen suspends the app, which suspends its
+    /// GPU access - the single most common reason a long render "stalls".
+    func refreshIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = settings.keepScreenAwake && !tasks.isEmpty
+    }
+
     private func launch(_ id: String, from phase: PhaseID) {
+        defer { refreshIdleTimer() }
         tasks[id] = Task { [weak self] in
             // Binds this render's project id as the `@TaskLocal` HTTP.swift
             // reads on a retry/give-up. Bound around just the `run()` call
@@ -560,6 +568,7 @@ final class Store {
             self?.tasks[id] = nil
             self?.jobs[id] = nil
             self?.startNextQueued()
+            self?.refreshIdleTimer()
         }
     }
 
@@ -595,7 +604,7 @@ final class Store {
         // iOS treats a task that outlives its grace period without ending
         // as a watchdog violation and terminates the app.
         let bg = BackgroundTaskBox()
-        bg.begin(name: "AVG render")
+        if settings.allowBackgroundRendering { bg.begin(name: "AVG render") }
         defer { bg.end() }
         record(id, "▶ Started “\(project(id)?.title ?? id)” from \(start.title).")
         let basedOn = prepareBranch(id, from: start)

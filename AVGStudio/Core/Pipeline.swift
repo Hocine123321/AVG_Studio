@@ -111,19 +111,23 @@ struct Pipeline {
 
     private func imageProvider(for kind: ImageProviderKind) throws -> ImageProvider {
         let s = store.settings
+        // Picture quality follows the video quality - never a separate choice.
+        let quality = ImageQuality.forVideo(shortEdge: s.shortEdge)
         switch kind {
-        case .pollinations: return PollinationsImages(key: Keychain.get(.pollinations), model: s.pollinationsImageModel)
-        case .stablehorde: return StableHordeImages(model: s.stableHordeModel)
+        case .pollinations: return PollinationsImages(key: Keychain.get(.pollinations), model: s.pollinationsImageModel, quality: quality)
+        case .stablehorde: return StableHordeImages(model: s.stableHordeModel, quality: quality)
         case .gemini: return GeminiImages(key: try Keychain.require(.gemini), model: s.geminiImageModel)
-        case .openai: return OpenAIImages(key: try Keychain.require(.openai))
+        case .openai: return OpenAIImages(key: try Keychain.require(.openai), quality: quality)
         }
     }
 
-    private func voiceProvider() throws -> VoiceProvider {
+    private func voiceProvider(channel ch: Channel) throws -> VoiceProvider {
         let s = store.settings
         switch s.voice {
-        case .apple: return AppleVoice(identifier: s.appleVoiceIdentifier)
-        case .elevenlabs: return ElevenLabsVoice(key: try Keychain.require(.elevenlabs), voiceID: s.elevenVoiceID, model: s.elevenModel)
+        case .apple: return AppleVoice(identifier: s.appleVoiceIdentifier, speed: ch.voiceSpeed)
+        case .elevenlabs:
+            return ElevenLabsVoice(key: try Keychain.require(.elevenlabs), voiceID: s.elevenVoiceID, model: s.elevenModel,
+                                   stability: ch.voiceStability, speed: ch.voiceSpeed)
         case .gemini: return GeminiVoice(key: try Keychain.require(.gemini), model: s.geminiVoiceModel, voiceName: s.geminiVoiceName)
         }
     }
@@ -144,7 +148,7 @@ struct Pipeline {
     }
 
     private func costImage(_ kind: ImageProviderKind) {
-        let usd = CostTable.imageFlat(kind)
+        let usd = CostTable.imageFlat(kind, quality: ImageQuality.forVideo(shortEdge: store.settings.shortEdge))
         guard usd > 0 else { return }
         store.addCost(projectID, "\(kind.label) image", usd)
     }
@@ -297,6 +301,8 @@ struct Pipeline {
             $0.audioFile = nil
             $0.output = nil
             $0.storyMap = nil
+            $0.chapters = nil
+            $0.audioSegments = nil
         }
         step(.writing, "segmentation", .done, "\(scenes.count) scenes" + (splitBySentence ? " (split by sentence)" : ""))
 
@@ -306,16 +312,21 @@ struct Pipeline {
         // neutral map and the run carries on.
         step(.writing, "story", .running)
         store.progress(projectID, 0.9, "Planning the story map…")
-        let mapPrompt = CreativePrompts.director1(inputs, sceneTexts: scenes.map(\.text))
+        let mapPrompt = CreativePrompts.director1(inputs, sceneTexts: scenes.map(\.text), chapters: ch.chaptersEnabled)
         do {
             let (mapRaw, mapProvider) = try await routedComplete(
                 primary: nil, backup: nil, onFailure: .stop, mapPrompt, system: "You return only strict JSON, nothing else."
             )
             costText(mapProvider, chars: mapPrompt.count + mapRaw.count)
             let map = StoryMap.parse(mapRaw, sceneCount: scenes.count)
-            store.update(projectID) { $0.storyMap = map }
+            let chapters = ch.chaptersEnabled ? CreativePrompts.parseChapters(mapRaw, sceneCount: scenes.count) : []
+            store.update(projectID) {
+                $0.storyMap = map
+                $0.chapters = chapters.isEmpty ? nil : chapters
+            }
             let planned = map.scenes.filter { !$0.role.isEmpty }.count
-            step(.writing, "story", .done, planned == 0 ? "No roles returned" : "\(planned) scene roles · \(mapProvider.label)")
+            let chapterNote = chapters.isEmpty ? "" : " · \(chapters.count) chapter\(chapters.count == 1 ? "" : "s")"
+            step(.writing, "story", .done, (planned == 0 ? "No roles returned" : "\(planned) scene roles · \(mapProvider.label)") + chapterNote)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -381,9 +392,12 @@ struct Pipeline {
             }
             : scenes
         if done > 0 { store.progress(projectID, Double(done) / Double(scenes.count), "Keeping \(done) image(s) already made") }
-        for batch in stride(from: 0, to: pending.count, by: 3) {
+        // Images made at once: 3 was the fixed value; it is now a setting (1 is
+        // gentlest on a free tier's rate limits, 4 is fastest on a paid key).
+        let parallel = max(1, min(4, store.settings.imageParallelism))
+        for batch in stride(from: 0, to: pending.count, by: parallel) {
             try Task.checkCancellation()
-            let slice = Array(pending[batch..<min(batch + 3, pending.count)])
+            let slice = Array(pending[batch..<min(batch + parallel, pending.count)])
             // A `[RECYCLE #k]` scene copies a pool image straight in - no
             // provider call, no cost - mirroring visuals.py's own
             // `_resolve_recycled_scene`. A pick whose file has since gone
@@ -463,18 +477,28 @@ struct Pipeline {
     // each [pause] marker (the marker text itself never reaches a
     // provider), synthesize each segment separately, then stitch the
     // segments back together with an explicit, exact-length silent gap
-    // (`assembleWithGaps`) - a real silence, not a hope.
+    // (`assemble`) - a real silence, not a hope.
 
     private func voice() async throws {
         let p = try project
         guard let narration = p.narration else { throw AVGError.message("No script yet — run Script first.") }
         let s = store.settings
-        let provider = try voiceProvider()
+        let ch = store.channel(for: p)
+        let provider = try voiceProvider(channel: ch)
         let dir = folder.appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let rawParts = s.dynamicPausesEnabled ? Self.splitOnPause(narration) : [Self.stripPauseMarkers(narration)]
-        let segments = rawParts.map(Self.spoken).filter { !$0.isEmpty }
+        // The same segmentation Captions uses to time the words (VoicePlan), so
+        // the two cannot disagree about what was recorded as which take.
+        let ordered = p.scenes.sorted { $0.index < $1.index }
+        let sceneTexts = ordered.isEmpty ? [narration] : ordered.map(\.text)
+        let plan = VoicePlan.make(
+            sceneTexts: sceneTexts,
+            dynamicPauses: s.dynamicPausesEnabled,
+            pauseSeconds: max(0, s.pauseMs / 1000),
+            chapterGaps: Self.chapterGaps(p, channel: ch)
+        )
+        let segments = plan.runs.map(\.text)
         guard !segments.isEmpty else { throw AVGError.message("Nothing left to narrate after removing pause markers.") }
 
         step(.voice, "speech", .running)
@@ -491,26 +515,48 @@ struct Pipeline {
         step(.voice, "speech", .done, "\(segments.count) segment\(segments.count == 1 ? "" : "s") · \(s.voice.label)")
         step(.voice, "trim", .running)
         store.progress(projectID, 0.7, "Removing dead air…")
-        let ch = store.channel(for: p)
         let cleanedFiles = try await cleanSegments(files, channel: ch, dir: dir)
         step(.voice, "trim", .done, "\(ch.voiceTrimAggressiveness.rawValue.capitalized) trim")
 
+        let gaps = plan.runs.map(\.gapBefore)
         let finalURL: URL
-        if cleanedFiles.count == 1 {
+        let spans: [AudioSegment]
+        if cleanedFiles.count == 1, (gaps.first ?? 0) == 0 {
             finalURL = cleanedFiles[0]
+            let duration = try await AVURLAsset(url: finalURL).load(.duration).seconds
+            spans = [AudioSegment(start: 0, end: duration)]
             step(.voice, "assemble", .skipped, "One take, nothing to join")
         } else {
             step(.voice, "assemble", .running)
             store.progress(projectID, 0.85, "Assembling narration with pauses…")
-            let pauseSeconds = s.dynamicPausesEnabled ? max(0, s.pauseMs / 1000) : 0
-            finalURL = try await Self.assembleWithGaps(cleanedFiles, pauseSeconds: pauseSeconds, into: dir)
-            step(.voice, "assemble", .done, "\(cleanedFiles.count) segments · \(Int(pauseSeconds * 1000)) ms pauses")
+            let joined = try await Self.assemble(cleanedFiles, gaps: gaps, kinds: plan.runs.map(\.gapKind), into: dir)
+            finalURL = joined.url
+            spans = joined.segments
+            let chapterCount = plan.runs.filter { $0.gapKind == "chapter" }.count
+            step(.voice, "assemble", .done, "\(cleanedFiles.count) segments · \(Int(max(0, s.pauseMs)))ms pauses" + (chapterCount > 0 ? " · \(chapterCount) chapter card gap\(chapterCount == 1 ? "" : "s")" : ""))
             for f in cleanedFiles where f.lastPathComponent != finalURL.lastPathComponent {
                 try? FileManager.default.removeItem(at: f)
             }
         }
         for f in files { try? FileManager.default.removeItem(at: f) }
-        store.update(projectID) { $0.audioFile = "audio/\(finalURL.lastPathComponent)" }
+        store.update(projectID) {
+            $0.audioFile = "audio/\(finalURL.lastPathComponent)"
+            // Where each take really sits - Captions anchors its timing to this.
+            $0.audioSegments = spans
+        }
+    }
+
+    /// Chapter cards as scene-position -> seconds, for the voice plan. Empty
+    /// unless the channel has chapters on.
+    static func chapterGaps(_ p: Project, channel ch: Channel) -> [Int: Double] {
+        guard ch.chaptersEnabled, let chapters = p.chapters else { return [:] }
+        let ordered = p.scenes.sorted { $0.index < $1.index }
+        var out: [Int: Double] = [:]
+        for c in chapters {
+            guard let pos = ordered.firstIndex(where: { $0.index == c.beforeScene }) else { continue }
+            out[pos] = min(Chapter.maxDuration, max(Chapter.minDuration, c.duration))
+        }
+        return out
     }
 
     /// Runs SilenceTrim.clean on each raw segment, in isolation, before the
@@ -562,21 +608,26 @@ struct Pipeline {
     /// `AVMutableComposition` track is silent by default wherever nothing
     /// has been inserted, so leaving the gap between two `insertTimeRange`
     /// calls untouched IS the silence - no synthetic silent buffer needed.
-    static func assembleWithGaps(_ segments: [URL], pauseSeconds: Double, into folder: URL) async throws -> URL {
+    /// Joins the cleaned takes with exact-length silences (`gaps[i]` is the
+    /// silence BEFORE take i) and reports where each take landed - the one place
+    /// that knows, so the timeline is read off the real layout, not recomputed.
+    static func assemble(_ segments: [URL], gaps: [Double], kinds: [String?], into folder: URL) async throws -> (url: URL, segments: [AudioSegment]) {
         let comp = AVMutableComposition()
         guard let track = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw AVGError.message("Couldn't assemble the narration audio.")
         }
         var cursor = CMTime.zero
+        var spans: [AudioSegment] = []
         for (i, url) in segments.enumerated() {
+            let gap = i < gaps.count ? max(0, gaps[i]) : 0
+            if gap > 0 { cursor = cursor + CMTime(seconds: gap, preferredTimescale: 600) }
             let asset = AVURLAsset(url: url)
             guard let segTrack = try await asset.loadTracks(withMediaType: .audio).first else { continue }
             let dur = try await asset.load(.duration)
             try track.insertTimeRange(CMTimeRange(start: .zero, duration: dur), of: segTrack, at: cursor)
+            spans.append(AudioSegment(start: cursor.seconds, end: (cursor + dur).seconds, gapBefore: gap,
+                                      gapKind: i < kinds.count ? kinds[i] : nil))
             cursor = cursor + dur
-            if i < segments.count - 1, pauseSeconds > 0 {
-                cursor = cursor + CMTime(seconds: pauseSeconds, preferredTimescale: 600)
-            }
         }
         guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetAppleM4A) else {
             throw AVGError.message("Couldn't export the narration audio.")
@@ -584,7 +635,7 @@ struct Pipeline {
         let out = folder.appendingPathComponent("narration.m4a")
         try? FileManager.default.removeItem(at: out)
         try await export.export(to: out, as: .m4a)
-        return out
+        return (out, spans)
     }
 
     // MARK: Phase — captions
@@ -601,50 +652,93 @@ struct Pipeline {
     private func captions() async throws {
         let p = try project
         let ch = store.channel(for: p)
+        let s = store.settings
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let duration = try await AVURLAsset(url: audio).load(.duration).seconds
-        let cleanTexts = p.scenes.map { Self.spoken($0.text) }
-        guard cleanTexts.contains(where: { !$0.isEmpty }) else { throw AVGError.message("No scene text to caption.") }
+        let sorted = p.scenes.sorted { $0.index < $1.index }
+        let sceneTexts = sorted.map(\.text)
+        guard sceneTexts.contains(where: { !VoicePlan.cleaned($0).isEmpty }) else { throw AVGError.message("No scene text to caption.") }
 
-        let sceneSpans = Self.allocateProportional(cleanTexts, total: duration)
-        let sceneDurations = sceneSpans.map { $0.1 - $0.0 }
+        // The same segmentation the Voice phase recorded with (VoicePlan), so
+        // each word is placed inside the take it was actually spoken in.
+        let plan = VoicePlan.make(
+            sceneTexts: sceneTexts,
+            dynamicPauses: s.dynamicPausesEnabled,
+            pauseSeconds: max(0, s.pauseMs / 1000),
+            chapterGaps: Self.chapterGaps(p, channel: ch)
+        )
+        guard !plan.words.isEmpty else { throw AVGError.message("Nothing to caption.") }
+        let anchoredToRecording = (p.audioSegments?.count ?? -1) == plan.runs.count
 
         step(.captions, "timing", .running)
-        var words: [WordTiming] = []
+        var spans = CaptionTiming.clean(
+            CaptionTiming.anchored(plan: plan, segments: p.audioSegments, duration: duration), duration: duration)
         var source = "estimated"
+        var timingNote = anchoredToRecording ? "Anchored to the recorded audio" : "Estimated across the audio"
         if let key = Keychain.get(.assemblyai) {
             store.progress(projectID, 0.15, "Transcribing narration…")
             do {
                 let real = try await AssemblyAI.words(fromAudio: audio, key: key)
                 if !real.isEmpty {
-                    words = real
-                    source = "assemblyai"
                     costTranscription(seconds: duration)
+                    // The SCRIPT's words keep their own spelling; the transcript
+                    // only supplies WHEN each was said.
+                    let merged = CaptionTiming.merge(words: plan.words.map(\.text), transcript: real, fallback: spans, duration: duration)
+                    if merged.matched >= 0.5 {
+                        spans = merged.spans
+                        source = "assemblyai"
+                        timingNote = "AssemblyAI · \(Int((merged.matched * 100).rounded()))% of words matched"
+                    } else {
+                        store.record(projectID, "The transcript only matched \(Int((merged.matched * 100).rounded()))% of the script, so word timing was estimated from the recording instead.")
+                    }
                 }
             } catch {
                 store.record(projectID, "AssemblyAI transcription unavailable (\(error.localizedDescription)); using estimated timing.")
             }
         }
-        if words.isEmpty {
-            words = Self.syntheticWordTimings(cleanTexts, spans: sceneSpans)
+        step(.captions, "timing", .done, timingNote)
+
+        // Scenes change where their first word is spoken (a hair early), not at
+        // a text-length guess - so pictures, cards and captions share one clock.
+        let bounds = CaptionTiming.sceneBoundaries(words: plan.words, spans: spans, sceneCount: sorted.count, duration: duration)
+        let sceneSpans: [(Double, Double)] = (0..<sorted.count).map { (bounds[$0], bounds[$0 + 1]) }
+        let sceneDurations = sceneSpans.map { $0.1 - $0.0 }
+
+        step(.captions, "cards", ch.takeoverCardsEnabled || ch.chaptersEnabled ? .running : .skipped,
+             ch.takeoverCardsEnabled || ch.chaptersEnabled ? nil : "Off for this channel")
+        var cards: [TakeoverCard] = []
+
+        // Chapter cards sit in the silence the Voice phase left for them.
+        if ch.chaptersEnabled, let chapters = p.chapters, anchoredToRecording, let segments = p.audioSegments {
+            let gapRuns = plan.runs.indices.filter { plan.runs[$0].gapKind == "chapter" }
+            let ordered = chapters.sorted { $0.beforeScene < $1.beforeScene }
+            for (n, pair) in zip(ordered, gapRuns).enumerated() where segments[pair.1].gapBefore > 0 {
+                let (chapter, run) = pair
+                let end = segments[run].start
+                // Part 1 never gets a card (the video opens on its first scene),
+                // so the first card introduces part 2.
+                cards.append(TakeoverCard(scene: chapter.beforeScene, text: chapter.title,
+                                          start: max(0, end - segments[run].gapBefore), end: end,
+                                          kind: "chapter", subtitle: chapter.subtitle, eyebrow: "Part \(n + 2)"))
+            }
+        } else if ch.chaptersEnabled, p.chapters != nil {
+            store.record(projectID, "Chapter cards were skipped: the narration was recorded before chapters were on. Redo from Voice to add them.")
         }
-        guard !words.isEmpty else { throw AVGError.message("Nothing to caption.") }
-        step(.captions, "timing", .done, source == "assemblyai" ? "AssemblyAI" : "Estimated on this device")
+        let chapterCards = cards
 
         // Deterministic Focused takeover cards: one per `((question))`
         // marker found in a scene's own (uncleaned) text, each taking over
         // its whole scene's window - mirrors director.py's `_build_card_plan`
         // exactly (frequency cap, one-card-per-scene, Focused-before-
         // Explainer, first-question-wins).
-        var cards: [TakeoverCard] = []
         if ch.takeoverCardsEnabled {
-            step(.captions, "cards", .running)
             var bySc: [Int: TakeoverCard] = [:]
-            for (scene, span) in zip(p.scenes, sceneSpans) {
+            for (scene, span) in zip(sorted, sceneSpans) {
                 guard bySc[scene.index] == nil, let q = Self.extractQuestionMarkers(scene.text).first else { continue }
                 bySc[scene.index] = TakeoverCard(scene: scene.index, text: q, start: span.0, end: span.1)
             }
-            var ordered = bySc.values.sorted { $0.scene < $1.scene }
+            let focused = bySc.values.sorted { $0.scene < $1.scene }
+            var questionCards = focused
 
             // Mirrors `explainer_enabled`/`build_explainer_prompt`: a FEW
             // AI-picked scenes worth a full-screen concept card, appended
@@ -653,11 +747,11 @@ struct Pipeline {
             // director.py's `_build_card_plan`'s own by-insertion-order
             // dedup - Focused entries are inserted into `by_scene` first).
             if ch.explainerCardsEnabled {
-                let maxCards = max(0, min(4, p.scenes.count / 6))
+                let maxCards = max(0, min(4, sorted.count / 6))
                 if maxCards > 0 {
                     do {
                         let text = try textProvider()
-                        let numbered = p.scenes.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "\n")
+                        let numbered = sorted.enumerated().map { "[\($0 + 1)] \($1.text)" }.joined(separator: "\n")
                         let prompt = """
                         You are an editor deciding where to drop a full-screen EXPLAINER CARD — a centred "board" that
                         covers the video for a moment to let the viewer absorb a deeper CONCEPT, definition, or summary
@@ -679,13 +773,13 @@ struct Pipeline {
                         struct ExplainerResponse: Decodable { let cards: [ExplainerCard] }
                         if let data = Self.extractJSONObject(result)?.data(using: .utf8),
                            let parsed = try? JSONDecoder().decode(ExplainerResponse.self, from: data) {
-                            var taken = Set(ordered.map(\.scene))
+                            var taken = Set(questionCards.map(\.scene))
                             for candidate in parsed.cards.prefix(maxCards) {
                                 let trimmedText = candidate.text.trimmed
                                 guard !trimmedText.isEmpty, !taken.contains(candidate.scene),
                                       candidate.scene >= 1, candidate.scene <= sceneSpans.count else { continue }
                                 let span = sceneSpans[candidate.scene - 1]
-                                ordered.append(TakeoverCard(scene: candidate.scene, text: trimmedText, start: span.0, end: span.1))
+                                questionCards.append(TakeoverCard(scene: candidate.scene, text: trimmedText, start: span.0, end: span.1, kind: "explainer"))
                                 taken.insert(candidate.scene)
                             }
                         }
@@ -694,39 +788,33 @@ struct Pipeline {
                     }
                 }
             }
-
-            if !ordered.isEmpty {
-                let cap = max(1, p.scenes.count / 3)
-                cards = Array(ordered.prefix(cap))
+            if !questionCards.isEmpty {
+                let cap = max(1, sorted.count / 3)
+                cards += Array(questionCards.prefix(cap))
             }
         }
-        if ch.takeoverCardsEnabled {
-            step(.captions, "cards", .done, cards.isEmpty ? "None needed" : "\(cards.count) card\(cards.count == 1 ? "" : "s")")
-        } else {
-            step(.captions, "cards", .skipped, "Off for this channel")
+        if ch.takeoverCardsEnabled || ch.chaptersEnabled {
+            let questions = cards.count - chapterCards.count
+            var parts: [String] = []
+            if !chapterCards.isEmpty { parts.append("\(chapterCards.count) chapter") }
+            if questions > 0 { parts.append("\(questions) question") }
+            step(.captions, "cards", .done, parts.isEmpty ? "None needed" : parts.joined(separator: " + ") + " card" + (cards.count == 1 ? "" : "s"))
         }
         let cardWindows = cards.map { ($0.start, $0.end) }
 
         step(.captions, "cues", .running)
         store.progress(projectID, 0.6, "Grouping caption cues…")
-        let maxWords = max(1, store.settings.captionMaxWords)
-        var cues: [CaptionCue] = []
-        for chunkStart in stride(from: 0, to: words.count, by: maxWords) {
-            let group = Array(words[chunkStart..<min(chunkStart + maxWords, words.count)])
-            guard let first = group.first, let last = group.last else { continue }
-            // A caption cue that overlaps a takeover card's window is
-            // suppressed - the card owns that span instead (mirrors
-            // captions.py's own `_card_suppression_windows` use).
-            if cardWindows.contains(where: { Self.overlaps(first.start, last.end, $0.0, $0.1) }) { continue }
-            cues.append(CaptionCue(start: first.start, end: last.end, text: group.map(\.text).joined(separator: " "), words: group))
-        }
+        // Cues break at sentences, pauses and long gaps, and never run into a
+        // card's window (the card owns that span - captions.py's own
+        // `_card_suppression_windows`).
+        let cues = CaptionTiming.cues(words: plan.words, spans: spans, maxWords: s.captionMaxWords, suppressing: cardWindows)
 
         step(.captions, "cues", .done, "\(cues.count) cue\(cues.count == 1 ? "" : "s")")
         store.update(projectID) {
             $0.sceneDurations = sceneDurations
             $0.captions = cues
             $0.captionsSource = source
-            $0.cards = cards
+            $0.cards = cards.sorted { $0.start < $1.start }
         }
     }
 
@@ -757,7 +845,9 @@ struct Pipeline {
         let ch = store.channel(for: p)
         let scenes = p.scenes.sorted { $0.index < $1.index }
         guard !scenes.isEmpty else { return }
-        let signature = scenes.map(\.text).joined(separator: "\u{1}")
+        // Everything the plan was made from: a new brand preset or story map
+        // must trigger a fresh plan even when the script text didn't change.
+        let signature = (scenes.map(\.text) + [ch.brandPreset, p.storyMap?.directorHints ?? ""]).joined(separator: "\u{1}")
         guard p.sceneDirections.count != scenes.count || p.directionSignature != signature else { return }
 
         store.progress(projectID, 0, "Planning motion and grade…")
@@ -903,11 +993,16 @@ struct Pipeline {
                 accent: Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
                 accent1: Theme.color(hex: ch.accent1ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
                 accent2: Theme.color(hex: ch.accent2ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
-                fontFamily: ch.fontFamily
+                fontFamily: ch.fontFamily,
+                overlay: ch.overlay
             ),
             filter: FilterSpec(style: s.filterStyle, intensity: s.filterIntensity),
             cards: p.cards,
-            output: out
+            output: out,
+            codec: s.videoCodec,
+            encoderQuality: s.encoderQuality,
+            engine: s.renderEngine,
+            pauseWhenHot: s.pauseWhenHot
         )
         let id = projectID
         let st = store
@@ -922,7 +1017,13 @@ struct Pipeline {
         defer { Task { await lease.release() } }
         step(.render, "frames", .running)
         st.progress(id, 0, "Rendering frames…")
-        let stats = try await VideoRenderer().render(input) { value in
+        let stats = try await VideoRenderer().render(input, status: { message in
+            // Only the cool-down is worth a Live List line; "Rendering frames…"
+            // just restores the live message.
+            Task { @MainActor in
+                st.progress(id, st.jobs[id]?.progress ?? 0, message, log: message.contains("cool"))
+            }
+        }) { value in
             // log: false - the percentage changes every few frames and must
             // not write a Live List line (and a disk append) each time.
             Task { @MainActor in

@@ -19,7 +19,7 @@ import SwiftUI
 
 /// Every screen the hub can open a setting on.
 enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
-    case writing, images, voice, captions, video, keys, fallbacks, appearance
+    case writing, images, voice, captions, video, performance, keys, fallbacks, appearance
     var id: String { rawValue }
 
     var title: String {
@@ -29,6 +29,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "Voice"
         case .captions: return "Captions"
         case .video: return "Video"
+        case .performance: return "Performance"
         case .keys: return "API keys"
         case .fallbacks: return "Fallbacks"
         case .appearance: return "Appearance"
@@ -42,6 +43,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "waveform"
         case .captions: return "captions.bubble"
         case .video: return "film"
+        case .performance: return "speedometer"
         case .keys: return "key.fill"
         case .fallbacks: return "arrow.triangle.branch"
         case .appearance: return "circle.lefthalf.filled"
@@ -55,7 +57,8 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case imageProvider, imageModel, imageStyle, reusableImages
     case voiceProvider, voicePick, voiceModel
     case captionsToggle, captionAnimation, captionWords, captionPosition, captionSize
-    case quality, fps, kenBurns, motion, filterStyle, filterIntensity, parallelJobs
+    case quality, fps, kenBurns, motion, filterStyle, filterIntensity
+    case renderEngine, videoCodec, encoderQuality, parallelJobs, imageParallelism, pauseWhenHot, keepAwake, backgroundRendering
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
     case theme, font, glass
@@ -107,7 +110,14 @@ enum SettingsIndex {
         e("Frame rate", .video, .fps, "fps 24 30 60 smooth"),
         e("Ken Burns motion", .video, .kenBurns, "zoom pan movement camera"),
         e("Motion amount", .video, .motion, "ken burns intensity strength"),
-        e("Videos at once", .video, .parallelJobs, "queue parallel jobs simultaneous concurrent render at the same time"),
+        e("Render engine", .performance, .renderEngine, "gpu cpu metal graphics speed fast slow software"),
+        e("Video format", .performance, .videoCodec, "codec hevc h264 h.265 h.264 compatible file size"),
+        e("Encoder quality", .performance, .encoderQuality, "bitrate quality size compact balanced high compression"),
+        e("Videos at once", .performance, .parallelJobs, "queue parallel jobs simultaneous concurrent render at the same time"),
+        e("Images at once", .performance, .imageParallelism, "parallel concurrent image generation batch rate limit speed"),
+        e("Pause when hot", .performance, .pauseWhenHot, "thermal heat temperature overheating cool throttle"),
+        e("Keep screen on", .performance, .keepAwake, "auto-lock sleep awake idle screen timeout stall"),
+        e("Keep working in background", .performance, .backgroundRendering, "background app switch leave continue"),
         e("Film filter", .video, .filterStyle, "filter grain light leak look"),
         e("Filter intensity", .video, .filterIntensity, "filter strength amount grain leak"),
         e("API keys", .keys, .apiKeys, "keychain gemini groq openai elevenlabs assemblyai stable horde pollinations"),

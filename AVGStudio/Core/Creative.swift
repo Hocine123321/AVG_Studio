@@ -563,9 +563,28 @@ enum CreativePrompts {
 
     // MARK: Director I (story map)
 
-    static func director1(_ i: CreativeInputs, sceneTexts: [String], minImages: Int = 3, maxImages: Int = 160) -> String {
+    static func director1(_ i: CreativeInputs, sceneTexts: [String], minImages: Int = 3, maxImages: Int = 160,
+                          chapters: Bool = false) -> String {
         let numbered = sceneTexts.enumerated().map { "[\($0.offset + 1)] \"\($0.element)\"" }.joined(separator: "\n")
         let n = sceneTexts.count
+        var chaptersSection = ""
+        var partsSchema = ""
+        if chapters, n > 0 {
+            let estParts = max(2, min(4, Int((Double(n) / 10).rounded(.up))))
+            chaptersSection = """
+
+
+            CHAPTER STRUCTURE (this video uses chapters):
+            - Group the \(n) scenes into \(estParts) sequential PARTS, each covering one sub-topic.
+              Split where the sub-topic genuinely changes, not every N scenes. Never split scene 1 away
+              from its part; never put a part break right before the final scene. Each part opens with a
+              full-screen takeover card (title + short subtitle) shown BEFORE its first scene.
+            - Chapter title: max 4 words, states the sub-topic plainly. Subtitle: max 6 words, rephrases
+              the title as a hook, not a restatement.
+            - Also return a "parts" array (see schema).
+            """
+            partsSchema = ",\n \"parts\":[{\"part\":1,\"title\":\"<max 4 words>\",\"sub\":\"<max 6 words>\",\"scenes\":[<scene numbers>],\"duration_sec\":1.8}]"
+        }
         return """
         You are the STRUCTURE DIRECTOR for a short narrated video built from still images.
         The script below is FINAL. Your job is to decide its VISUAL STRUCTURE: how many
@@ -595,12 +614,12 @@ enum CreativePrompts {
                 BACKGROUND = full-frame scene backdrop (most scenes)
                 ASSET = a floating graphic/icon/diagram composited over a clean background
                 POP = a bold full-frame impact graphic that cuts in hard
-        - zoom_words: array of {scene, word} — for each ZOOM-beat scene, the single word to emphasize.
+        - zoom_words: array of {scene, word} — for each ZOOM-beat scene, the single word to emphasize.\(chaptersSection)
 
         Return ONLY a JSON object, no preamble, no markdown fences:
         {"version":1,"image_count":<int>,
          "scenes":[{"scene":1,"role":"hook","beat":"HIT","visual_intent":"POP"}],
-         "zoom_words":[{"scene":<int>,"word":"<string>"}],
+         "zoom_words":[{"scene":<int>,"word":"<string>"}]\(partsSchema),
          "notes":"one line on your structural reasoning"}
         """
     }
@@ -703,6 +722,37 @@ struct StoryMap: Codable, Hashable {
         }
         let notes = ((obj["notes"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return StoryMap(imageCount: count, scenes: scenes, zoomWords: zoom, notes: notes)
+    }
+
+    /// The chapter cards in Director I's `parts` array. A part becomes a card
+    /// BEFORE its first scene, so part 1 (which starts at scene 1) never gets
+    /// one - the video opens on its first scene, and cards only sit BETWEEN
+    /// parts, exactly the PC's `_normalize_part_entry`. Entries naming no real
+    /// scene, or with no title, are dropped; duration is kept to 1-3 seconds.
+    static func parseChapters(_ raw: String, sceneCount: Int) -> [Chapter] {
+        guard let json = Pipeline.extractJSONObject(raw),
+              let obj = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
+              let parts = obj["parts"] as? [Any] else { return [] }
+        func int(_ v: Any?) -> Int? {
+            if let i = v as? Int { return i }
+            if let d = v as? Double { return Int(d) }
+            if let s = v as? String { return Int(s.trimmingCharacters(in: .whitespaces)) }
+            return nil
+        }
+        var seen = Set<Int>()
+        var out: [Chapter] = []
+        for entry in parts {
+            guard let e = entry as? [String: Any] else { continue }
+            let scenes = ((e["scenes"] as? [Any]) ?? []).compactMap(int).filter { $0 >= 1 && $0 <= sceneCount }.sorted()
+            guard let first = scenes.first, first > 1, seen.insert(first).inserted else { continue }
+            let title = ((e["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            let sub = ((e["sub"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let seconds = (e["duration_sec"] as? Double) ?? Double(int(e["duration_sec"]) ?? 0)
+            out.append(Chapter(beforeScene: first, title: title, subtitle: sub.isEmpty ? nil : sub,
+                               duration: seconds > 0 ? min(Chapter.maxDuration, max(Chapter.minDuration, seconds)) : Chapter.defaultDuration))
+        }
+        return out.sorted { $0.beforeScene < $1.beforeScene }
     }
 
     /// One line per scene for Director II's prompt, e.g. `[3] role=reveal beat=HIT intent=POP`.

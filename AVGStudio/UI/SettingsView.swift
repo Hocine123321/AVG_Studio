@@ -51,6 +51,7 @@ struct SettingsView: View {
                 row(.voice, store.settings.voice.label)
                 row(.captions, captionsSummary)
                 row(.video, videoSummary)
+                row(.performance, performanceSummary)
             }
             SettingsGroup(title: "Accounts") {
                 row(.keys, "\(savedKeyCount) of \(APIKey.allCases.count) connected")
@@ -106,6 +107,11 @@ struct SettingsView: View {
     private var videoSummary: String {
         let s = store.settings
         return "\(s.shortEdge)p · \(s.fps) fps · Ken Burns \(s.kenBurns ? "on" : "off")"
+    }
+
+    private var performanceSummary: String {
+        let s = store.settings
+        return "\(s.renderEngine == .auto ? "GPU" : "CPU") · \(s.videoCodec == .hevc ? "HEVC" : "H.264") · \(s.maxParallelJobs) at once"
     }
 
     private var errorSummary: String {
@@ -196,6 +202,7 @@ struct SettingsView: View {
         case .voice: VoiceSettingsPage(focus: focus)
         case .captions: CaptionsSettingsPage(focus: focus)
         case .video: VideoSettingsPage(focus: focus)
+        case .performance: PerformanceSettingsPage(focus: focus)
         case .keys: KeysSettingsPage(focus: focus)
         case .fallbacks: FallbacksSettingsPage(focus: focus)
         case .appearance: AppearanceSettingsPage(focus: focus)

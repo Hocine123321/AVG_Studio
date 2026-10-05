@@ -45,6 +45,7 @@ enum PhaseInputs {
                 "targetSeconds": String(ch.targetSeconds),
                 "contentShape": ch.contentShape, "visualTone": ch.visualTone, "styleLock": ch.styleLock,
                 "topicResearch": String(ch.topicResearchEnabled),
+                "chapters": String(ch.chaptersEnabled),
                 "recycle": ch.recycleEnabled ? "on \(Int(ch.recycleRatio))" : "off",
                 "briefProvider": d(ch.briefTextProvider), "briefBackup": d(ch.briefTextBackup),
                 "draftProvider": d(ch.scriptDraftTextProvider), "draftBackup": d(ch.scriptDraftTextBackup),
@@ -57,6 +58,10 @@ enum PhaseInputs {
                 "imageBackup": d(ch.imageProviderBackup),
                 // The app-wide style suffix is only used when there is no style lock.
                 "imageStyle": ch.styleLock.trimmed.isEmpty ? s.imageStyle : "",
+                // Picture quality follows the video quality, so a change of TIER
+                // (not every resolution step) makes the pictures stale. Gemini
+                // has no quality control, so it never does.
+                "imageQuality": s.image == .gemini ? "" : ImageQuality.forVideo(shortEdge: s.shortEdge).rawValue,
             ]
         case .voice:
             return [
@@ -65,6 +70,10 @@ enum PhaseInputs {
                 "dynamicPauses": s.dynamicPausesEnabled ? "on \(Int(s.pauseMs))" : "off",
                 "trim": ch.voiceTrimAggressiveness.rawValue,
                 "maxRemovable": String(Int(ch.voiceMaxRemovableSilencePct)),
+                // Only the settings the chosen voice actually honours.
+                "voiceStability": s.voice == .elevenlabs ? String(ch.voiceStability) : "",
+                "voiceSpeed": s.voice == .gemini ? "" : String(ch.voiceSpeed),
+                "chapters": String(ch.chaptersEnabled),
             ]
         case .captions:
             return [
@@ -72,6 +81,7 @@ enum PhaseInputs {
                 "takeoverCards": String(ch.takeoverCardsEnabled),
                 "explainerCards": String(ch.explainerCardsEnabled),
                 "transcriptionKey": String(hasTranscriptionKey),
+                "chapters": String(ch.chaptersEnabled),
             ]
         case .render:
             return [
@@ -85,9 +95,18 @@ enum PhaseInputs {
                 "accent": ch.accentColorHex, "accent1": ch.accent1ColorHex, "accent2": ch.accent2ColorHex,
                 "font": ch.fontFamily,
                 "brand": ch.brandPreset,
+                "overlay": Self.overlayDescription(ch.overlay),
+                "codec": s.videoCodec.rawValue, "encoderQuality": s.encoderQuality.rawValue,
                 "directorProvider": d(ch.director2TextProvider), "directorBackup": d(ch.director2TextBackup),
             ]
         }
+    }
+
+    /// A stable one-line description of the overlay look, for change detection.
+    static func overlayDescription(_ o: OverlayStyle) -> String {
+        [o.captionBackground.rawValue, String(o.captionOutline), String(o.captionShadow), String(o.captionUppercase),
+         o.captionTextColorHex, String(o.captionBackgroundOpacity), o.cardBackground.rawValue, o.cardAlignment.rawValue,
+         String(o.cardTextScale), String(o.cardUppercase), String(o.cardAccentBars), o.cardAnimation.rawValue].joined(separator: "|")
     }
 
     private static func writerModel(_ s: AppSettings) -> String {
@@ -133,6 +152,8 @@ enum PhaseInputs {
         "captionPosition": "Caption position", "captionSize": "Caption size",
         "accent": "Highlight colour", "accent1": "Accent 1", "accent2": "Accent 2", "font": "Font",
         "brand": "Brand preset", "directorProvider": "Motion planner", "directorBackup": "Motion backup",
+        "chapters": "Chapter cards", "imageQuality": "Image quality", "voiceStability": "Voice stability",
+        "voiceSpeed": "Voice speed", "overlay": "Overlay look", "codec": "Video format", "encoderQuality": "Encoder quality",
     ]
 
     /// The keys whose values differ, in a stable (alphabetical-by-label) order.
@@ -204,6 +225,8 @@ struct TakeSnapshot: Codable, Hashable {
     var gradeLook: GradeLook
     var directionSignature: String
     var storyMap: StoryMap?
+    var audioSegments: [AudioSegment]?
+    var chapters: [Chapter]?
     var phases: [String: PhaseRecord]
     var stepRecords: [String: StepRecord]?
 
@@ -212,6 +235,7 @@ struct TakeSnapshot: Codable, Hashable {
                      sceneDurations: p.sceneDurations, captions: p.captions, captionsSource: p.captionsSource,
                      cards: p.cards, sceneDirections: p.sceneDirections, gradeLook: p.gradeLook,
                      directionSignature: p.directionSignature, storyMap: p.storyMap,
+                     audioSegments: p.audioSegments, chapters: p.chapters,
                      phases: p.phases, stepRecords: p.stepRecords)
     }
 
@@ -222,6 +246,7 @@ struct TakeSnapshot: Codable, Hashable {
         p.sceneDurations = sceneDurations; p.captions = captions; p.captionsSource = captionsSource
         p.cards = cards; p.sceneDirections = sceneDirections; p.gradeLook = gradeLook
         p.directionSignature = directionSignature; p.storyMap = storyMap
+        p.audioSegments = audioSegments; p.chapters = chapters
         p.phases = phases; p.stepRecords = stepRecords
     }
 }

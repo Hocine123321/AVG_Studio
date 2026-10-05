@@ -44,7 +44,7 @@ enum BackgroundRender {
     /// the main actor.
     @MainActor
     static func scheduleIfNeeded(store: Store) {
-        guard let runningID = store.runningProjectID else { return }
+        guard store.settings.allowBackgroundRendering, let runningID = store.runningProjectID else { return }
         UserDefaults.standard.set(runningID, forKey: pendingKey)
         let request = BGProcessingTaskRequest(identifier: taskID)
         request.requiresNetworkConnectivity = true

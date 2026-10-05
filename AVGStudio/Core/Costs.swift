@@ -19,11 +19,17 @@ enum CostTable {
     }
 
     /// USD per generated image.
-    static func imageFlat(_ kind: ImageProviderKind) -> Double {
+    static func imageFlat(_ kind: ImageProviderKind, quality: ImageQuality = .medium) -> Double {
         switch kind {
         case .pollinations, .stablehorde: return 0
         case .gemini: return 0.02
-        case .openai: return 0.04
+        case .openai:
+            // OpenAI prices by quality tier; medium is the figure this table has always used.
+            switch quality {
+            case .low: return 0.015
+            case .medium: return 0.04
+            case .high: return 0.16
+            }
         }
     }
 
@@ -81,7 +87,7 @@ enum CostTable {
         // splitter asks for). Recycled pool images cost nothing.
         let scenes = Double(min(12, max(5, Int((seconds / 7).rounded()))))
         let recycled = (channel.recycleEnabled && poolSize > 0) ? scenes * min(100, max(0, channel.recycleRatio)) / 100 : 0
-        let images = max(0, scenes - recycled) * imageFlat(s.image)
+        let images = max(0, scenes - recycled) * imageFlat(s.image, quality: ImageQuality.forVideo(shortEdge: s.shortEdge))
 
         let voice = scriptChars * voiceRate(s.voice)
         let captions = hasTranscriptionKey ? seconds / 60 * transcriptionPerMinute : 0

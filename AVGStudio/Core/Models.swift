@@ -79,7 +79,18 @@ struct TakeoverCard: Codable, Hashable, Identifiable {
     var text: String
     var start: Double
     var end: Double
-    var id: Int { scene }
+    /// "question" (the default, and what every card saved before this field
+    /// was), "explainer", or "chapter".
+    var kind: String?
+    /// A chapter card's second line.
+    var subtitle: String?
+    /// A chapter card's small label above the title ("PART 2").
+    var eyebrow: String?
+    /// A chapter card shares its `scene` number with the first scene of the
+    /// part it introduces, and a question card can sit on that same scene - so
+    /// the id has to include the kind or the two would collide.
+    var id: String { "\(kind ?? "question")-\(scene)" }
+    var isChapter: Bool { kind == "chapter" }
 }
 
 /// One hand-added entry in the shared image recycling pool - ported from
@@ -254,6 +265,10 @@ struct Project: Codable, Hashable, Identifiable {
     /// The take whose content the working copy (the project's own fields and
     /// files) currently equals; nil once a run has started changing it.
     var workingTakeID: Int?
+    /// Where each spoken segment sits in the narration audio (see AudioSegment).
+    var audioSegments: [AudioSegment]?
+    /// The chapter cards Director I planned, when the channel has chapters on.
+    var chapters: [Chapter]?
 
     func phase(_ p: PhaseID) -> PhaseRecord { phases[p.rawValue] ?? PhaseRecord() }
 
@@ -334,6 +349,15 @@ struct Channel: Codable, Hashable, Identifiable {
     /// A brand-preset catalogue id: its motion feel, transitions and grade
     /// steer Director II; its colours seed the channel's accents when picked.
     var brandPreset: String = "modern_dark"
+    /// Title cards between the parts of a longer video (the PC's
+    /// `chapters_enabled`, off by default).
+    var chaptersEnabled: Bool = false
+    /// ElevenLabs voice stability, 0...1 (the PC's `voice_stability`).
+    var voiceStability: Double = 0.5
+    /// Speaking speed, 0.7...1.2 (the PC's `voice_speed`).
+    var voiceSpeed: Double = 1.0
+    /// How captions and cards are drawn.
+    var overlay = OverlayStyle()
     /// Mirrors the PC's `image_provider_backup`/`image_on_failure` exactly,
     /// including its default: "stop" - a scene whose only configured
     /// provider fails stops the run, UNLESS a backup provider is set AND
@@ -652,6 +676,19 @@ struct AppSettings: Codable {
     /// start as slots free (the PC's `max_parallel_jobs`, default 2). Renders
     /// take turns regardless - see RenderLease.
     var maxParallelJobs = 2
+    // Performance (Settings -> Performance)
+    var renderEngine: RenderEngine = .auto
+    var videoCodec: VideoCodec = .hevc
+    var encoderQuality: EncoderQuality = .automatic
+    /// Images made at once during Visuals (1...4).
+    var imageParallelism = 3
+    /// Wait for the iPhone to cool down between frames when it reports heat.
+    var pauseWhenHot = true
+    /// Stop the screen auto-locking while a video is being made: a locked
+    /// screen suspends the app and, with it, the GPU.
+    var keepScreenAwake = true
+    /// Keep working (more slowly) when you leave the app.
+    var allowBackgroundRendering = true
 
     /// Tolerant decode: a key missing from an older save (i.e. any field
     /// added in an update) keeps its default instead of failing the whole
@@ -697,6 +734,13 @@ struct AppSettings: Codable {
         filterStyle = c.value("filterStyle", filterStyle)
         filterIntensity = c.value("filterIntensity", filterIntensity)
         maxParallelJobs = c.value("maxParallelJobs", maxParallelJobs)
+        renderEngine = c.value("renderEngine", renderEngine)
+        videoCodec = c.value("videoCodec", videoCodec)
+        encoderQuality = c.value("encoderQuality", encoderQuality)
+        imageParallelism = c.value("imageParallelism", imageParallelism)
+        pauseWhenHot = c.value("pauseWhenHot", pauseWhenHot)
+        keepScreenAwake = c.value("keepScreenAwake", keepScreenAwake)
+        allowBackgroundRendering = c.value("allowBackgroundRendering", allowBackgroundRendering)
         appFont = c.value("appFont", appFont)
     }
 }
@@ -780,6 +824,10 @@ extension Channel {
         d.visualTone = c.value("visualTone", d.visualTone)
         d.styleLock = c.value("styleLock", d.styleLock)
         d.brandPreset = c.value("brandPreset", d.brandPreset)
+        d.chaptersEnabled = c.value("chaptersEnabled", d.chaptersEnabled)
+        d.voiceStability = c.value("voiceStability", d.voiceStability)
+        d.voiceSpeed = c.value("voiceSpeed", d.voiceSpeed)
+        d.overlay = c.value("overlay", d.overlay)
         d.imageProviderBackup = c.value("imageProviderBackup", d.imageProviderBackup)
         d.imageOnFailure = c.value("imageOnFailure", d.imageOnFailure)
         d.takeoverCardsEnabled = c.value("takeoverCardsEnabled", d.takeoverCardsEnabled)
