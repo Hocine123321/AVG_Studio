@@ -116,8 +116,7 @@ enum AgentProviderFactory {
         case .groq:
             return GroqAgent(key: try Keychain.require(.groq), model: settings.agentGroqModel)
         case .gemini:
-            // Replaced by GeminiAgent in a later task.
-            throw AVGError.message("The Gemini assistant arrives in a later update.")
+            return GeminiAgent(key: try Keychain.require(.gemini), model: settings.agentGeminiModel)
         }
     }
 }

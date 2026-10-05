@@ -124,9 +124,16 @@ final class AgentGroqTests: XCTestCase {
         XCTAssertThrowsError(try GroqAgent.decode(Data(#"{}"#.utf8)))
     }
 
-    func testFactoryRefusesGeminiUntilItsBackendExists() {
-        var s = AppSettings()
-        s.agentProvider = .gemini
-        XCTAssertThrowsError(try AgentProviderFactory.make(settings: s))
+    func testFactoryNeedsTheMatchingKey() throws {
+        // The simulator's Keychain is empty; skip rather than fail on a dev machine that has keys.
+        try XCTSkipIf(Keychain.has(.groq) || Keychain.has(.gemini), "a real key is present")
+        for kind in AgentProviderKind.allCases {
+            var s = AppSettings()
+            s.agentProvider = kind
+            XCTAssertThrowsError(try AgentProviderFactory.make(settings: s)) { error in
+                guard case AVGError.missingKey = error else { return XCTFail("expected missingKey, got \(error)") }
+            }
+            XCTAssertThrowsError(try AgentProviderFactory.make(settings: AppSettings(), kind: kind), "an explicit kind overrides the setting")
+        }
     }
 }
