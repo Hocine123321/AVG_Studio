@@ -106,6 +106,7 @@ extension AgentMessage {
 func makeAgent(_ provider: ScriptedProvider, host: FakeAgentHost) -> Agent {
     retainedHosts.append(host)
     let a = Agent()
+    a.chatURL = tempChatURL()   // before the host: attaching it may restore a kept chat
     a.host = host
     a.makeProvider = { _ in provider }
     a.makeContext = { AgentContext.test($0) }
@@ -119,4 +120,8 @@ func waitFor(_ what: String = "condition", _ cond: () -> Bool, file: StaticStrin
         try? await Task.sleep(nanoseconds: 5_000_000)
     }
     XCTFail("timed out waiting for \(what)", file: file, line: line)
+}
+
+func tempChatURL() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent("avg-agent-chat-\(UUID().uuidString).json")
 }

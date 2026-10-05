@@ -59,7 +59,13 @@ final class Agent {
 
     // MARK: Wiring (not UI state)
 
-    @ObservationIgnored weak var host: (any AgentHost)?
+    @ObservationIgnored weak var host: (any AgentHost)? {
+        didSet { restoreIfKept() }
+    }
+    /// Where the kept chat lives. `nil` means the real file beside the app's
+    /// data; tests point it at a temporary one so they never touch it.
+    @ObservationIgnored var chatURL: URL?
+    @ObservationIgnored private var restored = false
     /// Makes the provider for this turn. Tests replace it with a scripted one.
     @ObservationIgnored var makeProvider: (AgentProviderKind?) throws -> any AgentProvider = { _ in
         throw AVGError.message("The assistant isn't ready yet.")
@@ -118,6 +124,7 @@ final class Agent {
         lines = []
         wire = []
         approvedSpendUSD = 0
+        deleteSavedChat()
     }
 
     private func resolveApproval(_ approved: Bool) {
@@ -203,6 +210,7 @@ final class Agent {
 
         if epoch == myEpoch {
             wire = AgentHistory.compacted(wire, keepingLastTurn: false)
+            persistIfKept()
         }
     }
 
@@ -235,6 +243,40 @@ final class Agent {
         let done = AgentTools.perform(approval.action, host: host)
         if let id = done.projectID { startedByAgent.insert(id) }
         return done.text
+    }
+
+    // MARK: Keep chat
+
+    private var resolvedChatURL: URL { chatURL ?? AgentChatStore.url() }
+
+    /// Saves the conversation at the end of a completed message, if the
+    /// person asked for that. Once per message, not per token.
+    private func persistIfKept() {
+        guard host?.settings.agentKeepChat == true else { return }
+        try? AgentChatStore.save(lines, to: resolvedChatURL)
+    }
+
+    /// Brings the kept chat back the first time a host is attached. The
+    /// model's history is rebuilt as plain user/assistant text, so there is
+    /// no tool id or provider payload to replay.
+    func restoreIfKept() {
+        guard !restored, let host else { return }
+        restored = true
+        guard host.settings.agentKeepChat, lines.isEmpty else { return }
+        let saved = AgentChatStore.load(from: resolvedChatURL)
+        lines = saved
+        wire = saved.compactMap { l in
+            switch l.kind {
+            case .user: return AgentMessage.user(l.text)
+            case .assistant: return AgentMessage.assistant(text: l.text)
+            case .activity, .error, .announcement: return nil
+            }
+        }
+    }
+
+    /// Deletes the saved file (Settings > Clear saved chat, or Keep chat off).
+    func deleteSavedChat() {
+        AgentChatStore.delete(at: resolvedChatURL)
     }
 
     // MARK: Announcements
