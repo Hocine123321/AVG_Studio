@@ -38,6 +38,9 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var store = store
+        // `Store.agent` is a `let`, so a binding cannot be formed through
+        // `$store.agent`; bind the agent directly.
+        @Bindable var agent = store.agent
         return Group {
             if !store.settings.onboarded {
                 WelcomeView()
@@ -78,6 +81,18 @@ struct RootView: View {
         // an explicit override.
         .sheet(item: $store.recoveryPlan) { plan in
             RecoverySheet(plan: plan) { store.resolveRecovery($0) }
+        }
+        // The assistant's chat. A failed render's RecoverySheet needs the
+        // screen, so the chat gets out of its way (the prompt is the
+        // person's decision, never the assistant's).
+        .sheet(isPresented: $agent.isOpen) { AgentView() }
+        .onChange(of: store.recoveryPlan?.id) { _, id in
+            if id != nil { store.agent.isOpen = false }
+        }
+        // "Ready" / "stopped" announcements: felt even with the chat closed.
+        .sensoryFeedback(trigger: store.agent.lastAnnouncement) { _, new in
+            guard let new else { return nil }
+            return new.ok ? .success : .error
         }
         .environment(\.glassLevel, store.settings.glassOpacity)
         .environment(\.appFontChoice, store.settings.appFont)

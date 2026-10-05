@@ -197,6 +197,10 @@ final class Agent {
             for call in reply.toolCalls {
                 say(.activity, Self.activityText(for: call.name))
                 let outcome = AgentTools.run(call, host: host, context: context)
+                // Opening a project switches tab; get the chat out of the way.
+                if call.name == "open_project", case .result(let text) = outcome, text.hasPrefix("Opened") {
+                    isOpen = false
+                }
                 let result: String
                 switch outcome {
                 case .result(let text):

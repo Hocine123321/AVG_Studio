@@ -72,6 +72,7 @@ struct CreateView: View {
         }
         .screenBackground()
         .navigationTitle("New video")
+        .toolbar { ToolbarItem(placement: .topBarLeading) { AgentToolbarButton() } }
         .onAppear {
             aspect = store.activeChannel.aspectRatio
             // Coming from "Reword the topic and retry": pre-fill the topic

@@ -50,6 +50,7 @@ struct StudioView: View {
                 // TakeLogToggle) - the FULL run history, not the mock's
                 // small always-visible "Live list" tail (liveListCard,
                 // below) which only shows the last few lines.
+                ToolbarItem(placement: .topBarLeading) { AgentToolbarButton() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Log", systemImage: "text.alignleft") { showLog = true }
                 }

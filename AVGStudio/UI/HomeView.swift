@@ -102,6 +102,7 @@ struct HomeView: View {
         .screenBackground()
         .navigationTitle(filter == .archived ? "Archive" : "Library")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) { AgentToolbarButton() }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Haptics.light()
