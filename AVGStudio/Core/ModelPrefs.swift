@@ -82,7 +82,9 @@ enum ModelProbe {
             case .modelMissing: return .failed("Not available to this account")
             case .quota: return .failed("Over quota")
             case .billing: return .failed("Needs billing")
-            case .rateLimit, .contentFilter, .network, .timeout, .dependency, .bug: return .inconclusive(message)
+            // A malformed tool call (the in-app assistant's) says nothing about
+            // whether the model can write text, so it is never recorded as a failure.
+            case .rateLimit, .contentFilter, .network, .timeout, .dependency, .bug, .malformedOutput: return .inconclusive(message)
             }
         }
     }
