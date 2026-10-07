@@ -121,6 +121,13 @@ Each of these has caused a real defect, or is a documented invariant carried ove
 - **A new setting needs a `SettingAnchor` and a `SettingsIndex` entry,** or `SettingsIndexTests` fails.
 - **Never hand-edit a generated file, and never commit one.** See Commands.
 - **`Pc Version Reference (Linux)/` is read-only**, and `avg/media/vendor/` inside it is protected byte-for-byte (`-text` in `.gitattributes`). A change that seems to need an edit there is a change to the Swift port instead.
+- **The assistant never starts or redoes paid work without an `AgentApproval`.** The only work that may start on its own is work whose estimate is *exactly* zero, only when the person chose "Only videos that cost money", and at most once per message. A cost the estimate cannot price counts as paid. `CostRates` has no `default:` so a new provider cannot silently be free.
+- **Policy is decided in `AgentPolicy` from `AppSettings`, never from model text or the custom instructions.** "Never ask me" in the instructions box changes the tone and nothing else; a test pins it.
+- **Agent tool results and the saved chat never contain a key.** Keys stay behind `Keychain`; the saved chat masks key-shaped strings before writing.
+- **A malformed tool call is answered by the loop (a nudge to the model), never by a second HTTP retry.** `ErrorKind.malformedOutput` is not retryable on purpose.
+- **Failover to the other assistant happens only before the first tool call of a message, and once.** After a tool ran, the history holds the first service's own tool ids (and Gemini 3 signatures), and a second start could duplicate a video.
+- **Keep the agent's fixed prompt small.** Groq's free plan allows about 8K tokens a minute; `testSystemPlusToolsStaysUnderTokenBudget` guards it. Tool results are short plain text, not JSON.
+- **When the sandbox has no Swift toolchain, CI is the compiler.** `.github/workflows/ios.yml` repeats compiler and test errors as `::error::` annotations on failure, readable through the check-runs API. Match a run to a commit by `head_sha`.
 
 ## How work is run
 

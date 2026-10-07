@@ -65,6 +65,12 @@ with `@testable import AVGStudio`.
 | `PhotoSaver.swift` | `PhotoSaver.saveVideo(at:)`: add-only Photos permission, waits for the save, throws a readable error | Share sheets |
 | `SilenceTrim.swift` | Dead-air removal on PCM audio (20 ms windows), the port of `remove_silences_core` | Where the audio came from |
 | `CapCutExport.swift` | Builds the CapCut import bundle in `temporaryDirectory` | Share sheets |
+| `CostRates.swift` | **The one flat rate table** (`CostRates`), shared by `Pipeline`'s recorded costs and the assistant's pre-start estimate; `CostBreakdown` (priced per phase, so a redo from Voice is not priced as a whole video) and `CostEstimate`. No `default:` in its switches, so a new provider cannot price as free | Which phase runs |
+| `Agent.swift` | The in-app assistant's loop: bounded tool calling, approval continuation, spend limit, one auto-start per message, compaction, failover, self-test, "ready/stopped" announcements | SwiftUI, request shapes |
+| `AgentTools.swift` | `AgentHost`, the seven tools, the gated-action `AgentApproval`, project-ref resolution, preflight, permission filtering | The loop, providers |
+| `AgentPolicy.swift` | `AgentPolicy` (needs a tap? over the spend limit?) and `AgentPrompt` (the system prompt). **Policy is decided here from `AppSettings`, never from model text** | Model output |
+| `AgentSettings.swift` | The Assistant's enums and `AgentSettingsRules` (spend-limit and instruction clamps) | Views |
+| `AgentChatStore.swift` | The optional saved chat: user and assistant text only, newest 40, key-shaped strings masked | Providers |
 
 ### `AVGStudio/Providers/`: talking to the outside.
 
@@ -76,6 +82,9 @@ with `@testable import AVGStudio`.
 | `ImageProviders.swift` | `PollinationsImages`, `StableHordeImages`, `GeminiImages`, `OpenAIImages`, and `validImage(_:)` |
 | `VoiceProviders.swift` | `AppleVoice` (on-device), `ElevenLabsVoice`, `GeminiVoice` (adds its own WAV header) |
 | `TranscriptionProvider.swift` | `AssemblyAI.words(fromAudio:key:)` for word-level caption timing |
+| `AgentTypes.swift` | Provider-neutral vocabulary: `AgentToolSpec`, `AgentMessage`, `AgentProvider`, tolerant `AgentArgs`, and `AgentHistory` (trim and compact without orphaning a tool result) |
+| `AgentGroq.swift` | Groq's OpenAI-style tool-calling codec, `GroqAgent`, and `AgentProviderFactory` |
+| `AgentGemini.swift` | Gemini's `functionDeclarations` codec. Replays the model's turn **verbatim** (Gemini 3 thought signatures) |
 | `ModelCatalog.swift` | `ModelCatalog`: a live-fetched, disk-cached list backing a picker. One class, nine instances |
 | `ModelCatalogSources.swift` | One fetch closure per catalogue (Gemini, Groq, ElevenLabs, Stable Horde, Pollinations) |
 
@@ -96,8 +105,8 @@ with `@testable import AVGStudio`.
 | `StudioView.swift` | The current project: player, five phase rows, live list, takes, scenes, brief, export sheet |
 | `CreateView.swift` | New-video form: topic, title, shape, channel |
 | `ChannelsView.swift` | Channel list and `ChannelEditor` (identity, videos, brand colours and font, recycling, cards, image backup, voice cleanup, per-phase models) |
-| `SettingsView.swift` | The Settings **hub**: ten big rows that each show their current value, a search field and a Quick settings button docked at the bottom, and the `SettingsCatalogs` instance shared by every sub-screen |
-| `SettingsScreens.swift` | One page per category: `WritingSettingsPage`, `ImagesSettingsPage`, `VoiceSettingsPage`, `CaptionsSettingsPage`, `VideoSettingsPage`, `KeysSettingsPage`, `FallbacksSettingsPage`, `AppearanceSettingsPage`. The keys page holds only *which* keys exist, never a key's value |
+| `SettingsView.swift` | The Settings **hub**: eleven big rows that each show their current value, a search field and a Quick settings button docked at the bottom, and the `SettingsCatalogs` instance shared by every sub-screen |
+| `SettingsScreens.swift` | One page per category: `WritingSettingsPage`, `ImagesSettingsPage`, `VoiceSettingsPage`, `CaptionsSettingsPage`, `VideoSettingsPage`, `AssistantSettingsPage`, `KeysSettingsPage`, `FallbacksSettingsPage`, `AppearanceSettingsPage`. The keys page holds only *which* keys exist, never a key's value |
 | `SettingsKit.swift` | Routing (`SettingsCategory`, `SettingAnchor`, `SettingsRoute`), the **search index** (`SettingsIndex`), and the row components (`ToggleRow`, `ChoiceRow`, `SliderRow`, `StepperRow`, `SegmentRow`, `FieldRow`, `NavRow`, `SettingsGroup`, `SettingsPage`) |
 | `SettingsCatalogs.swift` | The nine live `ModelCatalog`s, created once by the hub so every screen shows the same loaded lists |
 | `APIKeySheet.swift` | `KeyStatusPill` and `APIKeySheet`: the one key-entry sheet, shared by Settings and Welcome. Never shows a saved key |
@@ -105,6 +114,7 @@ with `@testable import AVGStudio`.
 | `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
 | `WelcomeView.swift` | First-run five-step onboarding |
 | `ModelRow.swift` | One 56 pt row over a `ModelCatalog`; tapping opens a bottom sheet with search and Refresh. Always editable: typing an id works with no list |
+| `AgentView.swift` | The assistant's chat sheet (opened from a toolbar button on Library, Studio and Create) and `AgentToolbarButton`. The one filled button in it is Approve |
 | `ProjectLogView.swift` | The live log sheet |
 | `ReusableImagesView.swift` | The recycle-pool manager (photo import, descriptions) |
 | `ActivityShareSheet.swift` | `UIActivityViewController` wrapper |
@@ -215,6 +225,15 @@ There is no schema catalogue. Settings are two `Codable` structs in
   `filterIntensity`, the writer/image/voice fallback models and
   `autoUseFallback`, plus `glassOpacity`, `themePreference`, `appFont` and
   `onboarded`.
+- **The Assistant** (Settings > Assistant) is thirteen more `AppSettings`
+  fields, all prefixed `agent`: `agentProvider` (groq), `agentGroqModel`,
+  `agentGeminiModel`, `agentFailover` (true), `agentAllowCreate` /
+  `agentAllowRedo` / `agentAllowCancel` (true; an off action is not offered to
+  the model at all), `agentApproval` (`always`, or `paidOnly`, where only
+  exactly-free work starts without a tap), `agentChatSpendCapUSD` (1.00,
+  0.25 to 10), `agentReplyStyle` (brief), `agentAnnounceResults` (true),
+  `agentKeepChat` (false) and `agentInstructions` (400 characters). The
+  **Test assistant** and **Clear saved chat** rows are actions, not fields.
 - **`Channel`** is per channel: identity (`name`, `niche`, `tone`,
   `language`), `targetSeconds` (60), `aspectRatio`, `topicResearchEnabled`,
   brand colours (`accentColorHex`, `accent1ColorHex`, `accent2ColorHex`) and
@@ -238,7 +257,7 @@ tolerant `init(from:)` (`c.value("key", key)`), a control on the right page in
 
 ---
 
-## 6. The five recipes
+## 6. The six recipes
 
 **Add a setting.** Add a field with a default to `AppSettings` (or `Channel`)
 and a `c.value(...)` line in its `init(from:)`. If you skip the decode line, an
@@ -267,6 +286,15 @@ it advertises models, and add a cost rate in `Pipeline`.
 tab in `RootView` (`App.swift`). Its data comes from `store`; a view does not
 call a provider. Use `Theme` for every colour and radius. One filled
 (`.glassProminent`) action per screen.
+
+**Add an agent tool.** Add its `AgentToolSpec` to `AgentTools.specs(for:)` (one
+short sentence of `summary`: it is sent on every request), a `case` in
+`AgentTools.run`, and a result that is short plain text. If it spends money,
+return an `AgentApproval` and add its `AgentApprovedAction` case to
+`perform`; never start work from `run` itself. If a Settings switch should be
+able to turn it off, add the `agentAllow…` field and omit the spec when it is
+off. Add a `FakeAgentHost` test (`AgentToolsTests`) and keep
+`AgentPolicyTests.testSystemPlusToolsStaysUnderTokenBudget` passing.
 
 **Add a failure safeguard.** Extend `Recovery.plan(for:…)` with the new
 `RecoveryAction` set, handle it in `Recovery.apply`, and add the row to the
@@ -308,6 +336,7 @@ Dynamic Type check in the simulator.
 | `take.log` | `…/<projectID>/` | `Store.appendToProjectLog`; a failed write never breaks a run |
 | `.avg-meta.json` | `Documents/` | settings, channels, active channel, reusable-image descriptors. Written ~0.4 s after the last edit (debounced) and immediately when the app leaves the foreground. An unreadable file is kept as `meta.unreadable-<timestamp>.json` |
 | Reusable images | `Documents/ReusableImages/<UUID>.jpg` | `Store.addReusableImage` |
+| Kept assistant chat | `Documents/.avg-agent-chat.json` | `AgentChatStore`. Only when **Keep chat** is on; user and assistant text, newest 40, key-shaped strings masked. Deleted by New chat, Clear saved chat and turning Keep chat off |
 | Model catalogues | `Application Support/ModelCatalogs/<key>.json` | `ModelCatalog`. Replaced only by a **non-empty** successful fetch |
 | API keys | Keychain, service `com.avgstudio.keys`, `AfterFirstUnlockThisDeviceOnly` | `Keychain.swift` only |
 | Pending render id | `UserDefaults` `AVGPendingRenderProjectID` | `BackgroundRender` |
@@ -339,6 +368,7 @@ The `Store`, one instance for the process lifetime. `AVGStudioApp` builds it and
 | `tab`, `currentProjectID` | Navigation. Studio always shows `currentProject` |
 | `recoveryPlan`, `pendingReword` | A paused run waiting on the user |
 | `interruptedProjectID` | A run cut off by the app closing; shown as a "tap to resume" banner |
+| `agent` | The assistant (`let`, one per `Store`). Holds the transcript, the pending approval, the chat's approved spend, and `isOpen` for the sheet. It drives the store only through `AgentHost`, and never constructs a second `Store` |
 
 Views keep almost none. Anything a screen shows comes from `store`; local
 `@State` is limited to form fields and sheet flags.
