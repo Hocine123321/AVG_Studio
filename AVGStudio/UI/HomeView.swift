@@ -122,7 +122,11 @@ struct HomeView: View {
     private var subtitle: String {
         let base = "\(store.projects.count) project\(store.projects.count == 1 ? "" : "s")"
         let running = store.jobs.count
-        return running > 0 ? "\(base) · \(running) rendering now" : base
+        let queued = store.queuedIDs.count
+        var parts = [base]
+        if running > 0 { parts.append("\(running) running") }
+        if queued > 0 { parts.append("\(queued) queued") }
+        return parts.joined(separator: " · ")
     }
 
     private var emptyTitle: String {

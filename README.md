@@ -57,7 +57,10 @@ with `@testable import AVGStudio`.
 |---|---|---|
 | `Models.swift` | Every `Codable` document: `Project`, `Take`, `PhaseRecord`, `Channel`, `AppSettings`, plus the enums (`PhaseID`, `MotionType`, `GradeLook`, provider kinds). Decoding is **tolerant**: a missing key takes its default | SwiftUI, providers |
 | `Store.swift` | The one state container: projects, channels, settings, jobs, log, the recovery plan. Owns persistence and starts/cancels runs. Settings writes are **debounced** (0.4 s); `flushMeta()` forces one when the app leaves the foreground | Views |
-| `Pipeline.swift` | `Pipeline.execute(_ phase:)` and the five phase bodies. Provider resolution, routing, cost recording, prompt-marker parsing | HTTP status codes |
+| `Pipeline.swift` | `Pipeline.execute(_ phase:)` and the five phase bodies. Provider resolution, routing, cost recording, prompt-marker parsing, and the per-step markers for the Studio screen. The render phase takes a turn on `RenderLease` | HTTP status codes |
+| `Steps.swift` | `StepStatus`, `StepRecord`, `PhaseID.steps` (the finer steps inside each phase: 4 for Writing, 1 Visuals, 3 Voice, 3 Captions, 3 Render), and `Project.displayStatus` / `stepProgress`. Bookkeeping only: never changes what a phase does. `Project.stepRecords` is **optional** so older projects still decode | Pipeline logic |
+| `Costs.swift` | `CostTable`: the one table of provider price **estimates**, used both by `Pipeline` as calls happen and by the Create screen's `estimate(...)` before a video runs. Say "about", never "cost" | A metered bill |
+| `RenderLease.swift` | `actor RenderLease`: one render at a time across all running videos, first come first served; a cancelled waiter leaves the line | Phases other than render |
 | `Recovery.swift` | Maps a failure to a `RecoveryPlan` (nine safeguards), the fallback-model logic, `Connectivity` (`NWPathMonitor`), and `RecoverySheet` | Which view shows it |
 | `BackgroundRender.swift` | `BGProcessingTask` registration and the "interrupted render" flag. Uses the app's **one** `Store`, attached at launch with `attach(_:)` | Phase internals |
 | `Keychain.swift` | **The only file that reads or writes API keys.** `APIKey`, `Keychain.get/set/has/remove/require`. `set` returns `Bool` and updates in place | Providers' request shapes |
@@ -65,7 +68,7 @@ with `@testable import AVGStudio`.
 | `PhotoSaver.swift` | `PhotoSaver.saveVideo(at:)`: add-only Photos permission, waits for the save, throws a readable error | Share sheets |
 | `SilenceTrim.swift` | Dead-air removal on PCM audio (20 ms windows), the port of `remove_silences_core` | Where the audio came from |
 | `CapCutExport.swift` | Builds the CapCut import bundle in `temporaryDirectory` | Share sheets |
-| `CostRates.swift` | **The one flat rate table** (`CostRates`), shared by `Pipeline`'s recorded costs and the assistant's pre-start estimate; `CostBreakdown` (priced per phase, so a redo from Voice is not priced as a whole video) and `CostEstimate`. No `default:` in its switches, so a new provider cannot price as free | Which phase runs |
+| `CostRates.swift` | The assistant's view of cost, built **on `CostTable`** (Costs.swift, the one rate table the pipeline and the Create screen share): `CostBreakdown` (priced per phase, so a redo from Voice is not quoted as a whole video) and `CostEstimate`. Adds no rates of its own | Which phase runs |
 | `Agent.swift` | The in-app assistant's loop: bounded tool calling, approval continuation, spend limit, one auto-start per message, compaction, failover, self-test, "ready/stopped" announcements | SwiftUI, request shapes |
 | `AgentTools.swift` | `AgentHost`, the seven tools, the gated-action `AgentApproval`, project-ref resolution, preflight, permission filtering | The loop, providers |
 | `AgentPolicy.swift` | `AgentPolicy` (needs a tap? over the spend limit?) and `AgentPrompt` (the system prompt). **Policy is decided here from `AppSettings`, never from model text** | Model output |
@@ -101,11 +104,11 @@ with `@testable import AVGStudio`.
 |---|---|
 | `App.swift` (root) | `AVGStudioApp` and `RootView`: the five-tab `TabView`, onboarding gate, recovery sheet, scene-phase hook |
 | `Theme.swift` | The design system (Skin v2): palette, glass, typography, background, toasts, sheets, haptics. **The authority on every colour and radius** |
-| `HomeView.swift` | Library: search, filter strip, project grid, multi-select archive, interrupted-render banner |
-| `StudioView.swift` | The current project: player, five phase rows, live list, takes, scenes, brief, export sheet |
-| `CreateView.swift` | New-video form: topic, title, shape, channel |
+| `HomeView.swift` | Library: search, filter strip, project grid, multi-select archive, interrupted-render banner, "N running · N queued" summary |
+| `StudioView.swift` | The current project: player, five phase rows (tap one to expand its steps), queue position, live list, takes, scenes, brief, export sheet |
+| `CreateView.swift` | New-video form: topic, title, shape, channel, and an estimated-cost card from `CostTable` |
 | `ChannelsView.swift` | Channel list and `ChannelEditor` (identity, videos, brand colours and font, recycling, cards, image backup, voice cleanup, per-phase models) |
-| `SettingsView.swift` | The Settings **hub**: eleven big rows that each show their current value, a search field and a Quick settings button docked at the bottom, and the `SettingsCatalogs` instance shared by every sub-screen |
+| `SettingsView.swift` | The Settings **hub**: big rows that each show their current value, a search field and a Quick settings button docked at the bottom, and the `SettingsCatalogs` instance shared by every sub-screen |
 | `SettingsScreens.swift` | One page per category: `WritingSettingsPage`, `ImagesSettingsPage`, `VoiceSettingsPage`, `CaptionsSettingsPage`, `VideoSettingsPage`, `AssistantSettingsPage`, `KeysSettingsPage`, `FallbacksSettingsPage`, `AppearanceSettingsPage`. The keys page holds only *which* keys exist, never a key's value |
 | `SettingsKit.swift` | Routing (`SettingsCategory`, `SettingAnchor`, `SettingsRoute`), the **search index** (`SettingsIndex`), and the row components (`ToggleRow`, `ChoiceRow`, `SliderRow`, `StepperRow`, `SegmentRow`, `FieldRow`, `NavRow`, `SettingsGroup`, `SettingsPage`) |
 | `SettingsCatalogs.swift` | The nine live `ModelCatalog`s, created once by the hub so every screen shows the same loaded lists |
@@ -280,7 +283,7 @@ Add its `APIKey` case in `Keychain.swift` if it needs one, and send the key in a
 call in `HTTP.retrying(provider:)`. The `provider:` argument is **required**,
 because the provider-specific patterns in `ErrorPolicy.swift` key off it. Add
 its patterns there, add a catalogue source in `ModelCatalogSources.swift` if
-it advertises models, and add a cost rate in `Pipeline`.
+it advertises models, and add a cost rate in `CostTable` (`Costs.swift`).
 
 **Add a screen.** A view in `UI/`, a case in `AppTab` (`Store.swift`), and a
 tab in `RootView` (`App.swift`). Its data comes from `store`; a view does not
@@ -348,7 +351,7 @@ The Documents folder is exposed to the Files app (`UIFileSharingEnabled`), so
 `Projects/` is visible to the user.
 
 A project's costs are kept in `Project.costs`, capped at 200 entries. The
-rates are flat guesses, not metering: Gemini text about $0.25 per million
+rates are flat guesses, not metering (the single table is `CostTable` in `Costs.swift`): Gemini text about $0.25 per million
 characters, Groq about $0.15, Gemini image $0.02, OpenAI image $0.04,
 ElevenLabs $0.00003 per character, AssemblyAI $0.01 per minute.
 
@@ -386,7 +389,7 @@ Views keep almost none. Anything a screen shows comes from `store`; local
   (`CODE_SIGNING_ALLOWED=NO`).
 - **Local:** `brew install xcodegen && xcodegen generate && open AVGStudio.xcodeproj`
   from the repo root.
-- **Tests:** `AVGStudioTests/` is a `bundle.unit-test` target (42 tests, XCTest,
+- **Tests:** `AVGStudioTests/` is a `bundle.unit-test` target (57 tests, XCTest,
   `@testable import AVGStudio`). CI runs it on an iPhone simulator **before**
   the release build, and a failing test stops the IPA from being produced.
   Coverage is deliberately narrow, on the code where a mistake is silent:
@@ -402,6 +405,10 @@ Views keep almost none. Anything a screen shows comes from `store`; local
     the `RenderStats` summary text.
   - `SettingsIndexTests` (8): every `SettingAnchor` and category is
     searchable, titles are unique, ranking and multi-word queries.
+  - `StepsAndCostTests` (15): every phase has unique steps, older projects show
+    finished phases as done, `CostTable` estimates and labels, and
+    `RenderLease` ordering and cancelled waiters (these three use short
+    `Task.sleep` waits, so a rare timing flake is possible).
 
   Nothing tests providers, the pixels the renderer produces, the `Store` or any view; that is still
   the CI build plus running the app. From Xcode: `⌘U`.

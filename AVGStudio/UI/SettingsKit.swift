@@ -19,7 +19,7 @@ import SwiftUI
 
 /// Every screen the hub can open a setting on.
 enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
-    case writing, images, voice, captions, video, assistant, keys, fallbacks, appearance
+    case writing, images, voice, captions, video, performance, assistant, keys, fallbacks, appearance
     var id: String { rawValue }
 
     var title: String {
@@ -29,6 +29,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "Voice"
         case .captions: return "Captions"
         case .video: return "Video"
+        case .performance: return "Performance"
         case .assistant: return "Assistant"
         case .keys: return "API keys"
         case .fallbacks: return "Fallbacks"
@@ -43,6 +44,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "waveform"
         case .captions: return "captions.bubble"
         case .video: return "film"
+        case .performance: return "speedometer"
         case .assistant: return "sparkle"
         case .keys: return "key.fill"
         case .fallbacks: return "arrow.triangle.branch"
@@ -58,6 +60,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case voiceProvider, voicePick, voiceModel
     case captionsToggle, captionAnimation, captionWords, captionPosition, captionSize
     case quality, fps, kenBurns, motion, filterStyle, filterIntensity
+    case renderEngine, videoCodec, encoderQuality, parallelJobs, imageParallelism, pauseWhenHot, keepAwake, backgroundRendering
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
     case theme, font, glass
@@ -113,6 +116,14 @@ enum SettingsIndex {
         e("Frame rate", .video, .fps, "fps 24 30 60 smooth"),
         e("Ken Burns motion", .video, .kenBurns, "zoom pan movement camera"),
         e("Motion amount", .video, .motion, "ken burns intensity strength"),
+        e("Render engine", .performance, .renderEngine, "gpu cpu metal graphics speed fast slow software"),
+        e("Video format", .performance, .videoCodec, "codec hevc h264 h.265 h.264 compatible file size"),
+        e("Encoder quality", .performance, .encoderQuality, "bitrate quality size compact balanced high compression"),
+        e("Videos at once", .performance, .parallelJobs, "queue parallel jobs simultaneous concurrent render at the same time"),
+        e("Images at once", .performance, .imageParallelism, "parallel concurrent image generation batch rate limit speed"),
+        e("Pause when hot", .performance, .pauseWhenHot, "thermal heat temperature overheating cool throttle"),
+        e("Keep screen on", .performance, .keepAwake, "auto-lock sleep awake idle screen timeout stall"),
+        e("Keep working in background", .performance, .backgroundRendering, "background app switch leave continue"),
         e("Film filter", .video, .filterStyle, "filter grain light leak look"),
         e("Filter intensity", .video, .filterIntensity, "filter strength amount grain leak"),
         e("Assistant provider", .assistant, .assistantProvider, "assistant agent chat ai groq gemini service"),

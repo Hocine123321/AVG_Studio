@@ -21,10 +21,12 @@ private func validImage(_ d: Data) throws -> Data {
 struct PollinationsImages: ImageProvider {
     let key: String?
     let model: String
+    let quality: ImageQuality
 
-    init(key: String? = nil, model: String = "") {
+    init(key: String? = nil, model: String = "", quality: ImageQuality = .medium) {
         self.key = key
         self.model = PollinationsImages.normalizeModel(model)
+        self.quality = quality
     }
 
     private static let foreignPrefixes = [
@@ -41,7 +43,10 @@ struct PollinationsImages: ImageProvider {
 
     func generate(prompt: String, size: CGSize) async throws -> Data {
         let ratio = size.width > size.height ? "16:9" : (size.width < size.height ? "9:16" : "1:1")
-        let (width, height) = ratio == "1:1" ? (1024, 1024) : (ratio == "9:16" ? (768, 1344) : (1344, 768))
+        // The PC's per-ratio table is the "medium" size; the video's quality
+        // scales it (see ImageQuality).
+        let base = ratio == "1:1" ? (1024, 1024) : (ratio == "9:16" ? (768, 1344) : (1344, 768))
+        let (width, height) = quality.scaled(base)
         let enc = prompt.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#"))) ?? "image"
         var comps = URLComponents(string: "https://gen.pollinations.ai/image/\(enc)")!
         comps.queryItems = [
@@ -81,12 +86,18 @@ struct StableHordeImages: ImageProvider {
     private let model: String
     private let maxWaitSeconds: Double = 180
 
-    init(model: String = "") {
+    private let quality: ImageQuality
+
+    init(model: String = "", quality: ImageQuality = .medium) {
         self.model = model.trimmed.isEmpty ? "stable_diffusion" : model.trimmed
+        self.quality = quality
     }
 
     func generate(prompt: String, size: CGSize) async throws -> Data {
-        let (w, h) = Self.sizeFor(size)
+        let base = Self.sizeFor(size)
+        // Smaller for a low-quality video (fewer kudos, faster). Never LARGER
+        // than the PC's table: anonymous workers refuse big jobs.
+        let (w, h) = quality == .low ? quality.scaled(base) : base
         let key = Keychain.get(.stablehorde) ?? anonymousKey
         let headers = ["apikey": key, "Client-Agent": "AVG-Studio-iOS:1.0:local"]
 
@@ -195,10 +206,11 @@ struct GeminiImages: ImageProvider {
 
 struct OpenAIImages: ImageProvider {
     let key: String
+    var quality: ImageQuality = .medium
     func generate(prompt: String, size: CGSize) async throws -> Data {
         let url = URL(string: "https://api.openai.com/v1/images/generations")!
         let sz = size.width > size.height ? "1536x1024" : (size.width < size.height ? "1024x1536" : "1024x1024")
-        let body: [String: Any] = ["model": "gpt-image-1", "prompt": prompt, "size": sz, "n": 1]
+        let body: [String: Any] = ["model": "gpt-image-1", "prompt": prompt, "size": sz, "n": 1, "quality": quality.openAI]
         let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["Authorization": "Bearer \(key)"], json: body, provider: "openai") }, provider: "openai")
         let o = try HTTP.object(data)
         guard let b64 = (o["data"] as? [[String: Any]])?.first?["b64_json"] as? String, let d = Data(base64Encoded: b64) else {

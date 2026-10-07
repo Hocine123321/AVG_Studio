@@ -22,6 +22,8 @@ struct CaptionStyle {
     /// Mirrors `font_family` - the one font shared by captions and cards.
     /// Empty uses the system font.
     var fontFamily: String = ""
+    /// How captions and cards are drawn (outline, plate, colours, card look).
+    var overlay = OverlayStyle()
 }
 
 /// One UIFont for `family`/`size`/`weight`, falling back to the system font
@@ -66,6 +68,12 @@ struct RenderInput {
     var filter: FilterSpec = FilterSpec(style: .none, intensity: 0)
     var cards: [TakeoverCard] = []
     var output: URL
+    // Performance (Settings -> Performance). Defaults reproduce the old behaviour.
+    var codec: VideoCodec = .hevc
+    var encoderQuality: EncoderQuality = .automatic
+    var engine: RenderEngine = .auto
+    /// Wait for the device to cool when it reports serious heat.
+    var pauseWhenHot = true
 }
 
 /// One scene image placed on the canvas for one frame.
@@ -128,7 +136,7 @@ final class VideoRenderer {
     // MARK: - Render
 
     @discardableResult
-    func render(_ input: RenderInput, progress: @escaping (Double) -> Void) async throws -> RenderStats {
+    func render(_ input: RenderInput, status: @escaping (String) -> Void = { _ in }, progress: @escaping (Double) -> Void) async throws -> RenderStats {
         let clock = ContinuousClock()
         var stats = RenderStats()
         let prepareStart = clock.now
@@ -150,20 +158,27 @@ final class VideoRenderer {
         let total = max(acc, 0.5)
         let frames = max(1, Int(total * Double(input.fps)))
 
-        let gpu = makeGPUState(images: images, canvas: canvas)
+        let gpu = input.engine == .cpu ? nil : makeGPUState(images: images, canvas: canvas)
 
         let writer = try AVAssetWriter(outputURL: tmp, fileType: .mp4)
+        var compression: [String: Any] = [
+            // Stills with slow camera moves gain nothing from B-frames,
+            // and turning reordering off makes the hardware encoder's
+            // job simpler and lower-latency.
+            AVVideoAllowFrameReorderingKey: false,
+            AVVideoExpectedSourceFrameRateKey: input.fps,
+        ]
+        // Automatic leaves the rate to the system (what the app always did);
+        // the other quality choices ask for a specific average bitrate.
+        if let bitrate = input.encoderQuality.bitrate(width: w, height: h, fps: input.fps, codec: input.codec) {
+            compression[AVVideoAverageBitRateKey] = bitrate
+        }
+        if input.codec == .h264 { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoCodecKey: input.codec == .hevc ? AVVideoCodecType.hevc : AVVideoCodecType.h264,
             AVVideoWidthKey: w,
             AVVideoHeightKey: h,
-            AVVideoCompressionPropertiesKey: [
-                // Stills with slow camera moves gain nothing from B-frames,
-                // and turning reordering off makes the hardware encoder's
-                // job simpler and lower-latency.
-                AVVideoAllowFrameReorderingKey: false,
-                AVVideoExpectedSourceFrameRateKey: input.fps,
-            ] as [String: Any],
+            AVVideoCompressionPropertiesKey: compression,
         ])
         vIn.expectsMediaDataInRealTime = false
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: vIn, sourcePixelBufferAttributes: [
@@ -203,6 +218,13 @@ final class VideoRenderer {
                                 return
                             }
                             let f = counters.frame
+                            // Every half second of video, check the phone isn't
+                            // overheating; if it is, wait for it to cool (a hot
+                            // iPhone throttles hard and a long render only
+                            // makes it worse).
+                            if input.pauseWhenHot, f % max(1, fps / 2) == 0 {
+                                Self.coolDownIfNeeded(cancel: cancel, status: status)
+                            }
                             if f >= frames {
                                 counters.finished = true
                                 vIn.markAsFinished()
@@ -285,6 +307,22 @@ final class VideoRenderer {
         stats.muxSeconds = (clock.now - muxStart).seconds
         progress(1)
         return stats
+    }
+
+    /// Blocks (on the render queue, which has nothing else to do) while the
+    /// device reports serious or critical heat, up to two minutes at a time,
+    /// then carries on regardless - slow is better than never finishing.
+    static func coolDownIfNeeded(cancel: CancelFlag, status: (String) -> Void,
+                                 state: () -> ProcessInfo.ThermalState = { ProcessInfo.processInfo.thermalState },
+                                 sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
+                                 limit: TimeInterval = 120) {
+        var waited = 0.0
+        while state().rawValue >= ProcessInfo.ThermalState.serious.rawValue, !cancel.isRaised, waited < limit {
+            if waited == 0 { status("Letting the iPhone cool down…") }
+            sleep(1)
+            waited += 1
+        }
+        if waited > 0 { status("Rendering frames…") }
     }
 
     /// Mutable counters shared between the render queue and `render`. Only
@@ -382,7 +420,17 @@ final class VideoRenderer {
         ctx.interpolationQuality = .high
 
         if let card = plan.card {
-            drawCard(ctx, canvas: canvas, card: card, accent1: UIColor(input.captions.accent1), accent2: UIColor(input.captions.accent2), fontFamily: input.captions.fontFamily)
+            // The entrance (fade / pop) is a transform of the whole card about
+            // the frame's centre; the black behind it shows through while it
+            // is partly transparent or smaller.
+            let motion = Self.cardMotion(card, t: t, style: input.captions.overlay)
+            ctx.saveGState()
+            ctx.setAlpha(motion.alpha)
+            ctx.translateBy(x: canvas.midX, y: canvas.midY)
+            ctx.scaleBy(x: motion.scale, y: motion.scale)
+            ctx.translateBy(x: -canvas.midX, y: -canvas.midY)
+            drawCard(ctx, canvas: canvas, card: card, accent1: UIColor(input.captions.accent1), accent2: UIColor(input.captions.accent2), fontFamily: input.captions.fontFamily, style: input.captions.overlay)
+            ctx.restoreGState()
             applyFilter(ctx, canvas: canvas, t: t, filter: input.filter)
             return
         }
@@ -424,7 +472,7 @@ final class VideoRenderer {
         let sources: [CIImage?]
         /// Film-grain tile repeated to (canvas + one tile), built once.
         let grain: CIImage?
-        var cards: [Int: CIImage] = [:]
+        var cards: [String: CIImage] = [:]
         var caption: (key: CaptionKey, overlay: CaptionOverlay)?
 
         init(context: CIContext, canvas: CGRect, sources: [CIImage?], grain: CIImage?) {
@@ -474,8 +522,18 @@ final class VideoRenderer {
         let canvas = gpu.canvas
 
         if let card = plan.card {
-            let base = cardImage(card, input: input, gpu: gpu) ?? gpu.black
-            return applyFilterCI(base, t: t, filter: input.filter, gpu: gpu).cropped(to: canvas)
+            var base = cardImage(card, input: input, gpu: gpu) ?? gpu.black
+            let motion = Self.cardMotion(card, t: t, style: input.captions.overlay)
+            if motion.scale != 1 {
+                base = base.transformed(by: CGAffineTransform(translationX: -canvas.midX, y: -canvas.midY)
+                    .concatenating(CGAffineTransform(scaleX: motion.scale, y: motion.scale))
+                    .concatenating(CGAffineTransform(translationX: canvas.midX, y: canvas.midY)))
+            }
+            if motion.alpha < 1 {
+                base = base.applyingFilter("CIColorMatrix", parameters: ["inputAVector": CIVector(x: 0, y: 0, z: 0, w: motion.alpha)])
+            }
+            let framed = base.composited(over: gpu.black)
+            return applyFilterCI(framed, t: t, filter: input.filter, gpu: gpu).cropped(to: canvas)
         }
 
         var img = gpu.black
@@ -532,7 +590,7 @@ final class VideoRenderer {
     private func cardImage(_ card: TakeoverCard, input: RenderInput, gpu: GPUState) -> CIImage? {
         if let hit = gpu.cards[card.id] { return hit }
         guard let ctx = makeContext(Int(gpu.canvas.width), Int(gpu.canvas.height)) else { return nil }
-        drawCard(ctx, canvas: gpu.canvas, card: card, accent1: UIColor(input.captions.accent1), accent2: UIColor(input.captions.accent2), fontFamily: input.captions.fontFamily)
+        drawCard(ctx, canvas: gpu.canvas, card: card, accent1: UIColor(input.captions.accent1), accent2: UIColor(input.captions.accent2), fontFamily: input.captions.fontFamily, style: input.captions.overlay)
         guard let cg = ctx.makeImage() else { return nil }
         let image = CIImage(cgImage: cg)
         gpu.cards[card.id] = image
@@ -599,61 +657,118 @@ final class VideoRenderer {
     // the text centered with a small accent rule beneath it - the one
     // static-text composition every takeover card in the PC shares.
 
-    private func drawCard(_ ctx: CGContext, canvas: CGRect, card: TakeoverCard, accent1: UIColor, accent2: UIColor, fontFamily: String) {
+    /// The colours a card is drawn in, for the chosen background.
+    static func cardPalette(_ style: OverlayStyle, accent1: UIColor) -> (background: UIColor, text: UIColor, subtext: UIColor) {
+        switch style.cardBackground {
+        case .dark:
+            // overlay_design.py's DEFAULT_BRAND["bg"] (#0B0F1A).
+            return (UIColor(red: 0x0B / 255.0, green: 0x0F / 255.0, blue: 0x1A / 255.0, alpha: 1),
+                    UIColor(white: 0.95, alpha: 1), UIColor(white: 0.95, alpha: 0.72))
+        case .light:
+            return (UIColor(red: 0.957, green: 0.945, blue: 0.918, alpha: 1),
+                    UIColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 1), UIColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.66))
+        case .brand:
+            var h: CGFloat = 0, sat: CGFloat = 0, br: CGFloat = 0, a: CGFloat = 0
+            accent1.getHue(&h, saturation: &sat, brightness: &br, alpha: &a)
+            return (UIColor(hue: h, saturation: min(1, sat * 0.9), brightness: 0.16, alpha: 1),
+                    UIColor(white: 0.97, alpha: 1), UIColor(white: 0.97, alpha: 0.74))
+        }
+    }
+
+    /// The entrance of a card as an opacity and a scale about the centre, by
+    /// how long it has been on screen. Shared by both drawing paths.
+    static func cardMotion(_ card: TakeoverCard, t: Double, style: OverlayStyle) -> (alpha: CGFloat, scale: CGFloat) {
+        let age = max(0, t - card.start)
+        switch style.cardAnimation {
+        case .none: return (1, 1)
+        case .fade: return (CGFloat(min(1, age / 0.18)), 1)
+        case .pop:
+            let p = min(1, age / 0.22)
+            let eased = 1 - pow(1 - p, 3)
+            return (CGFloat(min(1, age / 0.12)), CGFloat(0.94 + 0.06 * eased))
+        }
+    }
+
+    private func drawCard(_ ctx: CGContext, canvas: CGRect, card: TakeoverCard, accent1: UIColor, accent2: UIColor, fontFamily: String, style: OverlayStyle) {
         ctx.saveGState()
-        // Matches overlay_design.py's DEFAULT_BRAND["bg"] (#0B0F1A) - the
-        // card owns the frame, so this replaces the scene entirely.
-        ctx.setFillColor(UIColor(red: 0x0B / 255.0, green: 0x0F / 255.0, blue: 0x1A / 255.0, alpha: 1).cgColor)
+        let palette = Self.cardPalette(style, accent1: accent1)
+        // The card owns the frame, so this replaces the scene entirely.
+        ctx.setFillColor(palette.background.cgColor)
         ctx.fill(canvas)
 
-        // A thin accent2 stripe along the top edge - the one place this
-        // card uses the PC's "secondary" card accent (overlay_accent2);
-        // accent1 stays reserved for the rule beneath the headline below.
-        let stripeH = max(3, canvas.height * 0.006)
-        ctx.setFillColor(accent2.cgColor)
-        ctx.fill(CGRect(x: 0, y: 0, width: canvas.width, height: stripeH))
+        // The whole card is laid out in TOP-DOWN coordinates (what text drawing
+        // wants), so flip once up front. The stripe used to be drawn BEFORE this
+        // flip, in bottom-up space - which put the "top edge" stripe on the
+        // bottom edge; it now sits where its own comment always said.
+        ctx.translateBy(x: 0, y: canvas.height)
+        ctx.scaleBy(x: 1, y: -1)
+
+        let shortEdge = min(canvas.width, canvas.height)
+        let left = style.cardAlignment == .left
+        if style.cardAccentBars {
+            // A thin accent2 stripe along the top edge - the one place a card
+            // uses the PC's "secondary" accent (overlay_accent2); accent1 stays
+            // reserved for the rule beneath the headline.
+            ctx.setFillColor(accent2.cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: canvas.width, height: max(3, canvas.height * 0.006)))
+        }
 
         let boxW = canvas.width * 0.84
         let boxH = canvas.height * 0.72
-        let shortEdge = min(canvas.width, canvas.height)
+        let boxX = left ? canvas.width * 0.08 : (canvas.width - boxW) / 2
         let floorSize = max(14, shortEdge * 0.035)
-        let maxLines = 2 // Shared by both Focused and Explainer cards - overlay_design.py draws them identically once picked; only WHO picks the text differs (see TakeoverCard's doc comment).
+        let maxLines = 2 // Shared by Focused, Explainer and chapter cards - overlay_design.py draws them identically once picked; only WHO picks the text differs.
         let para = NSMutableParagraphStyle()
-        para.alignment = .center
+        para.alignment = left ? .left : .center
         para.lineBreakMode = .byWordWrapping
 
-        var size = shortEdge * 0.15
+        func shown(_ text: String) -> String { style.cardUppercase ? text.uppercased() : text }
+        let headline = shown(card.text)
+
+        var size = shortEdge * 0.15 * CGFloat(min(1.6, max(0.5, style.cardTextScale)))
         var font = themedFont(family: fontFamily, size: size, weight: .heavy)
         while size > floorSize {
             font = themedFont(family: fontFamily, size: size, weight: .heavy)
-            let probe = NSAttributedString(string: card.text, attributes: [.font: font, .paragraphStyle: para])
+            let probe = NSAttributedString(string: headline, attributes: [.font: font, .paragraphStyle: para])
             let bounds = probe.boundingRect(with: CGSize(width: boxW, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin], context: nil)
             let lines = max(1, Int((bounds.height / font.lineHeight).rounded(.up)))
             if bounds.height <= boxH, lines <= maxLines { break }
             size -= max(2, size * 0.06)
         }
 
-        let str = NSAttributedString(string: card.text, attributes: [
-            .font: font, .paragraphStyle: para, .foregroundColor: UIColor(white: 0.95, alpha: 1),
-        ])
-        let bounds = str.boundingRect(with: CGSize(width: boxW, height: boxH), options: [.usesLineFragmentOrigin], context: nil)
-        let rect = CGRect(x: (canvas.width - boxW) / 2, y: (canvas.height - bounds.height) / 2, width: boxW, height: bounds.height)
+        func block(_ text: String, font: UIFont, color: UIColor, kern: CGFloat = 0) -> (NSAttributedString, CGFloat) {
+            let a = NSAttributedString(string: text, attributes: [.font: font, .paragraphStyle: para, .foregroundColor: color, .kern: kern])
+            return (a, a.boundingRect(with: CGSize(width: boxW, height: boxH), options: [.usesLineFragmentOrigin], context: nil).height)
+        }
+        let gap = shortEdge * 0.025
+        var blocks: [(NSAttributedString, CGFloat)] = []
+        if card.isChapter, let eyebrow = card.eyebrow, !eyebrow.isEmpty {
+            blocks.append(block(eyebrow.uppercased(), font: themedFont(family: fontFamily, size: max(floorSize, size * 0.30), weight: .bold), color: accent2, kern: size * 0.04))
+        }
+        blocks.append(block(headline, font: font, color: palette.text))
+        if card.isChapter, let sub = card.subtitle, !sub.isEmpty {
+            blocks.append(block(shown(sub), font: themedFont(family: fontFamily, size: max(floorSize, size * 0.42), weight: .medium), color: palette.subtext))
+        }
 
-        ctx.translateBy(x: 0, y: canvas.height)
-        ctx.scaleBy(x: 1, y: -1)
+        let totalH = blocks.reduce(0) { $0 + $1.1 } + gap * CGFloat(max(0, blocks.count - 1))
+        var y = (canvas.height - totalH) / 2
         UIGraphicsPushContext(ctx)
-        str.draw(with: rect, options: [.usesLineFragmentOrigin], context: nil)
+        for (text, h) in blocks {
+            text.draw(with: CGRect(x: boxX, y: y, width: boxW, height: h), options: [.usesLineFragmentOrigin], context: nil)
+            y += h + gap
+        }
         UIGraphicsPopContext()
 
-        // Accent rule beneath the text block - overlay_design.py's own
-        // rounded "rule" divider under a card's headline.
-        let ruleW = min(canvas.width * 0.22, shortEdge * 0.18)
-        let ruleH = max(3, shortEdge * 0.006)
-        let ruleRect = CGRect(x: (canvas.width - ruleW) / 2, y: rect.maxY + shortEdge * 0.03, width: ruleW, height: ruleH)
-        ctx.setFillColor(accent1.cgColor)
-        ctx.addPath(UIBezierPath(roundedRect: ruleRect, cornerRadius: ruleH / 2).cgPath)
-        ctx.fillPath()
-
+        if style.cardAccentBars {
+            // Accent rule beneath the text block - overlay_design.py's own
+            // rounded "rule" divider under a card's headline.
+            let ruleW = min(canvas.width * 0.22, shortEdge * 0.18)
+            let ruleH = max(3, shortEdge * 0.006)
+            let ruleRect = CGRect(x: left ? boxX : (canvas.width - ruleW) / 2, y: y - gap + shortEdge * 0.03, width: ruleW, height: ruleH)
+            ctx.setFillColor(accent1.cgColor)
+            ctx.addPath(UIBezierPath(roundedRect: ruleRect, cornerRadius: ruleH / 2).cgPath)
+            ctx.fillPath()
+        }
         ctx.restoreGState()
     }
 
@@ -903,7 +1018,7 @@ final class VideoRenderer {
 
     /// The caption's attributed text and the box it is drawn in (top-down
     /// coordinates, as UIKit text drawing wants).
-    private func captionLayout(canvas: CGRect, cue: CaptionCue, t: Double, style: CaptionStyle, quantizeSteps: Int?) -> (str: NSAttributedString, rect: CGRect) {
+    private func captionLayout(canvas: CGRect, cue: CaptionCue, t: Double, style: CaptionStyle, quantizeSteps: Int?) -> (str: NSAttributedString, rect: CGRect, textSize: CGSize) {
         let size = style.fontSize * canvas.width / 1080
         let font = themedFont(family: style.fontFamily, size: size, weight: .black, rounded: true)
         let para = NSMutableParagraphStyle()
@@ -919,10 +1034,12 @@ final class VideoRenderer {
         case .center: y = (canvas.height - bounds.height) / 2
         case .bottom: y = canvas.height * 0.78 - bounds.height
         }
-        return (str, CGRect(x: (canvas.width - maxW) / 2, y: y, width: maxW, height: bounds.height + 4))
+        return (str, CGRect(x: (canvas.width - maxW) / 2, y: y, width: maxW, height: bounds.height + 4),
+                CGSize(width: ceil(bounds.width), height: ceil(bounds.height)))
     }
 
-    private func paintCaption(_ ctx: CGContext, canvas: CGRect, str: NSAttributedString, rect: CGRect, motion: CaptionMotion) {
+    private func paintCaption(_ ctx: CGContext, canvas: CGRect, str: NSAttributedString, rect: CGRect, textSize: CGSize,
+                              overlay: OverlayStyle, motion: CaptionMotion) {
         ctx.saveGState()
         ctx.setAlpha(motion.alpha)
         ctx.translateBy(x: 0, y: canvas.height)
@@ -930,7 +1047,21 @@ final class VideoRenderer {
         ctx.translateBy(x: rect.midX, y: rect.midY - motion.offsetY)
         ctx.scaleBy(x: motion.scale, y: motion.scale)
         ctx.translateBy(x: -rect.midX, y: -rect.midY)
-        ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 12, color: UIColor.black.withAlphaComponent(0.6).cgColor)
+        if overlay.captionBackground != .none {
+            // A plate hugging the TEXT (not the full-width layout box), drawn
+            // before the shadow is set so the plate itself isn't blurred.
+            let padX = textSize.height * 0.16 + 14
+            let padY = textSize.height * 0.08 + 6
+            let plate = CGRect(x: rect.midX - textSize.width / 2 - padX, y: rect.minY - padY + 2,
+                               width: textSize.width + padX * 2, height: textSize.height + padY * 2)
+            let radius = overlay.captionBackground == .pill ? plate.height / 2 : 14
+            ctx.setFillColor(UIColor.black.withAlphaComponent(CGFloat(min(1, max(0, overlay.captionBackgroundOpacity)))).cgColor)
+            ctx.addPath(UIBezierPath(roundedRect: plate, cornerRadius: min(radius, plate.height / 2)).cgPath)
+            ctx.fillPath()
+        }
+        if overlay.captionShadow {
+            ctx.setShadow(offset: CGSize(width: 0, height: 4), blur: 12, color: UIColor.black.withAlphaComponent(0.6).cgColor)
+        }
         UIGraphicsPushContext(ctx)
         str.draw(with: rect, options: [.usesLineFragmentOrigin], context: nil)
         UIGraphicsPopContext()
@@ -941,7 +1072,7 @@ final class VideoRenderer {
     private func drawCaption(_ ctx: CGContext, canvas: CGRect, cue: CaptionCue, t: Double, style: CaptionStyle) {
         let layout = captionLayout(canvas: canvas, cue: cue, t: t, style: style, quantizeSteps: nil)
         let motion = Self.captionMotion(cue: cue, t: t, style: style, canvas: canvas)
-        paintCaption(ctx, canvas: canvas, str: layout.str, rect: layout.rect, motion: motion)
+        paintCaption(ctx, canvas: canvas, str: layout.str, rect: layout.rect, textSize: layout.textSize, overlay: style.overlay, motion: motion)
     }
 
     /// GPU path: paint the caption ONCE at rest (scale 1, opaque, in place)
@@ -950,7 +1081,8 @@ final class VideoRenderer {
     private func buildCaptionOverlay(cue: CaptionCue, t: Double, style: CaptionStyle, canvas: CGRect) -> CaptionOverlay? {
         let layout = captionLayout(canvas: canvas, cue: cue, t: t, style: style, quantizeSteps: Self.highlightSteps)
         guard let ctx = makeContext(Int(canvas.width), Int(canvas.height)) else { return nil }
-        paintCaption(ctx, canvas: canvas, str: layout.str, rect: layout.rect, motion: CaptionMotion(scale: 1, alpha: 1, offsetY: 0))
+        paintCaption(ctx, canvas: canvas, str: layout.str, rect: layout.rect, textSize: layout.textSize, overlay: style.overlay,
+                     motion: CaptionMotion(scale: 1, alpha: 1, offsetY: 0))
         guard let cg = ctx.makeImage() else { return nil }
         return CaptionOverlay(image: CIImage(cgImage: cg), rect: layout.rect)
     }
@@ -996,18 +1128,24 @@ final class VideoRenderer {
     }
 
     private func attributedString(for cue: CaptionCue, t: Double, style: CaptionStyle, font: UIFont, para: NSParagraphStyle, quantizeSteps: Int? = nil) -> NSAttributedString {
-        let strokeAttrs: [NSAttributedString.Key: Any] = [
-            .font: font, .paragraphStyle: para, .strokeColor: UIColor.black, .strokeWidth: -5.0,
-        ]
+        let overlay = style.overlay
+        let base = Theme.color(hex: overlay.captionTextColorHex).map { UIColor($0) } ?? UIColor.white
+        func shown(_ text: String) -> String { overlay.captionUppercase ? text.uppercased() : text }
+        var common: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: para]
+        if overlay.captionOutline > 0 {
+            // Negative width = stroke AND fill (positive would hollow the glyphs).
+            common[.strokeColor] = UIColor.black
+            common[.strokeWidth] = -CGFloat(overlay.captionOutline)
+        }
         switch style.animation {
         case .highlight, .typewriter:
             guard !cue.words.isEmpty else {
-                return NSAttributedString(string: cue.text.uppercased(), attributes: strokeAttrs.merging([.foregroundColor: UIColor.white]) { a, _ in a })
+                return NSAttributedString(string: shown(cue.text), attributes: common.merging([.foregroundColor: base]) { a, _ in a })
             }
             let accent = UIColor(style.accent)
             let out = NSMutableAttributedString()
             for (i, w) in cue.words.enumerated() {
-                var color = UIColor.white
+                var color = base
                 if style.animation == .highlight {
                     if t >= w.end { color = accent }
                     else if t >= w.start {
@@ -1015,21 +1153,21 @@ final class VideoRenderer {
                         // Snap to a few steps when a cached bitmap is being
                         // built (see `captionSignature`, which must agree).
                         if let q = quantizeSteps { p = (p * CGFloat(q)).rounded() / CGFloat(q) }
-                        color = lerp(UIColor.white, accent, p)
+                        color = lerp(base, accent, p)
                     }
                 } else { // typewriter: a moving snap, never left behind
-                    color = (t >= w.start && t < w.end) ? accent : .white
+                    color = (t >= w.start && t < w.end) ? accent : base
                 }
-                var attrs = strokeAttrs
+                var attrs = common
                 attrs[.foregroundColor] = color
-                out.append(NSAttributedString(string: w.text.uppercased(), attributes: attrs))
+                out.append(NSAttributedString(string: shown(w.text), attributes: attrs))
                 if i < cue.words.count - 1 { out.append(NSAttributedString(string: " ", attributes: attrs)) }
             }
             return out
         case .none, .pop, .fade, .rise:
-            var attrs = strokeAttrs
-            attrs[.foregroundColor] = UIColor.white
-            return NSAttributedString(string: cue.text.uppercased(), attributes: attrs)
+            var attrs = common
+            attrs[.foregroundColor] = base
+            return NSAttributedString(string: shown(cue.text), attributes: attrs)
         }
     }
 

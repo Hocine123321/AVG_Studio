@@ -7,7 +7,7 @@ protocol VoiceProvider {
     /// independent segments (Pipeline.voice() does this to give each
     /// `[pause]`-separated segment of the narration its own file, which it
     /// then stitches back together with real silence in between - see
-    /// Pipeline.swift's `assembleWithGaps`).
+    /// Pipeline.swift's `assemble`).
     func synthesize(_ text: String, into folder: URL, name: String) async throws -> String
 }
 
@@ -15,10 +15,24 @@ struct ElevenLabsVoice: VoiceProvider {
     let key: String
     let voiceID: String
     let model: String
+    /// 0...1: lower is more expressive and varied, higher more even.
+    var stability: Double = 0.5
+    /// 0.7...1.2, ElevenLabs' supported range for `speed`.
+    var speed: Double = 1.0
+
+    /// The request body's `voice_settings`. `speed` is only sent when it is not
+    /// 1.0, so a default channel makes exactly the request it always did.
+    static func voiceSettings(stability: Double, speed: Double) -> [String: Any] {
+        var settings: [String: Any] = ["stability": min(1, max(0, stability))]
+        let s = min(1.2, max(0.7, speed))
+        if abs(s - 1.0) > 0.001 { settings["speed"] = s }
+        return settings
+    }
 
     func synthesize(_ text: String, into folder: URL, name: String) async throws -> String {
         let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voiceID)?output_format=mp3_44100_128")!
-        let body: [String: Any] = ["text": text, "model_id": model]
+        let body: [String: Any] = ["text": text, "model_id": model,
+                                   "voice_settings": Self.voiceSettings(stability: stability, speed: speed)]
         let data = try await HTTP.retrying({ try await HTTP.send(url, headers: ["xi-api-key": key, "Accept": "audio/mpeg"], json: body, provider: "elevenlabs") }, provider: "elevenlabs")
         let file = "\(name).mp3"
         try data.write(to: folder.appendingPathComponent(file))
@@ -29,7 +43,21 @@ struct ElevenLabsVoice: VoiceProvider {
 /// On-device speech (includes Premium/Enhanced and Personal Voice if downloaded).
 final class AppleVoice: VoiceProvider {
     let identifier: String
-    init(identifier: String) { self.identifier = identifier }
+    /// A multiple of the default speaking rate (0.7...1.2).
+    let speed: Double
+    init(identifier: String, speed: Double = 1.0) {
+        self.identifier = identifier
+        self.speed = speed
+    }
+
+    /// `AVSpeechUtterance.rate` is NOT a multiplier: it runs 0...1 with the
+    /// default (~0.5) in the middle and is roughly logarithmic in loudness of
+    /// change. Scaling the default by `speed` and clamping to the legal range
+    /// is the simple mapping that behaves sensibly across 0.7x to 1.2x.
+    static func utteranceRate(speed: Double) -> Float {
+        let s = Float(min(1.2, max(0.7, speed)))
+        return min(AVSpeechUtteranceMaximumSpeechRate, max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * s))
+    }
 
     static func voices() -> [AVSpeechSynthesisVoice] {
         AVSpeechSynthesisVoice.speechVoices().sorted {
@@ -47,7 +75,7 @@ final class AppleVoice: VoiceProvider {
         utt.voice = AVSpeechSynthesisVoice(identifier: identifier)
             ?? AppleVoice.voices().first(where: { $0.language.hasPrefix("en") })
             ?? AVSpeechSynthesisVoice(language: "en-US")
-        utt.rate = AVSpeechUtteranceDefaultSpeechRate
+        utt.rate = Self.utteranceRate(speed: speed)
 
         // `synth` only needs to outlive this call, which it does: it's a
         // local `let` referenced by the closure passed to its own

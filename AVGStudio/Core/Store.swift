@@ -49,10 +49,25 @@ final class Store {
     // Debounced: a TextField bound to `settings` used to rewrite the whole
     // meta file (pretty-printed JSON, synchronously, on the main thread) on
     // every keystroke and every slider tick.
-    var settings = AppSettings() { didSet { scheduleMetaSave() } }
+    var settings = AppSettings() { didSet { scheduleMetaSave(); refreshIdleTimer() } }
     var reusableImages: [ReusableImage] = [] { didSet { scheduleMetaSave() } }
     var jobs: [String: JobState] = [:]
+    /// Projects waiting for a free slot, in the order they were started.
+    var queuedIDs: [String] = []
+    @ObservationIgnored private var pendingStarts: [String: PhaseID] = [:]
+    /// What a run is about to record on the take it produces: which take it
+    /// branched from and why (see Takes.swift). Set when the run starts, read
+    /// by the render phase when it creates the take.
+    struct TakeContext { var basedOn: Int?; var note: String? }
+    @ObservationIgnored var takeContext: [String: TakeContext] = [:]
+    @ObservationIgnored private var pendingNotes: [String: String] = [:]
+    /// Serialises the render phase across all running videos (RenderLease.swift).
+    @ObservationIgnored let renderLease = RenderLease()
     var log: [LogEntry] = []
+    /// Model favourites and proven-working results (ModelPrefs.swift).
+    let modelPrefs = ModelPrefs()
+    /// Errors, kept across launches (see ErrorHistory.swift), newest first.
+    var errorHistory: [ErrorRecord] = []
     var tab: AppTab = .library
     /// The failure prompt currently waiting on the user (nil = none), and
     /// the continuation the paused render resumes from once they choose.
@@ -87,6 +102,7 @@ final class Store {
     static var projectsDir: URL { root.appendingPathComponent("Projects", isDirectory: true) }
     static var reusableImagesDir: URL { root.appendingPathComponent("ReusableImages", isDirectory: true) }
     private static var metaURL: URL { root.appendingPathComponent(".avg-meta.json") }
+    private static var errorsURL: URL { root.appendingPathComponent(".avg-errors.json") }
 
     init() {
         load()
@@ -98,6 +114,7 @@ final class Store {
     func load() {
         loading = true
         defer { loading = false }
+        errorHistory = ErrorHistory.load(Self.errorsURL)
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.projectsDir, withIntermediateDirectories: true)
         if let d = try? Data(contentsOf: Self.metaURL) {
@@ -202,6 +219,164 @@ final class Store {
         }
     }
 
+    // MARK: Takes (see Takes.swift)
+
+    /// What `phase` would depend on if it ran right now.
+    func currentInputs(_ phase: PhaseID, for id: String) -> [String: String] {
+        guard let p = project(id) else { return [:] }
+        return PhaseInputs.describe(phase, settings: settings, channel: channel(for: p), hasTranscriptionKey: Keychain.has(.assemblyai))
+    }
+
+    /// Which finished phases the CURRENT settings have made out of date.
+    func staleReport(_ p: Project) -> StaleReport {
+        guard p.phases.values.contains(where: { $0.inputs != nil }) else { return StaleReport() }
+        return StaleReport.compute(project: p, settings: settings, channel: channel(for: p), hasTranscriptionKey: Keychain.has(.assemblyai))
+    }
+
+    /// Re-runs from the earliest phase the settings made stale, as a NEW take
+    /// (the old one is kept), noting what changed.
+    func updateToSettings(_ id: String) {
+        guard let p = project(id), !isBusy(id) else { return }
+        let report = staleReport(p)
+        guard let first = report.firstPhase else { return }
+        let labels = report.changedLabels
+        let shown = labels.prefix(4).joined(separator: ", ")
+        let note = "Changed: " + shown + (labels.count > 4 ? " +\(labels.count - 4) more" : "")
+        start(id, from: first, note: note)
+    }
+
+    /// Called when a run starts. If the run would rewrite the working files
+    /// (anything from Voice back), the files behind every not-yet-archived
+    /// take are copied aside first, so those takes stay restorable. Returns the
+    /// take this run branches from. A failed copy is logged and the run
+    /// carries on - the take stays watchable, just not restorable.
+    private func prepareBranch(_ id: String, from start: PhaseID) -> Int? {
+        guard let p = project(id) else { return nil }
+        let based = p.workingTakeID ?? p.takes.last?.id
+        // Captions and Render only rewrite JSON (which every take's snapshot
+        // already holds) and the take's own video file; the images and audio
+        // are untouched, so nothing needs saving and the working copy still
+        // equals its take.
+        guard start.order <= PhaseID.voice.order else { return based }
+        archiveUnarchivedTakes(id)
+        update(id) { $0.workingTakeID = nil }
+        return based
+    }
+
+    /// Every take whose files are still the working copy shares them (an
+    /// invariant: any run that rewrites them archives first), so ONE copy
+    /// serves them all.
+    private func archiveUnarchivedTakes(_ id: String) {
+        guard let p = project(id) else { return }
+        let waiting = p.takes.filter { $0.snapshot != nil && $0.archive == nil }
+        guard let newest = waiting.map(\.id).max() else { return }
+        do {
+            let rel = try TakeArchive.archive(takeID: newest, projectFolder: folder(for: id))
+            update(id) { proj in
+                for i in proj.takes.indices where proj.takes[i].snapshot != nil && proj.takes[i].archive == nil {
+                    proj.takes[i].archive = rel
+                }
+            }
+        } catch {
+            record(id, "Couldn't keep a copy of the earlier take's files (\(error.localizedDescription)); it can still be watched but not continued from.", error: true)
+        }
+    }
+
+    /// Makes `takeID` the working version again: its content and files come
+    /// back, and its video becomes the project's output. The version being
+    /// replaced is saved first, so nothing is lost.
+    func restoreTake(_ id: String, takeID: Int) throws {
+        guard let p = project(id), let take = p.takes.first(where: { $0.id == takeID }) else { return }
+        guard !isBusy(id) else { throw AVGError.message("Wait for this video to finish first.") }
+        guard let snapshot = take.snapshot else { throw AVGError.message("This take was made before takes could be continued from.") }
+        let wasArchived = take.archive != nil
+        archiveUnarchivedTakes(id)
+        if wasArchived, let rel = project(id)?.takes.first(where: { $0.id == takeID })?.archive {
+            try TakeArchive.restore(archive: rel, projectFolder: folder(for: id))
+        }
+        update(id) { proj in
+            snapshot.apply(to: &proj)
+            proj.output = take.file
+            proj.workingTakeID = takeID
+        }
+        record(id, "Continuing from \(take.label).")
+    }
+
+    /// Removes a take: its video, its saved snapshot and - once no other take
+    /// uses it - its archived files. If it was the one on show, the newest
+    /// remaining take takes over.
+    func deleteTake(_ id: String, takeID: Int) {
+        guard let p = project(id), !isBusy(id), let take = p.takes.first(where: { $0.id == takeID }) else { return }
+        let orphans = TakeArchive.orphanedArchives(takes: p.takes, deleting: takeID)
+        try? FileManager.default.removeItem(at: folder(for: id).appendingPathComponent(take.file))
+        for rel in orphans { TakeArchive.remove(archive: rel, projectFolder: folder(for: id)) }
+        update(id) { proj in
+            proj.takes.removeAll { $0.id == takeID }
+            if proj.workingTakeID == takeID { proj.workingTakeID = nil }
+            if proj.output == take.file { proj.output = proj.takes.last?.file }
+        }
+        record(id, "Deleted \(take.label).")
+    }
+
+    /// A take's own content and where its files are: its snapshot applied to
+    /// a copy of the project, rooted at its archive when it has one. A take
+    /// with no snapshot (made before takes existed) is just the project as is.
+    func takeContent(_ p: Project, _ take: Take) -> (project: Project, root: URL) {
+        guard let snapshot = take.snapshot else { return (p, folder(for: p.id)) }
+        var content = p
+        snapshot.apply(to: &content)
+        let root = take.archive.map { folder(for: p.id).appendingPathComponent($0, isDirectory: true) } ?? folder(for: p.id)
+        return (content, root)
+    }
+
+    // MARK: Steps (see Steps.swift)
+
+    /// Records one step's state. Repeating "running" for a step that is
+    /// already running is ignored, so progress callbacks can call it freely.
+    func setStep(_ id: String, _ phase: PhaseID, _ key: String, _ status: StepStatus, detail: String? = nil, seconds: Double? = nil) {
+        guard let current = project(id), !(status == .running && current.step(phase, key).status == .running) else { return }
+        update(id) { p in
+            var all = p.stepRecords ?? [:]
+            let k = p.stepKey(phase, key)
+            var r = all[k] ?? StepRecord()
+            switch status {
+            case .running:
+                r = StepRecord(status: .running, started: Date())
+            case .done, .failed, .skipped:
+                let now = Date()
+                r.finished = now
+                if r.started == nil { r.started = now }
+            case .pending:
+                r = StepRecord()
+            }
+            r.status = status
+            if let detail { r.detail = detail }
+            if let seconds { r.seconds = seconds }
+            all[k] = r
+            p.stepRecords = all
+        }
+    }
+
+    /// Forgets every step of `phase` and the phases after it - called when a
+    /// run restarts from there, so stale "done" ticks never outlive a redo.
+    func clearSteps(_ id: String, from phase: PhaseID) {
+        update(id) { p in
+            guard var all = p.stepRecords else { return }
+            let stale = Set(PhaseID.allCases.filter { $0.order >= phase.order }.map { $0.rawValue + "." })
+            all = all.filter { entry in !stale.contains { entry.key.hasPrefix($0) } }
+            p.stepRecords = all.isEmpty ? nil : all
+        }
+    }
+
+    /// When a phase ends abnormally, whichever step was mid-flight ends the
+    /// same way: failed after an error, back to pending after a cancel.
+    func settleRunningSteps(_ id: String, _ phase: PhaseID, as status: StepStatus) {
+        guard let p = project(id) else { return }
+        for def in phase.steps where p.step(phase, def.key).status == .running {
+            setStep(id, phase, def.key, status)
+        }
+    }
+
     // MARK: Channels
 
     var activeChannel: Channel { channels.first { $0.id == activeChannelID } ?? channels.first ?? Channel(name: "Default") }
@@ -285,9 +460,23 @@ final class Store {
     /// so distinct attempts stay visually distinguishable without needing
     /// a second on-disk layout.
     func record(_ id: String?, _ message: String, error: Bool = false) {
+        // Nothing credential-shaped reaches the screen, the project log (which
+        // the Files app can show) or the error history. Errors also scrub the
+        // exact stored key values; routine lines only the cheap patterns.
+        let secrets = error ? APIKey.allCases.compactMap { Keychain.get($0) } : []
+        let message = Redactor.scrub(message, secrets: secrets)
         log.insert(LogEntry(message: message, isError: error), at: 0)
         if log.count > 300 { log.removeLast() }
         if let id { appendToProjectLog(id, message) }
+        if error {
+            let title = id.flatMap { project($0)?.title }
+            errorHistory = ErrorHistory.append(ErrorRecord(date: Date(), message: message, project: title), to: Self.errorsURL)
+        }
+    }
+
+    func clearErrorHistory() {
+        ErrorHistory.clear(Self.errorsURL)
+        errorHistory = []
     }
 
     private static let logStamp: DateFormatter = {
@@ -333,11 +522,42 @@ final class Store {
     // MARK: Jobs
 
     func isRunning(_ id: String) -> Bool { tasks[id] != nil }
+    func isQueued(_ id: String) -> Bool { queuedIDs.contains(id) }
+    /// 1-based place in the queue (1 = next to start), or nil when not queued.
+    func queuePosition(_ id: String) -> Int? { queuedIDs.firstIndex(of: id).map { $0 + 1 } }
+    /// Running OR waiting for a slot - what "is something already happening to
+    /// this project" means for disabling its Render / Redo buttons.
+    func isBusy(_ id: String) -> Bool { isRunning(id) || isQueued(id) }
     var runningProjectID: String? { tasks.keys.first }
 
-    func start(_ id: String, from phase: PhaseID = .writing) {
-        guard tasks[id] == nil else { return }
+    /// Starts a run, or QUEUES it when `maxParallelJobs` are already going.
+    /// Queued, never refused (the PC's rule): with a cap of 1 this means one
+    /// video at a time in the order asked for. Starting a project that is
+    /// already running or queued is ignored - two runners on one
+    /// `project.json` is the bug that guard exists for.
+    func start(_ id: String, from phase: PhaseID = .writing, note: String? = nil) {
+        guard !isBusy(id) else { return }
+        if let note { pendingNotes[id] = note }
         if interruptedProjectID == id { interruptedProjectID = nil }
+        let cap = max(1, settings.maxParallelJobs)
+        if tasks.count >= cap {
+            queuedIDs.append(id)
+            pendingStarts[id] = phase
+            record(id, "Queued: \(tasks.count) video\(tasks.count == 1 ? " is" : "s are") already running. Starts when a slot frees.")
+            return
+        }
+        launch(id, from: phase)
+    }
+
+    /// Stops the screen auto-locking while anything is being made (when the
+    /// setting allows). A locked screen suspends the app, which suspends its
+    /// GPU access - the single most common reason a long render "stalls".
+    func refreshIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = settings.keepScreenAwake && !tasks.isEmpty
+    }
+
+    private func launch(_ id: String, from phase: PhaseID) {
+        defer { refreshIdleTimer() }
         tasks[id] = Task { [weak self] in
             // Binds this render's project id as the `@TaskLocal` HTTP.swift
             // reads on a retry/give-up. Bound around just the `run()` call
@@ -352,11 +572,32 @@ final class Store {
             }
             self?.tasks[id] = nil
             self?.jobs[id] = nil
+            // Tell the chat assistant (it only speaks for videos it started),
+            // then give the freed slot to the next queued project.
             self?.agent.projectFinished(id)
+            self?.startNextQueued()
+            self?.refreshIdleTimer()
+        }
+    }
+
+    /// Fills any free slots from the front of the queue.
+    private func startNextQueued() {
+        let cap = max(1, settings.maxParallelJobs)
+        while tasks.count < cap, !queuedIDs.isEmpty {
+            let next = queuedIDs.removeFirst()
+            let phase = pendingStarts.removeValue(forKey: next) ?? .writing
+            launch(next, from: phase)
         }
     }
 
     func cancel(_ id: String) {
+        // Still waiting for a slot: just leave the queue.
+        if let i = queuedIDs.firstIndex(of: id) {
+            queuedIDs.remove(at: i)
+            pendingStarts[id] = nil
+            record(id, "Removed from the queue.")
+            return
+        }
         tasks[id]?.cancel()
         if recoveryPlan?.projectID == id { resolveRecovery(.stop) }
     }
@@ -371,14 +612,21 @@ final class Store {
         // iOS treats a task that outlives its grace period without ending
         // as a watchdog violation and terminates the app.
         let bg = BackgroundTaskBox()
-        bg.begin(name: "AVG render")
+        if settings.allowBackgroundRendering { bg.begin(name: "AVG render") }
         defer { bg.end() }
         record(id, "▶ Started “\(project(id)?.title ?? id)” from \(start.title).")
+        let basedOn = prepareBranch(id, from: start)
+        takeContext[id] = TakeContext(basedOn: basedOn, note: pendingNotes.removeValue(forKey: id))
+        defer { takeContext[id] = nil }
         for phase in PhaseID.allCases where phase.order >= start.order {
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
         }
+        clearSteps(id, from: start)
         for phase in PhaseID.allCases where phase.order >= start.order {
             if Task.isCancelled { break }
+            // Captured BEFORE the phase runs: a setting changed mid-run must be
+            // reported as a change next time, not silently absorbed.
+            let inputs = currentInputs(phase, for: id)
             update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .running, started: Date()) }
             jobs[id] = JobState(phase: phase, progress: 0, message: "\(phase.title)…")
             record(id, "— \(phase.title) —")
@@ -387,14 +635,17 @@ final class Store {
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .done
                     $0.phases[phase.rawValue]?.finished = Date()
+                    $0.phases[phase.rawValue]?.inputs = inputs
                 }
                 record(id, "\(phase.title) done.")
             } catch is CancellationError {
+                settleRunningSteps(id, phase, as: .pending)
                 update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
                 record(id, "Render cancelled: \(project(id)?.title ?? id)")
                 break
             } catch {
                 let msg = error.localizedDescription
+                settleRunningSteps(id, phase, as: .failed)
                 update(id) {
                     $0.phases[phase.rawValue]?.status = .failed
                     $0.phases[phase.rawValue]?.error = msg
@@ -526,4 +777,9 @@ extension JSONDecoder {
 }
 
 // The agent drives the app through exactly these members; see AgentTools.swift.
-extension Store: AgentHost {}
+extension Store: AgentHost {
+    /// `Store.start` gained a defaulted `note:` parameter; a protocol
+    /// requirement is matched on the exact signature, so adapt it here.
+    func start(_ id: String, from phase: PhaseID) { start(id, from: phase, note: nil) }
+    var reusableImageCount: Int { reusableImages.count }
+}

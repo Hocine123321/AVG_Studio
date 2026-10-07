@@ -64,17 +64,31 @@ struct ModelRow: View {
 
 private struct ModelSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(Store.self) private var store
     let title: String
     @Binding var value: String
     let catalog: ModelCatalog
     @State private var query = ""
+    @State private var workingOnly = false
+
+    private var prefs: ModelPrefs { store.modelPrefs }
+    private var canProbe: Bool { ModelProbe.isProbeable(catalog.cacheKey) }
+    private var sweep: ModelPrefs.Sweep? { prefs.sweeping[catalog.cacheKey] }
 
     private var typed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var filtered: [CatalogEntry] {
-        guard !typed.isEmpty else { return catalog.entries }
+        var list = prefs.ordered(catalog.entries, catalog: catalog.cacheKey)
+        if workingOnly {
+            // "Working" means proven OR starred: a favourite you chose stays
+            // visible even before it has been tested.
+            list = list.filter {
+                prefs.isFavourite($0.id, in: catalog.cacheKey) || prefs.result($0.id, in: catalog.cacheKey)?.works == true
+            }
+        }
+        guard !typed.isEmpty else { return list }
         let q = typed.lowercased()
-        return catalog.entries.filter {
+        return list.filter {
             $0.label.lowercased().contains(q) || $0.id.lowercased().contains(q) || ($0.sublabel ?? "").lowercased().contains(q)
         }
     }
@@ -88,9 +102,27 @@ private struct ModelSheet: View {
         VStack(spacing: 0) {
             // Same grabber and corner radius as every `GlassSheet`.
             Capsule().fill(Theme.ink2).frame(width: 38, height: 5).opacity(0.5).padding(.top, 10)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.disp(24)).foregroundStyle(Theme.ink)
                 statusLine
+                if let sweep {
+                    HStack(spacing: 8) {
+                        ProgressView(value: Double(sweep.done), total: Double(max(sweep.total, 1))).tint(Theme.accent)
+                        Text("Testing \(sweep.done) of \(sweep.total)").font(.caption).foregroundStyle(Theme.ink2).monospacedDigit()
+                        Button("Stop") { prefs.cancelSweep(catalog.cacheKey) }
+                            .font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                    }
+                } else if let note = prefs.lastNote[catalog.cacheKey] {
+                    Text("Testing stopped: \(note)").font(.caption).foregroundStyle(Theme.bad)
+                } else if prefs.hasResults(catalog.cacheKey) {
+                    HStack {
+                        Text("\(prefs.workingCount(catalog.cacheKey)) of \(catalog.entries.count) tested models work")
+                            .font(.caption).foregroundStyle(Theme.ink2)
+                        Spacer()
+                        Toggle("Working only", isOn: $workingOnly)
+                            .toggleStyle(.button).font(.caption.weight(.semibold)).tint(Theme.accent)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 10)
@@ -105,7 +137,7 @@ private struct ModelSheet: View {
                             row(value, subtitle: "Current value (not in the live list)", selected: true) { dismiss() }
                         }
                         ForEach(filtered) { entry in
-                            row(entry.label, subtitle: entry.sublabel, selected: entry.id == value) { pick(entry.id) }
+                            entryRow(entry)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -158,6 +190,52 @@ private struct ModelSheet: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
+    /// A listed model: tap to choose it; the star pins it to the top; a small
+    /// badge says whether it was found to work.
+    private func entryRow(_ entry: CatalogEntry) -> some View {
+        let key = catalog.cacheKey
+        let favourite = prefs.isFavourite(entry.id, in: key)
+        let result = prefs.result(entry.id, in: key)
+        let selected = entry.id == value
+        return HStack(spacing: 4) {
+            Button { pick(entry.id) } label: {
+                HStack(spacing: 10) {
+                    RowText(title: entry.label, subtitle: entry.sublabel)
+                        .opacity(result?.works == false ? 0.55 : 1)
+                    Spacer(minLength: 6)
+                    if let result { probeBadge(result) }
+                    if selected { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Theme.accent) }
+                }
+                .frame(minHeight: settingsRowMinHeight)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            Button {
+                Haptics.light()
+                prefs.toggleFavourite(entry.id, in: key)
+            } label: {
+                Image(systemName: favourite ? "star.fill" : "star")
+                    .font(.system(size: 17))
+                    .foregroundStyle(favourite ? Theme.accent : Theme.ink2)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(favourite ? "Remove \(entry.label) from favourites" : "Add \(entry.label) to favourites")
+        }
+        .overlay(alignment: .top) { Rectangle().fill(Theme.glassEdge).frame(height: 0.5) }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func probeBadge(_ r: ProbeResult) -> some View {
+        Text(r.works ? "Works" : (r.note ?? "Failed"))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(r.works ? Theme.ok : Theme.bad)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background((r.works ? Theme.ok : Theme.bad).opacity(0.15), in: .capsule)
+            .lineLimit(1)
+    }
+
     private func pick(_ id: String) {
         Haptics.light()
         value = id
@@ -192,6 +270,22 @@ private struct ModelSheet: View {
             .buttonStyle(.plain)
             .disabled(catalog.status == .loading)
             .accessibilityLabel("Refresh list")
+
+            if canProbe {
+                Button {
+                    Haptics.light()
+                    prefs.startSweep(catalog)
+                } label: {
+                    Image(systemName: "checkmark.shield")
+                        .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink)
+                        .frame(width: 48, height: 48)
+                        .glassCircle()
+                }
+                .buttonStyle(.plain)
+                .disabled(sweep != nil || catalog.entries.isEmpty)
+                .accessibilityLabel("Test which models work")
+                .accessibilityHint("Sends each listed model one tiny request")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)

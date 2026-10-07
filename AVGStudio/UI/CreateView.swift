@@ -58,6 +58,8 @@ struct CreateView: View {
                     .padding(.horizontal, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                estimateCard
+
                 Button {
                     create()
                 } label: {
@@ -90,6 +92,45 @@ struct CreateView: View {
 
     private var hairline: some View {
         Rectangle().fill(Theme.glassEdge).frame(height: 0.5)
+    }
+
+    /// What this video is estimated to cost with the CURRENT settings,
+    /// before anything is spent (the PC shows the same on its Create screen).
+    /// An estimate from a maintained rate table, never metered spend - see
+    /// CostTable. Recomputed on every redraw: it is a few multiplications.
+    private var estimate: CostTable.Estimate {
+        CostTable.estimate(targetSeconds: channel.targetSeconds, settings: store.settings, channel: channel,
+                           hasTranscriptionKey: Keychain.has(.assemblyai), poolSize: store.reusableImages.count)
+    }
+
+    private var estimateCard: some View {
+        let est = estimate
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Estimated cost").sectionHeader().padding(.leading, 6)
+            VStack(spacing: 0) {
+                ForEach(Array(est.lines.enumerated()), id: \.element.id) { i, line in
+                    if i > 0 { hairline }
+                    HStack {
+                        Text(line.phase).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text(CostTable.Estimate.format(line.usd)).foregroundStyle(Theme.ink2).monospacedDigit()
+                    }
+                    .padding(.vertical, 11)
+                }
+                hairline
+                HStack {
+                    Text("Total").font(.body.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text(est.label).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).monospacedDigit()
+                }
+                .padding(.vertical, 11)
+            }
+            .padding(.horizontal, 16)
+            .glassCard(24, padding: 4)
+            Text("A rough guess from a rate table for a ~\(channel.targetSeconds)s video, not a bill. Free and on-device providers cost nothing.")
+                .font(.footnote).foregroundStyle(Theme.ink2).padding(.horizontal, 6)
+        }
+        .accessibilityElement(children: .contain)
     }
 
     /// A row that picks something IN PLACE (opens a sheet, no navigation).

@@ -51,6 +51,7 @@ struct SettingsView: View {
                 row(.voice, store.settings.voice.label)
                 row(.captions, captionsSummary)
                 row(.video, videoSummary)
+                row(.performance, performanceSummary)
                 row(.assistant, assistantSummary)
             }
             SettingsGroup(title: "Accounts") {
@@ -114,9 +115,14 @@ struct SettingsView: View {
         return "\(s.shortEdge)p · \(s.fps) fps · Ken Burns \(s.kenBurns ? "on" : "off")"
     }
 
+    private var performanceSummary: String {
+        let s = store.settings
+        return "\(s.renderEngine == .auto ? "GPU" : "CPU") · \(s.videoCodec == .hevc ? "HEVC" : "H.264") · \(s.maxParallelJobs) at once"
+    }
+
     private var errorSummary: String {
-        let n = store.log.filter(\.isError).count
-        return n == 0 ? "No errors" : (n == 1 ? "1 error" : "\(n) errors")
+        let n = store.errorHistory.count
+        return n == 0 ? "No errors" : (n == 1 ? "1 saved error" : "\(n) saved errors")
     }
 
     // MARK: Search results
@@ -202,6 +208,7 @@ struct SettingsView: View {
         case .voice: VoiceSettingsPage(focus: focus)
         case .captions: CaptionsSettingsPage(focus: focus)
         case .video: VideoSettingsPage(focus: focus)
+        case .performance: PerformanceSettingsPage(focus: focus)
         case .assistant: AssistantSettingsPage(focus: focus)
         case .keys: KeysSettingsPage(focus: focus)
         case .fallbacks: FallbacksSettingsPage(focus: focus)

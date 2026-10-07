@@ -115,6 +115,12 @@ struct ChannelEditor: View {
             set: { channel.accentColorHex = Theme.hex(from: $0) }
         )
     }
+    private var captionColorBinding: Binding<Color> {
+        Binding(
+            get: { Theme.color(hex: channel.overlay.captionTextColorHex) ?? .white },
+            set: { channel.overlay.captionTextColorHex = Theme.hex(from: $0) }
+        )
+    }
     private var accent1Binding: Binding<Color> {
         Binding(
             get: { Theme.color(hex: channel.accent1ColorHex) ?? Theme.color(hex: channel.accentColorHex) ?? Theme.accent },
@@ -168,6 +174,35 @@ struct ChannelEditor: View {
         Text(footer).font(.caption2).foregroundStyle(.secondary)
     }
 
+    // Creative: the PC's content_shape / visual_tone / style_lock / brand_preset.
+    private static let toneOptions = OptionCatalog.options("video_tone")
+    private static let brandOptions = OptionCatalog.options("brand_presets")
+
+    /// The visual tone, with "custom" standing for any free text a person
+    /// typed rather than a catalogue id (exactly how the PC stores it).
+    private var toneSelection: Binding<String> {
+        Binding(
+            get: { Self.toneOptions.contains { $0.id == channel.visualTone } ? channel.visualTone : "custom" },
+            set: { new in
+                if new == "custom" {
+                    if Self.toneOptions.contains(where: { $0.id == channel.visualTone }) { channel.visualTone = "" }
+                } else {
+                    channel.visualTone = new
+                }
+            }
+        )
+    }
+
+    /// Picking a brand also seeds the channel's three accent colours from it,
+    /// so the preset visibly does something right away; each colour can still
+    /// be changed afterwards in the Brand section below.
+    private func applyBrandColors(_ id: String) {
+        func clean(_ key: String) -> String? { Brand.accentHex(id, key)?.replacingOccurrences(of: "#", with: "") }
+        if let c = clean("accent1") { channel.accent1ColorHex = c }
+        if let c = clean("accent2") { channel.accent2ColorHex = c }
+        if let c = clean("highlight") { channel.accentColorHex = c }
+    }
+
     private static let fontPresets = ["", "Georgia", "Avenir Next", "Futura", "Times New Roman", "Courier New", "Impact", "custom"]
     private var fontPickerSelection: Binding<String> {
         Binding(
@@ -193,6 +228,43 @@ struct ChannelEditor: View {
                     Toggle("Research the topic first", isOn: $channel.topicResearchEnabled)
                 } header: { Text("Videos") } footer: {
                     Text("Research spends one extra AI call gathering facts about the topic before the brief is written, matching the PC's topic_research.")
+                }
+
+                Section {
+                    if !Personality.all.isEmpty {
+                        Picker("Personality", selection: $channel.contentShape) {
+                            ForEach(Personality.all) { Text($0.name.replacingOccurrences(of: "_", with: " ").capitalized).tag($0.name) }
+                            // A saved value the file no longer has stays selectable
+                            // (it degrades to the first preset when written).
+                            if !Personality.all.contains(where: { $0.name == channel.contentShape }) {
+                                Text(channel.contentShape.isEmpty ? "Default" : channel.contentShape).tag(channel.contentShape)
+                            }
+                        }
+                    }
+                    if !Self.toneOptions.isEmpty {
+                        Picker("Visual tone", selection: toneSelection) {
+                            ForEach(Self.toneOptions) { Text($0.label).tag($0.id) }
+                        }
+                    }
+                    if Self.toneOptions.isEmpty || toneSelection.wrappedValue == "custom" {
+                        TextField("Describe the look", text: $channel.visualTone, axis: .vertical)
+                            .lineLimit(1...3)
+                    }
+                    TextField("Style lock (appended to every image prompt)", text: $channel.styleLock, axis: .vertical)
+                        .lineLimit(1...3)
+                    if !Self.brandOptions.isEmpty {
+                        Picker("Brand preset", selection: $channel.brandPreset) {
+                            ForEach(Self.brandOptions) { Text($0.label).tag($0.id) }
+                            if !Self.brandOptions.contains(where: { $0.id == channel.brandPreset }) {
+                                Text(channel.brandPreset.isEmpty ? "None" : channel.brandPreset).tag(channel.brandPreset)
+                            }
+                        }
+                        .onChange(of: channel.brandPreset) { _, new in applyBrandColors(new) }
+                    }
+                    Toggle("Chapter cards between parts", isOn: $channel.chaptersEnabled)
+                } header: { Text("Creative") } footer: {
+                    Text(Personality.preset(named: channel.contentShape).description
+                         + " Visual tone steers the brief, the narration voice and every image prompt. A style lock is added to the end of each image prompt so the pictures look like one set. The brand preset sets the motion feel and transitions the AI editor works toward, and fills in the colours below when you pick it. Chapter cards split a longer video into parts: each part after the first opens with a title card, and the narration pauses for it. Off by default, as on the PC.")
                 }
                 Section {
                     ColorPicker("Highlight", selection: accentBinding, supportsOpacity: false)
@@ -256,6 +328,69 @@ struct ChannelEditor: View {
                     Text("How readily dead-air removal treats a quiet stretch in the narration as silence to cut, matching the PC's voice_trim_aggressiveness.")
                 }
 
+                Section {
+                    if store.settings.voice == .elevenlabs {
+                        VStack(alignment: .leading) {
+                            Text("Stability \(Int(channel.voiceStability * 100))%")
+                            Slider(value: $channel.voiceStability, in: 0...1, step: 0.05)
+                        }
+                    }
+                    if store.settings.voice != .gemini {
+                        VStack(alignment: .leading) {
+                            Text("Speed \(String(format: "%.2f", channel.voiceSpeed))x")
+                            Slider(value: $channel.voiceSpeed, in: 0.7...1.2, step: 0.05)
+                        }
+                    }
+                    if store.settings.voice == .gemini {
+                        Text("Gemini voices don't take a speed or stability setting.").foregroundStyle(.secondary)
+                    }
+                } header: { Text("Voice delivery") } footer: {
+                    Text("Stability: lower is more expressive and varied, higher is more even (ElevenLabs only). Speed: 0.7x to 1.2x (ElevenLabs and the built-in voices). Both are the PC's voice_stability and voice_speed.")
+                }
+
+                Section {
+                    OverlayPreview(style: channel.overlay, accent1: accent1Binding.wrappedValue, accent2: accent2Binding.wrappedValue)
+                        .listRowInsets(EdgeInsets())
+                    Picker("Background", selection: $channel.overlay.captionBackground) {
+                        ForEach(CaptionBackground.allCases) { Text($0.label).tag($0) }
+                    }
+                    if channel.overlay.captionBackground != .none {
+                        VStack(alignment: .leading) {
+                            Text("Background opacity \(Int(channel.overlay.captionBackgroundOpacity * 100))%")
+                            Slider(value: $channel.overlay.captionBackgroundOpacity, in: 0.1...1, step: 0.05)
+                        }
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Outline \(channel.overlay.captionOutline == 0 ? "off" : String(format: "%.0f", channel.overlay.captionOutline))")
+                        Slider(value: $channel.overlay.captionOutline, in: 0...10, step: 1)
+                    }
+                    Toggle("Shadow", isOn: $channel.overlay.captionShadow)
+                    Toggle("Capital letters", isOn: $channel.overlay.captionUppercase)
+                    ColorPicker("Text colour", selection: captionColorBinding, supportsOpacity: false)
+                } header: { Text("Caption look") } footer: {
+                    Text("How captions are drawn. The highlight colour for the spoken word is the Highlight colour in Brand above; where captions sit, how they animate and their size are in Settings → Captions.")
+                }
+
+                Section {
+                    Picker("Background", selection: $channel.overlay.cardBackground) {
+                        ForEach(CardBackground.allCases) { Text($0.label).tag($0) }
+                    }
+                    Picker("Alignment", selection: $channel.overlay.cardAlignment) {
+                        ForEach(CardAlignment.allCases) { Text($0.label).tag($0) }
+                    }
+                    VStack(alignment: .leading) {
+                        Text("Text size \(Int(channel.overlay.cardTextScale * 100))%")
+                        Slider(value: $channel.overlay.cardTextScale, in: 0.6...1.4, step: 0.05)
+                    }
+                    Toggle("Capital letters", isOn: $channel.overlay.cardUppercase)
+                    Toggle("Accent stripe and rule", isOn: $channel.overlay.cardAccentBars)
+                    Picker("Entrance", selection: $channel.overlay.cardAnimation) {
+                        ForEach(CardAnimation.allCases) { Text($0.label).tag($0) }
+                    }
+                } header: { Text("Card look") } footer: {
+                    Text("Applies to question, explainer and chapter cards. The accent colours come from the Brand section above.")
+                }
+
                 // Mirrors the PC's "Models" settings tab: each text-writing
                 // phase can override the channel's default text provider,
                 // with its own backup and if-both-fail policy. Left blank
@@ -306,5 +441,73 @@ struct ChannelEditor: View {
             .tint(Theme.accent)
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// A small live picture of the overlay settings: one card and one caption,
+/// drawn in SwiftUI from the same style values the renderer reads. It is a
+/// guide, not a pixel match - the renderer draws with Core Graphics - but it
+/// moves with every control, which is what makes the options understandable.
+private struct OverlayPreview: View {
+    let style: OverlayStyle
+    let accent1: Color
+    let accent2: Color
+
+    private var palette: (background: Color, text: Color) {
+        switch style.cardBackground {
+        case .dark: return (Color(red: 0.043, green: 0.059, blue: 0.102), Color(white: 0.95))
+        case .light: return (Color(red: 0.957, green: 0.945, blue: 0.918), Color(red: 0.08, green: 0.09, blue: 0.11))
+        case .brand: return (accent1.opacity(0.28).mix(with: .black, by: 0.7), Color(white: 0.97))
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            card.frame(maxWidth: .infinity)
+            caption.frame(maxWidth: .infinity)
+        }
+        .padding(12)
+        .accessibilityHidden(true)
+    }
+
+    private var card: some View {
+        ZStack(alignment: style.cardAlignment == .left ? .leading : .center) {
+            palette.background
+            if style.cardAccentBars {
+                VStack { accent2.frame(height: 3); Spacer() }
+            }
+            VStack(alignment: style.cardAlignment == .left ? .leading : .center, spacing: 6) {
+                Text(style.cardUppercase ? "WHY DOES IT GLOW?" : "Why does it glow?")
+                    .font(.system(size: 15 * CGFloat(style.cardTextScale), weight: .heavy))
+                    .foregroundStyle(palette.text)
+                    .multilineTextAlignment(style.cardAlignment == .left ? .leading : .center)
+                if style.cardAccentBars { Capsule().fill(accent1).frame(width: 34, height: 3) }
+            }
+            .padding(12)
+        }
+        .frame(height: 118)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var caption: some View {
+        ZStack {
+            LinearGradient(colors: [.gray.opacity(0.55), .gray.opacity(0.25)], startPoint: .top, endPoint: .bottom)
+            let color = Theme.color(hex: style.captionTextColorHex) ?? .white
+            Text(style.captionUppercase ? "THE SEA GLOWS" : "The sea glows")
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(color)
+                .shadow(color: style.captionOutline > 0 ? .black : .clear, radius: 0, x: 1, y: 1)
+                .shadow(color: style.captionShadow ? .black.opacity(0.6) : .clear, radius: 4, y: 2)
+                .padding(.horizontal, style.captionBackground == .none ? 0 : 10)
+                .padding(.vertical, style.captionBackground == .none ? 0 : 5)
+                .background {
+                    if style.captionBackground != .none {
+                        RoundedRectangle(cornerRadius: style.captionBackground == .pill ? 20 : 6, style: .continuous)
+                            .fill(.black.opacity(style.captionBackgroundOpacity))
+                    }
+                }
+        }
+        .frame(height: 118)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

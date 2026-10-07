@@ -343,3 +343,72 @@ final class AgentToolsTests: XCTestCase {
         }
     }
 }
+
+/// How the tools behave now that `Store.start` queues instead of refusing.
+@MainActor
+final class AgentToolsQueueTests: XCTestCase {
+
+    private func run(_ name: String, _ json: String, host: FakeAgentHost) -> AgentToolOutcome {
+        AgentTools.run(toolCall(name, json), host: host, context: .test(host.settings))
+    }
+
+    private func text(_ o: AgentToolOutcome) -> String {
+        if case .result(let t) = o { return t }
+        return ""
+    }
+
+    func testCancelOfAQueuedProjectRemovesItFromTheQueue() {
+        let host = FakeAgentHost()
+        let p = host.add("AAA111", title: "Volcanoes")
+        host.queued = [p.id]
+        let t = text(run("cancel", #"{"project":"AAA111"}"#, host: host))
+        XCTAssertTrue(t.contains("queue"), t)
+        XCTAssertEqual(host.cancelled, [p.id])
+        XCTAssertTrue(host.queued.isEmpty)
+    }
+
+    func testRedoOfAQueuedProjectIsRefused() {
+        let host = FakeAgentHost()
+        let p = host.add("AAA111", title: "Volcanoes")
+        host.queued = [p.id]
+        XCTAssertTrue(text(run("redo_from", #"{"project":"AAA111","phase":"voice"}"#, host: host)).contains("queued"))
+        XCTAssertTrue(host.started.isEmpty)
+    }
+
+    func testPerformRedoOfAQueuedProjectStartsNothing() {
+        let host = FakeAgentHost()
+        let p = host.add("AAA111", title: "Volcanoes")
+        host.queued = [p.id]
+        let done = AgentTools.perform(.redo(projectID: p.id, phase: .voice), host: host)
+        XCTAssertTrue(host.started.isEmpty)
+        XCTAssertNil(done.projectID)
+    }
+
+    func testGetStatusShowsTheQueuePlace() {
+        let host = FakeAgentHost()
+        host.add("AAA111", title: "First")
+        let p = host.add("BBB222", title: "Second")
+        host.queued = [host.projects[0].id, p.id]
+        let t = text(run("get_status", #"{"project":"BBB222"}"#, host: host))
+        XCTAssertTrue(t.contains("Queued: place 2"), t)
+    }
+
+    func testAStartedVideoThatGetsQueuedSaysSo() {
+        let host = FakeAgentHost()
+        host.queueNextStart = true
+        let done = AgentTools.perform(.createVideo(topic: "Rome", title: "", aspect: .portrait, channelID: host.channels[0].id), host: host)
+        XCTAssertTrue(done.text.contains("queued"), done.text)
+        XCTAssertNotNil(done.projectID, "a queued video is still the assistant's, so it is announced when done")
+    }
+
+    func testEstimateCountsTheRecycledImagePool() {
+        let host = FakeAgentHost()
+        host.settings.image = .gemini
+        host.channels[0].recycleEnabled = true
+        host.channels[0].recycleRatio = 100
+        host.reusableImageCount = 20
+        guard case .needsApproval(let a) = run("create_video", #"{"topic":"Rome"}"#, host: host) else { return XCTFail("expected approval") }
+        let expected = CostEstimate.forNewVideo(settings: host.settings, channel: host.channels[0], hasAssemblyKey: true, poolSize: 20)
+        XCTAssertEqual(a.estimateUSD, expected.usd, accuracy: 1e-12)
+    }
+}

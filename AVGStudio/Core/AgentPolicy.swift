@@ -13,7 +13,7 @@ enum AgentPolicy {
     /// `.always` asks every time. `.paidOnly` lets *exactly free* work start
     /// without a tap; anything with a non-zero estimate - even a fraction of
     /// a cent - still asks. There is deliberately no mode that skips paid
-    /// work. `CostRates` has no `default:`, so a provider with no rate cannot
+    /// work. `CostTable` has no `default:`, so a provider with no rate cannot
     /// slip through as free.
     static func needsTap(_ approval: AgentApproval, settings: AppSettings) -> Bool {
         switch settings.agentApproval {

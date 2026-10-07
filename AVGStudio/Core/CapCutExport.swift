@@ -51,9 +51,14 @@ enum CapCutExporter {
         guard let videoURL = store.file(project, take.file), fm.fileExists(atPath: videoURL.path) else {
             throw CapCutExportError.noRender
         }
-        guard let audioName = project.audioFile, let audioURL = store.file(project, audioName), fm.fileExists(atPath: audioURL.path) else {
-            throw CapCutExportError.missingAudio
-        }
+        // The take's OWN images, audio, captions and timing - not whatever the
+        // project holds now. Before real takes these were the same thing;
+        // exporting an older take with today's images under its old video
+        // would hand CapCut a mismatched set.
+        let (content, contentRoot) = store.takeContent(project, take)
+        guard let audioName = content.audioFile else { throw CapCutExportError.missingAudio }
+        let audioURL = contentRoot.appendingPathComponent(audioName)
+        guard fm.fileExists(atPath: audioURL.path) else { throw CapCutExportError.missingAudio }
 
         let root = fm.temporaryDirectory.appendingPathComponent(
             "CapCut Export - \(sanitize("\(project.title) - \(take.label)"))", isDirectory: true
@@ -65,8 +70,10 @@ enum CapCutExporter {
         // images/ - scene order, renamed 001/002/... so CapCut's own
         // filename sort lands in narration order, same as the PC.
         var copiedImages: [(index: Int, fileName: String)] = []
-        for scene in project.scenes.sorted(by: { $0.index < $1.index }) {
-            guard let src = store.file(project, scene.imageFile), fm.fileExists(atPath: src.path) else { continue }
+        for scene in content.scenes.sorted(by: { $0.index < $1.index }) {
+            guard let imageName = scene.imageFile else { continue }
+            let src = contentRoot.appendingPathComponent(imageName)
+            guard fm.fileExists(atPath: src.path) else { continue }
             let name = String(format: "%03d.%@", scene.index, src.pathExtension.isEmpty ? "jpg" : src.pathExtension)
             try? fm.copyItem(at: src, to: imagesDir.appendingPathComponent(name))
             copiedImages.append((scene.index, name))
@@ -78,12 +85,12 @@ enum CapCutExporter {
         // captions.srt - straight from CaptionCue; no ASS-parsing detour
         // needed like the PC's, since captions here are already
         // structured data, not a rendered subtitle file to reverse-parse.
-        try writeSRT(project.captions, to: root.appendingPathComponent("captions.srt"))
+        try writeSRT(content.captions, to: root.appendingPathComponent("captions.srt"))
 
         // timing.csv - one row per copied image, cumulative start/end from
         // sceneDurations - the same running-sum VideoRenderer itself uses
         // to place each scene on the timeline (see its own `starts.append`).
-        try writeTimingCSV(project: project, copiedImages: copiedImages, to: root.appendingPathComponent("timing.csv"))
+        try writeTimingCSV(project: content, copiedImages: copiedImages, to: root.appendingPathComponent("timing.csv"))
 
         // master_output.mp4 - this take's own render, verbatim.
         try fm.copyItem(at: videoURL, to: root.appendingPathComponent("master_output.mp4"))

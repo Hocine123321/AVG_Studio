@@ -229,6 +229,59 @@ struct VideoSettingsPage: View {
     }
 }
 
+// MARK: - Performance
+
+/// The levers that decide how fast and how hard the iPhone works. The PC offers
+/// ffmpeg's `render_engine`, `render_codec` and `render_threads`; a phone has
+/// different ones - which chip draws the frames, which format the encoder
+/// writes, how many things run at once, and whether iOS is allowed to keep the
+/// app going while it gets hot, locks, or is put away.
+struct PerformanceSettingsPage: View {
+    @Environment(Store.self) private var store
+    var focus: SettingAnchor?
+
+    var body: some View {
+        @Bindable var store = store
+        SettingsPage(title: "Performance", focus: focus) {
+            SettingsGroup(title: "Rendering",
+                          footer: "Automatic draws every frame on the GPU and falls back to the CPU only when iOS won't allow the GPU (the app in the background). CPU only is slower but never touches the GPU. HEVC makes smaller files; H.264 plays everywhere. Encoder quality sets how much detail the file keeps: Automatic lets iOS decide, the others ask for a fixed amount.") {
+                ChoiceRow(title: "Render engine",
+                          options: RenderEngine.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.renderEngine)
+                    .anchored(.renderEngine)
+                ChoiceRow(title: "Video format",
+                          options: VideoCodec.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.videoCodec)
+                    .anchored(.videoCodec)
+                ChoiceRow(title: "Encoder quality",
+                          options: EncoderQuality.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.encoderQuality)
+                    .anchored(.encoderQuality)
+            }
+
+            SettingsGroup(title: "Working at once",
+                          footer: "Extra videos wait in line and start as a slot frees; renders always take turns whatever this is. More images at once is faster, but free image makers rate-limit quickly - drop to 1 if they keep failing.") {
+                SegmentRow(title: "Videos at once", options: [1, 2, 3], label: { "\($0)" },
+                           selection: $store.settings.maxParallelJobs)
+                    .anchored(.parallelJobs)
+                SegmentRow(title: "Images at once", options: [1, 2, 3, 4], label: { "\($0)" },
+                           selection: $store.settings.imageParallelism)
+                    .anchored(.imageParallelism)
+            }
+
+            SettingsGroup(title: "Looking after the iPhone",
+                          footer: "A hot iPhone slows itself down, so a long render only gets slower; this waits for it to cool, then carries on. A locked screen suspends the app (and its GPU access), so keeping the screen on is the surest way to finish quickly. Background work is slower and iOS may stop it early.") {
+                ToggleRow(title: "Pause when the iPhone is hot", isOn: $store.settings.pauseWhenHot)
+                    .anchored(.pauseWhenHot)
+                ToggleRow(title: "Keep the screen on while working", isOn: $store.settings.keepScreenAwake)
+                    .anchored(.keepAwake)
+                ToggleRow(title: "Keep working in the background", isOn: $store.settings.allowBackgroundRendering)
+                    .anchored(.backgroundRendering)
+            }
+        }
+    }
+}
+
 // MARK: - API keys
 
 struct KeysSettingsPage: View {

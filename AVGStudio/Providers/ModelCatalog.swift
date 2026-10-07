@@ -21,13 +21,9 @@ struct CatalogEntry: Identifiable, Codable, Equatable, Hashable {
 /// on-disk cache mechanism instead of five near-identical copies - only
 /// the `fetch` closure differs per catalogue (see `ModelCatalogSources.swift`).
 ///
-/// Deliberately smaller than the PC's own Live List
-/// (`avg/core/model_prefs.py` + `web/src/ModelPicker.tsx`): no per-entry
-/// ticking, favouriting, free-text note, or AI-generated shortlist
-/// suggestion sitting on top of the fetched list - this is the PC
-/// catalogue's REFRESH half only, not its curation half, which is its own,
-/// much larger feature (a second document, a lock keyed per file, an
-/// AI-suggestion worker) this port is not taking on right now. What IS
+/// This is the PC catalogue's REFRESH half. Its curation half - favourites
+/// and which models proved to work - lives in `ModelPrefs.swift`; ticking,
+/// free-text notes and the AI-suggested shortlist are not ported. What IS
 /// ported from the PC's `ModelPicker.tsx` is its one load-bearing UX rule:
 /// when nothing comes back, fall back to a plain text field rather than
 /// leaving the setting impossible to change (see `ModelRow.swift`).
@@ -44,7 +40,8 @@ final class ModelCatalog {
     private(set) var entries: [CatalogEntry] = []
     private(set) var status: Status = .idle
 
-    private let cacheKey: String
+    /// Identifies this list on disk and in `ModelPrefs` (favourites, probe results).
+    let cacheKey: String
     private let fetch: () async throws -> [CatalogEntry]
 
     init(cacheKey: String, fetch: @escaping () async throws -> [CatalogEntry]) {

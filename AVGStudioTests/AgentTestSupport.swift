@@ -11,6 +11,11 @@ final class FakeAgentHost: AgentHost {
     var jobs: [String: JobState] = [:]
     var recoveryPlan: RecoveryPlan?
     var running: Set<String> = []
+    /// Projects waiting for a free slot (`Store` queues rather than refuses).
+    var queued: [String] = []
+    /// When true, the next `start` puts the project in the queue instead of running it.
+    var queueNextStart = false
+    var reusableImageCount = 0
     var activeChannelID: UUID?
 
     var created: [(topic: String, title: String, channelID: UUID, aspect: AspectRatio)] = []
@@ -24,6 +29,8 @@ final class FakeAgentHost: AgentHost {
     }
 
     func isRunning(_ id: String) -> Bool { running.contains(id) }
+    func isBusy(_ id: String) -> Bool { running.contains(id) || queued.contains(id) }
+    func queuePosition(_ id: String) -> Int? { queued.firstIndex(of: id).map { $0 + 1 } }
 
     func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio) -> Project {
         created.append((topic, title, channel.id, aspect))
@@ -34,8 +41,11 @@ final class FakeAgentHost: AgentHost {
         return p
     }
 
-    func start(_ id: String, from phase: PhaseID) { started.append((id, phase)) }
-    func cancel(_ id: String) { cancelled.append(id); running.remove(id) }
+    func start(_ id: String, from phase: PhaseID) {
+        started.append((id, phase))
+        if queueNextStart { queued.append(id); queueNextStart = false }
+    }
+    func cancel(_ id: String) { cancelled.append(id); running.remove(id); queued.removeAll { $0 == id } }
     func selectForStudio(_ id: String) { selected.append(id) }
     func record(_ id: String?, _ message: String, error: Bool) { recorded.append(message) }
 

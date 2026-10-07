@@ -24,6 +24,15 @@ protocol AgentHost: AnyObject {
     var jobs: [String: JobState] { get }
     var recoveryPlan: RecoveryPlan? { get }
     func isRunning(_ id: String) -> Bool
+    /// Running OR waiting for a slot. With `maxParallelJobs` reached a start is
+    /// queued, never refused, and `Store.start` silently ignores a project
+    /// that is already busy - so every "can I redo / cancel this?" check asks
+    /// this, not `isRunning`.
+    func isBusy(_ id: String) -> Bool
+    /// 1-based place in the queue, or nil when not queued.
+    func queuePosition(_ id: String) -> Int?
+    /// Recycled images in the pool; they make a video's image cost lower.
+    var reusableImageCount: Int { get }
     func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio) -> Project
     func start(_ id: String, from phase: PhaseID)
     func cancel(_ id: String)
@@ -56,7 +65,7 @@ struct AgentApproval: Identifiable, Equatable {
     let id: UUID
     let title: String
     let detail: String
-    /// The flat guess as text ("free", "≈ $0.03") and as a number the spend
+    /// The flat guess as text ("Free", "about $0.03") and as a number the spend
     /// limit counts.
     let estimate: String
     let estimateUSD: Double
@@ -188,9 +197,10 @@ enum AgentTools {
         case cancelName:
             guard s.agentAllowCancel else { return .result(turnedOff("Cancelling")) }
             return .result(withProject(args, host) { p in
-                guard host.isRunning(p.id) else { return "“\(short(p.title))” isn't running." }
+                guard host.isBusy(p.id) else { return "“\(short(p.title))” isn't running." }
+                let waiting = host.queuePosition(p.id) != nil
                 host.cancel(p.id)
-                return "Cancelled “\(short(p.title))”."
+                return waiting ? "Removed “\(short(p.title))” from the queue." : "Cancelled “\(short(p.title))”."
             })
         case createName:
             guard s.agentAllowCreate else { return .result(turnedOff("Starting videos")) }
@@ -212,18 +222,20 @@ enum AgentTools {
             let channel = host.channels.first { $0.id == channelID } ?? host.activeChannel
             let p = host.createProject(topic: topic, title: title, channel: channel, aspect: aspect)
             host.start(p.id, from: .writing)
+            let queued = host.queuePosition(p.id).map { " It is queued (place \($0)) until a slot frees." } ?? " It runs in the background."
             return AgentPerformed(
-                text: "Started “\(short(p.title))” (ref \(ref(p))). It runs in the background; check get_status for progress.",
+                text: "Started “\(short(p.title))” (ref \(ref(p))).\(queued) Check get_status for progress.",
                 projectID: p.id)
         case .redo(let projectID, let phase):
             guard let p = host.projects.first(where: { $0.id == projectID }) else {
                 return AgentPerformed(text: "That project no longer exists.", projectID: nil)
             }
-            guard !host.isRunning(projectID) else {
-                return AgentPerformed(text: "“\(short(p.title))” is already running.", projectID: nil)
+            guard !host.isBusy(projectID) else {
+                return AgentPerformed(text: "“\(short(p.title))” is already running or queued.", projectID: nil)
             }
             host.start(projectID, from: phase)
-            return AgentPerformed(text: "Restarted “\(short(p.title))” from \(phase.title).", projectID: projectID)
+            let queued = host.queuePosition(projectID).map { " It is queued (place \($0))." } ?? ""
+            return AgentPerformed(text: "Restarted “\(short(p.title))” from \(phase.title).\(queued)", projectID: projectID)
         }
     }
 
@@ -256,6 +268,9 @@ enum AgentTools {
     private static func getStatus(_ p: Project, _ host: any AgentHost) -> String {
         var lines = ["“\(short(p.title))” (ref \(ref(p))), \(p.aspectRatio.rawValue)"]
         lines.append("Steps: " + phaseSummary(p))
+        if let place = host.queuePosition(p.id) {
+            lines.append("Queued: place \(place), waiting for a free slot.")
+        }
         if host.isRunning(p.id) {
             if let job = host.jobs[p.id] {
                 let pct = Int((min(max(job.progress, 0), 1) * 100).rounded())
@@ -300,7 +315,8 @@ enum AgentTools {
         if let refusal = preflight(from: .writing, context: context) { return .result(refusal) }
 
         let estimate = CostEstimate.forNewVideo(settings: context.settings, channel: channel,
-                                                hasAssemblyKey: context.hasKey(.assemblyai))
+                                                hasAssemblyKey: context.hasKey(.assemblyai),
+                                                poolSize: host.reusableImageCount)
         let title = args.string("title") ?? ""
         return .needsApproval(AgentApproval(
             title: "Start this video?",
@@ -320,8 +336,8 @@ enum AgentTools {
         guard let raw = args.string("phase"), let phase = PhaseID(rawValue: raw.lowercased()) else {
             return .result("Error: phase must be one of \(valid.joined(separator: ", ")).")
         }
-        if host.isRunning(project.id) {
-            return .result("“\(short(project.title))” is already running. Wait for it, or cancel it first.")
+        if host.isBusy(project.id) {
+            return .result("“\(short(project.title))” is already running or queued. Wait for it, or cancel it first.")
         }
         if let plan = host.recoveryPlan, plan.projectID == project.id {
             return .result("“\(short(project.title))” is waiting for the user's decision on screen. Tell them to open the prompt.")
@@ -330,7 +346,8 @@ enum AgentTools {
 
         let channel = host.channels.first { $0.id == project.channelID } ?? host.activeChannel
         let estimate = CostEstimate.forRedo(from: phase, settings: context.settings, channel: channel,
-                                            hasAssemblyKey: context.hasKey(.assemblyai))
+                                            hasAssemblyKey: context.hasKey(.assemblyai),
+                                            poolSize: host.reusableImageCount)
         return .needsApproval(AgentApproval(
             title: "Redo from \(phase.title)?",
             detail: "“\(short(project.title))” will re-run from \(phase.title) onward.",
