@@ -89,7 +89,13 @@ enum HTTP {
     /// validation failure or a malformed reply, never a classified
     /// provider failure) is not retried and propagates immediately, same
     /// as the old loop's non-`.http` branch.
-    static func retrying<T>(_ op: () async throws -> T, provider: String) async throws -> T {
+    ///
+    /// `attemptCap` lowers the number of attempts below the policy's, for a
+    /// caller that has somewhere better to go than waiting: the assistant
+    /// passes 2 when a backup service is available, so a rate limit fails
+    /// over after one short wait instead of sitting out the full backoff.
+    /// Omitted, nothing changes.
+    static func retrying<T>(_ op: () async throws -> T, provider: String, attemptCap: Int? = nil) async throws -> T {
         var attempt = 1
         while true {
             do { return try await op() }
@@ -101,9 +107,10 @@ enum HTTP {
                 guard let avg = error as? AVGError, let kind = avg.kind, let rule = POLICY[kind],
                       case .provider(_, let providerName, let message) = avg
                 else { throw error }
-                if rule.retryable, attempt < rule.maxAttempts {
+                let maxAttempts = min(rule.maxAttempts, max(attemptCap ?? rule.maxAttempts, 1))
+                if rule.retryable, attempt < maxAttempts {
                     let delay = rule.backoffSeconds * pow(2.0, Double(attempt - 1))
-                    await RenderLog.emit("\(provider): \(kind.rawValue) - retrying in \(String(format: "%.0f", delay))s (attempt \(attempt + 1)/\(rule.maxAttempts)).")
+                    await RenderLog.emit("\(provider): \(kind.rawValue) - retrying in \(String(format: "%.0f", delay))s (attempt \(attempt + 1)/\(maxAttempts)).")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     attempt += 1
                     continue

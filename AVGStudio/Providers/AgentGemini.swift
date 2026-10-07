@@ -16,6 +16,8 @@ import Foundation
 struct GeminiAgent: AgentProvider {
     let key: String
     let model: String
+    /// See `HTTP.retrying(attemptCap:)`. nil = the policy's own budget.
+    var attemptCap: Int? = nil
 
     /// Ids the model did not supply are made up locally with this prefix, so
     /// the loop can match a result to its call. They are never sent back to
@@ -33,7 +35,7 @@ struct GeminiAgent: AgentProvider {
         let headers = ["x-goog-api-key": key]
         let data = try await HTTP.retrying({
             try await HTTP.send(url, headers: headers, json: body, timeout: 90, provider: "gemini")
-        }, provider: "gemini")
+        }, provider: "gemini", attemptCap: attemptCap)
         return try Self.decode(data)
     }
 

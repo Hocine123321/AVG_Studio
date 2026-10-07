@@ -15,6 +15,8 @@ import Foundation
 struct GroqAgent: AgentProvider {
     let key: String
     let model: String
+    /// See `HTTP.retrying(attemptCap:)`. nil = the policy's own budget.
+    var attemptCap: Int? = nil
 
     static let url = URL(string: "https://api.groq.com/openai/v1/chat/completions")!
 
@@ -24,7 +26,7 @@ struct GroqAgent: AgentProvider {
         let headers = ["Authorization": "Bearer \(key)"]
         let data = try await HTTP.retrying({
             try await HTTP.send(Self.url, headers: headers, json: body, timeout: 90, provider: "groq")
-        }, provider: "groq")
+        }, provider: "groq", attemptCap: attemptCap)
         return try Self.decode(data)
     }
 
@@ -111,12 +113,12 @@ struct GroqAgent: AgentProvider {
 enum AgentProviderFactory {
     /// The provider for `kind`, or the one in settings. Throws the usual
     /// "add your key" error when the key is missing, so the chat can say so.
-    static func make(settings: AppSettings, kind: AgentProviderKind? = nil) throws -> any AgentProvider {
+    static func make(settings: AppSettings, kind: AgentProviderKind? = nil, attemptCap: Int? = nil) throws -> any AgentProvider {
         switch kind ?? settings.agentProvider {
         case .groq:
-            return GroqAgent(key: try Keychain.require(.groq), model: settings.agentGroqModel)
+            return GroqAgent(key: try Keychain.require(.groq), model: settings.agentGroqModel, attemptCap: attemptCap)
         case .gemini:
-            return GeminiAgent(key: try Keychain.require(.gemini), model: settings.agentGeminiModel)
+            return GeminiAgent(key: try Keychain.require(.gemini), model: settings.agentGeminiModel, attemptCap: attemptCap)
         }
     }
 }

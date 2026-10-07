@@ -19,6 +19,8 @@ enum AgentProviderKind: String, Codable, CaseIterable, Identifiable {
     }
     /// The other service, for failover.
     var other: AgentProviderKind { self == .groq ? .gemini : .groq }
+    /// The Keychain slot this service's key lives in.
+    var apiKey: APIKey { self == .groq ? .groq : .gemini }
 }
 
 /// When the assistant must wait for a tap before starting work.

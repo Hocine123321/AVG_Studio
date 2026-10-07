@@ -37,6 +37,9 @@ final class Agent {
     static let maxSteps = 8
     static let maxNudges = 2
     static let historyWindow = 24
+    /// Failures worth trying the other service for: it is the service that is
+    /// unavailable, not our request that is wrong.
+    static let failoverKinds: Set<ErrorKind> = [.rateLimit, .quota, .billing, .network, .timeout]
     static let nudgeText = "Your last tool call was malformed. Call the tool again with valid arguments, or answer in plain text."
 
     // MARK: Observable state
@@ -85,7 +88,13 @@ final class Agent {
 
     init() {
         makeProvider = { [weak self] kind in
-            try AgentProviderFactory.make(settings: self?.host?.settings ?? AppSettings(), kind: kind)
+            let settings = self?.host?.settings ?? AppSettings()
+            // With a backup service ready, don't sit out the full rate-limit
+            // backoff (about 30 s) on the main one: one short retry, then
+            // fail over. The backup itself keeps the full budget.
+            let backupReady = settings.agentFailover && Keychain.has(settings.agentProvider.other.apiKey)
+            return try AgentProviderFactory.make(settings: settings, kind: kind,
+                                                 attemptCap: (kind == nil && backupReady) ? 2 : nil)
         }
     }
 
@@ -161,6 +170,13 @@ final class Agent {
         let system = AgentPrompt.system(settings: settings)
         var steps = 0
         var nudges = 0
+        // Failover: nil = the service chosen in Settings. Once a tool has run
+        // in this message, the history holds that service's own tool ids (and
+        // for Gemini 3, signatures the other one cannot replay), so a switch
+        // is only safe before the first tool call - and only once.
+        var activeKind: AgentProviderKind?
+        var failedOver = false
+        var toolRan = false
 
         loop: while true {
             if Task.isCancelled { say(.activity, "Stopped."); break loop }
@@ -172,7 +188,7 @@ final class Agent {
 
             let reply: AgentMessage
             do {
-                let provider = try makeProvider(nil)
+                let provider = try makeProvider(activeKind)
                 let history = AgentHistory.trimmed(wire, keepLast: Self.historyWindow)
                 reply = try await RenderLog.$record.withValue(logger()) {
                     try await provider.respond(system: system, messages: history, tools: tools)
@@ -183,6 +199,17 @@ final class Agent {
                     nudges += 1
                     remember(.nudge(Self.nudgeText))
                     continue loop
+                }
+                if let avg = error as? AVGError, let kind = avg.kind, Self.failoverKinds.contains(kind),
+                   settings.agentFailover, !failedOver, !toolRan {
+                    let other = settings.agentProvider.other
+                    if context.hasKey(other.apiKey) {
+                        failedOver = true
+                        activeKind = other
+                        say(.activity, "\(settings.agentProvider.label) isn't available right now. Trying \(other.label).")
+                        host.record(nil, "Assistant: \(kind.rawValue) on \(settings.agentProvider.label); trying \(other.label).", error: false)
+                        continue loop
+                    }
                 }
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 say(.error, message)
@@ -195,6 +222,7 @@ final class Agent {
             if reply.toolCalls.isEmpty { break loop }
 
             for call in reply.toolCalls {
+                toolRan = true
                 say(.activity, Self.activityText(for: call.name))
                 let outcome = AgentTools.run(call, host: host, context: context)
                 // Opening a project switches tab; get the chat out of the way.
