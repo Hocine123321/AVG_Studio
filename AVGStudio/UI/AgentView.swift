@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Toolbar entry on Library, Studio and Create. Glass but not prominent, so
-/// Create's single filled action stays the only one on its screen.
+/// Toolbar entry on Library, Studio and Create. A plain toolbar button: iOS 26
+/// draws it as Liquid Glass by itself, and it is not a filled action, so
+/// Create's single `.glassProminent` button stays the only one on its screen.
 struct AgentToolbarButton: View {
     @Environment(Store.self) private var store
 
@@ -14,8 +15,14 @@ struct AgentToolbarButton: View {
     }
 }
 
-/// The chat sheet. All state lives in `store.agent`; this view only draws it
-/// and forwards taps. The one filled (`.glassProminent`) button is Approve.
+/// The assistant's chat sheet. All state lives in `store.agent` (and the
+/// store); this view draws it and forwards taps.
+///
+/// Everything that needs the person's attention sits in one glass stack at
+/// the bottom, above the composer: a paused video's recovery choices, an
+/// approval, live progress for videos the assistant started. So an error is
+/// never somewhere else - it is right here with buttons that fix it. The one
+/// filled (`.glassProminent`) button on the screen is Approve.
 struct AgentView: View {
     @Environment(Store.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -24,17 +31,15 @@ struct AgentView: View {
 
     private var agent: Agent { store.agent }
     private var provider: AgentProviderKind { store.settings.agentProvider }
-    private var keyMissing: Bool { !Keychain.has(provider == .groq ? .groq : .gemini) }
+    private var keyMissing: Bool { !Keychain.has(provider.apiKey) }
     private var canSend: Bool { !draft.trimmed.isEmpty && !agent.isWorking }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            Group {
                 if keyMissing { missingKey } else { transcript }
-                if let approval = agent.pendingApproval { approvalCard(approval) }
-                if agent.approvedSpendUSD > 0 { spendCaption }
-                if !keyMissing { composer }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomStack }
             .navigationTitle("Assistant")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -46,13 +51,15 @@ struct AgentView: View {
                     .disabled(agent.lines.isEmpty && !agent.isWorking)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { agent.isOpen = false }
+                    Button("Done", role: .close) { agent.isOpen = false }
                 }
             }
         }
-        .presentationDetents([.large])
+        // No custom sheet background: at the medium height iOS 26 draws the
+        // sheet as inset Liquid Glass, and the app behind it stays usable.
+        .presentationDetents([.medium, .large])
+        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         .presentationDragIndicator(.visible)
-        .glassSheetBackground(scroll: false)
     }
 
     // MARK: Transcript
@@ -60,7 +67,7 @@ struct AgentView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     if agent.lines.isEmpty { intro }
                     ForEach(agent.lines) { line in row(line).id(line.id) }
                     if agent.isWorking && agent.pendingApproval == nil { typing }
@@ -70,21 +77,50 @@ struct AgentView: View {
                 .padding(.top, 8)
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: agent.lines.count) { _, _ in
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom") }
-            }
-            .onChange(of: agent.pendingApproval?.id) { _, _ in proxy.scrollTo("bottom") }
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .onChange(of: agent.lines.count) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: agent.pendingApproval?.id) { _, _ in scrollToEnd(proxy) }
+            .onChange(of: store.recoveryPlan?.id) { _, _ in scrollToEnd(proxy) }
+            .onAppear { proxy.scrollTo("bottom") }
         }
     }
 
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo("bottom") }
+    }
+
     private var intro: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Ask me to make a video, check progress, redo a step or stop one.")
-                .font(.subheadline).foregroundStyle(Theme.ink)
-            Text("Your messages go to \(provider.label). Anything that starts a video asks you first.")
-                .font(.footnote).foregroundStyle(Theme.ink2)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("What would you like to do?")
+                    .font(.headline).foregroundStyle(Theme.ink)
+                Text("Your messages go to \(provider.label). Anything that starts a video asks you first.")
+                    .font(.footnote).foregroundStyle(Theme.ink2)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                suggestion("What's in my library?", symbol: "square.grid.2x2") { agent.send("What's in my library?") }
+                suggestion("How is my video going?", symbol: "gauge.with.dots.needle.50percent") { agent.send("How is my latest video going?") }
+                suggestion("Make a video about…", symbol: "wand.and.stars") {
+                    draft = "Make a video about "
+                    focused = true
+                }
+            }
         }
         .padding(.vertical, 12)
+    }
+
+    private func suggestion(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.light()
+            action()
+        } label: {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .liquidGlass(Capsule(), interactive: true)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -96,31 +132,95 @@ struct AgentView: View {
                 Text(line.text)
                     .font(.subheadline).foregroundStyle(Theme.ink)
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Theme.accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .textSelection(.enabled)
             }
         case .assistant:
-            Text(line.text)
+            Text(Self.markdown(line.text))
                 .font(.subheadline).foregroundStyle(Theme.ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .contextMenu { Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = line.text } }
         case .activity:
             Label(line.text, systemImage: "ellipsis")
                 .font(.caption).foregroundStyle(Theme.ink2)
         case .error:
-            Label(line.text, systemImage: "exclamationmark.triangle.fill")
-                .font(.footnote).foregroundStyle(Theme.bad)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            errorRow(line)
         case .announcement:
             Label(line.text, systemImage: "bell.fill")
                 .font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
-                .glassCard(16, padding: 10)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .liquidGlass(RoundedRectangle(cornerRadius: 18, style: .continuous), tint: Theme.ok.opacity(0.25))
+        }
+    }
+
+    /// An assistant failure in plain words, with buttons that fix it. Only the
+    /// newest error is actionable; an older one is just history.
+    private func errorRow(_ line: Agent.Line) -> some View {
+        let actionable = line.id == agent.lines.last?.id
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(line.title ?? "Something went wrong", systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.bad)
+            Text(line.text)
+                .font(.footnote).foregroundStyle(Theme.ink)
+            if actionable && !line.fixes.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(line.fixes, id: \.self) { fix in
+                        Button {
+                            Haptics.light()
+                            apply(fix)
+                        } label: {
+                            Label(fix.label, systemImage: fix.symbol)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .liquidGlass(Capsule(), interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.bad.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    /// What each fix button does. They navigate or change one setting; none
+    /// of them starts paid work by itself (a retry goes through the same
+    /// approval as any other message).
+    private func apply(_ fix: AgentFix) {
+        switch fix {
+        case .retry:
+            agent.retryLast()
+        case .switchProvider(let kind):
+            store.settings.agentProvider = kind
+            agent.retryLast()
+        case .openKeys:
+            agent.isOpen = false
+            store.openSettings(.category(.keys, focus: .apiKeys))
+        case .openAssistantSettings:
+            agent.isOpen = false
+            store.openSettings(.category(.assistant, focus: .assistantModel))
         }
     }
 
     private var typing: some View {
-        Image(systemName: "ellipsis")
-            .font(.title3).foregroundStyle(Theme.ink2)
-            .symbolEffect(.variableColor.iterative, isActive: !reduceMotion)
-            .accessibilityLabel("The assistant is working")
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Working…").font(.caption).foregroundStyle(Theme.ink2)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Basic Markdown (bold, italic, code, links) the way models write it.
+    static func markdown(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            allowsExtendedAttributes: false,
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible)
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
     }
 
     // MARK: No key
@@ -133,8 +233,7 @@ struct AgentView: View {
             Text("Your messages go to \(provider.label). Keys stay in this phone's Keychain.")
                 .font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
             Button("Open API keys", systemImage: "key") {
-                agent.isOpen = false
-                store.tab = .settings
+                apply(.openKeys)
             }
             .buttonStyle(.glass)
         }
@@ -142,7 +241,64 @@ struct AgentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Approval
+    // MARK: Bottom stack
+
+    private var bottomStack: some View {
+        GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 10) {
+                if let plan = store.recoveryPlan { recoveryCard(plan) }
+                if let approval = agent.pendingApproval { approvalCard(approval) }
+                ForEach(agent.watching.prefix(3), id: \.self) { id in progressCard(id) }
+                if agent.approvedSpendUSD > 0 { spendCaption }
+                if !keyMissing { composer }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
+    }
+
+    /// A video that paused on an error, with the same choices the full-screen
+    /// prompt would show - here, where the person already is. The choice is
+    /// theirs; the assistant never picks one.
+    private func recoveryCard(_ plan: RecoveryPlan) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(plan.title, systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.bad)
+            if let name = store.project(plan.projectID)?.title {
+                Text("“\(name)” is paused at \(plan.phase.title).")
+                    .font(.caption).foregroundStyle(Theme.ink2)
+            }
+            Text(plan.reason).font(.footnote).foregroundStyle(Theme.ink)
+            if let pattern = plan.pattern {
+                Label(pattern, systemImage: "lightbulb").font(.footnote).foregroundStyle(Theme.accent)
+            }
+            VStack(spacing: 6) {
+                ForEach(plan.actions) { action in
+                    Button {
+                        Haptics.light()
+                        store.resolveRecovery(action)
+                        // These two leave the chat for another screen.
+                        if action == .openKeys || action == .reword { agent.isOpen = false }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: action.symbol).frame(width: 22)
+                            Text(action.label).font(.footnote.weight(.semibold))
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(action.isDestructive ? Theme.bad : Theme.ink)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .liquidGlass(Capsule(), interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlass(RoundedRectangle(cornerRadius: 24, style: .continuous), tint: Theme.bad.opacity(0.18))
+    }
 
     private func approvalCard(_ a: AgentApproval) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -157,9 +313,56 @@ struct AgentView: View {
                     .buttonStyle(.glassProminent)
             }
         }
-        .glassCard(24, padding: 16)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlass(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    /// Live progress for a video this chat started: what it is doing right
+    /// now, how far along, a Stop button - and a tap opens it in Studio.
+    @ViewBuilder
+    private func progressCard(_ id: String) -> some View {
+        if let project = store.project(id) {
+            let job = store.jobs[id]
+            let place = store.queuePosition(id)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(project.title).font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(progressLine(job: job, place: place))
+                        .font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                    if let job {
+                        ProgressView(value: min(max(job.progress, 0), 1)).tint(Theme.accent)
+                    }
+                }
+                Spacer(minLength: 0)
+                Button {
+                    Haptics.light()
+                    store.cancel(id)
+                } label: {
+                    Image(systemName: "stop.fill").font(.footnote)
+                        .frame(width: 34, height: 34)
+                        .liquidGlass(Circle(), interactive: true)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop \(project.title)")
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .onTapGesture {
+                store.selectForStudio(id)
+                agent.isOpen = false
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func progressLine(job: JobState?, place: Int?) -> String {
+        if let place { return "Queued, place \(place) - waiting for a free slot" }
+        guard let job else { return "Starting…" }
+        let pct = Int((min(max(job.progress, 0), 1) * 100).rounded())
+        return "\(job.phase.title) · \(pct)%" + (job.message.isEmpty ? "" : " · \(job.message)")
     }
 
     private var spendCaption: some View {
@@ -167,32 +370,34 @@ struct AgentView: View {
         return Text("Approved this chat: \(Agent.dollars(agent.approvedSpendUSD)) of \(Agent.dollars(cap))")
             .font(.caption2).foregroundStyle(Theme.ink2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 6)
     }
 
     // MARK: Composer
 
+    /// A Liquid Glass input and a glass send button. They are siblings in the
+    /// bottom stack's GlassEffectContainer, so the glass blends as they sit
+    /// together, and the send button tints once there is something to send.
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Ask the assistant…", text: $draft, axis: .vertical)
-                .lineLimit(1...4)
+                .lineLimit(1...5)
                 .focused($focused)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .glass(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            if agent.isWorking {
-                Button { agent.stop() } label: { Image(systemName: "stop.fill") }
-                    .buttonStyle(.glass)
-                    .accessibilityLabel("Stop")
-            } else {
-                Button { send() } label: { Image(systemName: "arrow.up") }
-                    .buttonStyle(.glass)
-                    .disabled(!canSend)
-                    .accessibilityLabel("Send")
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
+            Button {
+                if agent.isWorking { agent.stop() } else { send() }
+            } label: {
+                Image(systemName: agent.isWorking ? "stop.fill" : "arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(canSend || agent.isWorking ? Color.white : Theme.ink2)
+                    .frame(width: 46, height: 46)
+                    .liquidGlass(Circle(), tint: (canSend || agent.isWorking) ? Theme.accent.opacity(0.7) : nil, interactive: true)
             }
+            .buttonStyle(.plain)
+            .disabled(!canSend && !agent.isWorking)
+            .accessibilityLabel(agent.isWorking ? "Stop" : "Send")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     private func send() {
