@@ -274,6 +274,21 @@ extension View {
     /// siblings inside a `GlassEffectContainer`. Use it for controls and
     /// floating bars (search, composer, selection bar, chips, round buttons);
     /// it is a black box, so it ignores the "glass opacity" setting.
+    ///
+    /// COLOURS ON GLASS: the system renders what is drawn on glass in the
+    /// glass's OWN light/dark appearance, which can differ from the app's.
+    /// Every `Theme` colour that is trait-dependent (`ink`, `ink2`, `fill`,
+    /// `glassEdge`, ...) is a `UIColor` that asks "is the trait dark?", so on
+    /// glass it can resolve to the OTHER scheme - dark text on dark glass,
+    /// which is how the selected segment's label disappeared. Anything drawn
+    /// ON glass uses `.primary` / `.secondary` (they follow the glass), a
+    /// fixed colour (`Theme.accent`, `Theme.bad`), or `.white` over a photo -
+    /// never `Theme.ink*`.
+    ///
+    /// BUTTONS: do not nest an `interactive` glass inside a Button's label;
+    /// the glass's own touch handling can swallow the tap (the Settings
+    /// "Quick settings" button stopped opening its sheet). A glass button is
+    /// `.buttonStyle(.glass)` (+ `.buttonBorderShape(.circle)` for icons).
     func liquidGlass<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
         var glass = Glass.regular
         if let tint { glass = glass.tint(tint) }
@@ -358,35 +373,34 @@ struct SegmentedFilter<T: Hashable>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // The selected segment is a real Liquid Glass capsule; because every
-        // segment lives in one GlassEffectContainer and the thumb carries a
-        // shared `glassEffectID`, changing the selection MORPHS the glass
-        // from one segment to the next instead of cross-fading two fills.
+        // The selected segment is a real Liquid Glass capsule. The glass is
+        // applied to the segment's own BUTTON, so its label is the glass's
+        // content and is drawn above it (a separate glass shape in a ZStack
+        // sat on top of the label and hid it). Every segment is in one
+        // GlassEffectContainer with its own `glassEffectID`, so changing the
+        // selection moves the glass from one segment to the next.
         GlassEffectContainer(spacing: 4) {
             HStack(spacing: 4) {
-                ForEach(options, id: \.self) { option in
+                ForEach(options.indices, id: \.self) { index in
+                    let option = options[index]
                     let isOn = option == selection
-                    ZStack {
-                        if isOn {
-                            Capsule()
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(Theme.accent.opacity(0.22)).interactive(), in: .capsule)
-                                .glassEffectID("segment-thumb", in: glassNamespace)
-                        }
-                        Button {
-                            guard !isOn else { return }
-                            Haptics.light()
-                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { selection = option }
-                        } label: {
-                            Text(label(option))
-                                .font(.system(size: 13.5, weight: .semibold))
-                                .foregroundStyle(isOn ? Theme.ink : Theme.ink2)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, verticalPadding)
-                                .contentShape(.capsule)
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        guard !isOn else { return }
+                        Haptics.light()
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { selection = option }
+                    } label: {
+                        Text(label(option))
+                            .font(.system(size: 13.5, weight: .semibold))
+                            // On glass: `.primary` follows the glass. Off glass
+                            // (the plain track) the themed secondary ink is fine.
+                            .foregroundStyle(isOn ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(Theme.ink2))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, verticalPadding)
+                            .contentShape(.capsule)
                     }
+                    .buttonStyle(.plain)
+                    .glassEffect(isOn ? Glass.regular.tint(Theme.accent.opacity(0.28)) : Glass.identity, in: .capsule)
+                    .glassEffectID(index, in: glassNamespace)
                 }
             }
         }

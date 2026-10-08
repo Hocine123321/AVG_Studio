@@ -165,7 +165,7 @@ struct HomeView: View {
 
     private var selectBar: some View {
         HStack(spacing: 10) {
-            Text("\(selected.count) selected").fontWeight(.semibold)
+            Text("\(selected.count) selected").fontWeight(.semibold).foregroundStyle(.primary)
             Spacer()
             // In the Archived filter the same action must UN-archive - it used
             // to say "Archive" and re-archive things that were already there.
@@ -284,9 +284,9 @@ struct ProjectCard: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.footnote.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(width: 30, height: 30)
-                        .liquidGlass(Circle(), interactive: true)
+                        .liquidGlass(Circle())
                 }
                 .padding(8)
                 .accessibilityLabel("More options for \(project.title)")
@@ -327,7 +327,7 @@ struct ProjectCard: View {
     private var statusChip: some View {
         Text(statusText)
             .font(.system(size: 11.5, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(.primary)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .liquidGlass(Capsule(), tint: chipTint)
     }

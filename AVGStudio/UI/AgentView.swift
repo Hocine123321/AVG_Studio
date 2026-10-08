@@ -93,9 +93,9 @@ struct AgentView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("What would you like to do?")
-                    .font(.headline).foregroundStyle(Theme.ink)
+                    .font(.headline).foregroundStyle(.primary)
                 Text("Your messages go to \(provider.label). Anything that starts a video asks you first.")
-                    .font(.footnote).foregroundStyle(Theme.ink2)
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 8) {
                 suggestion("What's in my library?", symbol: "square.grid.2x2") { agent.send("What's in my library?") }
@@ -116,11 +116,8 @@ struct AgentView: View {
         } label: {
             Label(title, systemImage: symbol)
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(Theme.ink)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .liquidGlass(Capsule(), interactive: true)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glass)
     }
 
     @ViewBuilder
@@ -130,25 +127,25 @@ struct AgentView: View {
             HStack {
                 Spacer(minLength: 48)
                 Text(line.text)
-                    .font(.subheadline).foregroundStyle(Theme.ink)
+                    .font(.subheadline).foregroundStyle(.primary)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.accent.opacity(0.2), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                     .textSelection(.enabled)
             }
         case .assistant:
             Text(Self.markdown(line.text))
-                .font(.subheadline).foregroundStyle(Theme.ink)
+                .font(.subheadline).foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
                 .contextMenu { Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = line.text } }
         case .activity:
             Label(line.text, systemImage: "ellipsis")
-                .font(.caption).foregroundStyle(Theme.ink2)
+                .font(.caption).foregroundStyle(.secondary)
         case .error:
             errorRow(line)
         case .announcement:
             Label(line.text, systemImage: "bell.fill")
-                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                .font(.footnote.weight(.semibold)).foregroundStyle(.primary)
                 .padding(.horizontal, 14).padding(.vertical, 10)
                 .liquidGlass(RoundedRectangle(cornerRadius: 18, style: .continuous), tint: Theme.ok.opacity(0.25))
         }
@@ -162,7 +159,7 @@ struct AgentView: View {
             Label(line.title ?? "Something went wrong", systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote.weight(.semibold)).foregroundStyle(Theme.bad)
             Text(line.text)
-                .font(.footnote).foregroundStyle(Theme.ink)
+                .font(.footnote).foregroundStyle(.primary)
             if actionable && !line.fixes.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(line.fixes, id: \.self) { fix in
@@ -172,11 +169,9 @@ struct AgentView: View {
                         } label: {
                             Label(fix.label, systemImage: fix.symbol)
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.ink)
-                                .padding(.horizontal, 12).padding(.vertical, 8)
-                                .liquidGlass(Capsule(), interactive: true)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.glass)
+                        .controlSize(.small)
                     }
                 }
                 .padding(.top, 2)
@@ -209,7 +204,7 @@ struct AgentView: View {
     private var typing: some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text("Working…").font(.caption).foregroundStyle(Theme.ink2)
+            Text("Working…").font(.caption).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
     }
@@ -227,11 +222,11 @@ struct AgentView: View {
 
     private var missingKey: some View {
         VStack(spacing: 12) {
-            Image(systemName: "key.fill").font(.largeTitle).foregroundStyle(Theme.ink2)
+            Image(systemName: "key.fill").font(.largeTitle).foregroundStyle(.secondary)
             Text("Add your \(provider.label) key to use the assistant.")
                 .font(.headline).multilineTextAlignment(.center)
             Text("Your messages go to \(provider.label). Keys stay in this phone's Keychain.")
-                .font(.footnote).foregroundStyle(Theme.ink2).multilineTextAlignment(.center)
+                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Open API keys", systemImage: "key") {
                 apply(.openKeys)
             }
@@ -267,9 +262,9 @@ struct AgentView: View {
                 .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.bad)
             if let name = store.project(plan.projectID)?.title {
                 Text("“\(name)” is paused at \(plan.phase.title).")
-                    .font(.caption).foregroundStyle(Theme.ink2)
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Text(plan.reason).font(.footnote).foregroundStyle(Theme.ink)
+            Text(plan.reason).font(.footnote).foregroundStyle(.primary)
             if let pattern = plan.pattern {
                 Label(pattern, systemImage: "lightbulb").font(.footnote).foregroundStyle(Theme.accent)
             }
@@ -286,12 +281,10 @@ struct AgentView: View {
                             Text(action.label).font(.footnote.weight(.semibold))
                             Spacer(minLength: 0)
                         }
-                        .foregroundStyle(action.isDestructive ? Theme.bad : Theme.ink)
-                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .foregroundStyle(action.isDestructive ? AnyShapeStyle(Theme.bad) : AnyShapeStyle(HierarchicalShapeStyle.primary))
                         .frame(maxWidth: .infinity)
-                        .liquidGlass(Capsule(), interactive: true)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.glass)
                 }
             }
         }
@@ -302,10 +295,10 @@ struct AgentView: View {
 
     private func approvalCard(_ a: AgentApproval) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(a.title).font(.headline).foregroundStyle(Theme.ink)
-            Text(a.detail).font(.subheadline).foregroundStyle(Theme.ink2)
+            Text(a.title).font(.headline).foregroundStyle(.primary)
+            Text(a.detail).font(.subheadline).foregroundStyle(.secondary)
             Label("Estimated cost: \(a.estimate)", systemImage: "dollarsign.circle")
-                .font(.footnote).foregroundStyle(Theme.ink)
+                .font(.footnote).foregroundStyle(.primary)
             HStack(spacing: 12) {
                 Button("Decline") { Haptics.light(); agent.decline() }
                     .buttonStyle(.glass)
@@ -327,9 +320,9 @@ struct AgentView: View {
             let place = store.queuePosition(id)
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(project.title).font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                    Text(project.title).font(.footnote.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                     Text(progressLine(job: job, place: place))
-                        .font(.caption).foregroundStyle(Theme.ink2).lineLimit(1)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     if let job {
                         ProgressView(value: min(max(job.progress, 0), 1)).tint(Theme.accent)
                     }
@@ -340,10 +333,9 @@ struct AgentView: View {
                     store.cancel(id)
                 } label: {
                     Image(systemName: "stop.fill").font(.footnote)
-                        .frame(width: 34, height: 34)
-                        .liquidGlass(Circle(), interactive: true)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
                 .accessibilityLabel("Stop \(project.title)")
             }
             .padding(14)
@@ -368,7 +360,7 @@ struct AgentView: View {
     private var spendCaption: some View {
         let cap = AgentSettingsRules.spendCap(store.settings.agentChatSpendCapUSD)
         return Text("Approved this chat: \(Agent.dollars(agent.approvedSpendUSD)) of \(Agent.dollars(cap))")
-            .font(.caption2).foregroundStyle(Theme.ink2)
+            .font(.caption2).foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 6)
     }
@@ -384,17 +376,18 @@ struct AgentView: View {
                 .lineLimit(1...5)
                 .focused($focused)
                 .padding(.horizontal, 16).padding(.vertical, 12)
-                .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
+                .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
             Button {
                 if agent.isWorking { agent.stop() } else { send() }
             } label: {
                 Image(systemName: agent.isWorking ? "stop.fill" : "arrow.up")
                     .font(.headline)
-                    .foregroundStyle(canSend || agent.isWorking ? Color.white : Theme.ink2)
-                    .frame(width: 46, height: 46)
-                    .liquidGlass(Circle(), tint: (canSend || agent.isWorking) ? Theme.accent.opacity(0.7) : nil, interactive: true)
+                    .foregroundStyle(canSend || agent.isWorking ? AnyShapeStyle(Color.white) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .tint(canSend || agent.isWorking ? Theme.accent : nil)
             .disabled(!canSend && !agent.isWorking)
             .accessibilityLabel(agent.isWorking ? "Stop" : "Send")
         }

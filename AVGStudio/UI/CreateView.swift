@@ -33,10 +33,10 @@ struct CreateView: View {
                         .lineLimit(3...8)
                         .focused($focused)
                         .padding(14)
-                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
+                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     TextField("Title (optional)", text: $title)
                         .padding(14)
-                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
+                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
 
                 SegmentedFilter(options: AspectRatio.allCases, label: { $0.rawValue }, selection: $aspect)

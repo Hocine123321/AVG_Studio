@@ -146,10 +146,9 @@ struct SettingsView: View {
     // MARK: Bottom dock
 
     private var dock: some View {
-        GlassEffectContainer(spacing: 10) {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.ink2)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search settings", text: $query)
                     .focused($searchFocused)
                     .submitLabel(.search)
@@ -159,7 +158,7 @@ struct SettingsView: View {
                     Button {
                         query = ""
                     } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.ink2).frame(width: 32, height: 32)
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear search")
@@ -167,8 +166,10 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 48)
-            .liquidGlass(Capsule(), interactive: true)
+            .liquidGlass(Capsule())
 
+            // A real glass button (not a Button whose label carries its own
+            // interactive glass: that swallowed the tap and the sheet never opened).
             Button {
                 Haptics.light()
                 searchFocused = false
@@ -177,12 +178,11 @@ struct SettingsView: View {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.accent)
-                    .frame(width: 48, height: 48)
-                    .liquidGlass(Circle(), interactive: true)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
             .accessibilityLabel("Quick settings")
-        }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
