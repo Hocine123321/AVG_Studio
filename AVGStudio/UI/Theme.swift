@@ -208,6 +208,12 @@ enum Haptics {
     static func error() { UINotificationFeedbackGenerator().notificationOccurred(.error) }
 }
 
+/// Controls and floating bars use Apple's real Liquid Glass (`liquidGlass`
+/// below); this hand-rolled recipe remains for large CONTENT panels (cards,
+/// grouped rows), where a tunable fill - the Appearance "glass opacity"
+/// setting - matters more than the system material. Apple's own guidance is
+/// glass for the controls/navigation layer, not for content.
+///
 /// The mock's `.g` glass recipe, hand-rolled rather than Apple's Liquid
 /// Glass (`.glassEffect`): a translucent fill over a blur, a hairline
 /// edge, an inset top highlight + a soft outer shadow, and a diagonal
@@ -262,6 +268,19 @@ private struct GlassSurface<S: InsettableShape>: ViewModifier {
 }
 
 extension View {
+    /// Apple's real Liquid Glass: the system material, which refracts what is
+    /// behind it, reacts to touch when `interactive`, honours Reduce
+    /// Transparency and the Tinted/Clear appearance, and morphs between
+    /// siblings inside a `GlassEffectContainer`. Use it for controls and
+    /// floating bars (search, composer, selection bar, chips, round buttons);
+    /// it is a black box, so it ignores the "glass opacity" setting.
+    func liquidGlass<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        var glass = Glass.regular
+        if let tint { glass = glass.tint(tint) }
+        if interactive { glass = glass.interactive() }
+        return self.glassEffect(glass, in: shape)
+    }
+
     /// The mock's `.card`/`.g` panel: rounded glass, no default padding
     /// beyond what `.card`/`.card.p` add at each call site.
     func glassCard(_ radius: CGFloat = 24, padding: CGFloat = 16) -> some View {
@@ -335,32 +354,46 @@ struct SegmentedFilter<T: Hashable>: View {
     /// 8 keeps the compact 34pt strip Library/Create use; Settings passes 12
     /// for ~44pt segments a thumb can hit without aiming.
     var verticalPadding: CGFloat = 8
+    @Namespace private var glassNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(options, id: \.self) { option in
-                let isOn = option == selection
-                Button {
-                    if !isOn { Haptics.light(); selection = option }
-                } label: {
-                    Text(label(option))
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(isOn ? Theme.ink : Theme.ink2)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, verticalPadding)
-                        .background {
-                            if isOn {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Theme.fill)
-                                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.glassEdge, lineWidth: 0.5))
-                            }
+        // The selected segment is a real Liquid Glass capsule; because every
+        // segment lives in one GlassEffectContainer and the thumb carries a
+        // shared `glassEffectID`, changing the selection MORPHS the glass
+        // from one segment to the next instead of cross-fading two fills.
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(options, id: \.self) { option in
+                    let isOn = option == selection
+                    ZStack {
+                        if isOn {
+                            Capsule()
+                                .fill(.clear)
+                                .glassEffect(.regular.tint(Theme.accent.opacity(0.22)).interactive(), in: .capsule)
+                                .glassEffectID("segment-thumb", in: glassNamespace)
                         }
+                        Button {
+                            guard !isOn else { return }
+                            Haptics.light()
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { selection = option }
+                        } label: {
+                            Text(label(option))
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(isOn ? Theme.ink : Theme.ink2)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, verticalPadding)
+                                .contentShape(.capsule)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(3)
-        .glass(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .background(Capsule().fill(Theme.fill))
+        .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
     }
 }
 

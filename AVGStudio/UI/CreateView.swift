@@ -32,11 +32,11 @@ struct CreateView: View {
                     TextField("What is the video about? For example: why octopuses have three hearts", text: $topic, axis: .vertical)
                         .lineLimit(3...8)
                         .focused($focused)
-                        .padding(12)
-                        .glass(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(14)
+                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
                     TextField("Title (optional)", text: $title)
-                        .padding(12)
-                        .glass(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(14)
+                        .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: true)
                 }
 
                 SegmentedFilter(options: AspectRatio.allCases, label: { $0.rawValue }, selection: $aspect)

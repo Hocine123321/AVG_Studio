@@ -146,6 +146,7 @@ struct SettingsView: View {
     // MARK: Bottom dock
 
     private var dock: some View {
+        GlassEffectContainer(spacing: 10) {
         HStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.ink2)
@@ -166,7 +167,7 @@ struct SettingsView: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 48)
-            .glass(Capsule())
+            .liquidGlass(Capsule(), interactive: true)
 
             Button {
                 Haptics.light()
@@ -177,10 +178,11 @@ struct SettingsView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 48, height: 48)
-                    .glassCircle()
+                    .liquidGlass(Circle(), interactive: true)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Quick settings")
+        }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

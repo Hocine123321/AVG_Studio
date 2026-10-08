@@ -73,6 +73,9 @@ struct RootView: View {
                         NavigationStack { SettingsView() }
                     }
                 }
+                // The Liquid Glass tab bar shrinks out of the way while a
+                // list or grid scrolls down, and returns on scroll up.
+                .tabBarMinimizeBehavior(.onScrollDown)
             }
         }
         // The mock's Settings → Appearance Night/Day/Auto switch (`S.theme`) -
