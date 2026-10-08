@@ -70,6 +70,8 @@ with `@testable import AVGStudio`.
 | `CapCutExport.swift` | Builds the CapCut import bundle in `temporaryDirectory` | Share sheets |
 | `CostRates.swift` | The assistant's view of cost, built **on `CostTable`** (Costs.swift, the one rate table the pipeline and the Create screen share): `CostBreakdown` (priced per phase, so a redo from Voice is not quoted as a whole video) and `CostEstimate`. Adds no rates of its own | Which phase runs |
 | `Agent.swift` | The in-app assistant's loop: bounded tool calling, approval continuation, spend limit, one auto-start per message, compaction, failover, self-test, "ready/stopped" announcements | SwiftUI, request shapes |
+| `AgentErrorHelp.swift` | An assistant failure in plain words (`title`, `detail`) plus one-tap `AgentFix`es (fix my key, choose another model, switch service, try again). Pure; the raw provider message still goes to the Activity log | The view, navigation |
+| `LibraryLayout.swift` | How the Library packs cards into two columns: a landscape project spans both, narrow ones pair up, a lone card is half width and a waiting card borrows the next narrow one past a landscape row. Pure and property-tested | Views |
 | `AgentTools.swift` | `AgentHost`, the seven tools, the gated-action `AgentApproval`, project-ref resolution, preflight, permission filtering | The loop, providers |
 | `AgentPolicy.swift` | `AgentPolicy` (needs a tap? over the spend limit?) and `AgentPrompt` (the system prompt). **Policy is decided here from `AppSettings`, never from model text** | Model output |
 | `AgentSettings.swift` | The Assistant's enums and `AgentSettingsRules` (spend-limit and instruction clamps) | Views |
@@ -103,8 +105,8 @@ with `@testable import AVGStudio`.
 | File | Responsibility |
 |---|---|
 | `App.swift` (root) | `AVGStudioApp` and `RootView`: the five-tab `TabView`, onboarding gate, recovery sheet, scene-phase hook |
-| `Theme.swift` | The design system (Skin v2): palette, glass, typography, background, toasts, sheets, haptics. **The authority on every colour and radius** |
-| `HomeView.swift` | Library: search, filter strip, project grid, multi-select archive, interrupted-render banner, "N running · N queued" summary |
+| `Theme.swift` | The design system (Skin v2): palette, glass, typography, background, toasts, sheets, haptics. **The authority on every colour and radius.** Two glass recipes: `liquidGlass` is Apple's real Liquid Glass, for controls and floating bars (search, composer, chips, round buttons, the selection bar, the segmented filter's thumb); `glass`/`glassCard` is the hand-rolled, tunable one for large content panels |
+| `HomeView.swift` | Library: native `.searchable` search, filter strip, project grid (rows from `LibraryLayout`; a card's thumbnail size comes only from a `Color.clear` aspect-ratio base, never from the image), multi-select archive, interrupted-render banner, "N running · N queued" summary |
 | `StudioView.swift` | The current project: player, five phase rows (tap one to expand its steps), queue position, live list, takes, scenes, brief, export sheet |
 | `CreateView.swift` | New-video form: topic, title, shape, channel, and an estimated-cost card from `CostTable` |
 | `ChannelsView.swift` | Channel list and `ChannelEditor` (identity, videos, brand colours and font, recycling, cards, image backup, voice cleanup, per-phase models) |
@@ -117,7 +119,7 @@ with `@testable import AVGStudio`.
 | `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
 | `WelcomeView.swift` | First-run five-step onboarding |
 | `ModelRow.swift` | One 56 pt row over a `ModelCatalog`; tapping opens a bottom sheet with search and Refresh. Always editable: typing an id works with no list |
-| `AgentView.swift` | The assistant's chat sheet (opened from a toolbar button on Library, Studio and Create) and `AgentToolbarButton`. The one filled button in it is Approve |
+| `AgentView.swift` | The assistant's chat sheet (opened from a toolbar button on Library, Studio and Create) and `AgentToolbarButton`. Everything needing attention is one glass stack above the composer: a paused video's recovery choices, the approval, live progress for videos it started. Errors show in plain words with fix buttons. The one filled button in it is Approve |
 | `ProjectLogView.swift` | The live log sheet |
 | `ReusableImagesView.swift` | The recycle-pool manager (photo import, descriptions) |
 | `ActivityShareSheet.swift` | `UIActivityViewController` wrapper |
@@ -369,6 +371,7 @@ The `Store`, one instance for the process lifetime. `AVGStudioApp` builds it and
 | `tasks` (private) | The running `Task` per project. Several projects can run at once |
 | `log` | Recent `LogEntry`s (the Live List and Health's Recent Activity) |
 | `tab`, `currentProjectID` | Navigation. Studio always shows `currentProject` |
+| `settingsPath`, `openSettings(_:)` | What the Settings tab has pushed. Any error can land the person on the page that fixes it (`openSettings(.category(.keys, focus: .apiKeys))`); the Recovery prompt's "Fix my API key" and the assistant's error buttons both use it |
 | `recoveryPlan`, `pendingReword` | A paused run waiting on the user |
 | `interruptedProjectID` | A run cut off by the app closing; shown as a "tap to resume" banner |
 | `agent` | The assistant (`let`, one per `Store`). Holds the transcript, the pending approval, the chat's approved spend, and `isOpen` for the sheet. It drives the store only through `AgentHost`, and never constructs a second `Store` |
