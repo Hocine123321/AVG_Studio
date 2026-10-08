@@ -280,7 +280,7 @@ enum AgentTools {
             }
         }
         if let plan = host.recoveryPlan, plan.projectID == p.id {
-            lines.append("Waiting for the user's decision on screen (\(short(plan.title, 80))). Tell them to open the prompt; do not retry.")
+            lines.append("Waiting for the user's decision (\(short(plan.title, 80))). The choices are shown in the chat; tell them to pick one, and do not retry.")
         }
         if let failed = PhaseID.allCases.first(where: { p.phase($0).status == .failed }) {
             let err = p.phase(failed).error ?? "no details"
@@ -340,7 +340,7 @@ enum AgentTools {
             return .result("“\(short(project.title))” is already running or queued. Wait for it, or cancel it first.")
         }
         if let plan = host.recoveryPlan, plan.projectID == project.id {
-            return .result("“\(short(project.title))” is waiting for the user's decision on screen. Tell them to open the prompt.")
+            return .result("“\(short(project.title))” is waiting for the user's decision. The choices are shown in the chat; tell them to pick one.")
         }
         if let refusal = preflight(from: phase, context: context) { return .result(refusal) }
 

@@ -44,7 +44,7 @@ enum AgentPrompt {
             "You control AVG Studio, an app that makes short videos. Use the tools; never claim a video started unless a tool result says so.",
             "Ask for the topic if it is missing. Never invent a project ref: call list_projects.",
             "Starting or redoing a video needs the user's approval, and they may decline.",
-            "If a project says it needs the user's decision, tell them to open the prompt on screen; do not retry it.",
+            "If a project needs the user's decision, tell them to choose from the options shown in the chat; do not retry it.",
         ]
         switch settings.agentReplyStyle {
         case .brief: parts.append("Reply in one or two short sentences. No lists unless asked.")

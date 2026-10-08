@@ -95,8 +95,9 @@ final class AgentLoopTests: XCTestCase {
         await a.send("hi").value
         XCTAssertEqual(provider.calls.count, 1, "only malformed output is asked again")
         XCTAssertEqual(a.lines.last?.kind, .error)
-        XCTAssertTrue(a.lines.last?.text.contains("bad key") == true)
-        XCTAssertTrue(host.recorded.contains { $0.contains("bad key") })
+        XCTAssertTrue(a.lines.last?.title?.contains("didn't accept your key") == true, "the person sees it in plain words")
+        XCTAssertTrue(a.lines.last?.fixes.contains(.openKeys) == true)
+        XCTAssertTrue(host.recorded.contains { $0.contains("bad key") }, "the raw message still reaches the Activity log")
         XCTAssertFalse(a.isWorking)
     }
 

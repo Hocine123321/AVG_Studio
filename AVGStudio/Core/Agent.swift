@@ -27,6 +27,9 @@ final class Agent {
         let id = UUID()
         let kind: Kind
         let text: String
+        /// Errors only: a short headline above `text`, and buttons that fix it.
+        var title: String? = nil
+        var fixes: [AgentFix] = []
     }
 
     enum SelfTestResult: Equatable {
@@ -59,6 +62,10 @@ final class Agent {
     /// The newest "ready" / "stopped" announcement; the sheet watches it to
     /// fire a haptic.
     private(set) var lastAnnouncement: Announcement?
+    /// Videos this chat started or redid that are still running or queued, in
+    /// the order they were started. The sheet shows a live progress card for
+    /// each, so "what is happening" never needs a question.
+    private(set) var watching: [String] = []
 
     // MARK: Wiring (not UI state)
 
@@ -69,6 +76,7 @@ final class Agent {
     /// data; tests point it at a temporary one so they never touch it.
     @ObservationIgnored var chatURL: URL?
     @ObservationIgnored private var restored = false
+    @ObservationIgnored private var lastUserText: String?
     /// Makes the provider for this turn. Tests replace it with a scripted one.
     @ObservationIgnored var makeProvider: (AgentProviderKind?) throws -> any AgentProvider = { _ in
         throw AVGError.message("The assistant isn't ready yet.")
@@ -107,6 +115,7 @@ final class Agent {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isWorking, host != nil else { return Task {} }
         isWorking = true
+        lastUserText = trimmed
         lines.append(Line(kind: .user, text: trimmed))
         let task = Task { [weak self] in
             guard let self else { return }
@@ -114,6 +123,16 @@ final class Agent {
         }
         turnTask = task
         return task
+    }
+
+    /// "Try again" under an error: forgets the failed attempt (the person's
+    /// message and anything after it) and sends that message once more.
+    @discardableResult
+    func retryLast() -> Task<Void, Never>? {
+        guard !isWorking, let text = lastUserText else { return nil }
+        if let i = lines.lastIndex(where: { $0.kind == .user }) { lines.removeSubrange(i...) }
+        if let j = wire.lastIndex(where: { $0.role == .user && !$0.synthetic }) { wire.removeSubrange(j...) }
+        return send(text)
     }
 
     func approve() { resolveApproval(true) }
@@ -153,9 +172,9 @@ final class Agent {
         }
         guard let host else { return }
 
-        func say(_ kind: Line.Kind, _ text: String) {
+        func say(_ kind: Line.Kind, _ text: String, title: String? = nil, fixes: [AgentFix] = []) {
             guard epoch == myEpoch else { return }
-            lines.append(Line(kind: kind, text: text))
+            lines.append(Line(kind: kind, text: text, title: title, fixes: fixes))
         }
         func remember(_ m: AgentMessage) {
             guard epoch == myEpoch else { return }
@@ -211,9 +230,14 @@ final class Agent {
                         continue loop
                     }
                 }
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                say(.error, message)
-                host.record(nil, "Assistant: \(message)", error: true)
+                // In the person's words, with buttons that fix it. The raw
+                // provider message still goes to the Activity log.
+                let failing = activeKind ?? settings.agentProvider
+                let help = AgentErrorHelp.help(for: error, provider: failing,
+                                               otherHasKey: context.hasKey(failing.other.apiKey))
+                let raw = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                say(.error, help.detail, title: help.title, fixes: help.fixes)
+                host.record(nil, "Assistant: \(help.title) - \(raw)", error: true)
                 break loop
             }
 
@@ -273,7 +297,10 @@ final class Agent {
     private func carryOut(_ approval: AgentApproval, host: any AgentHost) -> String {
         approvedSpendUSD += approval.estimateUSD
         let done = AgentTools.perform(approval.action, host: host)
-        if let id = done.projectID { startedByAgent.insert(id) }
+        if let id = done.projectID {
+            startedByAgent.insert(id)
+            if !watching.contains(id) { watching.append(id) }
+        }
         return done.text
     }
 
@@ -317,6 +344,7 @@ final class Agent {
     /// projects this assistant started, if the person wants that. Never calls
     /// the provider, so it costs no tokens.
     func projectFinished(_ id: String) {
+        watching.removeAll { $0 == id }
         guard startedByAgent.contains(id), let host, host.settings.agentAnnounceResults,
               let project = host.projects.first(where: { $0.id == id }) else { return }
         let title = project.title
@@ -356,7 +384,10 @@ final class Agent {
             if let avg = error as? AVGError, avg.kind == .malformedOutput {
                 return .failed("This model can't make valid tool calls. Pick another model.")
             }
-            return .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            let s = host.settings
+            let help = AgentErrorHelp.help(for: error, provider: s.agentProvider,
+                                           otherHasKey: Keychain.has(s.agentProvider.other.apiKey))
+            return .failed(help.sentence)
         }
     }
 

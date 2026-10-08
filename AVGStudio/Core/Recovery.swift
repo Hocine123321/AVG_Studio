@@ -306,7 +306,7 @@ enum Recovery {
             store.record(plan.projectID, "Switched to a free provider and retrying.")
             return true
         case .openKeys:
-            store.tab = .settings
+            store.openSettings(.category(.keys, focus: .apiKeys))
             return false
         case .reword:
             store.pendingReword = plan.projectID

@@ -69,6 +69,16 @@ final class Store {
     /// Errors, kept across launches (see ErrorHistory.swift), newest first.
     var errorHistory: [ErrorRecord] = []
     var tab: AppTab = .library
+    /// What the Settings tab has pushed. Lives here (not in the view) so an
+    /// error elsewhere - a bad key in the assistant chat, a failed render -
+    /// can land the person on the exact settings page that fixes it.
+    var settingsPath: [SettingsRoute] = []
+
+    /// Switches to Settings and opens `route` there.
+    func openSettings(_ route: SettingsRoute) {
+        settingsPath = [route]
+        tab = .settings
+    }
     /// The failure prompt currently waiting on the user (nil = none), and
     /// the continuation the paused render resumes from once they choose.
     var recoveryPlan: RecoveryPlan?

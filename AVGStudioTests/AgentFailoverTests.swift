@@ -108,12 +108,14 @@ final class AgentFailoverTests: XCTestCase {
     func testOnlyOneFailoverPerMessage() async {
         let primary = ScriptedProvider(queue: [limited(.rateLimit, "groq")])
         let backup = ScriptedProvider(queue: [.failure(AVGError.provider(.quota, provider: "gemini", message: "gemini quota gone"))])
-        let a = agent(primary: primary, backup: backup, host: FakeAgentHost())
+        let host = FakeAgentHost()
+        let a = agent(primary: primary, backup: backup, host: host)
         await a.send("hi").value
         XCTAssertEqual(primary.calls.count, 1)
         XCTAssertEqual(backup.calls.count, 1)
         XCTAssertEqual(a.lines.last?.kind, .error)
-        XCTAssertTrue(a.lines.last?.text.contains("gemini quota gone") == true)
+        XCTAssertTrue(a.lines.last?.title?.contains("Gemini") == true, "the error shown is the backup's, in plain words")
+        XCTAssertTrue(host.recorded.contains { $0.contains("gemini quota gone") })
     }
 
     func testAfterFailoverLaterStepsStayOnTheBackup() async {

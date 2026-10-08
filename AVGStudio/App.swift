@@ -70,7 +70,7 @@ struct RootView: View {
                         NavigationStack { ChannelsView() }
                     }
                     Tab("Settings", systemImage: "gearshape.fill", value: AppTab.settings) {
-                        NavigationStack { SettingsView() }
+                        NavigationStack(path: $store.settingsPath) { SettingsView() }
                     }
                 }
                 // The Liquid Glass tab bar shrinks out of the way while a
@@ -82,16 +82,19 @@ struct RootView: View {
         // `.auto` passes `nil` through, which is exactly the old always-
         // follow-the-system behaviour this app had before Settings gained
         // an explicit override.
-        .sheet(item: $store.recoveryPlan) { plan in
+        //
+        // While the assistant's chat is open the same choices are shown INSIDE
+        // the chat (one sheet at a time, and the chat is where the person is
+        // already looking); closing the chat brings this sheet back. The
+        // binding must never write `nil` back: a programmatic dismissal would
+        // otherwise clear the plan and leave the paused render waiting forever.
+        .sheet(item: Binding<RecoveryPlan?>(
+            get: { store.agent.isOpen ? nil : store.recoveryPlan },
+            set: { if let plan = $0 { store.recoveryPlan = plan } }
+        )) { plan in
             RecoverySheet(plan: plan) { store.resolveRecovery($0) }
         }
-        // The assistant's chat. A failed render's RecoverySheet needs the
-        // screen, so the chat gets out of its way (the prompt is the
-        // person's decision, never the assistant's).
         .sheet(isPresented: $agent.isOpen) { AgentView() }
-        .onChange(of: store.recoveryPlan?.id) { _, id in
-            if id != nil { store.agent.isOpen = false }
-        }
         // "Ready" / "stopped" announcements: felt even with the chat closed.
         .sensoryFeedback(trigger: store.agent.lastAnnouncement) { _, new in
             guard let new else { return nil }
