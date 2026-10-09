@@ -190,7 +190,8 @@ struct AgentView: View {
         case .retry:
             agent.retryLast()
         case .switchProvider(let kind):
-            store.settings.agentProvider = kind
+            // For this chat only - the service chosen in Settings stays as it is.
+            agent.useForThisChat(kind)
             agent.retryLast()
         case .openKeys:
             agent.isOpen = false
@@ -244,6 +245,7 @@ struct AgentView: View {
                 if let plan = store.recoveryPlan { recoveryCard(plan) }
                 if let approval = agent.pendingApproval { approvalCard(approval) }
                 ForEach(agent.watching.prefix(3), id: \.self) { id in progressCard(id) }
+                if let used = agent.chatProvider { providerCaption(used) }
                 if agent.approvedSpendUSD > 0 { spendCaption }
                 if !keyMissing { composer }
             }
@@ -355,6 +357,13 @@ struct AgentView: View {
         guard let job else { return "Starting…" }
         let pct = Int((min(max(job.progress, 0), 1) * 100).rounded())
         return "\(job.phase.title) · \(pct)%" + (job.message.isEmpty ? "" : " · \(job.message)")
+    }
+
+    private func providerCaption(_ kind: AgentProviderKind) -> some View {
+        Text("Using \(kind.label) for this chat")
+            .font(.caption2).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
     }
 
     private var spendCaption: some View {

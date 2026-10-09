@@ -146,31 +146,32 @@ enum Recovery {
         }
     }
 
-    /// Switches the AI for `phase` to its fallback model. Returns the model
-    /// name applied, or nil if there was nothing to switch to.
+    /// Switches the AI for `phase` to its fallback model FOR THIS PROJECT'S
+    /// RUN. Returns the model name applied, or nil if there was nothing to
+    /// switch to. The person's own model is put back when the run ends.
     @discardableResult
-    static func applyFallback(phase: PhaseID, store: Store) -> String? {
+    static func applyFallback(phase: PhaseID, store: Store, project: String) -> String? {
         let kind = aiKind(for: phase)
         guard fallbackIsUseful(kind, store: store), let m = fallbackModel(kind, store: store) else { return nil }
         switch kind {
         case .writer:
             switch store.settings.text {
-            case .gemini: store.settings.geminiModel = m
-            case .groq: store.settings.groqModel = m
-            case .pollinations: store.settings.pollinationsTextModel = m
+            case .gemini: store.overrideForRun(\.geminiModel, to: m, project: project)
+            case .groq: store.overrideForRun(\.groqModel, to: m, project: project)
+            case .pollinations: store.overrideForRun(\.pollinationsTextModel, to: m, project: project)
             case .apple: return nil
             }
         case .image:
             switch store.settings.image {
-            case .gemini: store.settings.geminiImageModel = m
-            case .pollinations: store.settings.pollinationsImageModel = m
-            case .stablehorde: store.settings.stableHordeModel = m
+            case .gemini: store.overrideForRun(\.geminiImageModel, to: m, project: project)
+            case .pollinations: store.overrideForRun(\.pollinationsImageModel, to: m, project: project)
+            case .stablehorde: store.overrideForRun(\.stableHordeModel, to: m, project: project)
             default: return nil
             }
         case .voice:
             switch store.settings.voice {
-            case .elevenlabs: store.settings.elevenModel = m
-            case .gemini: store.settings.geminiVoiceModel = m
+            case .elevenlabs: store.overrideForRun(\.elevenModel, to: m, project: project)
+            case .gemini: store.overrideForRun(\.geminiVoiceModel, to: m, project: project)
             case .apple: return nil
             }
         }
@@ -283,27 +284,28 @@ enum Recovery {
             try? await Task.sleep(nanoseconds: UInt64(s) * 1_000_000_000)
             return !Task.isCancelled
         case .cheaperModel:
-            let m = applyFallback(phase: plan.phase, store: store)
-            store.record(plan.projectID, m.map { "Switched to the fallback model \($0) and retrying." } ?? "No lighter model available, retrying as is.")
+            let m = applyFallback(phase: plan.phase, store: store, project: plan.projectID)
+            store.record(plan.projectID, m.map { "Switched to the fallback model \($0) for this video and retrying." } ?? "No lighter model available, retrying as is.")
             return true
         case .otherProvider(let name):
             let n = name.lowercased()
             if plan.phase == .visuals {
-                store.settings.image = n.contains("gemini") ? .gemini : .pollinations
+                store.overrideForRun(\.image, to: n.contains("gemini") ? .gemini : .pollinations, project: plan.projectID)
             } else if plan.phase == .voice {
-                store.settings.voice = n.contains("gemini") ? .gemini : .apple
+                store.overrideForRun(\.voice, to: n.contains("gemini") ? .gemini : .apple, project: plan.projectID)
             } else {
-                store.settings.text = n.contains("gemini") ? .gemini : (n.contains("groq") ? .groq : .pollinations)
+                store.overrideForRun(\.text, to: n.contains("gemini") ? .gemini : (n.contains("groq") ? .groq : .pollinations),
+                                     project: plan.projectID)
             }
-            store.record(plan.projectID, "Switched to \(name) and retrying.")
+            store.record(plan.projectID, "Switched to \(name) for this video and retrying.")
             return true
         case .freeProvider:
             switch plan.phase {
-            case .visuals: store.settings.image = .pollinations
-            case .voice: store.settings.voice = .apple
-            default: store.settings.text = .pollinations
+            case .visuals: store.overrideForRun(\.image, to: .pollinations, project: plan.projectID)
+            case .voice: store.overrideForRun(\.voice, to: .apple, project: plan.projectID)
+            default: store.overrideForRun(\.text, to: .pollinations, project: plan.projectID)
             }
-            store.record(plan.projectID, "Switched to a free provider and retrying.")
+            store.record(plan.projectID, "Switched to a free provider for this video and retrying.")
             return true
         case .openKeys:
             store.openSettings(.category(.keys, focus: .apiKeys))

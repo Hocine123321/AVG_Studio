@@ -369,45 +369,91 @@ struct SegmentedFilter<T: Hashable>: View {
     /// 8 keeps the compact 34pt strip Library/Create use; Settings passes 12
     /// for ~44pt segments a thumb can hit without aiming.
     var verticalPadding: CGFloat = 8
-    @Namespace private var glassNamespace
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// While a finger is down: where the thumb's centre is. nil = resting
+    /// on the selected segment.
+    @State private var dragCenter: CGFloat?
+    @State private var size: CGSize = .zero
+
+    private var count: Int { max(options.count, 1) }
+    private var selectedIndex: Int { options.firstIndex(of: selection) ?? 0 }
+    private var segment: CGFloat { size.width / CGFloat(count) }
+
+    private func index(at x: CGFloat) -> Int {
+        guard segment > 0 else { return selectedIndex }
+        return min(max(Int(x / segment), 0), count - 1)
+    }
+
+    /// The segment the thumb is over right now (follows the finger while dragging).
+    private var highlighted: Int { dragCenter.map(index(at:)) ?? selectedIndex }
+
+    private var thumbX: CGFloat {
+        guard let c = dragCenter else { return CGFloat(selectedIndex) * segment }
+        return min(max(c - segment / 2, 0), max(size.width - segment, 0))
+    }
 
     var body: some View {
-        // The selected segment is a real Liquid Glass capsule. The glass is
-        // applied to the segment's own BUTTON, so its label is the glass's
-        // content and is drawn above it (a separate glass shape in a ZStack
-        // sat on top of the label and hid it). Every segment is in one
-        // GlassEffectContainer with its own `glassEffectID`, so changing the
-        // selection moves the glass from one segment to the next.
-        GlassEffectContainer(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(options.indices, id: \.self) { index in
-                    let option = options[index]
-                    let isOn = option == selection
-                    Button {
-                        guard !isOn else { return }
-                        Haptics.light()
-                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { selection = option }
-                    } label: {
-                        Text(label(option))
-                            .font(.system(size: 13.5, weight: .semibold))
-                            // On glass: `.primary` follows the glass. Off glass
-                            // (the plain track) the themed secondary ink is fine.
-                            .foregroundStyle(isOn ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(Theme.ink2))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, verticalPadding)
-                            .contentShape(.capsule)
-                    }
-                    .buttonStyle(.plain)
-                    .glassEffect(isOn ? Glass.regular.tint(Theme.accent.opacity(0.28)) : Glass.identity, in: .capsule)
-                    .glassEffectID(index, in: glassNamespace)
-                }
+        // ONE glass thumb that travels, like the system segmented control:
+        // tapping a segment slides it there with a spring, and it can be
+        // picked up and dragged across the segments (a tick for each one it
+        // crosses, the choice is made on release). The previous version put
+        // glass on the selected button, so a change was glass vanishing from
+        // one button and appearing on another - it felt like buttons.
+        //
+        // The thumb is the labels' BACKGROUND, so the labels are always drawn
+        // above it, and they use `.primary` while on glass (see liquidGlass()).
+        HStack(spacing: 0) {
+            ForEach(options.indices, id: \.self) { i in
+                Text(label(options[i]))
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(i == highlighted ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(Theme.ink2))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, verticalPadding)
+                    .contentShape(.rect)
+                    .accessibilityAddTraits(i == selectedIndex ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { commit(i) }
             }
         }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+        .background(alignment: .leading) {
+            if size.width > 0 {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Theme.accent.opacity(0.28)), in: .capsule)
+                    .frame(width: segment, height: size.height)
+                    .scaleEffect(dragCenter == nil ? 1 : 1.07)
+                    .offset(x: thumbX)
+                    // Following the finger must not lag; settling should glide.
+                    .animation(dragCenter != nil || reduceMotion ? nil : .smooth(duration: 0.34), value: thumbX)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: dragCenter == nil)
+            }
+        }
+        .gesture(
+            // `simultaneousGesture` so a vertical swipe that starts on the
+            // control still scrolls the list behind it.
+            DragGesture(minimumDistance: 0)
+                .onChanged { v in
+                    guard abs(v.translation.height) < 24 else { return }
+                    dragCenter = v.location.x
+                }
+                .onEnded { v in
+                    let target = index(at: v.location.x)
+                    let scrolled = abs(v.translation.height) >= 24
+                    dragCenter = nil
+                    if !scrolled { commit(target) }
+                }
+        )
         .padding(3)
         .background(Capsule().fill(Theme.fill))
         .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
+        .sensoryFeedback(.selection, trigger: highlighted)
         .accessibilityElement(children: .contain)
+    }
+
+    private func commit(_ i: Int) {
+        guard options.indices.contains(i), options[i] != selection else { return }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.34)) { selection = options[i] }
     }
 }
 

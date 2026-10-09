@@ -181,3 +181,29 @@ final class AgentErrorLoopTests: XCTestCase {
         XCTAssertEqual(a.watching, [p.id])
     }
 }
+
+/// "Switch to Gemini" under an error is for this chat only.
+@MainActor
+final class AgentChatProviderTests: XCTestCase {
+
+    func testSwitchingForThisChatUsesTheOtherServiceWithoutTouchingSettings() async {
+        let host = FakeAgentHost()
+        let primary = ScriptedProvider(queue: [])
+        let other = ScriptedProvider(queue: [.success(.assistant(text: "from gemini"))])
+        let a = makeAgent(primary, host: host)
+        a.makeProvider = { kind in kind == .gemini ? other : primary }
+        a.useForThisChat(.gemini)
+        await a.send("hi").value
+        XCTAssertEqual(a.lines.last?.text, "from gemini")
+        XCTAssertTrue(primary.calls.isEmpty)
+        XCTAssertEqual(host.settings.agentProvider, .groq, "the service chosen in Settings is untouched")
+    }
+
+    func testNewChatForgetsTheSwitch() {
+        let a = makeAgent(ScriptedProvider(queue: []), host: FakeAgentHost())
+        a.useForThisChat(.gemini)
+        XCTAssertEqual(a.chatProvider, .gemini)
+        a.reset()
+        XCTAssertNil(a.chatProvider)
+    }
+}

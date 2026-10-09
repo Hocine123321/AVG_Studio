@@ -66,6 +66,10 @@ final class Agent {
     /// the order they were started. The sheet shows a live progress card for
     /// each, so "what is happening" never needs a question.
     private(set) var watching: [String] = []
+    /// "Switch to Gemini" under an error applies to THIS CHAT only; the
+    /// service chosen in Settings is never rewritten behind the person's back.
+    /// Cleared by New chat.
+    private(set) var chatProvider: AgentProviderKind?
 
     // MARK: Wiring (not UI state)
 
@@ -135,6 +139,10 @@ final class Agent {
         return send(text)
     }
 
+    func useForThisChat(_ kind: AgentProviderKind) {
+        chatProvider = kind
+    }
+
     func approve() { resolveApproval(true) }
     func decline() { resolveApproval(false) }
 
@@ -152,6 +160,7 @@ final class Agent {
         lines = []
         wire = []
         approvedSpendUSD = 0
+        chatProvider = nil
         deleteSavedChat()
     }
 
@@ -193,7 +202,7 @@ final class Agent {
         // in this message, the history holds that service's own tool ids (and
         // for Gemini 3, signatures the other one cannot replay), so a switch
         // is only safe before the first tool call - and only once.
-        var activeKind: AgentProviderKind?
+        var activeKind: AgentProviderKind? = chatProvider
         var failedOver = false
         var toolRan = false
 
@@ -221,12 +230,13 @@ final class Agent {
                 }
                 if let avg = error as? AVGError, let kind = avg.kind, Self.failoverKinds.contains(kind),
                    settings.agentFailover, !failedOver, !toolRan {
-                    let other = settings.agentProvider.other
+                    let current = activeKind ?? settings.agentProvider
+                    let other = current.other
                     if context.hasKey(other.apiKey) {
                         failedOver = true
                         activeKind = other
-                        say(.activity, "\(settings.agentProvider.label) isn't available right now. Trying \(other.label).")
-                        host.record(nil, "Assistant: \(kind.rawValue) on \(settings.agentProvider.label); trying \(other.label).", error: false)
+                        say(.activity, "\(current.label) isn't available right now. Trying \(other.label).")
+                        host.record(nil, "Assistant: \(kind.rawValue) on \(current.label); trying \(other.label).", error: false)
                         continue loop
                     }
                 }
