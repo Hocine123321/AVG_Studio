@@ -19,7 +19,7 @@ struct ErrorLogView: View {
         let version = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
         let device = "\(UIDevice.current.model) · iOS \(UIDevice.current.systemVersion)"
         return ErrorHistory.report(store.errorHistory, appVersion: version, device: device,
-                                   secrets: APIKey.allCases.compactMap { Keychain.get($0) })
+                                   secrets: Keychain.allSecrets)
     }
 
     var body: some View {

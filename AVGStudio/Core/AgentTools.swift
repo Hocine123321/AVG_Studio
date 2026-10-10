@@ -46,6 +46,8 @@ struct AgentContext {
     var settings: AppSettings
     var appleAvailable: Bool
     var hasKey: (APIKey) -> Bool
+    /// Is a backup key saved for this provider? (Real Keychain unless a test says otherwise.)
+    var hasBackupKey: (APIKey) -> Bool = { Keychain.has($0, slot: .backup) }
 
     /// The real device: Keychain and Apple Intelligence as they are now.
     @MainActor static func live(settings: AppSettings) -> AgentContext {

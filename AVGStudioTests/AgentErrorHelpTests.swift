@@ -207,3 +207,62 @@ final class AgentChatProviderTests: XCTestCase {
         XCTAssertNil(a.chatProvider)
     }
 }
+
+/// The backup key, as the assistant uses it.
+@MainActor
+final class AgentBackupKeyTests: XCTestCase {
+
+    private func suite() -> UserDefaults { UserDefaults(suiteName: "AgentBackup-\(UUID().uuidString)")! }
+
+    private func agent(_ provider: ScriptedProvider, backup: Bool, defaults: UserDefaults) -> Agent {
+        let host = FakeAgentHost()
+        host.settings.agentFailover = false      // isolate the backup step from switching service
+        let a = makeAgent(provider, host: host)
+        a.makeContext = { AgentContext.test($0, backup: { _ in backup }) }
+        a.backupDefaults = defaults
+        return a
+    }
+
+    func testAFailedMainKeyIsRetriedOnTheBackupAndThenWorks() async {
+        let defaults = suite()
+        let err = AVGError.provider(.auth, provider: "groq", message: "bad key")
+        let provider = ScriptedProvider(queue: [.failure(err), .success(.assistant(text: "worked on the backup"))])
+        let a = agent(provider, backup: true, defaults: defaults)
+        await a.send("hi").value
+        XCTAssertEqual(provider.calls.count, 2)
+        XCTAssertEqual(a.lines.last?.text, "worked on the backup")
+        XCTAssertTrue(KeyBackup.isActive(.groq, defaults: defaults))
+        XCTAssertTrue(a.lines.contains { $0.kind == .activity && $0.text.contains("backup key") })
+    }
+
+    func testWithoutABackupTheErrorShowsAsBefore() async {
+        let defaults = suite()
+        let err = AVGError.provider(.auth, provider: "groq", message: "bad key")
+        let provider = ScriptedProvider(queue: [.failure(err)])
+        let a = agent(provider, backup: false, defaults: defaults)
+        await a.send("hi").value
+        XCTAssertEqual(provider.calls.count, 1)
+        XCTAssertEqual(a.lines.last?.kind, .error)
+        XCTAssertFalse(KeyBackup.isActive(.groq, defaults: defaults))
+    }
+
+    func testAFailingBackupIsNotRetriedAgain() async {
+        let defaults = suite()
+        let err = AVGError.provider(.quota, provider: "groq", message: "no quota")
+        let provider = ScriptedProvider { _, _ in .failure(err) }
+        let a = agent(provider, backup: true, defaults: defaults)
+        await a.send("hi").value
+        XCTAssertEqual(provider.calls.count, 2, "main, then the backup once - never a loop")
+        XCTAssertEqual(a.lines.last?.kind, .error)
+    }
+
+    func testANetworkErrorNeverTouchesKeys() async {
+        let defaults = suite()
+        let err = AVGError.provider(.network, provider: "groq", message: "offline")
+        let provider = ScriptedProvider(queue: [.failure(err)])
+        let a = agent(provider, backup: true, defaults: defaults)
+        await a.send("hi").value
+        XCTAssertEqual(provider.calls.count, 1)
+        XCTAssertFalse(KeyBackup.isActive(.groq, defaults: defaults))
+    }
+}

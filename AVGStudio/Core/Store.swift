@@ -476,7 +476,7 @@ final class Store {
         // Nothing credential-shaped reaches the screen, the project log (which
         // the Files app can show) or the error history. Errors also scrub the
         // exact stored key values; routine lines only the cheap patterns.
-        let secrets = error ? APIKey.allCases.compactMap { Keychain.get($0) } : []
+        let secrets = error ? Keychain.allSecrets : []
         let message = Redactor.scrub(message, secrets: secrets)
         log.insert(LogEntry(message: message, isError: error), at: 0)
         if log.count > 300 { log.removeLast() }
@@ -719,6 +719,15 @@ final class Store {
                    let m = Recovery.applyFallback(phase: phase, store: self, project: id) {
                     triedAutoFallback.insert(id + phase.rawValue)
                     record(id, "Too expensive / over quota: switched to fallback model \(m) for this video.")
+                    continue
+                }
+                // Backup key: the main key failed (rejected, out of quota,
+                // rate-limited past every retry) and the fallback model, if
+                // there was one, did not help. Use the backup key for 30
+                // minutes, then the main one again. If the BACKUP fails too,
+                // the usual prompt appears.
+                if let key = KeyBackup.activateIfPossible(after: error) {
+                    record(id, "\(key.label): the main key failed, so the backup key is used for the next 30 minutes. Retrying.")
                     continue
                 }
                 guard let plan = Recovery.plan(for: error, project: id, phase: phase, store: self) else { throw error }

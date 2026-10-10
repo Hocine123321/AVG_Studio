@@ -293,14 +293,19 @@ struct KeysSettingsPage: View {
 
     var body: some View {
         SettingsPage(title: "API keys", focus: focus) {
-            SettingsGroup(footer: "Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy.") {
+            SettingsGroup(footer: "Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy. Tap a service to also add a backup key: if the main one fails, the app uses the backup for 30 minutes.") {
                 ForEach(Array(APIKey.allCases.enumerated()), id: \.element) { i, key in
                     Button {
                         Haptics.light()
                         editingKey = key
                     } label: {
                         HStack {
-                            Text(key.label).foregroundStyle(Theme.ink)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(key.label).foregroundStyle(Theme.ink)
+                                if let caption = backupCaption(key) {
+                                    Text(caption).font(.caption).foregroundStyle(Theme.ink2)
+                                }
+                            }
                             Spacer()
                             KeyStatusPill(saved: savedKeys.contains(key))
                         }
@@ -344,6 +349,13 @@ struct KeysSettingsPage: View {
 
     private func refreshSavedKeys() {
         savedKeys = Set(APIKey.allCases.filter { Keychain.has($0) })
+    }
+
+    /// "Backup key in use - 24 min left" / "Backup key saved" / nothing.
+    private func backupCaption(_ key: APIKey) -> String? {
+        guard Keychain.has(key, slot: .backup) else { return nil }
+        if let left = KeyBackup.remaining(key) { return "Backup key in use - \(KeyBackup.remainingText(left))" }
+        return "Backup key saved"
     }
 }
 

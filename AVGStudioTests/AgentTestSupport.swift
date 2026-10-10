@@ -61,8 +61,9 @@ final class FakeAgentHost: AgentHost {
 
 extension AgentContext {
     /// A device with every key and Apple Intelligence, unless a test says otherwise.
-    static func test(_ settings: AppSettings, apple: Bool = true, keys: @escaping (APIKey) -> Bool = { _ in true }) -> AgentContext {
-        AgentContext(settings: settings, appleAvailable: apple, hasKey: keys)
+    static func test(_ settings: AppSettings, apple: Bool = true, keys: @escaping (APIKey) -> Bool = { _ in true },
+                     backup: @escaping (APIKey) -> Bool = { _ in false }) -> AgentContext {
+        AgentContext(settings: settings, appleAvailable: apple, hasKey: keys, hasBackupKey: backup)
     }
 }
 

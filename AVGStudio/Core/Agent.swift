@@ -81,6 +81,8 @@ final class Agent {
     @ObservationIgnored var chatURL: URL?
     @ObservationIgnored private var restored = false
     @ObservationIgnored private var lastUserText: String?
+    /// Where the backup-key window is stored; tests point it at a throwaway suite.
+    @ObservationIgnored var backupDefaults: UserDefaults = .standard
     /// Makes the provider for this turn. Tests replace it with a scripted one.
     @ObservationIgnored var makeProvider: (AgentProviderKind?) throws -> any AgentProvider = { _ in
         throw AVGError.message("The assistant isn't ready yet.")
@@ -239,6 +241,13 @@ final class Agent {
                         host.record(nil, "Assistant: \(kind.rawValue) on \(current.label); trying \(other.label).", error: false)
                         continue loop
                     }
+                }
+                // The main key failed and switching service (if possible) did
+                // not help: use the BACKUP key for 30 minutes, then retry.
+                if let key = KeyBackup.activateIfPossible(after: error, defaults: backupDefaults, hasBackup: context.hasBackupKey) {
+                    say(.activity, "\(key.label): the main key failed. Using the backup key for the next 30 minutes.")
+                    host.record(nil, "Assistant: switched \(key.label) to its backup key for 30 minutes.", error: false)
+                    continue loop
                 }
                 // In the person's words, with buttons that fix it. The raw
                 // provider message still goes to the Activity log.

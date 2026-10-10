@@ -72,7 +72,7 @@ struct WelcomeView: View {
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $editingKey) { key in
-            APIKeySheet(key: key) { refreshSavedKeys() }
+            APIKeySheet(key: key, showsBackup: false) { refreshSavedKeys() }
         }
         .onAppear { refreshSavedKeys() }
     }
