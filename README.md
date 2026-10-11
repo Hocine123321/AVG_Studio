@@ -63,13 +63,19 @@ with `@testable import AVGStudio`.
 | `RenderLease.swift` | `actor RenderLease`: one render at a time across all running videos, first come first served; a cancelled waiter leaves the line | Phases other than render |
 | `Recovery.swift` | Maps a failure to a `RecoveryPlan` (nine safeguards), the fallback-model logic, `Connectivity` (`NWPathMonitor`), and `RecoverySheet` | Which view shows it |
 | `BackgroundRender.swift` | `BGProcessingTask` registration and the "interrupted render" flag. Uses the app's **one** `Store`, attached at launch with `attach(_:)` | Phase internals |
-| `Keychain.swift` | **The only file that reads or writes API keys.** `APIKey`, `Keychain.get/set/has/remove/require`. `set` returns `Bool` and updates in place | Providers' request shapes |
+| `Keychain.swift` | **The only file that reads or writes API keys.** `APIKey`, `Keychain.get/set/has/remove/require`. Each provider has a MAIN and a BACKUP slot (`KeySlot`): `get`/`require` return what to SEND (the backup while its window is open), `read`/`has` return one slot as stored, `allSecrets` is every secret for scrubbing logs. `set` returns `Bool` and updates in place | Providers' request shapes |
 | `ImageCache.swift` | `ImageCache` (ImageIO downsample off the main actor into an `NSCache`) and `CachedThumb`, the view every thumbnail uses | Which screen shows the picture |
 | `PhotoSaver.swift` | `PhotoSaver.saveVideo(at:)`: add-only Photos permission, waits for the save, throws a readable error | Share sheets |
 | `SilenceTrim.swift` | Dead-air removal on PCM audio (20 ms windows), the port of `remove_silences_core` | Where the audio came from |
 | `CapCutExport.swift` | Builds the CapCut import bundle in `temporaryDirectory` | Share sheets |
 | `CostRates.swift` | The assistant's view of cost, built **on `CostTable`** (Costs.swift, the one rate table the pipeline and the Create screen share): `CostBreakdown` (priced per phase, so a redo from Voice is not quoted as a whole video) and `CostEstimate`. Adds no rates of its own | Which phase runs |
 | `Agent.swift` | The in-app assistant's loop: bounded tool calling, approval continuation, spend limit, one auto-start per message, compaction, failover, self-test, "ready/stopped" announcements | SwiftUI, request shapes |
+| `KeyBackup.swift` | The backup API key's 30-minute window (a date per provider in UserDefaults, so a relaunch doesn't reset it). `activateIfPossible(after:)` opens it when a KEY-level failure (rejected, quota, billing, rate limit past all retries) hits a provider with a backup saved, after the fallback model and the other service were tried; a failing backup is never retried with itself | Providers |
+| `FallbackLedger.swift` | Run-scoped setting overrides. A fallback model or provider is a decision about ONE run: it is recorded with the value it replaced, put back when that project's run ends, and never saved (`saveMeta` persists `reverted(settings)`) | Views |
+| `AgentCapability.swift` | The seven assistant capabilities (one switch each; to the model each is a set of tools; off = not offered) and which tools each owns | Views |
+| `AgentSettingsCatalog.swift` | The hand-written list of 24 settings the assistant may read and, with approval, change. No `agent...` field and no key is reachable (a test throws values at every entry and checks) | Views |
+| `AgentCapabilityTools.swift` | `estimate_cost`, `manage_project`, `change_setting`, `edit_channel`, `get_app_status`, `get_activity`, `get_settings`: terse specs, plain-text results, errors that name the valid values | The loop |
+| `AgentMarkdown.swift` | Turns a model's block Markdown (`* item`, `# Title`) into text SwiftUI's inline parser can style | Views |
 | `AgentErrorHelp.swift` | An assistant failure in plain words (`title`, `detail`) plus one-tap `AgentFix`es (fix my key, choose another model, switch service, try again). Pure; the raw provider message still goes to the Activity log | The view, navigation |
 | `LibraryLayout.swift` | How the Library packs cards into two columns: a landscape project spans both, narrow ones pair up, a lone card is half width and a waiting card borrows the next narrow one past a landscape row. Pure and property-tested | Views |
 | `AgentTools.swift` | `AgentHost`, the seven tools, the gated-action `AgentApproval`, project-ref resolution, preflight, permission filtering | The loop, providers |
@@ -230,11 +236,14 @@ There is no schema catalogue. Settings are two `Codable` structs in
   `filterIntensity`, the writer/image/voice fallback models and
   `autoUseFallback`, plus `glassOpacity`, `themePreference`, `appFont` and
   `onboarded`.
-- **The Assistant** (Settings > Assistant) is thirteen more `AppSettings`
-  fields, all prefixed `agent`: `agentProvider` (groq), `agentGroqModel`,
-  `agentGeminiModel`, `agentFailover` (true), `agentAllowCreate` /
-  `agentAllowRedo` / `agentAllowCancel` (true; an off action is not offered to
-  the model at all), `agentApproval` (`always`, or `paidOnly`, where only
+- **The Assistant** (Settings > Assistant) is more `AppSettings` fields, all
+  prefixed `agent`: `agentProvider` (groq), `agentGroqModel`,
+  `agentGeminiModel`, `agentFailover` (true), the seven **capability** switches
+  `agentAllowCreate` / `agentAllowRedo` / `agentAllowCancel` /
+  `agentAllowManageProjects` / `agentAllowChangeSettings` /
+  `agentAllowEditChannels` / `agentAllowDiagnostics` (all true; an off
+  capability's tools are not offered to the model at all, and anything that
+  changes something still asks), `agentApproval` (`always`, or `paidOnly`, where only
   exactly-free work starts without a tap), `agentChatSpendCapUSD` (1.00,
   0.25 to 10), `agentReplyStyle` (brief), `agentAnnounceResults` (true),
   `agentKeepChat` (false) and `agentInstructions` (400 characters). The
@@ -292,14 +301,21 @@ tab in `RootView` (`App.swift`). Its data comes from `store`; a view does not
 call a provider. Use `Theme` for every colour and radius. One filled
 (`.glassProminent`) action per screen.
 
-**Add an agent tool.** Add its `AgentToolSpec` to `AgentTools.specs(for:)` (one
+**Add an agent tool.** Add its `AgentToolSpec` to `AgentTools.allSpecs` (one
 short sentence of `summary`: it is sent on every request), a `case` in
-`AgentTools.run`, and a result that is short plain text. If it spends money,
-return an `AgentApproval` and add its `AgentApprovedAction` case to
-`perform`; never start work from `run` itself. If a Settings switch should be
-able to turn it off, add the `agentAllow…` field and omit the spec when it is
-off. Add a `FakeAgentHost` test (`AgentToolsTests`) and keep
-`AgentPolicyTests.testSystemPlusToolsStaysUnderTokenBudget` passing.
+`AgentTools.run`, and a result that is short plain text. It must belong to a
+capability (`AgentCapability.tools`) or be in `AgentCapability.alwaysOn` - a
+test fails otherwise - so there is always a switch that removes it. If it
+spends money or changes anything, return an `AgentApproval` (`kind`: `.spend`,
+`.change` or `.destructive`) and add its `AgentApprovedAction` case to
+`perform`; never act from `run` itself; add it to `AgentTools.isGated`. Add a
+`FakeAgentHost` test and keep
+`AgentPolicyTests.testSystemPlusToolsStaysUnderTokenBudget` passing (every
+extra tool costs tokens on every request).
+
+**Let the assistant change a setting.** Add ONE entry to
+`AgentSettingsCatalog.all` (key, title, group, kind, read, write). Never a key
+or an `agent...` field: the catalogue test would fail.
 
 **Add a failure safeguard.** Extend `Recovery.plan(for:…)` with the new
 `RecoveryAction` set, handle it in `Recovery.apply`, and add the row to the
@@ -343,7 +359,8 @@ Dynamic Type check in the simulator.
 | Reusable images | `Documents/ReusableImages/<UUID>.jpg` | `Store.addReusableImage` |
 | Kept assistant chat | `Documents/.avg-agent-chat.json` | `AgentChatStore`. Only when **Keep chat** is on; user and assistant text, newest 40, key-shaped strings masked. Deleted by New chat, Clear saved chat and turning Keep chat off |
 | Model catalogues | `Application Support/ModelCatalogs/<key>.json` | `ModelCatalog`. Replaced only by a **non-empty** successful fetch |
-| API keys | Keychain, service `com.avgstudio.keys`, `AfterFirstUnlockThisDeviceOnly` | `Keychain.swift` only |
+| API keys | Keychain, service `com.avgstudio.keys`, account `<provider>` (main) and `<provider>.backup`, `AfterFirstUnlockThisDeviceOnly` | `Keychain.swift` only |
+| Backup-key windows | UserDefaults `avg.backupKeyUntil` (provider -> end date; not a secret) | `KeyBackup.swift` |
 | Pending render id | `UserDefaults` `AVGPendingRenderProjectID` | `BackgroundRender` |
 | CapCut bundle | `temporaryDirectory/CapCut Export - <title> - <take>/` | `CapCutExporter`, handed to the share sheet |
 | Thumbnails | in memory only (`NSCache`, 300 items / 80 MB), keyed by path, size and modification date | `ImageCache`. Redoing Visuals overwrites files in place, and the date in the key stops a stale picture showing |

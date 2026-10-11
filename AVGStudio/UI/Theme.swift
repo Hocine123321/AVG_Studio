@@ -429,9 +429,9 @@ struct SegmentedFilter<T: Hashable>: View {
                     .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: dragCenter == nil)
             }
         }
-        .gesture(
-            // `simultaneousGesture` so a vertical swipe that starts on the
-            // control still scrolls the list behind it.
+        .simultaneousGesture(
+            // Simultaneous, so a vertical swipe that starts on the control
+            // still scrolls the list behind it (and is not taken as a choice).
             DragGesture(minimumDistance: 0)
                 .onChanged { v in
                     guard abs(v.translation.height) < 24 else { return }
