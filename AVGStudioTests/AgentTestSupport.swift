@@ -23,6 +23,12 @@ final class FakeAgentHost: AgentHost {
     var cancelled: [String] = []
     var selected: [String] = []
     var recorded: [String] = []
+    var upserted: [Channel] = []
+    var activated: [UUID] = []
+    var renamed: [(id: String, title: String)] = []
+    var archivedCalls: [(id: String, archived: Bool)] = []
+    var deleted: [String] = []
+    var activityLines: [String] = []
 
     var activeChannel: Channel {
         channels.first { $0.id == activeChannelID } ?? channels[0]
@@ -48,6 +54,24 @@ final class FakeAgentHost: AgentHost {
     func cancel(_ id: String) { cancelled.append(id); running.remove(id); queued.removeAll { $0 == id } }
     func selectForStudio(_ id: String) { selected.append(id) }
     func record(_ id: String?, _ message: String, error: Bool) { recorded.append(message) }
+
+    func upsertChannel(_ channel: Channel) {
+        upserted.append(channel)
+        if let i = channels.firstIndex(where: { $0.id == channel.id }) { channels[i] = channel }
+    }
+    func activateChannel(_ channel: Channel) { activated.append(channel.id); activeChannelID = channel.id }
+    func renameProject(_ id: String, to title: String) {
+        renamed.append((id, title))
+        if let i = projects.firstIndex(where: { $0.id == id }) { projects[i].title = title }
+    }
+    func setArchived(_ id: String, _ archived: Bool) {
+        archivedCalls.append((id, archived))
+        if let i = projects.firstIndex(where: { $0.id == id }) { projects[i].archived = archived }
+    }
+    func deleteProject(_ id: String) { deleted.append(id); projects.removeAll { $0.id == id } }
+    func recentActivity(limit: Int, errorsOnly: Bool) -> [String] {
+        Array(activityLines.filter { !errorsOnly || $0.contains("ERROR") }.prefix(limit))
+    }
 
     /// A project whose id ends in `suffix` (its ref).
     @discardableResult

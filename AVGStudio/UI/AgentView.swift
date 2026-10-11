@@ -299,13 +299,17 @@ struct AgentView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(a.title).font(.headline).foregroundStyle(.primary)
             Text(a.detail).font(.subheadline).foregroundStyle(.secondary)
-            Label("Estimated cost: \(a.estimate)", systemImage: "dollarsign.circle")
-                .font(.footnote).foregroundStyle(.primary)
+            // Only a video has a cost; a settings, channel or project change does not.
+            if a.kind == .spend {
+                Label("Estimated cost: \(a.estimate)", systemImage: "dollarsign.circle")
+                    .font(.footnote).foregroundStyle(.primary)
+            }
             HStack(spacing: 12) {
                 Button("Decline") { Haptics.light(); agent.decline() }
                     .buttonStyle(.glass)
-                Button("Approve") { Haptics.light(); agent.approve() }
+                Button(a.kind == .destructive ? "Delete" : "Approve") { Haptics.light(); agent.approve() }
                     .buttonStyle(.glassProminent)
+                    .tint(a.kind == .destructive ? Theme.bad : nil)
             }
         }
         .padding(16)

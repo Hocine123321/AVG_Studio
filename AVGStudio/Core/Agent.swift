@@ -267,7 +267,10 @@ final class Agent {
             for call in reply.toolCalls {
                 toolRan = true
                 say(.activity, Self.activityText(for: call.name))
-                let outcome = AgentTools.run(call, host: host, context: context)
+                // A fresh context per call: an approved settings change earlier
+                // in this very turn (a new writer, say) must be what the next
+                // tool call's checks and estimates see.
+                let outcome = AgentTools.run(call, host: host, context: makeContext(host.settings))
                 // Opening a project switches tab; get the chat out of the way.
                 if call.name == "open_project", case .result(let text) = outcome, text.hasPrefix("Opened") {
                     isOpen = false
@@ -293,12 +296,15 @@ final class Agent {
     /// returns the text the model gets back as the tool result.
     private func handle(_ approval: AgentApproval, host: any AgentHost, settings: AppSettings) async -> String {
         let cap = AgentSettingsRules.spendCap(settings.agentChatSpendCapUSD)
-        if case .overLimit = AgentPolicy.spendVerdict(approvedSoFar: approvedSpendUSD, adding: approval.estimateUSD, cap: cap) {
+        // The spend limit and the free-start shortcut are about VIDEOS. A
+        // change to a setting, channel or project skips both and always asks.
+        if approval.kind == .spend,
+           case .overLimit = AgentPolicy.spendVerdict(approvedSoFar: approvedSpendUSD, adding: approval.estimateUSD, cap: cap) {
             return "This chat's spend limit (\(Self.dollars(cap))) would be passed. Tell the user; they can raise it in Settings > Assistant or start a new chat."
         }
         // Free work may start without a tap if the person chose that - once
         // per message. A second one in the same message asks like any other.
-        if !AgentPolicy.needsTap(approval, settings: settings), !autoStartedThisMessage {
+        if approval.kind == .spend, !AgentPolicy.needsTap(approval, settings: settings), !autoStartedThisMessage {
             autoStartedThisMessage = true
             return carryOut(approval, host: host)
         }
@@ -430,6 +436,13 @@ final class Agent {
         case "redo_from": return "Preparing a redo…"
         case "cancel": return "Stopping a project…"
         case "open_project": return "Opening a project…"
+        case "estimate_cost": return "Working out the cost…"
+        case "manage_project": return "Preparing a project change…"
+        case "change_setting": return "Preparing a settings change…"
+        case "edit_channel": return "Preparing a channel change…"
+        case "get_app_status": return "Checking the app…"
+        case "get_activity": return "Reading the activity log…"
+        case "get_settings": return "Reading settings…"
         default: return "Working…"
         }
     }

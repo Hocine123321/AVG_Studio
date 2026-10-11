@@ -66,6 +66,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case theme, font, glass
     case assistantProvider, assistantModel, assistantTest, assistantFailover
     case assistantAllowCreate, assistantAllowRedo, assistantAllowCancel
+    case assistantAllowManage, assistantAllowSettings, assistantAllowChannels, assistantAllowDiagnostics
     case assistantApproval, assistantSpendCap, assistantReplyStyle, assistantAnnounce
     case assistantKeepChat, assistantClear, assistantInstructions
 }
@@ -130,9 +131,13 @@ enum SettingsIndex {
         e("Assistant model", .assistant, .assistantModel, "assistant agent chat model groq gemini llama"),
         e("Test assistant", .assistant, .assistantTest, "assistant agent check connection key works tools verify"),
         e("Switch assistant on limits", .assistant, .assistantFailover, "assistant agent failover backup other rate limit quota"),
-        e("Assistant can start videos", .assistant, .assistantAllowCreate, "assistant agent permission allow create make new"),
-        e("Assistant can redo steps", .assistant, .assistantAllowRedo, "assistant agent permission allow redo rerun restart"),
-        e("Assistant can cancel", .assistant, .assistantAllowCancel, "assistant agent permission allow stop cancel"),
+        e("Start videos", .assistant, .assistantAllowCreate, "assistant agent capabilities tools permission allow create make new"),
+        e("Redo and resume steps", .assistant, .assistantAllowRedo, "assistant agent capabilities tools permission allow redo rerun restart resume"),
+        e("Stop running videos", .assistant, .assistantAllowCancel, "assistant agent capabilities tools permission allow stop cancel"),
+        e("Manage projects", .assistant, .assistantAllowManage, "assistant agent capabilities tools permission allow rename archive delete projects"),
+        e("Change app settings", .assistant, .assistantAllowSettings, "assistant agent capabilities tools permission allow change settings writer voice quality captions"),
+        e("Edit channels", .assistant, .assistantAllowChannels, "assistant agent capabilities tools permission allow channel niche tone language length switch"),
+        e("Read settings and activity", .assistant, .assistantAllowDiagnostics, "assistant agent capabilities tools permission allow read status log errors diagnostics"),
         e("Ask before starting", .assistant, .assistantApproval, "assistant agent approve approval confirm ask tap paid free"),
         e("Spend limit per chat", .assistant, .assistantSpendCap, "assistant agent budget cost money dollars cap"),
         e("Reply length", .assistant, .assistantReplyStyle, "assistant agent brief short long verbose answers"),

@@ -20,7 +20,8 @@ protocol AgentHost: AnyObject {
     var projects: [Project] { get }
     var channels: [Channel] { get }
     var activeChannel: Channel { get }
-    var settings: AppSettings { get }
+    /// Read AND write: the assistant changes settings (with approval) through this.
+    var settings: AppSettings { get set }
     var jobs: [String: JobState] { get }
     var recoveryPlan: RecoveryPlan? { get }
     func isRunning(_ id: String) -> Bool
@@ -38,6 +39,13 @@ protocol AgentHost: AnyObject {
     func cancel(_ id: String)
     func selectForStudio(_ id: String)
     func record(_ id: String?, _ message: String, error: Bool)
+    func upsertChannel(_ channel: Channel)
+    func activateChannel(_ channel: Channel)
+    func renameProject(_ id: String, to title: String)
+    func setArchived(_ id: String, _ archived: Bool)
+    func deleteProject(_ id: String)
+    /// Newest first, already worded for reading ("12:01:44 Gemini: ...").
+    func recentActivity(limit: Int, errorsOnly: Bool) -> [String]
 }
 
 /// What the tools may know about the device. Injected so tests can say "no
@@ -57,13 +65,40 @@ struct AgentContext {
 
 // MARK: - Approvals
 
+/// One change to a channel, applied only after the person approves it.
+enum ChannelEdit: Equatable {
+    case name(String), niche(String), tone(String), language(String), seconds(Int), aspect(AspectRatio)
+
+    func apply(to c: inout Channel) {
+        switch self {
+        case .name(let v): c.name = v
+        case .niche(let v): c.niche = v
+        case .tone(let v): c.tone = v
+        case .language(let v): c.language = v
+        case .seconds(let v): c.targetSeconds = v
+        case .aspect(let v): c.aspectRatio = v
+        }
+    }
+}
+
 enum AgentApprovedAction: Equatable {
     case createVideo(topic: String, title: String, aspect: AspectRatio, channelID: UUID)
     case redo(projectID: String, phase: PhaseID)
+    case changeSetting(key: String, value: String)
+    case updateChannel(id: UUID, edit: ChannelEdit)
+    case setActiveChannel(UUID)
+    case renameProject(id: String, title: String)
+    case archiveProject(id: String, archived: Bool)
+    case deleteProject(id: String)
 }
 
-/// A request to spend (or possibly spend) money, shown as Approve / Decline.
+/// A request to spend money or to change something, shown as Approve / Decline.
 struct AgentApproval: Identifiable, Equatable {
+    /// `spend` starts paid-or-free work and carries a cost; `change` edits a
+    /// setting, channel or project; `destructive` cannot be undone. Only
+    /// `spend` can ever skip the tap (free work, if the person chose that).
+    enum Kind: Equatable { case spend, change, destructive }
+
     let id: UUID
     let title: String
     let detail: String
@@ -72,9 +107,11 @@ struct AgentApproval: Identifiable, Equatable {
     let estimate: String
     let estimateUSD: Double
     let action: AgentApprovedAction
+    let kind: Kind
 
     init(id: UUID = UUID(), title: String, detail: String, estimate: String, estimateUSD: Double,
-         action: AgentApprovedAction) {
+         action: AgentApprovedAction, kind: Kind = .spend) {
+        self.kind = kind
         self.id = id
         self.title = title
         self.detail = detail
@@ -109,42 +146,46 @@ enum AgentTools {
 
     /// Starting or restarting a pipeline spends money, so these two go
     /// through an approval. Everything else is read-only or free.
-    static func isGated(_ name: String) -> Bool { name == createName || name == redoName }
+    static func isGated(_ name: String) -> Bool {
+        [createName, redoName, "manage_project", "change_setting", "edit_channel"].contains(name)
+    }
 
     private static let projectParam = AgentToolParam(name: "project", kind: .string,
-                                                     summary: "Project ref (6 characters), id, or part of its title.")
+                                                     summary: "Ref, id or part of the title.")
 
-    /// The tools offered to the model. A capability the user turned off in
-    /// Settings is omitted entirely, which also saves tokens.
-    static func specs(for settings: AppSettings) -> [AgentToolSpec] {
+    /// Every tool, in the order the model sees them.
+    static var allSpecs: [AgentToolSpec] {
         var out: [AgentToolSpec] = [
             AgentToolSpec(name: "list_channels", summary: "List the channels (name, niche, shape, length).", params: []),
             AgentToolSpec(name: "list_projects", summary: "List recent projects with their step status.", params: [
                 AgentToolParam(name: "limit", kind: .integer, summary: "How many, 1-10. Default 5.", required: false),
+                AgentToolParam(name: "archived", kind: .boolean, summary: "Show archived projects instead.", required: false),
             ]),
             AgentToolSpec(name: "get_status", summary: "Show one project's progress, errors and cost.", params: [projectParam]),
+            AgentToolSpec(name: "open_project", summary: "Open a project in the Studio screen.", params: [projectParam]),
         ]
-        if settings.agentAllowCreate {
-            out.append(AgentToolSpec(name: createName, summary: "Make a new video. The user must approve it.", params: [
-                AgentToolParam(name: "topic", kind: .string, summary: "What the video is about."),
-                AgentToolParam(name: "title", kind: .string, summary: "Optional short title.", required: false),
-                AgentToolParam(name: "aspect", kind: .string, summary: "Shape. Default: the channel's.", required: false,
-                               allowed: AspectRatio.allCases.map { $0.rawValue }),
-                AgentToolParam(name: "channel", kind: .string, summary: "Channel name. Default: the active one.", required: false),
-            ]))
-        }
-        if settings.agentAllowRedo {
-            out.append(AgentToolSpec(name: redoName, summary: "Re-run a project from one step onward. The user must approve it.", params: [
-                projectParam,
-                AgentToolParam(name: "phase", kind: .string, summary: "Step to restart from.",
-                               allowed: PhaseID.allCases.map { $0.rawValue }),
-            ]))
-        }
-        if settings.agentAllowCancel {
-            out.append(AgentToolSpec(name: cancelName, summary: "Stop a project that is running.", params: [projectParam]))
-        }
-        out.append(AgentToolSpec(name: "open_project", summary: "Open a project in the Studio screen.", params: [projectParam]))
+        out.append(AgentToolSpec(name: createName, summary: "Make a new video. Needs approval.", params: [
+            AgentToolParam(name: "topic", kind: .string, summary: "What the video is about."),
+            AgentToolParam(name: "title", kind: .string, summary: "Optional short title.", required: false),
+            AgentToolParam(name: "aspect", kind: .string, summary: "Shape. Default: the channel's.", required: false,
+                           allowed: AspectRatio.allCases.map { $0.rawValue }),
+            AgentToolParam(name: "channel", kind: .string, summary: "Channel name. Default: the active one.", required: false),
+        ]))
+        out.append(AgentToolSpec(name: redoName, summary: "Re-run a project from one step onward. next = its first unfinished step (resume). Needs approval.", params: [
+            projectParam,
+            AgentToolParam(name: "phase", kind: .string, summary: "Step to restart from.",
+                           allowed: PhaseID.allCases.map { $0.rawValue } + ["next"]),
+        ]))
+        out.append(AgentToolSpec(name: cancelName, summary: "Stop a project that is running or queued.", params: [projectParam]))
+        out.append(contentsOf: AgentCapabilityTools.specs)
         return out
+    }
+
+    /// The tools offered to the model: every tool whose capability is on. A
+    /// capability the user turned off in Settings is omitted entirely, which
+    /// also saves tokens.
+    static func specs(for settings: AppSettings) -> [AgentToolSpec] {
+        allSpecs.filter { AgentCapability.isOffered($0.name, in: settings) }
     }
 
     /// The last six characters of the project id - short enough to say or
@@ -184,11 +225,17 @@ enum AgentTools {
     static func run(_ call: AgentToolCall, host: any AgentHost, context: AgentContext) -> AgentToolOutcome {
         let args = AgentArgs(json: call.argumentsJSON)
         let s = context.settings
+        // A tool whose capability is off is refused by name, even if the model
+        // calls it without having been offered it.
+        if allSpecs.contains(where: { $0.name == call.name }), !AgentCapability.isOffered(call.name, in: s) {
+            let cap = AgentCapability.owning(call.name) ?? .diagnostics
+            return .result(turnedOff(cap.title))
+        }
         switch call.name {
         case "list_channels":
             return .result(listChannels(host))
         case "list_projects":
-            return .result(listProjects(host, limit: args.int("limit")))
+            return .result(listProjects(host, limit: args.int("limit"), archived: args.bool("archived") ?? false))
         case "get_status":
             return .result(withProject(args, host) { getStatus($0, host) })
         case "open_project":
@@ -196,8 +243,9 @@ enum AgentTools {
                 host.selectForStudio(p.id)
                 return "Opened “\(short(p.title))” in Studio."
             })
+        case "estimate_cost":
+            return .result(AgentCapabilityTools.estimateCost(args, host, context))
         case cancelName:
-            guard s.agentAllowCancel else { return .result(turnedOff("Cancelling")) }
             return .result(withProject(args, host) { p in
                 guard host.isBusy(p.id) else { return "“\(short(p.title))” isn't running." }
                 let waiting = host.queuePosition(p.id) != nil
@@ -205,11 +253,21 @@ enum AgentTools {
                 return waiting ? "Removed “\(short(p.title))” from the queue." : "Cancelled “\(short(p.title))”."
             })
         case createName:
-            guard s.agentAllowCreate else { return .result(turnedOff("Starting videos")) }
             return createVideo(args, host, context)
         case redoName:
-            guard s.agentAllowRedo else { return .result(turnedOff("Redoing steps")) }
             return redo(args, host, context)
+        case "manage_project":
+            return AgentCapabilityTools.manageProject(args, host)
+        case "change_setting":
+            return AgentCapabilityTools.changeSetting(args, host, context)
+        case "edit_channel":
+            return AgentCapabilityTools.editChannel(args, host)
+        case "get_app_status":
+            return .result(AgentCapabilityTools.appStatus(host, context))
+        case "get_activity":
+            return .result(AgentCapabilityTools.activity(args, host))
+        case "get_settings":
+            return .result(AgentCapabilityTools.settingsGroup(args, host))
         default:
             let names = specs(for: s).map { $0.name }.joined(separator: ", ")
             return .result("Unknown tool “\(call.name)”. Available: \(names).")
@@ -219,6 +277,7 @@ enum AgentTools {
     /// Carries out an approved (or auto-approved) action.
     @MainActor
     static func perform(_ action: AgentApprovedAction, host: any AgentHost) -> AgentPerformed {
+        if let other = AgentCapabilityTools.perform(action, host: host) { return other }
         switch action {
         case .createVideo(let topic, let title, let aspect, let channelID):
             let channel = host.channels.first { $0.id == channelID } ?? host.activeChannel
@@ -238,6 +297,8 @@ enum AgentTools {
             host.start(projectID, from: phase)
             let queued = host.queuePosition(projectID).map { " It is queued (place \($0))." } ?? ""
             return AgentPerformed(text: "Restarted “\(short(p.title))” from \(phase.title).\(queued)", projectID: projectID)
+        case .changeSetting, .updateChannel, .setActiveChannel, .renameProject, .archiveProject, .deleteProject:
+            return AgentPerformed(text: "Nothing to do.", projectID: nil)   // handled above
         }
     }
 
@@ -255,15 +316,15 @@ enum AgentTools {
     }
 
     @MainActor
-    private static func listProjects(_ host: any AgentHost, limit: Int?) -> String {
-        let live = host.projects.filter { !$0.archived }.sorted { $0.created > $1.created }
-        guard !live.isEmpty else { return "No projects yet." }
+    private static func listProjects(_ host: any AgentHost, limit: Int?, archived: Bool) -> String {
+        let live = host.projects.filter { $0.archived == archived }.sorted { $0.created > $1.created }
+        guard !live.isEmpty else { return archived ? "No archived projects." : "No projects yet." }
         let n = min(max(limit ?? 5, 1), 10)
         let lines = live.prefix(n).map { p -> String in
             let video = p.output != nil ? " · video ready" : ""
             return "\(ref(p)) · \(short(p.title)) · \(p.aspectRatio.rawValue) · \(phaseSummary(p))\(video)"
         }
-        return "\(lines.count) of \(live.count) projects, newest first:\n" + lines.joined(separator: "\n")
+        return "\(lines.count) of \(live.count) \(archived ? "archived " : "")projects, newest first:\n" + lines.joined(separator: "\n")
     }
 
     @MainActor
@@ -334,8 +395,19 @@ enum AgentTools {
         case .success(let p): project = p
         case .failure(let e): return .result(e.text)
         }
-        let valid = PhaseID.allCases.map { $0.rawValue }
-        guard let raw = args.string("phase"), let phase = PhaseID(rawValue: raw.lowercased()) else {
+        let valid = PhaseID.allCases.map { $0.rawValue } + ["next"]
+        let phase: PhaseID
+        var resuming = false
+        if let raw = args.string("phase")?.lowercased(), raw == "next" {
+            // "next" = pick up where it stopped: the first step that is not done.
+            guard let first = PhaseID.allCases.first(where: { project.phase($0).status != .done }) else {
+                return .result("Every step of “\(short(project.title))” is already done. Name a step to redo it.")
+            }
+            phase = first
+            resuming = true
+        } else if let raw = args.string("phase")?.lowercased(), let p = PhaseID(rawValue: raw) {
+            phase = p
+        } else {
             return .result("Error: phase must be one of \(valid.joined(separator: ", ")).")
         }
         if host.isBusy(project.id) {
@@ -351,8 +423,9 @@ enum AgentTools {
                                             hasAssemblyKey: context.hasKey(.assemblyai),
                                             poolSize: host.reusableImageCount)
         return .needsApproval(AgentApproval(
-            title: "Redo from \(phase.title)?",
-            detail: "“\(short(project.title))” will re-run from \(phase.title) onward.",
+            title: resuming ? "Resume from \(phase.title)?" : "Redo from \(phase.title)?",
+            detail: resuming ? "“\(short(project.title))” picks up at \(phase.title) and runs to the end."
+                             : "“\(short(project.title))” will re-run from \(phase.title) onward.",
             estimate: estimate.summary, estimateUSD: estimate.usd,
             action: .redo(projectID: project.id, phase: phase)))
     }
@@ -380,7 +453,7 @@ enum AgentTools {
         "The \(k.label) key is missing. Tell the user to add it under Settings > Keys. Nothing was started."
     }
 
-    private static func keyNeeded(text: TextProviderKind) -> APIKey? {
+    static func keyNeeded(text: TextProviderKind) -> APIKey? {
         switch text {
         case .gemini: return .gemini
         case .groq: return .groq
@@ -388,7 +461,7 @@ enum AgentTools {
         }
     }
 
-    private static func keyNeeded(image: ImageProviderKind) -> APIKey? {
+    static func keyNeeded(image: ImageProviderKind) -> APIKey? {
         switch image {
         case .gemini: return .gemini
         case .openai: return .openai
@@ -396,7 +469,7 @@ enum AgentTools {
         }
     }
 
-    private static func keyNeeded(voice: VoiceProviderKind) -> APIKey? {
+    static func keyNeeded(voice: VoiceProviderKind) -> APIKey? {
         switch voice {
         case .elevenlabs: return .elevenlabs
         case .gemini: return .gemini
@@ -415,7 +488,7 @@ enum AgentTools {
     }
 
     @MainActor
-    private static func resolveChannel(_ name: String?, in host: any AgentHost) -> Result<Channel, AgentToolError> {
+    static func resolveChannel(_ name: String?, in host: any AgentHost) -> Result<Channel, AgentToolError> {
         guard let name else { return .success(host.activeChannel) }
         let lower = name.lowercased()
         if let exact = host.channels.first(where: { $0.name.lowercased() == lower }) { return .success(exact) }
@@ -438,11 +511,11 @@ enum AgentTools {
         }
     }
 
-    private static func phaseSummary(_ p: Project) -> String {
+    static func phaseSummary(_ p: Project) -> String {
         PhaseID.allCases.map { "\($0.title)\(mark(p.phase($0).status))" }.joined(separator: " ")
     }
 
-    private static func short(_ s: String, _ limit: Int = 48) -> String {
+    static func short(_ s: String, _ limit: Int = 48) -> String {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.count <= limit ? t : String(t.prefix(limit - 1)) + "…"
     }

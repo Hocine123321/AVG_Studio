@@ -546,14 +546,16 @@ struct AssistantSettingsPage: View {
                     .anchored(.assistantFailover)
             }
 
-            SettingsGroup(title: "What it may do",
-                          footer: "A turned-off action is not offered to the assistant at all.") {
-                ToggleRow(title: "Assistant can start videos", isOn: $store.settings.agentAllowCreate)
-                    .anchored(.assistantAllowCreate)
-                ToggleRow(title: "Assistant can redo steps", isOn: $store.settings.agentAllowRedo)
-                    .anchored(.assistantAllowRedo)
-                ToggleRow(title: "Assistant can cancel", isOn: $store.settings.agentAllowCancel)
-                    .anchored(.assistantAllowCancel)
+            // What the assistant is allowed to try. To the model each one is a
+            // tool: switched off, it is not even offered.
+            SettingsGroup(title: "Assistant capabilities · \(AgentCapability.enabledCount(store.settings)) of \(AgentCapability.allCases.count) on",
+                          footer: "These are the tools the assistant can use to control the app. A capability that is off is not offered to it at all. Anything that changes something still asks you first. It can never read your API keys or change its own limits.") {
+                ForEach(AgentCapability.allCases) { capability in
+                    ToggleRow(title: capability.title, subtitle: capability.summary,
+                              isOn: Binding(get: { store.settings[keyPath: capability.keyPath] },
+                                            set: { store.settings[keyPath: capability.keyPath] = $0 }))
+                        .anchored(Self.anchor(for: capability))
+                }
             }
 
             SettingsGroup(title: "Asking and spending",
@@ -603,6 +605,18 @@ struct AssistantSettingsPage: View {
         .onChange(of: store.settings.agentProvider) { _, _ in testResult = nil }
         .onChange(of: store.settings.agentKeepChat) { _, on in
             if !on { store.agent.deleteSavedChat() }
+        }
+    }
+
+    private static func anchor(for capability: AgentCapability) -> SettingAnchor {
+        switch capability {
+        case .startVideos: return .assistantAllowCreate
+        case .redoSteps: return .assistantAllowRedo
+        case .cancelRuns: return .assistantAllowCancel
+        case .manageProjects: return .assistantAllowManage
+        case .changeSettings: return .assistantAllowSettings
+        case .editChannels: return .assistantAllowChannels
+        case .diagnostics: return .assistantAllowDiagnostics
         }
     }
 

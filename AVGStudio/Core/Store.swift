@@ -820,4 +820,13 @@ extension Store: AgentHost {
     /// requirement is matched on the exact signature, so adapt it here.
     func start(_ id: String, from phase: PhaseID) { start(id, from: phase, note: nil) }
     var reusableImageCount: Int { reusableImages.count }
+    func upsertChannel(_ channel: Channel) { upsert(channel) }
+    func activateChannel(_ channel: Channel) { activate(channel) }
+    func renameProject(_ id: String, to title: String) { update(id) { $0.title = title } }
+    func deleteProject(_ id: String) { delete(id) }
+    func recentActivity(limit: Int, errorsOnly: Bool) -> [String] {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return log.filter { !errorsOnly || $0.isError }.prefix(limit).map { "\(f.string(from: $0.date)) \($0.isError ? "ERROR " : "")\($0.message)" }
+    }
 }

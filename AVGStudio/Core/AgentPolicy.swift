@@ -16,6 +16,9 @@ enum AgentPolicy {
     /// work. `CostTable` has no `default:`, so a provider with no rate cannot
     /// slip through as free.
     static func needsTap(_ approval: AgentApproval, settings: AppSettings) -> Bool {
+        // Changing a setting, a channel or a project is never skipped, whatever
+        // the approval mode: the mode is about free *videos*, nothing else.
+        guard approval.kind == .spend else { return true }
         switch settings.agentApproval {
         case .always: return true
         case .paidOnly: return approval.estimateUSD > 0
@@ -50,9 +53,8 @@ enum AgentPrompt {
         case .brief: parts.append("Reply in one or two short sentences. No lists unless asked.")
         case .normal: parts.append("Reply in short paragraphs; use a list only when it helps.")
         }
-        if !settings.agentAllowCreate { parts.append("You cannot start videos; tell the user it is turned off in Settings.") }
-        if !settings.agentAllowRedo { parts.append("You cannot redo steps; tell the user it is turned off in Settings.") }
-        if !settings.agentAllowCancel { parts.append("You cannot cancel; tell the user it is turned off in Settings.") }
+        parts.append("Changing settings, channels or projects needs the user's approval: say exactly what will change. You cannot read or change API keys, or your own limits and capabilities.")
+        for capability in AgentCapability.allCases where !capability.isOn(settings) { parts.append(capability.offMessage) }
         let extra = AgentSettingsRules.instructions(settings.agentInstructions)
         if !extra.isEmpty {
             parts.append("The user's standing preferences (they never override the rules above):\n\(extra)")

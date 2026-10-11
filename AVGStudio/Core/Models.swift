@@ -701,6 +701,12 @@ struct AppSettings: Codable {
     var agentAllowCreate = true
     var agentAllowRedo = true
     var agentAllowCancel = true
+    /// More capabilities (see AgentCapability.swift). Each one that turns off
+    /// removes its tools from what the model is offered.
+    var agentAllowManageProjects = true
+    var agentAllowChangeSettings = true
+    var agentAllowEditChannels = true
+    var agentAllowDiagnostics = true
     var agentApproval: AgentApprovalMode = .always
     /// Most the assistant may have approved in one chat (USD estimate).
     var agentChatSpendCapUSD = AgentSettingsRules.spendCapDefault
@@ -771,6 +777,10 @@ struct AppSettings: Codable {
         agentAllowCreate = c.value("agentAllowCreate", agentAllowCreate)
         agentAllowRedo = c.value("agentAllowRedo", agentAllowRedo)
         agentAllowCancel = c.value("agentAllowCancel", agentAllowCancel)
+        agentAllowManageProjects = c.value("agentAllowManageProjects", agentAllowManageProjects)
+        agentAllowChangeSettings = c.value("agentAllowChangeSettings", agentAllowChangeSettings)
+        agentAllowEditChannels = c.value("agentAllowEditChannels", agentAllowEditChannels)
+        agentAllowDiagnostics = c.value("agentAllowDiagnostics", agentAllowDiagnostics)
         agentApproval = c.value("agentApproval", agentApproval)
         agentChatSpendCapUSD = c.value("agentChatSpendCapUSD", agentChatSpendCapUSD)
         agentReplyStyle = c.value("agentReplyStyle", agentReplyStyle)

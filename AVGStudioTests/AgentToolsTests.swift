@@ -253,17 +253,27 @@ final class AgentToolsTests: XCTestCase {
     func testSpecsOmitDisabledTools() {
         var s = AppSettings()
         func names() -> Set<String> { Set(AgentTools.specs(for: s).map { $0.name }) }
-        XCTAssertEqual(names(), ["list_channels", "list_projects", "get_status", "create_video", "redo_from", "cancel", "open_project"])
-        s.agentAllowCreate = false
-        XCTAssertFalse(names().contains("create_video"))
-        XCTAssertTrue(names().contains("redo_from") && names().contains("cancel"))
-        s.agentAllowCreate = true; s.agentAllowRedo = false
-        XCTAssertEqual(names().subtracting(["redo_from"]).count, 6)
-        XCTAssertFalse(names().contains("redo_from"))
-        s.agentAllowRedo = true; s.agentAllowCancel = false
-        XCTAssertFalse(names().contains("cancel"))
-        s.agentAllowCreate = false; s.agentAllowRedo = false
-        XCTAssertEqual(names(), ["list_channels", "list_projects", "get_status", "open_project"])
+        let always: Set<String> = ["list_channels", "list_projects", "get_status", "open_project", "estimate_cost"]
+        let everything = always.union(["create_video", "redo_from", "cancel", "manage_project", "change_setting",
+                                       "edit_channel", "get_app_status", "get_activity", "get_settings"])
+        XCTAssertEqual(names(), everything)
+        for capability in AgentCapability.allCases {
+            s = AppSettings()
+            s[keyPath: capability.keyPath] = false
+            let missing = everything.subtracting(names())
+            switch capability {
+            case .diagnostics:
+                // get_settings stays while "change settings" is on: it cannot pick a value without it.
+                XCTAssertEqual(missing, ["get_app_status", "get_activity"])
+            case .changeSettings:
+                XCTAssertEqual(missing, ["change_setting"], "get_settings stays while diagnostics is on")
+            default:
+                XCTAssertEqual(missing, Set(capability.tools), "\(capability)")
+            }
+        }
+        s = AppSettings()
+        for capability in AgentCapability.allCases { s[keyPath: capability.keyPath] = false }
+        XCTAssertEqual(names(), always, "with everything off only the read-only tools remain")
     }
 
     func testDisabledToolCalledAnywayIsRefusedWithTheSettingName() {
