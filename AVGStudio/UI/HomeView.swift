@@ -17,46 +17,42 @@ struct HomeView: View {
     @State private var selectMode = false
     @State private var selected: Set<String> = []
 
-    private var visible: [Project] {
-        store.projects.filter { p in
-            let statusMatch: Bool
-            switch filter {
-            case .all: statusMatch = !p.archived
-            case .running: statusMatch = !p.archived && p.overallStatus == .running
-            case .done: statusMatch = !p.archived && p.overallStatus == .done
-            case .archived: statusMatch = p.archived
-            }
-            guard statusMatch else { return false }
-            return query.isEmpty || p.title.localizedCaseInsensitiveContains(query)
-        }
+    /// A grid row, identified by its first project so SwiftUI keeps a card
+    /// (and its decoded thumbnail) attached to the project when the filter or a
+    /// search moves it to another row, instead of re-using it by position.
+    private struct GridRow: Identifiable {
+        let items: [Project]
+        let wide: Bool
+        var id: String { items.first?.id ?? "" }
     }
 
     /// The grid's rows - see `LibraryLayout` for the packing rules (a lone
     /// card is half width, a landscape project spans both columns).
-    private var rows: [(items: [Project], wide: Bool)] {
-        let v = visible
-        return LibraryLayout.rows(v.map { $0.aspectRatio }).map { row in
-            (items: row.indices.map { v[$0] }, wide: row.isWide)
+    private static func gridRows(_ shown: [Project]) -> [GridRow] {
+        LibraryLayout.rows(shown.map { $0.aspectRatio }).map { row in
+            GridRow(items: row.indices.map { shown[$0] }, wide: row.isWide)
         }
     }
 
     var body: some View {
+        // Filtered and packed ONCE per update. This used to be recomputed
+        // (filter, then layout) every time the grid asked for `rows`, which it
+        // does for every row: work grew with the square of the library.
+        let shown = filter.apply(to: store.projects, query: query)
+        let rows = Self.gridRows(shown)
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !selectMode, let id = store.interruptedProjectID, let p = store.project(id) {
                     interruptedBanner(p)
                 }
                 SegmentedFilter(options: LibraryFilter.allCases, label: { $0.rawValue }, selection: $filter)
-                // The mock's own subtitle counts ALL projects (`P.length`),
-                // not just the filtered set - kept that, added a real
-                // "rendering now" count in place of its fake "job slots,
-                // 1 busy, extra jobs queue" text (this app has no job-slot
-                // limit; every render starts immediately).
-                Text(subtitle)
-                    .font(.system(size: 12.5)).foregroundStyle(Theme.ink2)
+                // Its own view: it reads `store.jobs`, which changes on every
+                // progress tick of every running video. Read here, it would
+                // rebuild the whole Library several times a second.
+                LibrarySubtitle()
                     .padding(.horizontal, 4)
 
-                if visible.isEmpty {
+                if shown.isEmpty {
                     ContentUnavailableView {
                         Label(emptyTitle, systemImage: "film.stack")
                     } description: {
@@ -69,9 +65,10 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 60)
                 } else {
-                    VStack(spacing: 12) {
-                        ForEach(rows.indices, id: \.self) { i in
-                            let row = rows[i]
+                    // Lazy: only the cards near the screen are built (each one
+                    // draws layered shadows and decodes an image).
+                    LazyVStack(spacing: 12) {
+                        ForEach(rows) { row in
                             if row.wide {
                                 card(row.items[0], wide: true)
                             } else {
@@ -115,16 +112,6 @@ struct HomeView: View {
         .safeAreaInset(edge: .bottom) {
             if selectMode { selectBar }
         }
-    }
-
-    private var subtitle: String {
-        let base = "\(store.projects.count) project\(store.projects.count == 1 ? "" : "s")"
-        let running = store.jobs.count
-        let queued = store.queuedIDs.count
-        var parts = [base]
-        if running > 0 { parts.append("\(running) running") }
-        if queued > 0 { parts.append("\(queued) queued") }
-        return parts.joined(separator: " · ")
     }
 
     private var emptyTitle: String {
@@ -265,10 +252,10 @@ struct ProjectCard: View {
                         .lineLimit(2, reservesSpace: !wide)
                         .multilineTextAlignment(.leading)
                     // Always 5pt tall, so a running card is not taller than its neighbour.
-                    Group {
-                        if let job = store.jobs[project.id] { progressBar(job.progress) } else { Color.clear }
-                    }
-                    .frame(height: 5)
+                    // Its own view: only THIS reads `store.jobs`, so a progress tick
+                    // redraws a 5pt bar, not every card in the Library.
+                    CardProgress(projectID: project.id)
+                        .frame(height: 5)
                 }
                 .padding(EdgeInsets(top: 10, leading: 12, bottom: 12, trailing: 12))
             }
@@ -356,15 +343,6 @@ struct ProjectCard: View {
         .frame(width: 24, height: 24)
     }
 
-    private func progressBar(_ value: Double) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.fill)
-                Capsule().fill(Theme.accent).frame(width: geo.size.width * max(0, min(1, value)))
-            }
-        }
-    }
-
     /// First scene's image, once there is one.
     private var thumbURL: URL? {
         store.file(project, project.scenes.first(where: { $0.imageFile != nil })?.imageFile)
@@ -383,5 +361,42 @@ struct ProjectCard: View {
 private struct GlassCardShape: ViewModifier {
     func body(content: Content) -> some View {
         content.glassCard(24, padding: 0)
+    }
+}
+
+/// The "N projects · M running" line. Separate from `HomeView` on purpose: it
+/// is the only part of the Library header that reads the live job table.
+private struct LibrarySubtitle: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        let base = "\(store.projects.count) project\(store.projects.count == 1 ? "" : "s")"
+        let running = store.jobs.count
+        let queued = store.queuedIDs.count
+        var parts = [base]
+        if running > 0 { parts.append("\(running) running") }
+        if queued > 0 { parts.append("\(queued) queued") }
+        return Text(parts.joined(separator: " · "))
+            .font(.system(size: 12.5)).foregroundStyle(Theme.ink2)
+    }
+}
+
+/// A running card's progress bar. It alone observes the job's progress.
+private struct CardProgress: View {
+    @Environment(Store.self) private var store
+    let projectID: String
+
+    var body: some View {
+        if let job = store.jobs[projectID] {
+            let value = max(0, min(1, job.progress))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.fill)
+                    Capsule().fill(Theme.accent).frame(width: geo.size.width * value)
+                }
+            }
+        } else {
+            Color.clear
+        }
     }
 }

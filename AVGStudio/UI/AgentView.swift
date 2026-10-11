@@ -7,9 +7,11 @@ struct AgentToolbarButton: View {
     @Environment(Store.self) private var store
 
     var body: some View {
-        Button("Assistant", systemImage: "sparkle") {
+        Button {
             Haptics.light()
             store.agent.isOpen = true
+        } label: {
+            Label("Assistant", systemImage: "sparkle").labelStyle(.iconOnly)
         }
         .accessibilityLabel("Open the assistant")
     }
@@ -44,9 +46,11 @@ struct AgentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("New chat", systemImage: "square.and.pencil") {
+                    Button {
                         Haptics.light()
                         agent.reset()
+                    } label: {
+                        Label("New chat", systemImage: "square.and.pencil").labelStyle(.iconOnly)
                     }
                     .disabled(agent.lines.isEmpty && !agent.isWorking)
                 }
@@ -210,14 +214,8 @@ struct AgentView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Basic Markdown (bold, italic, code, links) the way models write it.
-    static func markdown(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            allowsExtendedAttributes: false,
-            interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            failurePolicy: .returnPartiallyParsedIfPossible)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
-    }
+    /// Bold, italic, code, links and bullets the way models write them.
+    static func markdown(_ text: String) -> AttributedString { AgentMarkdown.attributed(text) }
 
     // MARK: No key
 
@@ -386,6 +384,9 @@ struct AgentView: View {
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Ask the assistant…", text: $draft, axis: .vertical)
+                // The same size and font as the messages above it (the app font
+                // setting otherwise makes the placeholder a different face).
+                .font(.system(.subheadline))
                 .lineLimit(1...5)
                 .focused($focused)
                 .padding(.horizontal, 16).padding(.vertical, 12)

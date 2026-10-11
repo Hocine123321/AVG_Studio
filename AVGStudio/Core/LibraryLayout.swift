@@ -49,3 +49,21 @@ enum LibraryLayout {
         return out
     }
 }
+
+extension LibraryFilter {
+    /// The projects this filter and the search box show, in the store's
+    /// order. Archived projects appear only under Archived.
+    func apply(to projects: [Project], query: String) -> [Project] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return projects.filter { p in
+            let statusMatch: Bool
+            switch self {
+            case .all: statusMatch = !p.archived
+            case .running: statusMatch = !p.archived && p.overallStatus == .running
+            case .done: statusMatch = !p.archived && p.overallStatus == .done
+            case .archived: statusMatch = p.archived
+            }
+            return statusMatch && (q.isEmpty || p.title.localizedCaseInsensitiveContains(q))
+        }
+    }
+}
