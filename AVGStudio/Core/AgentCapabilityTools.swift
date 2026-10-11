@@ -6,7 +6,6 @@ import Foundation
 /// every request and Groq's free plan allows about 8K tokens a minute), plain
 /// text results, and errors that name the valid values so the next call can
 /// be right. See `AgentCapability` for the switches that gate them.
-@MainActor
 enum AgentCapabilityTools {
 
     // MARK: Specs
@@ -49,7 +48,7 @@ enum AgentCapabilityTools {
 
     // MARK: estimate_cost
 
-    static func estimateCost(_ args: AgentArgs, _ host: any AgentHost, _ context: AgentContext) -> String {
+    @MainActor static func estimateCost(_ args: AgentArgs, _ host: any AgentHost, _ context: AgentContext) -> String {
         let phase: PhaseID
         if let raw = args.string("phase") {
             guard let p = PhaseID(rawValue: raw.lowercased()) else {
@@ -73,7 +72,7 @@ enum AgentCapabilityTools {
 
     // MARK: manage_project
 
-    static func manageProject(_ args: AgentArgs, _ host: any AgentHost) -> AgentToolOutcome {
+    @MainActor static func manageProject(_ args: AgentArgs, _ host: any AgentHost) -> AgentToolOutcome {
         let project: Project
         switch AgentTools.resolveProject(args.string("project") ?? "", in: host.projects) {
         case .success(let p): project = p
@@ -111,7 +110,7 @@ enum AgentCapabilityTools {
 
     // MARK: change_setting
 
-    static func changeSetting(_ args: AgentArgs, _ host: any AgentHost, _ context: AgentContext) -> AgentToolOutcome {
+    @MainActor static func changeSetting(_ args: AgentArgs, _ host: any AgentHost, _ context: AgentContext) -> AgentToolOutcome {
         guard let key = args.string("setting") else {
             return .result("Error: setting is required. Valid: \(AgentSettingsCatalog.keys.joined(separator: ", ")).")
         }
@@ -155,7 +154,7 @@ enum AgentCapabilityTools {
 
     // MARK: edit_channel
 
-    static func editChannel(_ args: AgentArgs, _ host: any AgentHost) -> AgentToolOutcome {
+    @MainActor static func editChannel(_ args: AgentArgs, _ host: any AgentHost) -> AgentToolOutcome {
         guard let name = args.string("channel") else { return .result("Error: channel is required. Call list_channels for names.") }
         let channel: Channel
         switch AgentTools.resolveChannel(name, in: host) {
@@ -206,7 +205,7 @@ enum AgentCapabilityTools {
 
     // MARK: Read-only
 
-    static func appStatus(_ host: any AgentHost, _ context: AgentContext) -> String {
+    @MainActor static func appStatus(_ host: any AgentHost, _ context: AgentContext) -> String {
         var lines: [String] = []
         let running = host.projects.filter { host.isRunning($0.id) }
         let queued = host.projects.filter { host.queuePosition($0.id) != nil }
@@ -235,13 +234,13 @@ enum AgentCapabilityTools {
         return lines.joined(separator: "\n")
     }
 
-    static func activity(_ args: AgentArgs, _ host: any AgentHost) -> String {
+    @MainActor static func activity(_ args: AgentArgs, _ host: any AgentHost) -> String {
         let limit = min(max(args.int("limit") ?? 8, 1), 20)
         let lines = host.recentActivity(limit: limit, errorsOnly: args.bool("errors_only") ?? false)
         return lines.isEmpty ? "No recent activity." : lines.joined(separator: "\n")
     }
 
-    static func settingsGroup(_ args: AgentArgs, _ host: any AgentHost) -> String {
+    @MainActor static func settingsGroup(_ args: AgentArgs, _ host: any AgentHost) -> String {
         let valid = AgentSetting.Group.allCases.map { $0.rawValue }.joined(separator: ", ")
         guard let raw = args.string("group")?.lowercased(),
               let group = AgentSetting.Group.allCases.first(where: { $0.rawValue == raw || $0.title.lowercased() == raw }) else {
@@ -253,7 +252,7 @@ enum AgentCapabilityTools {
     // MARK: Performing approved actions
 
     /// Carries out the actions this file creates. nil = not one of ours.
-    static func perform(_ action: AgentApprovedAction, host: any AgentHost) -> AgentPerformed? {
+    @MainActor static func perform(_ action: AgentApprovedAction, host: any AgentHost) -> AgentPerformed? {
         func done(_ text: String) -> AgentPerformed { AgentPerformed(text: text, projectID: nil) }
         switch action {
         case .changeSetting(let key, let value):
