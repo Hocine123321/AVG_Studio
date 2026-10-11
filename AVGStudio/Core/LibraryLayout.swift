@@ -63,7 +63,8 @@ extension LibraryFilter {
             case .done: statusMatch = !p.archived && p.overallStatus == .done
             case .archived: statusMatch = p.archived
             }
-            return statusMatch && (q.isEmpty || p.title.localizedCaseInsensitiveContains(q))
+            // Ignoring case AND accents: "cafe" finds "Café culture". (`localizedCaseInsensitiveContains` ignores case only.)
+            return statusMatch && (q.isEmpty || p.title.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
         }
     }
 }
