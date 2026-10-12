@@ -55,7 +55,7 @@ final class Store {
     /// Projects waiting for a free slot, in the order they were started.
     var queuedIDs: [String] = []
     @ObservationIgnored private var pendingStarts: [String: PhaseID] = [:]
-    @ObservationIgnored private var fallbackLedger = FallbackLedger()
+    @ObservationIgnored private var runOverrides = RunOverrides()
     /// What a run is about to record on the take it produces: which take it
     /// branched from and why (see Takes.swift). Set when the run starts, read
     /// by the render phase when it creates the take.
@@ -186,9 +186,7 @@ final class Store {
 
     func saveMeta() {
         guard !loading else { return }
-        // Never persist a run's fallback: the file always holds what the
-        // person chose, even if the app is killed mid-run.
-        let m = Meta(settings: fallbackLedger.reverted(settings), channels: channels, activeChannelID: activeChannelID, reusableImages: reusableImages)
+        let m = Meta(settings: settings, channels: channels, activeChannelID: activeChannelID, reusableImages: reusableImages)
         if let d = try? JSONEncoder.avg.encode(m) { try? d.write(to: Self.metaURL, options: .atomic) }
     }
 
@@ -565,16 +563,23 @@ final class Store {
     /// Stops the screen auto-locking while anything is being made (when the
     /// setting allows). A locked screen suspends the app, which suspends its
     /// GPU access - the single most common reason a long render "stalls".
-    // MARK: Run-scoped fallbacks (see FallbackLedger.swift)
+    // MARK: Per-video fallbacks (see RunOverrides.swift)
 
-    /// Switches a setting for ONE project's run (a fallback model, another
-    /// provider). It is put back when that run ends and is never saved.
-    func overrideForRun<T: Equatable>(_ keyPath: WritableKeyPath<AppSettings, T>, to value: T, project: String) {
-        fallbackLedger.override(keyPath, to: value, owner: project, in: &settings)
+    /// The person's settings with `project`'s fallbacks on top. The pipeline
+    /// reads this and only this, so a fallback never leaks into the app's
+    /// settings, the Settings screen, another video, or the saved file.
+    func effectiveSettings(for project: String) -> AppSettings {
+        runOverrides.applied(to: settings, project: project)
+    }
+
+    /// Switches a setting for ONE video's run (a fallback model, another
+    /// provider). It ends with the run; nothing global changes.
+    func overrideForRun<T>(_ keyPath: WritableKeyPath<AppSettings, T>, to value: T, project: String) {
+        runOverrides.set(keyPath, to: value, project: project)
     }
 
     private func releaseOverrides(_ id: String) {
-        if fallbackLedger.release(owner: id, in: &settings) {
+        if runOverrides.clear(project: id) {
             record(id, "Back to your chosen models.")
         }
     }

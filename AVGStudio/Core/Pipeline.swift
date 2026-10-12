@@ -7,6 +7,12 @@ import SwiftUI
 struct Pipeline {
     let store: Store
     let projectID: String
+
+    /// The settings THIS video runs on: the person's own, with this run's
+    /// fallbacks (a lighter model, another provider) laid on top. Every read
+    /// in this file goes through here; nothing writes a fallback into the
+    /// app's real settings (see RunOverrides.swift).
+    private var settings: AppSettings { store.effectiveSettings(for: projectID) }
     /// True when this is a RETRY of a phase that already failed once inside
     /// the same run (the user tapped "Try again" / picked another provider in
     /// the recovery sheet). Visuals then keeps every scene image that was
@@ -42,7 +48,7 @@ struct Pipeline {
     // MARK: Providers
 
     private func textProvider() throws -> TextProvider {
-        let s = store.settings
+        let s = settings
         switch s.text {
         case .apple: return AppleText()
         case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
@@ -55,7 +61,7 @@ struct Pipeline {
     /// `textProvider()` (no argument) just calls this with the channel's
     /// global default, preserving every existing call site's behavior.
     private func textProvider(for kind: TextProviderKind) throws -> TextProvider {
-        let s = store.settings
+        let s = settings
         switch kind {
         case .apple: return AppleText()
         case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
@@ -86,7 +92,7 @@ struct Pipeline {
         primary: TextProviderKind?, backup: TextProviderKind?, onFailure: PhaseOnFailure,
         _ prompt: String, system: String?
     ) async throws -> (text: String, used: TextProviderKind) {
-        let defaultKind = store.settings.text
+        let defaultKind = settings.text
         let primaryKind = primary ?? defaultKind
         var lastError: Error
         do {
@@ -107,10 +113,10 @@ struct Pipeline {
         throw lastError
     }
 
-    private func imageProvider() throws -> ImageProvider { try imageProvider(for: store.settings.image) }
+    private func imageProvider() throws -> ImageProvider { try imageProvider(for: settings.image) }
 
     private func imageProvider(for kind: ImageProviderKind) throws -> ImageProvider {
-        let s = store.settings
+        let s = settings
         // Picture quality follows the video quality - never a separate choice.
         let quality = ImageQuality.forVideo(shortEdge: s.shortEdge)
         switch kind {
@@ -122,7 +128,7 @@ struct Pipeline {
     }
 
     private func voiceProvider(channel ch: Channel) throws -> VoiceProvider {
-        let s = store.settings
+        let s = settings
         switch s.voice {
         case .apple: return AppleVoice(identifier: s.appleVoiceIdentifier, speed: ch.voiceSpeed)
         case .elevenlabs:
@@ -148,7 +154,7 @@ struct Pipeline {
     }
 
     private func costImage(_ kind: ImageProviderKind) {
-        let usd = CostTable.imageFlat(kind, quality: ImageQuality.forVideo(shortEdge: store.settings.shortEdge))
+        let usd = CostTable.imageFlat(kind, quality: ImageQuality.forVideo(shortEdge: settings.shortEdge))
         guard usd > 0 else { return }
         store.addCost(projectID, "\(kind.label) image", usd)
     }
@@ -372,7 +378,7 @@ struct Pipeline {
         // `applyStyleLock`), so the app-wide style suffix is only added when
         // there is no lock - otherwise "cinematic, dramatic lighting" would be
         // stacked onto, say, a flat wireframe style.
-        let style = ch.styleLock.trimmed.isEmpty ? store.settings.imageStyle : ""
+        let style = ch.styleLock.trimmed.isEmpty ? settings.imageStyle : ""
         let dir = folder.appendingPathComponent("images", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let scenes = p.scenes
@@ -381,7 +387,7 @@ struct Pipeline {
 
         var done = 0
         let pool = store.reusableImages
-        let requestedKind = store.settings.image // captured once: read on MainActor, then only passed by value into the concurrent child tasks below, never read from `store` off-actor.
+        let requestedKind = settings.image // captured once: read on MainActor, then only passed by value into the concurrent child tasks below, never read from `store` off-actor.
         // Scenes still needing an image. On a retry, anything whose file is
         // already on disk counts as done (see `resumeExisting`).
         let pending: [VideoScene] = resumeExisting
@@ -394,7 +400,7 @@ struct Pipeline {
         if done > 0 { store.progress(projectID, Double(done) / Double(scenes.count), "Keeping \(done) image(s) already made") }
         // Images made at once: 3 was the fixed value; it is now a setting (1 is
         // gentlest on a free tier's rate limits, 4 is fastest on a paid key).
-        let parallel = max(1, min(4, store.settings.imageParallelism))
+        let parallel = max(1, min(4, settings.imageParallelism))
         for batch in stride(from: 0, to: pending.count, by: parallel) {
             try Task.checkCancellation()
             let slice = Array(pending[batch..<min(batch + parallel, pending.count)])
@@ -482,7 +488,7 @@ struct Pipeline {
     private func voice() async throws {
         let p = try project
         guard let narration = p.narration else { throw AVGError.message("No script yet — run Script first.") }
-        let s = store.settings
+        let s = settings
         let ch = store.channel(for: p)
         let provider = try voiceProvider(channel: ch)
         let dir = folder.appendingPathComponent("audio", isDirectory: true)
@@ -652,7 +658,7 @@ struct Pipeline {
     private func captions() async throws {
         let p = try project
         let ch = store.channel(for: p)
-        let s = store.settings
+        let s = settings
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
         let duration = try await AVURLAsset(url: audio).load(.duration).seconds
         let sorted = p.scenes.sorted { $0.index < $1.index }
@@ -768,7 +774,7 @@ struct Pipeline {
                         If no scene warrants a board, return {"cards":[]}.
                         """
                         let result = try await text.complete(prompt, system: "You return only strict JSON, nothing else.")
-                        costText(store.settings.text, chars: prompt.count + result.count)
+                        costText(settings.text, chars: prompt.count + result.count)
                         struct ExplainerCard: Decodable { let scene: Int; let text: String }
                         struct ExplainerResponse: Decodable { let cards: [ExplainerCard] }
                         if let data = Self.extractJSONObject(result)?.data(using: .utf8),
@@ -942,7 +948,7 @@ struct Pipeline {
     private func render() async throws {
         var p = try project
         guard let audio = store.file(p, p.audioFile) else { throw AVGError.message("No narration audio yet.") }
-        let s = store.settings
+        let s = settings
         var ch = store.channel(for: p)
         if s.kenBurns {
             step(.render, "direction", .running)

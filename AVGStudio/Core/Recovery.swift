@@ -90,8 +90,7 @@ enum Recovery {
     /// The model this AI would drop to: the user's own fallback if set, else a
     /// built-in light preset for the provider currently in use. `nil` when
     /// there is nothing lighter (Apple on-device, Stable Horde...).
-    static func fallbackModel(_ kind: AIKind, store: Store) -> String? {
-        let s = store.settings
+    static func fallbackModel(_ kind: AIKind, settings s: AppSettings) -> String? {
         switch kind {
         case .writer:
             if !s.writerFallbackModel.isEmpty { return s.writerFallbackModel }
@@ -119,9 +118,8 @@ enum Recovery {
 
     /// True when the fallback differs from what is already set (otherwise
     /// offering it would just repeat the same failing request).
-    static func fallbackIsUseful(_ kind: AIKind, store: Store) -> Bool {
-        guard let m = fallbackModel(kind, store: store) else { return false }
-        let s = store.settings
+    static func fallbackIsUseful(_ kind: AIKind, settings s: AppSettings) -> Bool {
+        guard let m = fallbackModel(kind, settings: s) else { return false }
         switch kind {
         case .writer:
             switch s.text {
@@ -152,24 +150,27 @@ enum Recovery {
     @discardableResult
     static func applyFallback(phase: PhaseID, store: Store, project: String) -> String? {
         let kind = aiKind(for: phase)
-        guard fallbackIsUseful(kind, store: store), let m = fallbackModel(kind, store: store) else { return nil }
+        // What THIS video is running on: its own fallbacks included, so a
+        // fallback already applied is not offered again.
+        let s = store.effectiveSettings(for: project)
+        guard fallbackIsUseful(kind, settings: s), let m = fallbackModel(kind, settings: s) else { return nil }
         switch kind {
         case .writer:
-            switch store.settings.text {
+            switch s.text {
             case .gemini: store.overrideForRun(\.geminiModel, to: m, project: project)
             case .groq: store.overrideForRun(\.groqModel, to: m, project: project)
             case .pollinations: store.overrideForRun(\.pollinationsTextModel, to: m, project: project)
             case .apple: return nil
             }
         case .image:
-            switch store.settings.image {
+            switch s.image {
             case .gemini: store.overrideForRun(\.geminiImageModel, to: m, project: project)
             case .pollinations: store.overrideForRun(\.pollinationsImageModel, to: m, project: project)
             case .stablehorde: store.overrideForRun(\.stableHordeModel, to: m, project: project)
             default: return nil
             }
         case .voice:
-            switch store.settings.voice {
+            switch s.voice {
             case .elevenlabs: store.overrideForRun(\.elevenModel, to: m, project: project)
             case .gemini: store.overrideForRun(\.geminiVoiceModel, to: m, project: project)
             case .apple: return nil
@@ -205,8 +206,9 @@ enum Recovery {
         let others = alternatives(to: provider, store: store, phase: phase)
         let switches: [RecoveryAction] = others.prefix(2).map { .otherProvider(name: $0) }
         var plan: RecoveryPlan?
-        let canFallback = fallbackIsUseful(aiKind(for: phase), store: store)
-        let fb = fallbackModel(aiKind(for: phase), store: store) ?? ""
+        let running = store.effectiveSettings(for: project)
+        let canFallback = fallbackIsUseful(aiKind(for: phase), settings: running)
+        let fb = fallbackModel(aiKind(for: phase), settings: running) ?? ""
         switch kind {
         case .network, .timeout:
             plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) isn't responding",
