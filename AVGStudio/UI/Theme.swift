@@ -424,6 +424,7 @@ struct SegmentedFilter<T: Hashable>: View {
                     .frame(width: segment, height: size.height)
                     .scaleEffect(dragCenter == nil ? 1 : 1.07)
                     .offset(x: thumbX)
+                    .transition(.identity)
                     // Following the finger must not lag; settling should glide.
                     .animation(dragCenter != nil || reduceMotion ? nil : .smooth(duration: 0.34), value: thumbX)
                     .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: dragCenter == nil)

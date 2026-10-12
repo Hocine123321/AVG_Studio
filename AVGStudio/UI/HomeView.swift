@@ -148,6 +148,7 @@ struct HomeView: View {
             onArchive: { archiveToggle(p) },
             onDelete: { delete(p) }
         )
+        .equatable()
     }
 
     private var selectBar: some View {
@@ -219,7 +220,7 @@ struct HomeView: View {
 /// out with different widths and overflowing content. The title and the
 /// progress slot also reserve their height, so every card in a row is the
 /// same height whether its title wraps or a render is running.
-struct ProjectCard: View {
+struct ProjectCard: View, Equatable {
     @Environment(Store.self) private var store
     let project: Project
     let wide: Bool
@@ -228,6 +229,21 @@ struct ProjectCard: View {
     var onTap: () -> Void
     var onArchive: () -> Void
     var onDelete: () -> Void
+
+    /// Equal when everything the card DRAWS is equal. The closures are left
+    /// out on purpose: they read live state (`selectMode`, `store`) when called,
+    /// so an old one is as good as a new one. With `.equatable()` a project
+    /// update during a render redraws that project's card, not the whole grid.
+    static func == (l: ProjectCard, r: ProjectCard) -> Bool {
+        l.wide == r.wide && l.selectMode == r.selectMode && l.isSelected == r.isSelected
+            && l.project.id == r.project.id && l.project.title == r.project.title
+            && l.project.archived == r.project.archived && l.project.aspectRatio == r.project.aspectRatio
+            && l.project.created == r.project.created && l.project.overallStatus == r.project.overallStatus
+            && l.firstImage == r.firstImage
+    }
+
+    /// The image the thumbnail shows, by file name.
+    private var firstImage: String? { project.scenes.first(where: { $0.imageFile != nil })?.imageFile }
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "MMM d"; return f

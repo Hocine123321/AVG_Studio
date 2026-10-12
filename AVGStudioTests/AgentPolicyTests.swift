@@ -101,6 +101,6 @@ final class AgentPolicyTests: XCTestCase {
                                                                    "parameters": spec.jsonSchema()] as [String: Any])
             chars += data.count
         }
-        XCTAssertLessThan(chars, 7500, "system prompt + tools = \(chars) characters (~\(chars / 4) tokens)")
+        XCTAssertLessThan(chars, 100, "system prompt + tools = \(chars) characters (~\(chars / 4) tokens)")
     }
 }

@@ -27,7 +27,9 @@ enum AgentCapabilityTools {
                 AgentToolParam(name: "title", kind: .string, summary: "New title, for rename.", required: false),
             ]),
             AgentToolSpec(name: "change_setting", summary: "Change one app setting. Needs approval. Call get_settings first for valid values.", params: [
-                AgentToolParam(name: "setting", kind: .string, summary: "Which setting.", allowed: AgentSettingsCatalog.keys),
+                // Deliberately NOT an enum: 24 keys would be sent on every request. get_settings
+                // lists them, and a wrong key gets an error that names every valid one.
+                AgentToolParam(name: "setting", kind: .string, summary: "Setting key, from get_settings."),
                 AgentToolParam(name: "value", kind: .string, summary: "The new value."),
             ]),
             AgentToolSpec(name: "edit_channel", summary: "Edit a channel, or make it the active one. Needs approval.", params: [
@@ -103,7 +105,7 @@ enum AgentCapabilityTools {
         default:
             if host.isBusy(project.id) { return .result("“\(name)” is running or queued. Cancel it first, then delete it.") }
             return .needsApproval(AgentApproval(
-                title: "Delete this video?", detail: "“\(name)” and all its files will be deleted. This can't be undone.",
+                title: "Delete this video?", detail: "“\(name)” (ref \(AgentTools.ref(project))) and all its files will be deleted. This can't be undone.",
                 estimate: "", estimateUSD: 0, action: .deleteProject(id: project.id), kind: .destructive))
         }
     }

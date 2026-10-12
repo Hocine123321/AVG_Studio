@@ -29,6 +29,8 @@ struct AgentView: View {
     @Environment(Store.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var draft = ""
+    @State private var detent: PresentationDetent = .medium
+    @State private var attentionHeight: CGFloat = 0
     @FocusState private var focused: Bool
 
     private var agent: Agent { store.agent }
@@ -61,9 +63,12 @@ struct AgentView: View {
         }
         // No custom sheet background: at the medium height iOS 26 draws the
         // sheet as inset Liquid Glass, and the app behind it stays usable.
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         .presentationDragIndicator(.visible)
+        // An approval or a paused video needs room to read and answer: open up.
+        .onChange(of: agent.pendingApproval?.id) { _, id in if id != nil { detent = .large } }
+        .onChange(of: store.recoveryPlan?.id) { _, id in if id != nil { detent = .large } }
     }
 
     // MARK: Transcript
@@ -237,14 +242,30 @@ struct AgentView: View {
 
     // MARK: Bottom stack
 
+    private var hasAttention: Bool {
+        store.recoveryPlan != nil || agent.pendingApproval != nil || !agent.watching.isEmpty
+            || agent.chatProvider != nil || agent.approvedSpendUSD > 0
+    }
+
+    /// Everything needing attention scrolls inside a capped area; the composer
+    /// below it never leaves the screen, however many cards there are.
     private var bottomStack: some View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
-                if let plan = store.recoveryPlan { recoveryCard(plan) }
-                if let approval = agent.pendingApproval { approvalCard(approval) }
-                ForEach(agent.watching.prefix(3), id: \.self) { id in progressCard(id) }
-                if let used = agent.chatProvider { providerCaption(used) }
-                if agent.approvedSpendUSD > 0 { spendCaption }
+                if hasAttention {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            if let plan = store.recoveryPlan { recoveryCard(plan) }
+                            if let approval = agent.pendingApproval { approvalCard(approval) }
+                            ForEach(agent.watching.prefix(3), id: \.self) { id in progressCard(id) }
+                            if let used = agent.chatProvider { providerCaption(used) }
+                            if agent.approvedSpendUSD > 0 { spendCaption }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { attentionHeight = $0 }
+                    }
+                    .frame(height: min(attentionHeight, 320))
+                    .scrollBounceBehavior(.basedOnSize)
+                }
                 if !keyMissing { composer }
             }
             .padding(.horizontal, 16)
@@ -351,6 +372,10 @@ struct AgentView: View {
                 agent.isOpen = false
             }
             .accessibilityElement(children: .contain)
+            .accessibilityAction(named: "Open in Studio") {
+                store.selectForStudio(id)
+                agent.isOpen = false
+            }
         }
     }
 
