@@ -295,6 +295,9 @@ final class Agent {
     /// Applies the spend limit and the approval policy to a gated action and
     /// returns the text the model gets back as the tool result.
     private func handle(_ approval: AgentApproval, host: any AgentHost, settings: AppSettings) async -> String {
+        // Stop was pressed: nothing more may start - not even free work that
+        // would otherwise skip the tap.
+        guard !Task.isCancelled else { return "The user declined." }
         let cap = AgentSettingsRules.spendCap(settings.agentChatSpendCapUSD)
         // The spend limit and the free-start shortcut are about VIDEOS. A
         // change to a setting, channel or project skips both and always asks.

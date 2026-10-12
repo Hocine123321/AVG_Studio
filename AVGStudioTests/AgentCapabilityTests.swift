@@ -650,3 +650,21 @@ final class AgentRefinementTests: XCTestCase {
         XCTAssertTrue(host.deleted.isEmpty)
     }
 }
+
+@MainActor
+final class AgentStopTests: XCTestCase {
+    func testPressingStopBeforeAFreeAutoStartMeansNothingStarts() async {
+        let host = FakeAgentHost()
+        host.settings.text = .apple; host.settings.image = .pollinations; host.settings.voice = .apple
+        host.settings.agentApproval = .paidOnly
+        let two = AgentMessage.assistant(text: "", calls: [toolCall("list_channels", id: "c1"),
+                                                           toolCall("create_video", #"{"topic":"x"}"#, id: "c2")])
+        let provider = ScriptedProvider(queue: [.success(two), .success(.assistant(text: "late"))])
+        let a = makeAgent(provider, host: host)
+        a.makeContext = { AgentContext.test($0, keys: { $0 != .assemblyai }) }
+        let turn = a.send("go")
+        a.stop()
+        await turn.value
+        XCTAssertTrue(host.created.isEmpty, "a free video must not start after Stop")
+    }
+}

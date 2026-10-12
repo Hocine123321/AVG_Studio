@@ -91,8 +91,8 @@ final class AgentPolicyTests: XCTestCase {
     func testSystemPlusToolsStaysUnderTokenBudget() throws {
         // A rough guard (about 4 characters per token) against Groq's free
         // 8K tokens-per-minute: the fixed part of every request must stay
-        // small - with EVERY capability on, the largest it ever is. It is an
-        // estimate, not a tokenizer.
+        // small - with EVERY capability on, the largest it ever is (measured:
+        // 5,551 characters, about 1,400 tokens). It is an estimate, not a tokenizer.
         var s = AppSettings()
         s.agentInstructions = String(repeating: "y", count: 400)
         var chars = AgentPrompt.system(settings: s).count
@@ -101,6 +101,6 @@ final class AgentPolicyTests: XCTestCase {
                                                                    "parameters": spec.jsonSchema()] as [String: Any])
             chars += data.count
         }
-        XCTAssertLessThan(chars, 100, "system prompt + tools = \(chars) characters (~\(chars / 4) tokens)")
+        XCTAssertLessThan(chars, 6000, "system prompt + tools = \(chars) characters (~\(chars / 4) tokens)")
     }
 }
