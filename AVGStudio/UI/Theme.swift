@@ -376,22 +376,14 @@ struct SegmentedFilter<T: Hashable>: View {
     @State private var dragCenter: CGFloat?
     @State private var size: CGSize = .zero
 
-    private var count: Int { max(options.count, 1) }
     private var selectedIndex: Int { options.firstIndex(of: selection) ?? 0 }
-    private var segment: CGFloat { size.width / CGFloat(count) }
-
-    private func index(at x: CGFloat) -> Int {
-        guard segment > 0 else { return selectedIndex }
-        return min(max(Int(x / segment), 0), count - 1)
-    }
+    private var geometry: SegmentedGeometry { SegmentedGeometry(width: size.width, count: options.count) }
+    private var segment: CGFloat { geometry.segment }
 
     /// The segment the thumb is over right now (follows the finger while dragging).
-    private var highlighted: Int { dragCenter.map(index(at:)) ?? selectedIndex }
+    private var highlighted: Int { dragCenter.map(geometry.index(at:)) ?? selectedIndex }
 
-    private var thumbX: CGFloat {
-        guard let c = dragCenter else { return CGFloat(selectedIndex) * segment }
-        return min(max(c - segment / 2, 0), max(size.width - segment, 0))
-    }
+    private var thumbX: CGFloat { geometry.thumbX(selected: selectedIndex, dragCenter: dragCenter) }
 
     var body: some View {
         // ONE glass thumb that travels, like the system segmented control:
@@ -433,16 +425,19 @@ struct SegmentedFilter<T: Hashable>: View {
         .simultaneousGesture(
             // Simultaneous, so a vertical swipe that starts on the control
             // still scrolls the list behind it (and is not taken as a choice).
+            // A TAP picks nothing up: it just selects, and the thumb glides.
+            // Only a clear sideways move picks the thumb up (see SegmentedGeometry).
             DragGesture(minimumDistance: 0)
                 .onChanged { v in
-                    guard abs(v.translation.height) < 24 else { return }
-                    dragCenter = v.location.x
+                    guard SegmentedGeometry.beginsDrag(v.translation) else { return }
+                    let grab = geometry.grabOffset(start: v.startLocation.x, selected: selectedIndex)
+                    dragCenter = v.location.x - grab
                 }
                 .onEnded { v in
-                    let target = index(at: v.location.x)
-                    let scrolled = abs(v.translation.height) >= 24
+                    let wasDragging = dragCenter != nil
+                    let target = geometry.index(at: dragCenter ?? v.location.x)
                     dragCenter = nil
-                    if !scrolled { commit(target) }
+                    if wasDragging || !SegmentedGeometry.wasScroll(v.translation) { commit(target) }
                 }
         )
         .padding(3)
