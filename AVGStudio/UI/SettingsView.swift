@@ -1,16 +1,16 @@
 import SwiftUI
 
 /// Settings hub. See SettingsKit.swift for the reasoning: a short list of big
-/// rows that each show their current value, a search field and a Quick
-/// settings button docked at the BOTTOM (the thumb zone, not a nav bar), and
-/// one sub-screen per category - never more than two taps to any setting.
+/// rows that each show their current value, the system's own search field (a
+/// Liquid Glass bar, the same as the Library's) with a Quick settings button
+/// beside it in the toolbar, and one sub-screen per category - never more
+/// than two taps to any setting.
 struct SettingsView: View {
     @Environment(Store.self) private var store
     @State private var catalogs = SettingsCatalogs()
     @State private var query = ""
     @State private var showQuick = false
     @State private var savedKeyCount = 0
-    @FocusState private var searchFocused: Bool
 
     private var searching: Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -29,7 +29,19 @@ struct SettingsView: View {
         .screenBackground()
         .tint(Theme.accent)
         .navigationTitle("Settings")
-        .safeAreaInset(edge: .bottom) { dock }
+        .searchable(text: $query, prompt: "Search settings")
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Haptics.light()
+                    showQuick = true
+                } label: {
+                    Label("Quick settings", systemImage: "slider.horizontal.3").labelStyle(.iconOnly)
+                }
+            }
+        }
         .navigationDestination(for: SettingsRoute.self) { destination($0) }
         .sheet(isPresented: $showQuick) { QuickSettingsSheet() }
         .onAppear { savedKeyCount = APIKey.allCases.filter { Keychain.has($0) }.count }
@@ -143,50 +155,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Bottom dock
-
-    private var dock: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search settings", text: $query)
-                    .focused($searchFocused)
-                    .submitLabel(.search)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-            .liquidGlass(Capsule())
-
-            // A real glass button (not a Button whose label carries its own
-            // interactive glass: that swallowed the tap and the sheet never opened).
-            Button {
-                Haptics.light()
-                searchFocused = false
-                showQuick = true
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .controlSize(.large)
-            .accessibilityLabel("Quick settings")
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
 
     // MARK: Destinations
 

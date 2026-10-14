@@ -10,8 +10,8 @@ import SwiftUI
 // The rebuild is about REACH:
 //   * a short hub (ten big rows, each showing its current value, so most
 //     checks need no tap at all), never more than two taps to any setting;
-//   * the search field and a Quick settings button are DOCKED at the bottom,
-//     in the thumb zone, not in a nav bar at the top;
+//   * search is the system's own field (`.searchable`, a Liquid Glass bar where
+//     iOS puts it), with the Quick settings button in the toolbar beside it;
 //   * every choice opens a bottom sheet of large rows instead of a menu;
 //   * rows are >= 56pt, steppers/segments are >= 44pt, and a whole toggle
 //     row is the tap target, not just the small switch;

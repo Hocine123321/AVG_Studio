@@ -357,99 +357,30 @@ extension View {
     }
 }
 
-/// The mock's `.seg.g`: a custom pill-of-pills filter control (Library's
-/// All/Running/Done/Archived, Settings' Channel/Global, Create's aspect
-/// picker) - NOT SwiftUI's native `.segmented` picker style, which has a
-/// different look entirely. The whole strip is a glass rounded rect; the
-/// selected option gets its own flat `Theme.fill` + hairline-edge chip.
 struct SegmentedFilter<T: Hashable>: View {
     let options: [T]
     let label: (T) -> String
     @Binding var selection: T
-    /// 8 keeps the compact 34pt strip Library/Create use; Settings passes 12
-    /// for ~44pt segments a thumb can hit without aiming.
+    /// 12 asks for the larger control (Settings rows); anything less is the
+    /// standard height Library and Create use.
     var verticalPadding: CGFloat = 8
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// While a finger is down: where the thumb's centre is. nil = resting
-    /// on the selected segment.
-    @State private var dragCenter: CGFloat?
-    @State private var size: CGSize = .zero
-
-    private var selectedIndex: Int { options.firstIndex(of: selection) ?? 0 }
-    private var geometry: SegmentedGeometry { SegmentedGeometry(width: size.width, count: options.count) }
-    private var segment: CGFloat { geometry.segment }
-
-    /// The segment the thumb is over right now (follows the finger while dragging).
-    private var highlighted: Int { dragCenter.map(geometry.index(at:)) ?? selectedIndex }
-
-    private var thumbX: CGFloat { geometry.thumbX(selected: selectedIndex, dragCenter: dragCenter) }
-
     var body: some View {
-        // ONE glass thumb that travels, like the system segmented control:
-        // tapping a segment slides it there with a spring, and it can be
-        // picked up and dragged across the segments (a tick for each one it
-        // crosses, the choice is made on release). The previous version put
-        // glass on the selected button, so a change was glass vanishing from
-        // one button and appearing on another - it felt like buttons.
-        //
-        // The thumb is the labels' BACKGROUND, so the labels are always drawn
-        // above it, and they use `.primary` while on glass (see liquidGlass()).
-        HStack(spacing: 0) {
-            ForEach(options.indices, id: \.self) { i in
-                Text(label(options[i]))
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(i == highlighted ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(Theme.ink2))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, verticalPadding)
-                    .contentShape(.rect)
-                    .accessibilityAddTraits(i == selectedIndex ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction { commit(i) }
+        // The REAL system control. On iOS 26 a segmented `Picker` IS the Liquid
+        // Glass segmented control: one glass thumb that slides and bounces
+        // under the finger, can be dragged across the segments, and gives the
+        // system's own haptics, Dynamic Type, Reduce Motion and VoiceOver
+        // behaviour for free - exactly what an app-made imitation can only
+        // approximate (and twice did, badly: first glass jumping between
+        // buttons, then a hand-built thumb). Never rebuild it.
+        Picker("", selection: $selection) {
+            ForEach(options, id: \.self) { option in
+                Text(label(option)).tag(option)
             }
         }
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
-        .background(alignment: .leading) {
-            if size.width > 0 {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Theme.accent.opacity(0.28)), in: .capsule)
-                    .frame(width: segment, height: size.height)
-                    .scaleEffect(dragCenter == nil ? 1 : 1.07)
-                    .offset(x: thumbX)
-                    .transition(.identity)
-                    // Following the finger must not lag; settling should glide.
-                    .animation(dragCenter != nil || reduceMotion ? nil : .smooth(duration: 0.34), value: thumbX)
-                    .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: dragCenter == nil)
-            }
-        }
-        .simultaneousGesture(
-            // Simultaneous, so a vertical swipe that starts on the control
-            // still scrolls the list behind it (and is not taken as a choice).
-            // A TAP picks nothing up: it just selects, and the thumb glides.
-            // Only a clear sideways move picks the thumb up (see SegmentedGeometry).
-            DragGesture(minimumDistance: 0)
-                .onChanged { v in
-                    guard SegmentedGeometry.beginsDrag(v.translation) else { return }
-                    let grab = geometry.grabOffset(start: v.startLocation.x, selected: selectedIndex)
-                    dragCenter = v.location.x - grab
-                }
-                .onEnded { v in
-                    let wasDragging = dragCenter != nil
-                    let target = geometry.index(at: dragCenter ?? v.location.x)
-                    dragCenter = nil
-                    if wasDragging || !SegmentedGeometry.wasScroll(v.translation) { commit(target) }
-                }
-        )
-        .padding(3)
-        .background(Capsule().fill(Theme.fill))
-        .overlay(Capsule().strokeBorder(Theme.glassEdge, lineWidth: 0.5))
-        .sensoryFeedback(.selection, trigger: highlighted)
-        .accessibilityElement(children: .contain)
-    }
-
-    private func commit(_ i: Int) {
-        guard options.indices.contains(i), options[i] != selection else { return }
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.34)) { selection = options[i] }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(verticalPadding >= 12 ? .large : .regular)
     }
 }
 
