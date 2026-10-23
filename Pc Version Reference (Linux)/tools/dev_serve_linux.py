@@ -43,12 +43,20 @@ too: `pip install -e ".[dev,gui]"`): `python -m avg.shell`.
 Not part of the shipped app; avg.shell owns the real launch path.
 """
 
+import os
+
 import uvicorn
 
 from avg.api.app import create_app
 from avg.shell import resolve_output_root
 
-TOKEN = "devtoken"
+# Overridable so this can be run from a container or a second machine on the
+# LAN (the Base44 sandbox does exactly that: the browser is outside this
+# process's network namespace). Left unset, every value is the original
+# loopback-and-`devtoken` one this file has always used.
+HOST = os.environ.get("AVG_DEV_HOST", "127.0.0.1")
+PORT = int(os.environ.get("AVG_DEV_PORT", "8756"))
+TOKEN = os.environ.get("AVG_DEV_TOKEN", "devtoken")
 
 # resolve_output_root(), not a hardcoded path: it already does the right
 # thing here (checks AVG_OUTPUT_ROOT, then settings.json, then falls back
@@ -57,5 +65,5 @@ TOKEN = "devtoken"
 app = create_app(token=TOKEN, output_root=resolve_output_root())
 
 if __name__ == "__main__":
-    print(f"http://127.0.0.1:8756/?token={TOKEN}")
-    uvicorn.run(app, host="127.0.0.1", port=8756, log_level="info")
+    print(f"http://{HOST}:{PORT}/?token={TOKEN}")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="info")

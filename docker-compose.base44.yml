@@ -1,0 +1,131 @@
+# Base44 sandbox environment for AVG Studio.
+#
+# The repository root is the native iOS app (Swift, built with Xcode - it
+# cannot run in this Linux container and cannot be shown in a browser
+# preview). The runnable application here is the project's own Linux
+# desktop/web edition in "Pc Version Reference (Linux)/": a FastAPI bridge
+# (avg/api) plus a React 19 UI (web/). Both run from the bind-mounted source
+# with their normal dev commands, so edits are live.
+#
+#   web  - Vite dev server, host port 3000 (the single public entry point)
+#   api  - uvicorn on the compose network; every /api and /ws request is
+#          proxied by Vite, so the browser only ever talks to port 3000
+#
+# Single-origin wiring on purpose: the bridge's session token travels in the
+# X-AVG-Token header / ?token= query parameter, not a cookie, and keeping one
+# origin means no CORS layer to maintain.
+name: avg-studio
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: .base44/Dockerfile.api
+    working_dir: /app
+    # tools/dev_serve_linux.py is the project's own browser dev server (no
+    # pywebview/Qt). AVG_DEV_* are its env overrides, added so it can bind
+    # outside loopback and hand the proxy a known token.
+    command: ["sh", "-ec", "exec python tools/dev_serve_linux.py"]
+    volumes:
+      - "./Pc Version Reference (Linux):/app"
+      # The app writes its library, settings, channels, secrets and caches
+      # under $HOME / XDG dirs; a named volume keeps them across rebuilds.
+      - avg-home:/data/home
+    environment:
+      - BASE44_PREVIEW_MODE
+      - PYTHONUNBUFFERED=1
+      # dev_serve_linux.py is run by path, so /app is not on sys.path by
+      # itself; the project's own docs use PYTHONPATH (or an editable
+      # install) for exactly this.
+      - PYTHONPATH=/app
+      - HOME=/data/home
+      - XDG_CONFIG_HOME=/data/home/.config
+      - XDG_CACHE_HOME=/data/home/.cache
+      - XDG_DOCUMENTS_DIR=/data/home/Documents
+      - XDG_VIDEOS_DIR=/data/home/Videos
+      - AVG_DEV_HOST=0.0.0.0
+      - AVG_DEV_PORT=8756
+      # Local-only session token, generated here - not a user credential and
+      # not a secret. The bridge rejects every request without it, so Vite's
+      # proxy presents it on behalf of a browser that was not opened with
+      # ?token= (the preview iframe cannot be given a query string).
+      - AVG_DEV_TOKEN=devtoken
+      - PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
+    # Optional: providers' keys can also come from env (VAF_<PROVIDER>_API_KEY,
+    # see avg/config/secrets.py). Missing file is fine - the app boots without
+    # any provider key and only the AI phases need one.
+    env_file:
+      - path: /run/base44/app.env
+        required: false
+    healthcheck:
+      # Responsiveness of the real bridge (a cheap authenticated read) plus
+      # the two binaries renders depend on.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import shutil, sys, urllib.request
+          if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+              print("ffmpeg/ffprobe missing"); sys.exit(1)
+          req = urllib.request.Request("http://127.0.0.1:8756/api/keys", headers={"X-AVG-Token": "devtoken"})
+          try:
+              ok = urllib.request.urlopen(req, timeout=4).status == 200
+          except Exception as exc:
+              print(f"api not answering: {exc}"); sys.exit(1)
+          sys.exit(0 if ok else 1)
+      interval: 15s
+      timeout: 8s
+      retries: 10
+      start_period: 40s
+    restart: on-failure
+    labels:
+      base44.project: "AVG Studio"
+      base44.kind: api
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /app/web
+    command:
+      - sh
+      - -ec
+      - CI=true npm ci --no-audit --no-fund && exec npm run dev -- --host 0.0.0.0 --port 5173
+    volumes:
+      - "./Pc Version Reference (Linux)/web:/app/web"
+      # Not from the host: npm ci owns this directory, and keeping it out of
+      # the bind mount keeps the checkout clean.
+      - web-node-modules:/app/web/node_modules
+    environment:
+      - BASE44_PREVIEW_MODE
+      - CI=true
+      # The bridge lives in the api service; vite.config.ts proxies /api and
+      # /ws to this origin and presents the session token there.
+      - AVG_DEV_API_URL=http://api:8756
+      - AVG_DEV_TOKEN=devtoken
+      # Vite >= 6.1 appends this to server.allowedHosts, which is how the
+      # preview's public hostname is accepted without weakening the default.
+      - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS
+    ports:
+      - "3000:5173"
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: on-failure
+    labels:
+      base44.project: "AVG Studio"
+      base44.kind: web
+      base44.port: "3000"
+
+volumes:
+  avg-home:
+  web-node-modules:

@@ -1,0 +1,27 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "VAF_GROQ_API_KEY",
+      "description": "Groq API key (console.groq.com/keys). The shipped default text model is groq/llama-3.3-70b-versatile, so without it the Brief and Script phases cannot run.",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "VAF_ELEVENLABS_API_KEY",
+      "description": "ElevenLabs API key (elevenlabs.io -> profile -> API keys). The shipped default voice provider is ElevenLabs; without it the Voice phase cannot run.",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "VAF_GEMINI_API_KEY",
+      "description": "Optional Google Gemini API key (aistudio.google.com/apikey) for Gemini text and image generation.",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "VAF_OPENAI_API_KEY",
+      "description": "Optional OpenAI API key (platform.openai.com/api-keys) for OpenAI image generation.",
+      "requiredAtBoot": false
+    }
+  ]
+}

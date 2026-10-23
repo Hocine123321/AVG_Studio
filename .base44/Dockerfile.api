@@ -1,0 +1,48 @@
+# Python runtime for the Linux/web edition of AVG Studio
+# ("Pc Version Reference (Linux)/"). Sandbox-only: it carries the system
+# tools and interpreter dependencies, never the application source - that is
+# bind-mounted at /app by docker-compose.base44.yml so edits show up live.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# ffmpeg/ffprobe: the render phase and every thumbnail shell out to them
+# (see avg/media/environment.py - a frozen build ships vendor/ffmpeg, a dev
+# run expects them on PATH).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# Mirrors "Pc Version Reference (Linux)/pyproject.toml": [project].dependencies,
+# the media extra (numpy/Pillow/pydub) and the dev extra (pytest/ruff/mypy).
+# A Dockerfile has no access to the pyproject at build time here (the source is
+# bind-mounted, not copied), so the list is spelled out; the project's own
+# dependency declarations stay the source of truth for real installs.
+RUN pip install --no-cache-dir \
+      fastapi \
+      "uvicorn[standard]" \
+      "pydantic>=2" \
+      edge-tts \
+      keyring \
+      cryptography \
+      httpx \
+      numpy \
+      Pillow \
+      pydub \
+      pytest \
+      ruff \
+      mypy
+
+# avg/config/secrets.py keeps the Fernet key in the OS keyring (Secret
+# Service). A container has no D-Bus session and therefore no keyring, so
+# avg/shell.py's headless path would fail closed and the Settings screen
+# could not save a provider key at all. keyrings.alt supplies a file-backed
+# backend; docker-compose.base44.yml selects it explicitly through
+# PYTHON_KEYRING_BACKEND. This is a sandbox convenience and is *not*
+# equivalent to the Secret-Service protection a real desktop install has -
+# see AGENTS.md.
+RUN pip install --no-cache-dir keyrings.alt
+
+WORKDIR /app
+EXPOSE 8756
