@@ -711,6 +711,7 @@ final class Store {
                 // slow video can be diagnosed instead of guessed at.
                 record(id, "\(phase.title) took \(String(format: "%.1f", (ContinuousClock.now - phaseStart).seconds))s.")
                 Recovery.noteSuccess()
+                recordModelSuccess(phase, project: id)
                 return
             } catch is CancellationError {
                 throw CancellationError()
@@ -751,6 +752,24 @@ final class Store {
                 if !(await Recovery.apply(action, plan: plan, store: self)) { throw error }
             }
         }
+    }
+
+    /// A phase that calls an AI just finished: remember the model it ran on, so
+    /// a later failure can fall back to something that is known to work for this
+    /// account (ModelHistory.swift). Only the three phases that call a model by
+    /// name count - captions and render may not have touched the writer at all.
+    /// Uses the settings this video ACTUALLY ran on, so a fallback that was
+    /// applied for the run and then succeeded is recorded as working too.
+    private func recordModelSuccess(_ phase: PhaseID, project id: String) {
+        let kind: AIKind
+        switch phase {
+        case .writing: kind = .writer
+        case .visuals: kind = .image
+        case .voice: kind = .voice
+        case .captions, .render: return
+        }
+        guard let slot = Recovery.slot(kind, settings: effectiveSettings(for: id)) else { return }
+        modelPrefs.recordSuccess(kind: Recovery.historyKey(kind), provider: slot.provider, model: slot.current)
     }
 
     /// Called by the prompt sheet when the user taps a choice.

@@ -382,7 +382,7 @@ struct FallbacksSettingsPage: View {
                 if let c = catalogs.writerCatalog(store.settings) {
                     ModelRow(title: "Fallback model", value: $store.settings.writerFallbackModel, catalog: c)
                         .anchored(.writerFallback)
-                    InfoNote(text: "Empty = built-in light model (\(Recovery.fallbackModel(.writer, settings: store.settings) ?? "none")).")
+                    InfoNote(text: "Empty = automatic: the model that last worked, else a built-in light one (now: \(Recovery.fallbackModel(.writer, settings: store.settings, prefs: store.modelPrefs) ?? "none")).")
                 } else {
                     InfoNote(text: "\(store.settings.text.label) runs on your device, so there is no cheaper model to fall back to.")
                         .anchored(.writerFallback)
@@ -393,7 +393,7 @@ struct FallbacksSettingsPage: View {
                 if let c = catalogs.imageCatalog(store.settings) {
                     ModelRow(title: "Fallback model", value: $store.settings.imageFallbackModel, catalog: c)
                         .anchored(.imageFallback)
-                    InfoNote(text: "Empty = built-in light model (\(Recovery.fallbackModel(.image, settings: store.settings) ?? "none")).")
+                    InfoNote(text: "Empty = automatic: the model that last worked, else a built-in light one (now: \(Recovery.fallbackModel(.image, settings: store.settings, prefs: store.modelPrefs) ?? "none")).")
                 } else {
                     InfoNote(text: "\(store.settings.image.label) has a single model, so there is no cheaper one to fall back to.")
                         .anchored(.imageFallback)
@@ -404,7 +404,7 @@ struct FallbacksSettingsPage: View {
                 if let c = catalogs.voiceFallbackCatalog(store.settings) {
                     ModelRow(title: "Fallback model", value: $store.settings.voiceFallbackModel, catalog: c)
                         .anchored(.voiceFallback)
-                    InfoNote(text: "Empty = built-in light model (\(Recovery.fallbackModel(.voice, settings: store.settings) ?? "none")).")
+                    InfoNote(text: "Empty = automatic: the model that last worked, else a built-in light one (now: \(Recovery.fallbackModel(.voice, settings: store.settings, prefs: store.modelPrefs) ?? "none")).")
                 } else {
                     InfoNote(text: "\(store.settings.voice.label) has no cheaper model to fall back to.")
                         .anchored(.voiceFallback)

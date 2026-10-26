@@ -125,6 +125,8 @@ final class ModelPrefs {
 
     private(set) var favourites = ModelFavourites()
     private(set) var probes = ProbeResults()
+    /// Models that recently finished a real phase, newest first (ModelHistory.swift).
+    private(set) var history = ModelHistory()
     /// Sweeps in progress, by model list.
     private(set) var sweeping: [String: Sweep] = [:]
     /// Why the last sweep of a list stopped early (a rejected key), if it did.
@@ -133,6 +135,7 @@ final class ModelPrefs {
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private let favouritesURL: URL
     @ObservationIgnored private let probesURL: URL
+    @ObservationIgnored private let historyURL: URL
 
     /// `directory` is injectable so tests never touch the real Application Support.
     init(directory: URL? = nil) {
@@ -140,8 +143,10 @@ final class ModelPrefs {
             .appendingPathComponent("ModelPrefs", isDirectory: true)
         favouritesURL = dir.appendingPathComponent("model_prefs.json")
         probesURL = dir.appendingPathComponent("working_models.json")
+        historyURL = dir.appendingPathComponent("model_history.json")
         favourites = Self.read(ModelFavourites.self, from: favouritesURL) ?? ModelFavourites()
         probes = Self.read(ProbeResults.self, from: probesURL) ?? ProbeResults()
+        history = Self.read(ModelHistory.self, from: historyURL) ?? ModelHistory()
     }
 
     // MARK: Favourites
@@ -184,6 +189,19 @@ final class ModelPrefs {
     static func merged(existing: [String: ProbeResult], fresh: [String: ProbeResult]) -> [String: ProbeResult] {
         existing.merging(fresh) { _, new in new }
     }
+
+    // MARK: Working-model history
+
+    /// A phase just finished on `model`. Skips the write when it is already the
+    /// newest entry, so a run of videos on one model does not rewrite the file
+    /// every time (the date of the first success is kept; it only ages the entry).
+    func recordSuccess(kind: String, provider: String, model: String) {
+        if let newest = history.recent(kind: kind).first, newest.provider == provider, newest.model == model { return }
+        history.record(kind: kind, provider: provider, model: model)
+        Self.write(history, to: historyURL)
+    }
+
+    func recentUses(kind: String) -> [ModelUse] { history.recent(kind: kind) }
 
     // MARK: Sweeping
 

@@ -87,39 +87,80 @@ enum Recovery {
         switch phase { case .visuals: return .image; case .voice: return .voice; default: return .writer }
     }
 
-    /// The model this AI would drop to: the user's own fallback if set, else a
-    /// built-in light preset for the provider currently in use. `nil` when
-    /// there is nothing lighter (Apple on-device, Stable Horde...).
-    static func fallbackModel(_ kind: AIKind, settings s: AppSettings) -> String? {
+    /// What an AI is running on right now: the provider, the model, and that
+    /// provider's built-in light preset. `nil` when the AI runs on the device
+    /// (Apple) or on a provider with one model and no preset (Stable Horde:
+    /// only a user-chosen fallback applies there).
+    struct Slot {
+        let provider: String
+        let current: String
+        let preset: String?
+    }
+
+    static func slot(_ kind: AIKind, settings s: AppSettings) -> Slot? {
         switch kind {
         case .writer:
-            if !s.writerFallbackModel.isEmpty { return s.writerFallbackModel }
             switch s.text {
-            case .gemini: return "gemini-2.5-flash-lite"
-            case .groq: return "llama-3.1-8b-instant"
-            case .pollinations: return "openai-fast"
+            case .gemini: return Slot(provider: "gemini", current: s.geminiModel, preset: "gemini-2.5-flash-lite")
+            case .groq: return Slot(provider: "groq", current: s.groqModel, preset: "llama-3.1-8b-instant")
+            case .pollinations: return Slot(provider: "pollinations", current: s.pollinationsTextModel, preset: "openai-fast")
             case .apple: return nil
             }
         case .image:
-            if !s.imageFallbackModel.isEmpty { return s.imageFallbackModel }
             switch s.image {
-            case .gemini: return "gemini-2.5-flash-image"
-            case .pollinations: return "flux"
-            default: return nil   // Stable Horde: only a user-chosen fallback (above) applies
+            case .gemini: return Slot(provider: "gemini", current: s.geminiImageModel, preset: "gemini-2.5-flash-image")
+            case .pollinations: return Slot(provider: "pollinations", current: s.pollinationsImageModel, preset: "flux")
+            default: return nil
             }
         case .voice:
-            if !s.voiceFallbackModel.isEmpty { return s.voiceFallbackModel }
             switch s.voice {
-            case .elevenlabs: return "eleven_flash_v2_5"
-            default: return nil   // Gemini voice: only a user-chosen fallback applies
+            case .elevenlabs: return Slot(provider: "elevenlabs", current: s.elevenModel, preset: "eleven_flash_v2_5")
+            case .gemini: return Slot(provider: "gemini", current: s.geminiVoiceModel, preset: nil)
+            case .apple: return nil
             }
         }
     }
 
+    /// The key a kind of AI is filed under in `ModelHistory`.
+    static func historyKey(_ kind: AIKind) -> String {
+        switch kind {
+        case .writer: return "writer"
+        case .image: return "image"
+        case .voice: return "voice"
+        }
+    }
+
+    /// Models already dropped to (or away from) in the current streak of
+    /// trouble, per kind, so two failing models are not offered back and forth
+    /// forever. Cleared by `noteSuccess()`, like `failures`.
+    private static var triedThisStreak: [String: Set<String>] = [:]
+
+    /// The model this AI would drop to: the user's own fallback if set, else
+    /// the newest model of this provider that recently worked (`prefs.history`,
+    /// vetoed by any probe that marked it bad), else a built-in light preset.
+    /// `nil` when there is nothing to drop to. See `FallbackPlanner` for the order.
+    static func fallbackModel(_ kind: AIKind, settings s: AppSettings, prefs: ModelPrefs? = nil) -> String? {
+        let own: String
+        switch kind {
+        case .writer: own = s.writerFallbackModel
+        case .image: own = s.imageFallbackModel
+        case .voice: own = s.voiceFallbackModel
+        }
+        guard let sl = slot(kind, settings: s) else { return own.isEmpty ? nil : own }
+        // Only the text lists are ever probed (ModelProbe.isProbeable), so only the writer has vetoes.
+        var excluded = triedThisStreak[historyKey(kind)] ?? []
+        if kind == .writer, let results = prefs?.probes.byCatalog["\(sl.provider)_text"] {
+            excluded.formUnion(results.filter { !$0.value.works }.map { $0.key })
+        }
+        return FallbackPlanner.pick(
+            userChoice: own, provider: sl.provider, current: sl.current, preset: sl.preset,
+            history: prefs?.recentUses(kind: historyKey(kind)) ?? [], excluded: excluded)
+    }
+
     /// True when the fallback differs from what is already set (otherwise
     /// offering it would just repeat the same failing request).
-    static func fallbackIsUseful(_ kind: AIKind, settings s: AppSettings) -> Bool {
-        guard let m = fallbackModel(kind, settings: s) else { return false }
+    static func fallbackIsUseful(_ kind: AIKind, settings s: AppSettings, prefs: ModelPrefs? = nil) -> Bool {
+        guard let m = fallbackModel(kind, settings: s, prefs: prefs) else { return false }
         switch kind {
         case .writer:
             switch s.text {
@@ -153,7 +194,10 @@ enum Recovery {
         // What THIS video is running on: its own fallbacks included, so a
         // fallback already applied is not offered again.
         let s = store.effectiveSettings(for: project)
-        guard fallbackIsUseful(kind, settings: s), let m = fallbackModel(kind, settings: s) else { return nil }
+        guard fallbackIsUseful(kind, settings: s, prefs: store.modelPrefs),
+              let m = fallbackModel(kind, settings: s, prefs: store.modelPrefs) else { return nil }
+        // The model being left is remembered so it is not offered straight back if `m` fails too.
+        if let leaving = slot(kind, settings: s)?.current { triedThisStreak[historyKey(kind), default: []].insert(leaving) }
         switch kind {
         case .writer:
             switch s.text {
@@ -182,7 +226,10 @@ enum Recovery {
     /// Failures remembered this session, per provider (safeguard 9).
     private static var failures: [String: Int] = [:]
 
-    static func noteSuccess() { failures.removeAll() }
+    static func noteSuccess() {
+        failures.removeAll()
+        triedThisStreak.removeAll()
+    }
 
     /// Builds the prompt for a failed phase. `nil` means "nothing useful to
     /// offer" (a plain bug / cancelled) - the caller falls back to the old
@@ -207,8 +254,8 @@ enum Recovery {
         let switches: [RecoveryAction] = others.prefix(2).map { .otherProvider(name: $0) }
         var plan: RecoveryPlan?
         let running = store.effectiveSettings(for: project)
-        let canFallback = fallbackIsUseful(aiKind(for: phase), settings: running)
-        let fb = fallbackModel(aiKind(for: phase), settings: running) ?? ""
+        let canFallback = fallbackIsUseful(aiKind(for: phase), settings: running, prefs: store.modelPrefs)
+        let fb = fallbackModel(aiKind(for: phase), settings: running, prefs: store.modelPrefs) ?? ""
         switch kind {
         case .network, .timeout:
             plan = RecoveryPlan(projectID: project, phase: phase, title: "\(provider) isn't responding",
