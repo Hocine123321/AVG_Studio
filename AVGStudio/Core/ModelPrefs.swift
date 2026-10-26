@@ -127,6 +127,13 @@ final class ModelPrefs {
     private(set) var probes = ProbeResults()
     /// Models that recently finished a real phase, newest first (ModelHistory.swift).
     private(set) var history = ModelHistory()
+    /// Models the APP chose (catalogue key -> model id), as opposed to ones the
+    /// person set. ModelAutoSetup only ever replaces the factory default or a
+    /// model it picked itself - anything else was a deliberate choice.
+    private(set) var autoPicks = AutoPicks()
+    /// What the last automatic setup did, newest last. Memory only: it is a
+    /// status line for the screen, not something to keep.
+    private(set) var setupNotes: [String] = []
     /// Sweeps in progress, by model list.
     private(set) var sweeping: [String: Sweep] = [:]
     /// Why the last sweep of a list stopped early (a rejected key), if it did.
@@ -136,6 +143,7 @@ final class ModelPrefs {
     @ObservationIgnored private let favouritesURL: URL
     @ObservationIgnored private let probesURL: URL
     @ObservationIgnored private let historyURL: URL
+    @ObservationIgnored private let autoPicksURL: URL
 
     /// `directory` is injectable so tests never touch the real Application Support.
     init(directory: URL? = nil) {
@@ -144,9 +152,11 @@ final class ModelPrefs {
         favouritesURL = dir.appendingPathComponent("model_prefs.json")
         probesURL = dir.appendingPathComponent("working_models.json")
         historyURL = dir.appendingPathComponent("model_history.json")
+        autoPicksURL = dir.appendingPathComponent("auto_picks.json")
         favourites = Self.read(ModelFavourites.self, from: favouritesURL) ?? ModelFavourites()
         probes = Self.read(ProbeResults.self, from: probesURL) ?? ProbeResults()
         history = Self.read(ModelHistory.self, from: historyURL) ?? ModelHistory()
+        autoPicks = Self.read(AutoPicks.self, from: autoPicksURL) ?? AutoPicks()
     }
 
     // MARK: Favourites
@@ -208,9 +218,13 @@ final class ModelPrefs {
     /// Probes every model in `catalog`, one at a time (gently: a burst of
     /// calls is how a free tier gets rate-limited), recording as it goes.
     func startSweep(_ catalog: ModelCatalog) {
-        let key = catalog.cacheKey
-        guard ModelProbe.isProbeable(key), tasks[key] == nil, !catalog.entries.isEmpty else { return }
-        let ids = catalog.entries.map(\.id)
+        startSweep(catalogKey: catalog.cacheKey, ids: catalog.entries.map(\.id))
+    }
+
+    /// The same sweep over just `ids` - the automatic setup checks a short list
+    /// (the few best candidates), not every model the provider offers.
+    func startSweep(catalogKey key: String, ids: [String]) {
+        guard ModelProbe.isProbeable(key), tasks[key] == nil, !ids.isEmpty else { return }
         sweeping[key] = Sweep(done: 0, total: ids.count)
         lastNote[key] = nil
         tasks[key] = Task { [weak self] in
@@ -241,6 +255,27 @@ final class ModelPrefs {
         tasks[key] = nil
     }
 
+    /// Probes `ids` and returns when done. If a sweep of this list is already
+    /// running (the person pressed "check"), waits for that one instead.
+    func check(catalogKey key: String, models ids: [String]) async {
+        startSweep(catalogKey: key, ids: ids)
+        await tasks[key]?.value
+    }
+
+    // MARK: Automatic picks
+
+    func autoPick(_ catalogKey: String) -> String? { autoPicks.byCatalog[catalogKey] }
+
+    func setAutoPick(_ model: String, for catalogKey: String) {
+        autoPicks.byCatalog[catalogKey] = model
+        Self.write(autoPicks, to: autoPicksURL)
+    }
+
+    func addSetupNote(_ line: String) {
+        setupNotes.append(line)
+        if setupNotes.count > 20 { setupNotes.removeFirst(setupNotes.count - 20) }
+    }
+
     // MARK: Storage
 
     private static func read<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
@@ -253,4 +288,10 @@ final class ModelPrefs {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
     }
+}
+
+/// Which model the app picked for each list, persisted so a later run can tell
+/// "the app chose this" from "the person chose this".
+struct AutoPicks: Codable, Equatable {
+    var byCatalog: [String: String] = [:]
 }

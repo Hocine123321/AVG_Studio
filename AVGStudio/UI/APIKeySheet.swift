@@ -140,6 +140,9 @@ struct APIKeySheet: View {
             ok = Keychain.set(key, backupDraft, slot: .backup)
         }
         if ok {
+            // A new main key: let the app check that provider's models and pick
+            // the best working one (ModelAutoSetup), without another trip to Settings.
+            if !draft.trimmed.isEmpty { NotificationCenter.default.post(name: .avgKeySaved, object: nil) }
             onChange()
             dismiss()
         } else {

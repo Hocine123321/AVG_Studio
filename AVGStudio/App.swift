@@ -104,6 +104,13 @@ struct RootView: View {
         .environment(\.appFontChoice, store.settings.appFont)
         .font(store.settings.appFont == .caprasimo ? Font.custom("Caprasimo-Regular", size: 17) : nil)
         .preferredColorScheme(store.settings.themePreference.colorScheme)
+        // A provider key was just saved: check its models in the background and
+        // pick the best working one. The same check runs once per launch for keys
+        // saved earlier whose models were never (or not recently) checked.
+        .onReceive(NotificationCenter.default.publisher(for: .avgKeySaved)) { _ in
+            Task { await ModelAutoSetup.run(store: store) }
+        }
+        .task { await ModelAutoSetup.run(store: store, force: false) }
         .onChange(of: scenePhase) { _, phase in
             // Write any debounced settings edit before we can be suspended.
             if phase != .active { store.flushMeta() }
