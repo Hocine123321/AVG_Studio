@@ -5,7 +5,7 @@ import SwiftUI
 ///   0  Hero            - what the app does
 ///   1  How it works    - the five real pipeline steps (`PhaseID`)
 ///   2  First channel   - name + niche (what the old single screen collected)
-///   3  Your AI         - what works with no key, plus optional keys
+///   3  Your AI team    - Free / Balanced / Premium, plus the keys they need
 ///   4  All set         - summary, then straight into Create
 ///
 /// Design rules carried over from the rest of the app: one filled
@@ -28,6 +28,7 @@ struct WelcomeView: View {
     @State private var niche = ""
     @State private var savedKeys: Set<APIKey> = []
     @State private var editingKey: APIKey?
+    @State private var preset: AITeamPreset = .free
     @FocusState private var field: Field?
 
     private enum Field: Hashable { case name, niche }
@@ -75,6 +76,11 @@ struct WelcomeView: View {
             APIKeySheet(key: key, showsBackup: false) { refreshSavedKeys() }
         }
         .onAppear { refreshSavedKeys() }
+        // Adding a Google key is the moment Balanced starts to make sense: move
+        // the choice there, unless the person already picked something else.
+        .onChange(of: savedKeys) { old, new in
+            if new.contains(.gemini), !old.contains(.gemini), preset == .free { preset = .balanced }
+        }
     }
 
     @ViewBuilder private var page: some View {
@@ -199,23 +205,42 @@ struct WelcomeView: View {
         }
     }
 
-    // MARK: Step 3 - your AI
+    // MARK: Step 3 - your AI team
+
+    /// What the chosen preset puts in each role, given the keys saved now.
+    private var team: TeamAssignment {
+        AITeamPreset.assignment(preset, keys: savedKeys, appleAvailable: AppleText.isAvailable)
+    }
 
     private var aiStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            titleText("Ready without a key")
-            leadText("These work out of the box. Add a key only if you want a different writer, image maker or voice.")
+            titleText("Your AI team")
+            leadText("Choose how much to lean on online AI. Every model can still be changed later in Settings.")
+
             VStack(spacing: 0) {
-                includedRow("Writer", writerName)
-                hairline
-                includedRow("Images", ImageProviderKind.pollinations.label)
-                hairline
-                includedRow("Voice", VoiceProviderKind.apple.label)
+                ForEach(Array(AITeamPreset.allCases.enumerated()), id: \.element) { i, option in
+                    if i > 0 { hairline }
+                    presetRow(option)
+                }
             }
             .padding(.horizontal, 14)
             .glassCard(24, padding: 6)
 
-            Text("Optional keys").sectionHeader().padding(.leading, 6).padding(.top, 4)
+            VStack(spacing: 0) {
+                includedRow("Writer", team.text.label)
+                hairline
+                includedRow("Images", team.image.label)
+                hairline
+                includedRow("Voice", team.voice.label)
+            }
+            .padding(.horizontal, 14)
+            .glassCard(24, padding: 6)
+
+            needsCard
+            checkStatus
+
+            Text("Keys")
+                .sectionHeader().padding(.leading, 6).padding(.top, 4)
             VStack(spacing: 0) {
                 ForEach(Array(optionalKeys.enumerated()), id: \.element) { i, key in
                     if i > 0 { hairline }
@@ -234,9 +259,70 @@ struct WelcomeView: View {
             .padding(.horizontal, 14)
             .glassCard(24, padding: 6)
 
-            Text("Keys stay in your iPhone's Keychain, on this device only. Add or change them any time in Settings.")
+            Text("Keys stay in your iPhone's Keychain, on this device only. When you add one, the app checks its models and picks the best one that works.")
                 .font(.caption).foregroundStyle(Theme.ink2)
                 .padding(.horizontal, 4)
+        }
+    }
+
+    private func presetRow(_ option: AITeamPreset) -> some View {
+        Button {
+            Haptics.light()
+            preset = option
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: preset == option ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(preset == option ? Theme.accent : Theme.ink2)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
+                    Text(option.blurb).font(.caption).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 10)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(preset == option ? .isSelected : [])
+    }
+
+    /// Shown when the chosen preset wants a key that is not saved yet, with a
+    /// button for each, so the person is never left wondering why it fell back.
+    @ViewBuilder private var needsCard: some View {
+        if !team.needs.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("\(preset.title) needs \(team.needs.map { $0.label }.joined(separator: " and ")). Until you add it, the free options are used.")
+                    .font(.callout).foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(team.needs) { key in
+                    Button { editingKey = key } label: {
+                        Text("Add \(key.label) key").font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity).padding(.vertical, 4)
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .glassCard(24, padding: 6)
+        }
+    }
+
+    /// Live feedback from `ModelAutoSetup` after a key is saved.
+    @ViewBuilder private var checkStatus: some View {
+        if !store.modelPrefs.sweeping.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Checking your models...").font(.callout).foregroundStyle(Theme.ink2)
+            }
+            .padding(.horizontal, 6)
+        } else if let note = store.modelPrefs.setupNotes.last {
+            Label(note, systemImage: "checkmark.circle.fill")
+                .font(.callout).foregroundStyle(Theme.ink2)
+                .padding(.horizontal, 6)
         }
     }
 
@@ -249,12 +335,6 @@ struct WelcomeView: View {
         }
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-    }
-
-    /// Apple Intelligence when the device has it, otherwise the free online
-    /// writer `finish(to:)` will select.
-    private var writerName: String {
-        (AppleText.isAvailable ? TextProviderKind.apple : TextProviderKind.pollinations).label
     }
 
     // MARK: Step 4 - all set
@@ -273,9 +353,11 @@ struct WelcomeView: View {
             VStack(spacing: 0) {
                 summaryRow("Channel", resolvedChannelName)
                 hairline
-                summaryRow("Writer", writerName)
+                summaryRow("Writer", team.text.label)
                 hairline
-                summaryRow("Narrator", VoiceProviderKind.apple.label)
+                summaryRow("Images", team.image.label)
+                hairline
+                summaryRow("Narrator", team.voice.label)
                 hairline
                 summaryRow("Keys", savedKeys.isEmpty ? "None yet" : "\(savedKeys.count) connected")
             }
@@ -398,7 +480,13 @@ struct WelcomeView: View {
         channel.niche = niche.trimmed
         store.upsert(channel)
         store.activate(channel)
-        if !AppleText.isAvailable { store.settings.text = .pollinations }
+        // The chosen team (Free / Balanced / Premium), staffed with the keys saved
+        // right now. This also covers the old rule that the writer falls back to
+        // Pollinations where Apple Intelligence is unavailable.
+        let staffed = team
+        store.settings.text = staffed.text
+        store.settings.image = staffed.image
+        store.settings.voice = staffed.voice
         field = nil
         Haptics.success()
         store.tab = destination
