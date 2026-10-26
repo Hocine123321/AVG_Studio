@@ -72,6 +72,9 @@ with `@testable import AVGStudio`.
 | `Agent.swift` | The in-app assistant's loop: bounded tool calling, approval continuation, spend limit, one auto-start per message, compaction, failover, self-test, "ready/stopped" announcements | SwiftUI, request shapes |
 | `KeyBackup.swift` | The backup API key's 30-minute window (a date per provider in UserDefaults, so a relaunch doesn't reset it). `activateIfPossible(after:)` opens it when a KEY-level failure (rejected, quota, billing, rate limit past all retries) hits a provider with a backup saved, after the fallback model and the other service were tried; a failing backup is never retried with itself | Providers |
 | `RunOverrides.swift` | Per-VIDEO setting overrides. A fallback model or provider is a decision about one run: it lives here keyed by project, `Store.effectiveSettings(for:)` lays it on the person's settings, the pipeline reads ONLY that, and ending the run discards it. Nothing global changes: not the Settings screen, not another video, not the saved file | Views |
+| `ModelHistory.swift` | `ModelHistory` (the newest models that finished a phase, per kind of AI, newest first, capped) and `FallbackPlanner`, the pure rule behind "no fallback chosen": the person's own pick, else the newest working model of the SAME provider that is not failing now, not already tried this streak and not marked bad by a probe, else the built-in light preset. Another provider is never picked here |
+| `ModelAutoSetup.swift` | Runs when a Gemini or Groq key is saved (and once per launch for keys never checked): fetch the live list, rank it, probe only the top three, switch to the best that works. Replaces only the factory default or its own earlier pick, never a model the person chose; image and voice are never probed (cost), only replaced if no longer offered. `shouldReplace` is the pure decision |
+| `AITeam.swift` | The Welcome "Your AI team" presets (Free / Balanced / Premium) as a pure table: who staffs the writer, images and voice given the keys saved, and which keys are missing. A preset never half-applies |
 | `AgentCapability.swift` | The seven assistant capabilities (one switch each; to the model each is a set of tools; off = not offered) and which tools each owns | Views |
 | `AgentSettingsCatalog.swift` | The hand-written list of 24 settings the assistant may read and, with approval, change. No `agent...` field and no key is reachable (a test throws values at every entry and checks) | Views |
 | `AgentCapabilityTools.swift` | `estimate_cost`, `manage_project`, `change_setting`, `edit_channel`, `get_app_status`, `get_activity`, `get_settings`: terse specs, plain-text results, errors that name the valid values | The loop |
@@ -98,6 +101,7 @@ with `@testable import AVGStudio`.
 | `AgentGemini.swift` | Gemini's `functionDeclarations` codec. Replays the model's turn **verbatim** (Gemini 3 thought signatures) |
 | `ModelCatalog.swift` | `ModelCatalog`: a live-fetched, disk-cached list backing a picker. One class, nine instances |
 | `ModelCatalogSources.swift` | One fetch closure per catalogue (Gemini, Groq, ElevenLabs, Stable Horde, Pollinations) |
+| `ModelRanking.swift` | Orders a provider's live model ids best-first by rule, not by name: Gemini flash family only, stable before preview, newer before older; Groq by parameter size (a rescue when the current model stops working). Only orders candidates - a probe confirms before anything is switched |
 
 ### `AVGStudio/Render/`.
 
@@ -123,7 +127,7 @@ with `@testable import AVGStudio`.
 | `APIKeySheet.swift` | `KeyStatusPill` and `APIKeySheet`: the one key-entry sheet, shared by Settings and Welcome. Never shows a saved key |
 | `ErrorLogView.swift` | The Activity screen: All / Errors filter over `store.log` |
 | `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
-| `WelcomeView.swift` | First-run five-step onboarding |
+| `WelcomeView.swift` | First-run five-step onboarding; step 3 is "Your AI team" (`AITeamPreset`) |
 | `ModelRow.swift` | One 56 pt row over a `ModelCatalog`; tapping opens a bottom sheet with search and Refresh. Always editable: typing an id works with no list |
 | `AgentView.swift` | The assistant's chat sheet (opened from a toolbar button on Library, Studio and Create) and `AgentToolbarButton`. Everything needing attention is one glass stack above the composer: a paused video's recovery choices, the approval, live progress for videos it started. Errors show in plain words with fix buttons. The one filled button in it is Approve |
 | `ProjectLogView.swift` | The live log sheet |
