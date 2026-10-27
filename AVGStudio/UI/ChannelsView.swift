@@ -317,6 +317,26 @@ struct ChannelEditor: View {
                 }
 
                 Section {
+                    Picker("Track", selection: $channel.musicTrackID) {
+                        Text("None").tag(String?.none)
+                        if let missing = channel.musicTrackID, store.audioLibrary.item(missing) == nil {
+                            Text("Removed track").tag(String?.some(missing))
+                        }
+                        ForEach(store.audioLibrary.music) { Text($0.name).tag(String?.some($0.id)) }
+                    }
+                    if channel.musicTrackID != nil {
+                        VStack(alignment: .leading) {
+                            Text("Under the voice: \(Int(channel.musicGainDB)) dB")
+                            Slider(value: $channel.musicGainDB, in: -35 ... -10, step: 1)
+                        }
+                    }
+                } header: { Text("Music") } footer: {
+                    Text(store.audioLibrary.music.isEmpty
+                         ? "Upload tracks under Settings → Music first."
+                         : "Plays under every video of this channel and drops while someone speaks. About -20 dB is a good start.")
+                }
+
+                Section {
                     Picker("Trim aggressiveness", selection: $channel.voiceTrimAggressiveness) {
                         ForEach(VoiceTrimAggressiveness.allCases) { Text($0.label).tag($0) }
                     }

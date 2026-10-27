@@ -411,6 +411,13 @@ final class Store {
     // A shared "recycle pool" the writer can reference instead of always
     // generating fresh art - see `ReusableImage`'s doc comment.
 
+    /// Removes a library track and clears it from any channel that used it, so a
+    /// channel never points at a file that is gone.
+    func removeAudioItem(_ id: String) {
+        audioLibrary.remove(id)
+        for i in channels.indices where channels[i].musicTrackID == id { channels[i].musicTrackID = nil }
+    }
+
     func reusableImageURL(_ r: ReusableImage) -> URL { Self.reusableImagesDir.appendingPathComponent(r.fileName) }
 
     @discardableResult

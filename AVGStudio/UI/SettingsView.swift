@@ -66,6 +66,12 @@ struct SettingsView: View {
                 row(.performance, performanceSummary)
                 row(.assistant, assistantSummary)
             }
+            SettingsGroup(title: "Sound") {
+                NavigationLink(value: SettingsRoute.music) {
+                    NavRow(symbol: "music.note", title: "Music", detail: musicSummary)
+                }
+                .buttonStyle(.plain)
+            }
             SettingsGroup(title: "Accounts") {
                 row(.keys, "\(savedKeyCount) of \(APIKey.allCases.count) connected")
                 row(.fallbacks, store.settings.autoUseFallback ? "Switches automatically when a model is too expensive" : "Asks before switching models")
@@ -132,6 +138,11 @@ struct SettingsView: View {
         return "\(s.renderEngine == .auto ? "GPU" : "CPU") · \(s.videoCodec == .hevc ? "HEVC" : "H.264") · \(s.maxParallelJobs) at once"
     }
 
+    private var musicSummary: String {
+        let n = store.audioLibrary.music.count
+        return n == 0 ? "Upload tracks to put under your videos" : (n == 1 ? "1 track" : "\(n) tracks")
+    }
+
     private var errorSummary: String {
         let n = store.errorHistory.count
         return n == 0 ? "No errors" : (n == 1 ? "1 saved error" : "\(n) saved errors")
@@ -168,6 +179,8 @@ struct SettingsView: View {
             ErrorLogView()
         case .reusableImages:
             ReusableImagesView()
+        case .music:
+            MusicLibraryView()
         }
     }
 

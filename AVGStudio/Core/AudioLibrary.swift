@@ -162,6 +162,16 @@ final class AudioLibrary {
         save()
     }
 
+    /// Everything the details sheet edits, saved in one write.
+    func update(_ id: String, name: String, tags: [String], license: String, attribution: String) {
+        guard let i = items.firstIndex(where: { $0.id == id }), !name.trimmed.isEmpty else { return }
+        items[i].name = name.trimmed
+        items[i].tags = tags
+        items[i].license = license.trimmed.isEmpty ? "Mine" : license.trimmed
+        items[i].attribution = attribution.trimmed
+        save()
+    }
+
     func setTags(_ id: String, _ tags: [String]) {
         guard let i = items.firstIndex(where: { $0.id == id }) else { return }
         items[i].tags = tags

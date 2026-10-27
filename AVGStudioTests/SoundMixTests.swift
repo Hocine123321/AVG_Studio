@@ -228,3 +228,28 @@ final class ChannelMusicDecodingTests: XCTestCase {
         XCTAssertEqual(back.musicGainDB, -24)
     }
 }
+
+@MainActor
+final class StoreMusicTests: XCTestCase {
+    func testRemovingATrackClearsItFromEveryChannelThatUsedIt() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("storemusic-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = Store()
+        let tone = try makeTestTone(seconds: 1, in: dir)
+        let item = try await store.audioLibrary.importFile(tone, kind: .music, name: "Test bed")
+
+        var using = Channel(name: "Uses music")
+        using.musicTrackID = item.id
+        var other = Channel(name: "Other")
+        other.musicTrackID = "someone-elses-track"
+        store.channels.append(contentsOf: [using, other])
+        defer { store.channels.removeAll { $0.id == using.id || $0.id == other.id } }
+
+        store.removeAudioItem(item.id)
+
+        XCTAssertNil(store.audioLibrary.item(item.id))
+        XCTAssertNil(store.channels.first { $0.id == using.id }?.musicTrackID)
+        XCTAssertEqual(store.channels.first { $0.id == other.id }?.musicTrackID, "someone-elses-track",
+                       "only channels that used the removed track are touched")
+    }
+}
