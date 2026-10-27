@@ -19,7 +19,7 @@ func makeTestTone(seconds: Double, hz: Double = 440, in dir: URL, name: String =
 
 final class MusicEnvelopeTests: XCTestCase {
     private let ducked = SoundMix.linear(SoundMix.defaultGainDB)
-    private var open: Double { min(1, SoundMix.linear(SoundMix.defaultGainDB + SoundMix.openLiftDB)) }
+    private var lifted: Double { min(1, SoundMix.linear(SoundMix.defaultGainDB + SoundMix.openLiftDB)) }
 
     private func keys(_ speech: [(start: Double, end: Double)], total: Double = 10, loops: [Double] = []) -> [GainKeyframe] {
         MusicEnvelope.keyframes(speech: speech, total: total, gainDB: SoundMix.defaultGainDB, loopPoints: loops)
@@ -28,20 +28,20 @@ final class MusicEnvelopeTests: XCTestCase {
     func testDuckedWhileSomeoneSpeaksAndOpenInThePauses() {
         let k = keys([(start: 2, end: 5)])
         XCTAssertEqual(MusicEnvelope.gain(at: 3.5, in: k), ducked, accuracy: 0.0001)
-        XCTAssertEqual(MusicEnvelope.gain(at: 6.5, in: k), open, accuracy: 0.0001)
-        XCTAssertEqual(MusicEnvelope.gain(at: 1.5, in: k), open, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 6.5, in: k), lifted, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 1.5, in: k), lifted, accuracy: 0.0001)
     }
 
     func testFadesInFromSilenceAndOutToSilence() {
         let k = keys([(start: 2, end: 5)])
         XCTAssertEqual(MusicEnvelope.gain(at: 0, in: k), 0, accuracy: 0.0001)
         XCTAssertEqual(MusicEnvelope.gain(at: 10, in: k), 0, accuracy: 0.0001)
-        XCTAssertEqual(MusicEnvelope.gain(at: 9, in: k), open * 0.5, accuracy: 0.001, "halfway through the 2 s fade-out")
+        XCTAssertEqual(MusicEnvelope.gain(at: 9, in: k), lifted * 0.5, accuracy: 0.001, "halfway through the 2 s fade-out")
     }
 
     func testNeverLouderThanTheOpenLevelAndTimesOnlyIncrease() {
         let k = keys([(start: 0.2, end: 3), (start: 4.5, end: 9.5)])
-        XCTAssertTrue(k.allSatisfy { $0.gain >= 0 && $0.gain <= open + 1e-9 })
+        XCTAssertTrue(k.allSatisfy { $0.gain >= 0 && $0.gain <= lifted + 1e-9 })
         for (a, b) in zip(k, k.dropFirst()) { XCTAssertLessThan(a.time, b.time) }
         XCTAssertEqual(k.first?.time, 0)
         XCTAssertEqual(k.last?.time, 10)
@@ -51,24 +51,24 @@ final class MusicEnvelopeTests: XCTestCase {
         let k = keys([(start: 1, end: 2), (start: 2.4, end: 3)])
         XCTAssertEqual(MusicEnvelope.gain(at: 2.2, in: k), ducked, accuracy: 0.0001, "a 0.4 s gap stays ducked")
         let wide = keys([(start: 1, end: 2), (start: 5, end: 6)])
-        XCTAssertEqual(MusicEnvelope.gain(at: 3.5, in: wide), open, accuracy: 0.0001, "a 3 s gap comes back up")
+        XCTAssertEqual(MusicEnvelope.gain(at: 3.5, in: wide), lifted, accuracy: 0.0001, "a 3 s gap comes back up")
     }
 
     func testNoSpeechMeansAnOpenBedWithFades() {
         let k = keys([])
-        XCTAssertEqual(MusicEnvelope.gain(at: 5, in: k), open, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 5, in: k), lifted, accuracy: 0.0001)
     }
 
     func testSpeechOutsideTheVideoIsIgnoredAndTinyVideosGiveNothing() {
-        XCTAssertEqual(MusicEnvelope.gain(at: 5, in: keys([(start: 20, end: 30)])), open, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 5, in: keys([(start: 20, end: 30)])), lifted, accuracy: 0.0001)
         XCTAssertTrue(MusicEnvelope.keyframes(speech: [], total: 0.05, gainDB: -20).isEmpty)
     }
 
     func testARepeatSeamDipsToSilence() {
         let k = keys([], loops: [4])
         XCTAssertEqual(MusicEnvelope.gain(at: 4, in: k), 0, accuracy: 0.0001)
-        XCTAssertEqual(MusicEnvelope.gain(at: 4 - MusicEnvelope.loopDip, in: k), open, accuracy: 0.0001)
-        XCTAssertEqual(MusicEnvelope.gain(at: 4 + MusicEnvelope.loopDip, in: k), open, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 4 - MusicEnvelope.loopDip, in: k), lifted, accuracy: 0.0001)
+        XCTAssertEqual(MusicEnvelope.gain(at: 4 + MusicEnvelope.loopDip, in: k), lifted, accuracy: 0.0001)
     }
 
     func testAQuieterSettingLowersBothLevels() {

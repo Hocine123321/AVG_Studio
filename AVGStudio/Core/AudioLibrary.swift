@@ -52,6 +52,15 @@ extension AudioItem {
     }
 }
 
+/// What a file must satisfy to go on the shelf. Not on `AudioLibrary` itself so
+/// the (nonisolated) error text below can read them without a main-actor hop.
+enum AudioLimits {
+    static let allowedExtensions: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac"]
+    static let maxBytes = 80_000_000
+    static let maxMusicMinutes = 30
+    static let maxEffectSeconds = 30.0
+}
+
 enum AudioLibraryError: LocalizedError {
     case unsupportedType(String)
     case tooLarge
@@ -62,7 +71,7 @@ enum AudioLibraryError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedType(let ext): return "“.\(ext)” isn't a supported audio type. Use mp3, m4a, wav, aiff or caf."
-        case .tooLarge: return "That file is over \(AudioLibrary.maxBytes / 1_000_000) MB."
+        case .tooLarge: return "That file is over \(AudioLimits.maxBytes / 1_000_000) MB."
         case .notAudio: return "That file doesn't contain playable audio."
         case .tooShort: return "That clip is too short to use."
         case .tooLong(let minutes): return "That track is over \(minutes) minutes. Trim it first."
@@ -72,11 +81,6 @@ enum AudioLibraryError: LocalizedError {
 
 @MainActor @Observable
 final class AudioLibrary {
-    static let allowedExtensions: Set<String> = ["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac"]
-    static let maxBytes = 80_000_000
-    static let maxMusicMinutes = 30
-    static let maxEffectSeconds = 30.0
-
     private(set) var items: [AudioItem] = []
     @ObservationIgnored private let root: URL
     @ObservationIgnored private let indexURL: URL
@@ -119,9 +123,9 @@ final class AudioLibrary {
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
 
         let ext = source.pathExtension.lowercased()
-        guard Self.allowedExtensions.contains(ext) else { throw AudioLibraryError.unsupportedType(ext) }
+        guard AudioLimits.allowedExtensions.contains(ext) else { throw AudioLibraryError.unsupportedType(ext) }
         let size = (try? FileManager.default.attributesOfItem(atPath: source.path)[.size] as? Int) ?? 0
-        guard size <= Self.maxBytes else { throw AudioLibraryError.tooLarge }
+        guard size <= AudioLimits.maxBytes else { throw AudioLibraryError.tooLarge }
 
         var item = AudioItem(kind: kind, name: name ?? source.deletingPathExtension().lastPathComponent, fileName: "")
         item.fileName = "\(item.id).\(ext)"
@@ -140,8 +144,8 @@ final class AudioLibrary {
             guard try await asset.loadTracks(withMediaType: .audio).first != nil else { throw AudioLibraryError.notAudio }
             let seconds = try await asset.load(.duration).seconds
             guard seconds.isFinite, seconds > 0.2 else { throw AudioLibraryError.tooShort }
-            if kind == .music, seconds > Double(Self.maxMusicMinutes * 60) { throw AudioLibraryError.tooLong(Self.maxMusicMinutes) }
-            if kind == .sfx, seconds > Self.maxEffectSeconds { throw AudioLibraryError.tooLong(Int(Self.maxEffectSeconds)) }
+            if kind == .music, seconds > Double(AudioLimits.maxMusicMinutes * 60) { throw AudioLibraryError.tooLong(AudioLimits.maxMusicMinutes) }
+            if kind == .sfx, seconds > AudioLimits.maxEffectSeconds { throw AudioLibraryError.tooLong(Int(AudioLimits.maxEffectSeconds)) }
             item.duration = seconds
         } catch {
             try? FileManager.default.removeItem(at: destination)

@@ -47,7 +47,7 @@ enum MusicEnvelope {
                           loopPoints: [Double] = []) -> [GainKeyframe] {
         guard total > 0.1 else { return [] }
         let ducked = SoundMix.linear(gainDB)
-        let open = min(1, SoundMix.linear(gainDB + SoundMix.openLiftDB))
+        let lifted = min(1, SoundMix.linear(gainDB + SoundMix.openLiftDB))
         let spans = merged(speech, total: total)
 
         var times: [Double] = [0, total, min(fadeIn, total), max(0, total - fadeOut)]
@@ -60,7 +60,7 @@ enum MusicEnvelope {
             points.append(t)
         }
         return points.map { t in
-            let level = levelUnderSpeech(at: t, spans: spans, ducked: ducked, open: open)
+            let level = levelUnderSpeech(at: t, spans: spans, ducked: ducked, lifted: lifted)
             let fade = max(0, min(1, t / fadeIn, (total - t) / fadeOut))
             var dip = 1.0
             for p in loopPoints { dip = min(dip, min(1, abs(t - p) / loopDip)) }
@@ -99,16 +99,16 @@ enum MusicEnvelope {
     }
 
     private static func levelUnderSpeech(at t: Double, spans: [(start: Double, end: Double)],
-                                         ducked: Double, open: Double) -> Double {
+                                         ducked: Double, lifted: Double) -> Double {
         for s in spans {
             if t >= s.start && t <= s.end { return ducked }
             if t > s.start - attack && t < s.start {
-                return open + (ducked - open) * (t - (s.start - attack)) / attack
+                return lifted + (ducked - lifted) * (t - (s.start - attack)) / attack
             }
             if t > s.end && t < s.end + release {
-                return ducked + (open - ducked) * (t - s.end) / release
+                return ducked + (lifted - ducked) * (t - s.end) / release
             }
         }
-        return open
+        return lifted
     }
 }

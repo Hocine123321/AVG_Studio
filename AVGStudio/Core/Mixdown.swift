@@ -29,7 +29,7 @@ enum Mixdown {
         var effects: [Effect] = []
     }
 
-    struct Result {
+    struct Outcome {
         var duration: Double
         /// How many times the music repeated to cover the video (0 = it was long enough).
         var loops: Int
@@ -37,7 +37,7 @@ enum Mixdown {
 
     /// The mix is exactly as long as the narration; music is cut or repeated to fit.
     @discardableResult
-    static func render(_ input: Input, to out: URL) async throws -> Result {
+    static func render(_ input: Input, to out: URL) async throws -> Outcome {
         let comp = AVMutableComposition()
         let voiceAsset = AVURLAsset(url: input.voice)
         guard let voiceSource = try await voiceAsset.loadTracks(withMediaType: .audio).first,
@@ -106,7 +106,7 @@ enum Mixdown {
         try? FileManager.default.removeItem(at: out)
         try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
         try await export.export(to: out, as: .m4a)
-        return Result(duration: total, loops: loops)
+        return Outcome(duration: total, loops: loops)
     }
 
     private static func time(_ seconds: Double) -> CMTime {
