@@ -67,6 +67,8 @@ final class Store {
     var log: [LogEntry] = []
     /// Model favourites and proven-working results (ModelPrefs.swift).
     let modelPrefs = ModelPrefs()
+    /// Uploaded / generated music and sound effects (AudioLibrary.swift).
+    let audioLibrary = AudioLibrary()
     /// Errors, kept across launches (see ErrorHistory.swift), newest first.
     var errorHistory: [ErrorRecord] = []
     var tab: AppTab = .library

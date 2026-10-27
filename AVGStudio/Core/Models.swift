@@ -378,6 +378,11 @@ struct Channel: Codable, Hashable, Identifiable {
     /// full-screen concept card, in addition to the deterministic Focused
     /// cards. Ignored when `takeoverCardsEnabled` is off, like the PC.
     var explainerCardsEnabled = false
+    /// Background music: the track (an `AudioLibrary` item id) laid under every
+    /// video of this channel, or nil for none, and its level while someone is
+    /// speaking (see `SoundMix`).
+    var musicTrackID: String? = nil
+    var musicGainDB: Double = SoundMix.defaultGainDB
 
     // ── Per-phase text model overrides ──────────────────────────────
     //
@@ -877,6 +882,8 @@ extension Channel {
         d.imageOnFailure = c.value("imageOnFailure", d.imageOnFailure)
         d.takeoverCardsEnabled = c.value("takeoverCardsEnabled", d.takeoverCardsEnabled)
         d.explainerCardsEnabled = c.value("explainerCardsEnabled", d.explainerCardsEnabled)
+        d.musicTrackID = c.value("musicTrackID", d.musicTrackID)
+        d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
         d.briefTextProvider = c.value("briefTextProvider", d.briefTextProvider)
         d.briefTextBackup = c.value("briefTextBackup", d.briefTextBackup)
         d.briefOnFailure = c.value("briefOnFailure", d.briefOnFailure)

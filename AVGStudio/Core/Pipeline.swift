@@ -977,10 +977,16 @@ struct Pipeline {
         let name = "render/take_\(takeID).mp4"
         let out = folder.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // Background music is mixed into the audio BEFORE the renderer's own mux,
+        // so the renderer still just adds one audio file. Never fatal: a missing or
+        // unreadable track means a video with narration only, with a log line why.
+        let mixFile = folder.appendingPathComponent("render/mix_take_\(takeID).m4a")
+        defer { try? FileManager.default.removeItem(at: mixFile) }
+        let muxAudio = await mixedAudio(project: p, channel: ch, narration: audio, into: mixFile)
         let input = RenderInput(
             images: p.scenes.map { store.file(p, $0.imageFile) },
             sceneDurations: p.sceneDurations,
-            audio: audio,
+            audio: muxAudio,
             cues: p.captions,
             size: p.aspectRatio.size(shortEdge: s.shortEdge),
             fps: s.fps,
@@ -1064,6 +1070,28 @@ struct Pipeline {
             proj.workingTakeID = takeID
         }
         store.record(projectID, "Finished “\(p.title)” (take \(takeID)).")
+    }
+
+    /// The narration with the channel's music under it, or the narration itself
+    /// when there is no music or it cannot be used.
+    private func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
+        guard let trackID = ch.musicTrackID else { return narration }
+        guard let music = store.audioLibrary.fileURL(for: trackID) else {
+            store.record(projectID, "This channel's music track is no longer in the library; rendering with narration only.")
+            return narration
+        }
+        let speech = (p.audioSegments ?? []).map { (start: $0.start, end: $0.end) }
+        do {
+            let result = try await Mixdown.render(
+                Mixdown.Input(voice: narration, speech: speech, music: music, musicGainDB: ch.musicGainDB), to: mixFile)
+            let title = store.audioLibrary.item(trackID)?.name ?? "music"
+            store.record(projectID, "Mixed in “\(title)” at \(Int(ch.musicGainDB)) dB under the voice"
+                         + (result.loops > 0 ? " (repeated \(result.loops)x to fit)." : "."))
+            return mixFile
+        } catch {
+            store.record(projectID, "Music could not be mixed (\(error.localizedDescription)); rendering with narration only.")
+            return narration
+        }
     }
 
     // MARK: Text helpers
