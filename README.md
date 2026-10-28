@@ -79,6 +79,8 @@ with `@testable import AVGStudio`.
 | `Mixdown.swift` | Voice + music + sound effects -> one m4a (an `AVMutableComposition` with volume ramps). Runs in the Render phase BEFORE the renderer's own mux, so `VideoRenderer` still muxes a single audio file with a passthrough export. A track shorter than the video repeats |
 | `AudioLibrary.swift` | The shelf of uploaded music and short sound effects: files are copied in, checked as real audio and measured at upload, with the licence recorded. No bundled or scraped catalogue (licences forbid redistributing most "free" music inside an app) |
 | `SFXPlanner.swift` | `SFXMoment` (impact, riser, whoosh, pop, soft hit) and the pure policy for where effects land: sound leads the picture, events at least a second apart, at most two within five seconds, the stronger moment wins a contested spot |
+| `MusicPicker.swift` | "Choose a track for me": scores library tracks by how well their tags fit the video's title, topic, brief and channel tone, never repeats the previous video's track when another exists, ties by least recently used then own uploads over generated. No model call; the pick is stored on the project (`autoMusicID`) so a re-render keeps its music |
+| `AudioGeneration.swift` | The paid, optional way to fill the shelf: one Lyria track (clip about $0.04, full song about $0.08) or the five-sound ElevenLabs starter pack, saved through the same checks as an upload. Only runs from a button that shows the price first |
 | `AgentCapability.swift` | The seven assistant capabilities (one switch each; to the model each is a set of tools; off = not offered) and which tools each owns | Views |
 | `AgentSettingsCatalog.swift` | The hand-written list of 24 settings the assistant may read and, with approval, change. No `agent...` field and no key is reachable (a test throws values at every entry and checks) | Views |
 | `AgentCapabilityTools.swift` | `estimate_cost`, `manage_project`, `change_setting`, `edit_channel`, `get_app_status`, `get_activity`, `get_settings`: terse specs, plain-text results, errors that name the valid values | The loop |
@@ -106,6 +108,7 @@ with `@testable import AVGStudio`.
 | `ModelCatalog.swift` | `ModelCatalog`: a live-fetched, disk-cached list backing a picker. One class, nine instances |
 | `ModelCatalogSources.swift` | One fetch closure per catalogue (Gemini, Groq, ElevenLabs, Stable Horde, Pollinations) |
 | `ModelRanking.swift` | Orders a provider's live model ids best-first by rule, not by name: Gemini flash family only, stable before preview, newer before older; Groq by parameter size (a rescue when the current model stops working). Only orders candidates - a probe confirms before anything is switched |
+| `AudioGenProviders.swift` | `GeminiMusic` (Lyria through `generateContent`, audio out), `ElevenLabsEffects` (text to sound effect), plus the pure `MusicPrompt` and `StarterSounds` tables that say exactly what is asked for |
 
 ### `AVGStudio/Render/`.
 
