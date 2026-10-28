@@ -77,6 +77,7 @@ enum SettingsRoute: Hashable {
     case activity
     case reusableImages
     case music
+    case soundEffects
 }
 
 /// The searchable list of settings. `SettingAnchor.allCases` must all appear

@@ -383,6 +383,12 @@ struct Channel: Codable, Hashable, Identifiable {
     /// speaking (see `SoundMix`).
     var musicTrackID: String? = nil
     var musicGainDB: Double = SoundMix.defaultGainDB
+    /// Sound effects: off until the person turns them on, a sound (an
+    /// `AudioLibrary` item id) per `SFXMoment` raw value, and a channel-wide
+    /// level offset in dB applied on top of each moment's own level.
+    var sfxEnabled = false
+    var sfxMap: [String: String] = [:]
+    var sfxGainDB: Double = 0
 
     // ── Per-phase text model overrides ──────────────────────────────
     //
@@ -884,6 +890,9 @@ extension Channel {
         d.explainerCardsEnabled = c.value("explainerCardsEnabled", d.explainerCardsEnabled)
         d.musicTrackID = c.value("musicTrackID", d.musicTrackID)
         d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
+        d.sfxEnabled = c.value("sfxEnabled", d.sfxEnabled)
+        d.sfxMap = c.value("sfxMap", d.sfxMap)
+        d.sfxGainDB = c.value("sfxGainDB", d.sfxGainDB)
         d.briefTextProvider = c.value("briefTextProvider", d.briefTextProvider)
         d.briefTextBackup = c.value("briefTextBackup", d.briefTextBackup)
         d.briefOnFailure = c.value("briefOnFailure", d.briefOnFailure)

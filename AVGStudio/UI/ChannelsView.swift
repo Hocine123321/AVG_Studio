@@ -109,6 +109,13 @@ struct ChannelEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var channel: Channel
 
+    private func soundBinding(_ moment: SFXMoment) -> Binding<String?> {
+        Binding(
+            get: { channel.sfxMap[moment.rawValue] },
+            set: { channel.sfxMap[moment.rawValue] = $0 }
+        )
+    }
+
     private var accentBinding: Binding<Color> {
         Binding(
             get: { Theme.color(hex: channel.accentColorHex) ?? Theme.accent },
@@ -334,6 +341,31 @@ struct ChannelEditor: View {
                     Text(store.audioLibrary.music.isEmpty
                          ? "Upload tracks under Settings → Music first."
                          : "Plays under every video of this channel and drops while someone speaks. About -20 dB is a good start.")
+                }
+
+                Section {
+                    Toggle("Sound effects", isOn: $channel.sfxEnabled)
+                    if channel.sfxEnabled {
+                        ForEach(SFXMoment.allCases) { moment in
+                            Picker(selection: soundBinding(moment)) {
+                                Text("None").tag(String?.none)
+                                ForEach(store.audioLibrary.effects) { Text($0.name).tag(String?.some($0.id)) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(moment.title)
+                                    Text(moment.detail).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        VStack(alignment: .leading) {
+                            Text("Level: \(Int(channel.sfxGainDB)) dB")
+                            Slider(value: $channel.sfxGainDB, in: -12 ... 6, step: 1)
+                        }
+                    }
+                } header: { Text("Sound effects") } footer: {
+                    Text(store.audioLibrary.effects.isEmpty
+                         ? "Upload short sounds under Settings → Sound effects first. A moment with no sound does nothing."
+                         : "Effects are used sparingly: not on every scene, and never crowded together. A moment with no sound does nothing.")
                 }
 
                 Section {

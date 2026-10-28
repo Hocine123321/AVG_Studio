@@ -71,6 +71,10 @@ struct SettingsView: View {
                     NavRow(symbol: "music.note", title: "Music", detail: musicSummary)
                 }
                 .buttonStyle(.plain)
+                NavigationLink(value: SettingsRoute.soundEffects) {
+                    NavRow(symbol: "waveform", title: "Sound effects", detail: soundEffectsSummary)
+                }
+                .buttonStyle(.plain)
             }
             SettingsGroup(title: "Accounts") {
                 row(.keys, "\(savedKeyCount) of \(APIKey.allCases.count) connected")
@@ -143,6 +147,11 @@ struct SettingsView: View {
         return n == 0 ? "Upload tracks to put under your videos" : (n == 1 ? "1 track" : "\(n) tracks")
     }
 
+    private var soundEffectsSummary: String {
+        let n = store.audioLibrary.effects.count
+        return n == 0 ? "Upload short sounds for key moments" : (n == 1 ? "1 sound" : "\(n) sounds")
+    }
+
     private var errorSummary: String {
         let n = store.errorHistory.count
         return n == 0 ? "No errors" : (n == 1 ? "1 saved error" : "\(n) saved errors")
@@ -180,7 +189,9 @@ struct SettingsView: View {
         case .reusableImages:
             ReusableImagesView()
         case .music:
-            MusicLibraryView()
+            AudioLibraryView(kind: .music)
+        case .soundEffects:
+            AudioLibraryView(kind: .sfx)
         }
     }
 

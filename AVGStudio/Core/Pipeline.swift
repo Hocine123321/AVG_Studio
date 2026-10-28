@@ -1072,25 +1072,65 @@ struct Pipeline {
         store.record(projectID, "Finished “\(p.title)” (take \(takeID)).")
     }
 
-    /// The narration with the channel's music under it, or the narration itself
-    /// when there is no music or it cannot be used.
+    /// The narration with the channel's music and sound effects mixed in, or the
+    /// narration itself when there is neither (or none of it can be used).
     private func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
-        guard let trackID = ch.musicTrackID else { return narration }
-        guard let music = store.audioLibrary.fileURL(for: trackID) else {
-            store.record(projectID, "This channel's music track is no longer in the library; rendering with narration only.")
-            return narration
+        var musicURL: URL?
+        if let trackID = ch.musicTrackID {
+            musicURL = store.audioLibrary.fileURL(for: trackID)
+            if musicURL == nil {
+                store.record(projectID, "This channel's music track is no longer in the library; rendering without music.")
+            }
         }
+        let effects = soundEffects(project: p, channel: ch)
+        guard musicURL != nil || !effects.isEmpty else { return narration }
+
         let speech = (p.audioSegments ?? []).map { (start: $0.start, end: $0.end) }
         do {
             let result = try await Mixdown.render(
-                Mixdown.Input(voice: narration, speech: speech, music: music, musicGainDB: ch.musicGainDB), to: mixFile)
-            let title = store.audioLibrary.item(trackID)?.name ?? "music"
-            store.record(projectID, "Mixed in “\(title)” at \(Int(ch.musicGainDB)) dB under the voice"
-                         + (result.loops > 0 ? " (repeated \(result.loops)x to fit)." : "."))
+                Mixdown.Input(voice: narration, speech: speech, music: musicURL, musicGainDB: ch.musicGainDB, effects: effects),
+                to: mixFile)
+            var parts: [String] = []
+            if musicURL != nil {
+                let title = ch.musicTrackID.flatMap { store.audioLibrary.item($0)?.name } ?? "music"
+                parts.append("music “\(title)” at \(Int(ch.musicGainDB)) dB under the voice"
+                             + (result.loops > 0 ? " (repeated \(result.loops)x to fit)" : ""))
+            }
+            if !effects.isEmpty { parts.append("\(effects.count) sound effect\(effects.count == 1 ? "" : "s")") }
+            store.record(projectID, "Mixed in " + parts.joined(separator: " and ") + ".")
             return mixFile
         } catch {
-            store.record(projectID, "Music could not be mixed (\(error.localizedDescription)); rendering with narration only.")
+            store.record(projectID, "Music and effects could not be mixed (\(error.localizedDescription)); rendering with narration only.")
             return narration
+        }
+    }
+
+    /// The effects for this video: only for moments the channel gave a sound to,
+    /// placed sparingly by `SFXPlanner`.
+    private func soundEffects(project p: Project, channel ch: Channel) -> [Mixdown.Effect] {
+        guard ch.sfxEnabled, !p.sceneDurations.isEmpty else { return [] }
+        var files: [SFXMoment: (url: URL, length: Double)] = [:]
+        for moment in SFXMoment.allCases {
+            guard let id = ch.sfxMap[moment.rawValue],
+                  let url = store.audioLibrary.fileURL(for: id),
+                  let item = store.audioLibrary.item(id) else { continue }
+            files[moment] = (url: url, length: item.duration)
+        }
+        guard !files.isEmpty else { return [] }
+
+        var transitions: [Int: SceneTransition] = [:]
+        for d in p.sceneDirections { transitions[d.scene] = d.transitionIn }
+        var beats: [Int: String] = [:]
+        var roles: [Int: String] = [:]
+        for s in p.storyMap?.scenes ?? [] { beats[s.scene] = s.beat; roles[s.scene] = s.role }
+
+        let cues = SFXPlanner.plan(SFXPlanner.Input(
+            sceneDurations: p.sceneDurations, transitions: transitions, beats: beats, roles: roles,
+            cards: p.cards.map { (start: $0.start, kind: $0.kind) },
+            soundLength: files.mapValues { $0.length }))
+        return cues.compactMap { cue in
+            guard let file = files[cue.moment] else { return nil }
+            return Mixdown.Effect(url: file.url, at: cue.at, gainDB: cue.moment.defaultGainDB + ch.sfxGainDB)
         }
     }
 

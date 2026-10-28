@@ -37,10 +37,11 @@ final class AudioPreview: NSObject, AVAudioPlayerDelegate {
     }
 }
 
-/// Settings → Music: the tracks that can go under a channel's videos.
-/// Everything here was uploaded on purpose - there is no bundled or scraped
-/// catalogue (see AudioLibrary.swift for why).
-struct MusicLibraryView: View {
+/// Settings → Music and Settings → Sound effects: the shelf a channel picks
+/// from. Everything here was uploaded on purpose - there is no bundled or
+/// scraped catalogue (see AudioLibrary.swift for why).
+struct AudioLibraryView: View {
+    let kind: AudioItem.Kind
     @Environment(Store.self) private var store
     @State private var preview = AudioPreview()
     @State private var importing = false
@@ -56,34 +57,39 @@ struct MusicLibraryView: View {
         List {
             Section {
                 Button { importing = true } label: {
-                    Label(busy ? "Adding…" : "Upload music", systemImage: "square.and.arrow.down")
+                    Label(busy ? "Adding…" : (kind == .music ? "Upload music" : "Upload a sound"),
+                          systemImage: "square.and.arrow.down")
                 }
                 .disabled(busy)
             } footer: {
-                Text("Use tracks you have the right to use. Even “royalty-free” music can be flagged by YouTube’s Content ID, so keep the licence in each track’s details.")
+                Text(kind == .music
+                     ? "Use tracks you have the right to use. Even “royalty-free” music can be flagged by YouTube’s Content ID, so keep the licence in each track’s details."
+                     : "Short sounds only (up to 30 seconds). Use sounds you have the right to use, and keep the licence in each sound’s details.")
             }
 
-            let tracks = store.audioLibrary.music
+            let tracks = store.audioLibrary.items.filter { $0.kind == kind }
             if tracks.isEmpty {
                 Section {
-                    Text("No music yet. Upload an mp3, m4a or wav, then pick it for a channel in the channel’s Music section.")
+                    Text(kind == .music
+                         ? "No music yet. Upload an mp3, m4a or wav, then pick it for a channel in the channel’s Music section."
+                         : "No sounds yet. Upload a short mp3, m4a or wav, then give it a moment in a channel’s Sound effects section.")
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Section("Your music (\(tracks.count))") {
+                Section("\(kind == .music ? "Your music" : "Your sounds") (\(tracks.count))") {
                     ForEach(tracks) { item in row(item) }
                 }
             }
         }
         .screenBackground()
-        .navigationTitle("Music")
+        .navigationTitle(kind == .music ? "Music" : "Sound effects")
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { handle($0) }
         .alert("Couldn’t add that file", isPresented: errorShown) {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "")
         }
-        .sheet(item: $editing) { MusicItemEditor(item: $0) }
+        .sheet(item: $editing) { AudioItemEditor(item: $0) }
         .onDisappear { preview.stop() }
     }
 
@@ -132,7 +138,7 @@ struct MusicLibraryView: View {
                 var failures: [String] = []
                 for url in urls {
                     do {
-                        try await store.audioLibrary.importFile(url, kind: .music)
+                        try await store.audioLibrary.importFile(url, kind: kind)
                     } catch {
                         failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
                     }
@@ -143,8 +149,8 @@ struct MusicLibraryView: View {
     }
 }
 
-/// Name, tags and rights for one track.
-private struct MusicItemEditor: View {
+/// Name, tags and rights for one track or sound.
+private struct AudioItemEditor: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     let item: AudioItem
@@ -174,7 +180,7 @@ private struct MusicItemEditor: View {
                 } header: {
                     Text("Tags")
                 } footer: {
-                    Text("Mood or genre words, separated by commas. They will be used to match music to a video.")
+                    Text("Words that describe it (mood, genre, what it sounds like), separated by commas.")
                 }
                 Section {
                     TextField("Licence", text: $license)
