@@ -1076,7 +1076,8 @@ struct Pipeline {
     /// narration itself when there is neither (or none of it can be used).
     private func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
         var musicURL: URL?
-        if let trackID = ch.musicTrackID {
+        let chosenID = ch.musicAuto ? autoMusicTrack(project: p, channel: ch) : ch.musicTrackID
+        if let trackID = chosenID {
             musicURL = store.audioLibrary.fileURL(for: trackID)
             if musicURL == nil {
                 store.record(projectID, "This channel's music track is no longer in the library; rendering without music.")
@@ -1092,7 +1093,7 @@ struct Pipeline {
                 to: mixFile)
             var parts: [String] = []
             if musicURL != nil {
-                let title = ch.musicTrackID.flatMap { store.audioLibrary.item($0)?.name } ?? "music"
+                let title = chosenID.flatMap { store.audioLibrary.item($0)?.name } ?? "music"
                 parts.append("music “\(title)” at \(Int(ch.musicGainDB)) dB under the voice"
                              + (result.loops > 0 ? " (repeated \(result.loops)x to fit)" : ""))
             }
@@ -1103,6 +1104,27 @@ struct Pipeline {
             store.record(projectID, "Music and effects could not be mixed (\(error.localizedDescription)); rendering with narration only.")
             return narration
         }
+    }
+
+    /// The track for a channel that picks its own music: the one already chosen
+    /// for this video if it still exists (so a re-render keeps its music), else a
+    /// fresh pick by `MusicPicker`, remembered on the project and the channel.
+    private func autoMusicTrack(project p: Project, channel ch: Channel) -> String? {
+        if let saved = p.autoMusicID, store.audioLibrary.fileURL(for: saved) != nil { return saved }
+        let tracks = store.audioLibrary.music
+            .filter { store.audioLibrary.fileURL(for: $0.id) != nil }
+            .map { MusicPicker.Candidate(id: $0.id, tags: $0.tags, isOwn: $0.origin != .generated) }
+        let words = [p.title, p.topic, p.brief ?? "", ch.tone, ch.visualTone].joined(separator: " ")
+        guard let picked = MusicPicker.pick(from: tracks, text: words, recent: ch.musicRecent) else {
+            store.record(projectID, "This channel picks its music automatically, but the library has no tracks yet.")
+            return nil
+        }
+        store.update(projectID) { $0.autoMusicID = picked }
+        store.rememberMusic(channel: ch.id, track: picked)
+        if let name = store.audioLibrary.item(picked)?.name {
+            store.record(projectID, "Chose “\(name)” for this video.")
+        }
+        return picked
     }
 
     /// The effects for this video: only for moments the channel gave a sound to,

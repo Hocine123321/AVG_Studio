@@ -324,14 +324,17 @@ struct ChannelEditor: View {
                 }
 
                 Section {
-                    Picker("Track", selection: $channel.musicTrackID) {
-                        Text("None").tag(String?.none)
-                        if let missing = channel.musicTrackID, store.audioLibrary.item(missing) == nil {
-                            Text("Removed track").tag(String?.some(missing))
+                    Toggle("Choose a track for me", isOn: $channel.musicAuto)
+                    if !channel.musicAuto {
+                        Picker("Track", selection: $channel.musicTrackID) {
+                            Text("None").tag(String?.none)
+                            if let missing = channel.musicTrackID, store.audioLibrary.item(missing) == nil {
+                                Text("Removed track").tag(String?.some(missing))
+                            }
+                            ForEach(store.audioLibrary.music) { Text($0.name).tag(String?.some($0.id)) }
                         }
-                        ForEach(store.audioLibrary.music) { Text($0.name).tag(String?.some($0.id)) }
                     }
-                    if channel.musicTrackID != nil {
+                    if channel.musicAuto || channel.musicTrackID != nil {
                         VStack(alignment: .leading) {
                             Text("Under the voice: \(Int(channel.musicGainDB)) dB")
                             Slider(value: $channel.musicGainDB, in: -35 ... -10, step: 1)
@@ -340,7 +343,9 @@ struct ChannelEditor: View {
                 } header: { Text("Music") } footer: {
                     Text(store.audioLibrary.music.isEmpty
                          ? "Upload tracks under Settings → Music first."
-                         : "Plays under every video of this channel and drops while someone speaks. About -20 dB is a good start.")
+                         : (channel.musicAuto
+                            ? "Each video gets the track whose tags fit its title and topic best, never the same one twice in a row. Tag your tracks under Settings → Music."
+                            : "Plays under every video of this channel and drops while someone speaks. About -20 dB is a good start."))
                 }
 
                 Section {

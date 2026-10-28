@@ -262,6 +262,9 @@ struct Project: Codable, Hashable, Identifiable {
     /// Director I's plan (each scene's role, beat and visual intent), fed to
     /// Director II's motion prompt. Optional for the same reason as above.
     var storyMap: StoryMap?
+    /// The library track `MusicPicker` chose for this video (when its channel
+    /// picks automatically), kept so a re-render keeps the same music.
+    var autoMusicID: String?
     /// The take whose content the working copy (the project's own fields and
     /// files) currently equals; nil once a run has started changing it.
     var workingTakeID: Int?
@@ -383,6 +386,11 @@ struct Channel: Codable, Hashable, Identifiable {
     /// speaking (see `SoundMix`).
     var musicTrackID: String? = nil
     var musicGainDB: Double = SoundMix.defaultGainDB
+    /// When true, `MusicPicker` chooses a library track for each video (and
+    /// `musicTrackID` is ignored); `musicRecent` remembers the last few picks,
+    /// newest first, so the same bed does not sit under every upload.
+    var musicAuto = false
+    var musicRecent: [String] = []
     /// Sound effects: off until the person turns them on, a sound (an
     /// `AudioLibrary` item id) per `SFXMoment` raw value, and a channel-wide
     /// level offset in dB applied on top of each moment's own level.
@@ -890,6 +898,8 @@ extension Channel {
         d.explainerCardsEnabled = c.value("explainerCardsEnabled", d.explainerCardsEnabled)
         d.musicTrackID = c.value("musicTrackID", d.musicTrackID)
         d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
+        d.musicAuto = c.value("musicAuto", d.musicAuto)
+        d.musicRecent = c.value("musicRecent", d.musicRecent)
         d.sfxEnabled = c.value("sfxEnabled", d.sfxEnabled)
         d.sfxMap = c.value("sfxMap", d.sfxMap)
         d.sfxGainDB = c.value("sfxGainDB", d.sfxGainDB)

@@ -411,6 +411,15 @@ final class Store {
     // A shared "recycle pool" the writer can reference instead of always
     // generating fresh art - see `ReusableImage`'s doc comment.
 
+    /// Notes that `track` was just chosen for a video of this channel (newest
+    /// first, three kept), so the next automatic pick can avoid repeating it.
+    func rememberMusic(channel id: UUID, track: String) {
+        guard let i = channels.firstIndex(where: { $0.id == id }) else { return }
+        var recent = channels[i].musicRecent.filter { $0 != track }
+        recent.insert(track, at: 0)
+        channels[i].musicRecent = Array(recent.prefix(3))
+    }
+
     /// Removes a library track and clears it from any channel that used it, so a
     /// channel never points at a file that is gone.
     func removeAudioItem(_ id: String) {
