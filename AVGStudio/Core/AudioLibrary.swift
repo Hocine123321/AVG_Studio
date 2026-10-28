@@ -158,6 +158,18 @@ final class AudioLibrary {
         return item
     }
 
+    /// Saves audio a provider returned (a generated track or effect) through the
+    /// same checks as an upload, so a bad response fails here, not mid-render.
+    @discardableResult
+    func importData(_ data: Data, fileExtension: String, kind: AudioItem.Kind, name: String, origin: AudioItem.Origin,
+                    license: String, attribution: String = "", tags: [String] = []) async throws -> AudioItem {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
+        try data.write(to: temp)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        return try await importFile(temp, kind: kind, name: name, origin: origin, license: license,
+                                    attribution: attribution, tags: tags)
+    }
+
     // MARK: Editing
 
     func rename(_ id: String, to name: String) {

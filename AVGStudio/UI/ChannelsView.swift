@@ -357,6 +357,11 @@ struct ChannelEditor: View {
                                 }
                             }
                         }
+                        if store.audioLibrary.effects.contains(where: { $0.tags.contains(StarterSounds.tag) }) {
+                            Button("Use the starter pack sounds") {
+                                channel.sfxMap = StarterSounds.fill(channel.sfxMap, from: store.audioLibrary.effects)
+                            }
+                        }
                         VStack(alignment: .leading) {
                             Text("Level: \(Int(channel.sfxGainDB)) dB")
                             Slider(value: $channel.sfxGainDB, in: -12 ... 6, step: 1)

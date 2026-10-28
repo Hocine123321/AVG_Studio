@@ -48,6 +48,8 @@ struct AudioLibraryView: View {
     @State private var busy = false
     @State private var errorMessage: String?
     @State private var editing: AudioItem?
+    @State private var generating = false
+    @State private var confirmingPack = false
 
     private var errorShown: Binding<Bool> {
         Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
@@ -61,6 +63,17 @@ struct AudioLibraryView: View {
                           systemImage: "square.and.arrow.down")
                 }
                 .disabled(busy)
+                if kind == .music {
+                    Button { generating = true } label: {
+                        Label("Generate music with AI", systemImage: "wand.and.stars")
+                    }
+                    .disabled(busy)
+                } else {
+                    Button { confirmingPack = true } label: {
+                        Label("Add a starter pack (AI)", systemImage: "sparkles")
+                    }
+                    .disabled(busy)
+                }
             } footer: {
                 Text(kind == .music
                      ? "Use tracks you have the right to use. Even “royalty-free” music can be flagged by YouTube’s Content ID, so keep the licence in each track’s details."
@@ -84,7 +97,14 @@ struct AudioLibraryView: View {
         .screenBackground()
         .navigationTitle(kind == .music ? "Music" : "Sound effects")
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { handle($0) }
-        .alert("Couldn’t add that file", isPresented: errorShown) {
+        .sheet(isPresented: $generating) { GenerateMusicSheet() }
+        .confirmationDialog("Add a starter pack?", isPresented: $confirmingPack, titleVisibility: .visible) {
+            Button("Generate 5 sounds") { startPack() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Makes five short sounds (impact, riser, whoosh, pop, soft hit) with ElevenLabs. It needs an ElevenLabs key and costs a few cents. You pay once; they stay on this shelf.")
+        }
+        .alert("That didn’t work", isPresented: errorShown) {
             Button("OK") {}
         } message: {
             Text(errorMessage ?? "")
@@ -125,6 +145,18 @@ struct AudioLibraryView: View {
         if !item.tags.isEmpty { parts.append(item.tags.joined(separator: ", ")) }
         parts.append(item.license)
         return parts.joined(separator: " · ")
+    }
+
+    private func startPack() {
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await AudioGeneration.generateStarterSounds(store: store)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func handle(_ result: Result<[URL], Error>) {
@@ -208,5 +240,69 @@ private struct AudioItemEditor: View {
             .tint(Theme.accent)
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// Asks Google Lyria for one background track and saves it to the shelf.
+private struct GenerateMusicSheet: View {
+    @Environment(Store.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var mood = MusicPrompt.moods[0]
+    @State private var detail = ""
+    @State private var length = AudioGeneration.Length.clip
+    @State private var working = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Mood") {
+                    Picker("Mood", selection: $mood) {
+                        ForEach(MusicPrompt.moods, id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    TextField("Style notes (optional), e.g. lo-fi piano, slow build", text: $detail, axis: .vertical)
+                }
+                Section {
+                    Picker("Length", selection: $length) {
+                        ForEach(AudioGeneration.Length.allCases) { Text("\($0.title) · \($0.price)").tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                } header: {
+                    Text("Length and price")
+                } footer: {
+                    Text("Uses your Google key and needs a paid Google plan: Lyria has no free tier. The track is saved to your music, so you pay once and can reuse it in every video.")
+                }
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Generate music")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(working) }
+                ToolbarItem(placement: .confirmationAction) {
+                    if working { ProgressView() } else { Button("Generate") { generate() } }
+                }
+            }
+            .interactiveDismissDisabled(working)
+            .glassSheetBackground()
+            .tint(Theme.accent)
+        }
+        .presentationDetents([.large])
+    }
+
+    private func generate() {
+        working = true
+        errorMessage = nil
+        Task {
+            defer { working = false }
+            do {
+                _ = try await AudioGeneration.generateMusic(store: store, mood: mood, detail: detail, length: length)
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
