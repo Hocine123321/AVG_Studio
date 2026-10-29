@@ -42,11 +42,99 @@ struct EditGateCard: View {
     }
 }
 
+/// Draws frames for the editor's preview off the main thread and keeps only the
+/// newest request: dragging the scrub bar asks for many frames, the person only
+/// ever needs the last one.
+@MainActor @Observable
+final class EditorPreviewModel {
+    private(set) var image: UIImage?
+    private(set) var duration = 0.0
+    private(set) var loading = true
+    private(set) var failed = false
+    private(set) var playing = false
+    /// The scrub position, in seconds. Bound to the slider.
+    var time = 0.0
+
+    @ObservationIgnored private var preview: VideoRenderer.Preview?
+    @ObservationIgnored private let queue = DispatchQueue(label: "com.avgstudio.editor.preview", qos: .userInitiated)
+    @ObservationIgnored private var wanted: Double?
+    @ObservationIgnored private var busy = false
+    @ObservationIgnored private var playTask: Task<Void, Never>?
+
+    /// Prepares the video (decoding every image once), then shows the first frame.
+    func load(_ input: RenderInput) async {
+        loading = true
+        failed = false
+        let made: VideoRenderer.Preview = await withCheckedContinuation { c in
+            queue.async { c.resume(returning: VideoRenderer.Preview(input)) }
+        }
+        preview = made
+        duration = made.total
+        loading = false
+        show(time)
+    }
+
+    /// The editor changed cards or captions; redraw the current frame.
+    func update(cards: [TakeoverCard], cues: [CaptionCue]) {
+        guard let preview else { return }
+        queue.async { preview.update(cards: cards, cues: cues) }
+        show(time)
+    }
+
+    func show(_ t: Double) {
+        wanted = t
+        if !busy { pump() }
+    }
+
+    private func pump() {
+        guard let t = wanted, let preview else { return }
+        wanted = nil
+        busy = true
+        queue.async { [weak self] in
+            let frame = preview.frame(at: t)
+            Task { @MainActor in self?.finished(frame) }
+        }
+    }
+
+    private func finished(_ frame: CGImage?) {
+        busy = false
+        if let frame { image = UIImage(cgImage: frame) } else if image == nil { failed = true }
+        if wanted != nil { pump() }
+    }
+
+    /// Steps through the frames at about 8 per second, silently.
+    func togglePlay() {
+        if playing { stop(); return }
+        guard duration > 0 else { return }
+        if time >= duration - 0.2 { time = 0 }
+        playing = true
+        playTask = Task { [weak self] in
+            while let self, self.playing, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(125))
+                guard self.playing else { break }
+                self.time += 0.125
+                if self.time >= self.duration { self.time = self.duration; self.show(self.time); break }
+                self.show(self.time)
+            }
+            self?.playing = false
+        }
+    }
+
+    func stop() {
+        playing = false
+        playTask?.cancel()
+        playTask = nil
+    }
+}
+
 struct EditorView: View {
     let projectID: String
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var addingCard = false
+    @State private var model = EditorPreviewModel()
+    @State private var mixPlayer = AudioPreview()
+    @State private var mixing = false
 
     private var project: Project? { store.project(projectID) }
 
@@ -65,13 +153,97 @@ struct EditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
             .tint(Theme.accent)
+            .task { await loadPreview() }
+            .onChange(of: project?.cards) { _, _ in refreshPreview() }
+            .onChange(of: project?.captions) { _, _ in refreshPreview() }
+            .onDisappear {
+                model.stop()
+                mixPlayer.stop()
+            }
         }
     }
 
+    // MARK: Preview
+
+    private func loadPreview() async {
+        guard let p = project else { return }
+        let pipeline = Pipeline(store: store, projectID: projectID, resumeExisting: false)
+        let input = pipeline.renderInput(project: p, channel: store.channel(for: p),
+                                         audio: store.file(p, p.audioFile) ?? URL(fileURLWithPath: "/dev/null"),
+                                         output: FileManager.default.temporaryDirectory.appendingPathComponent("preview-unused.mp4"),
+                                         shortEdge: 360)
+        await model.load(input)
+    }
+
+    private func refreshPreview() {
+        guard let p = project else { return }
+        model.update(cards: p.cards, cues: p.captions)
+    }
+
+    /// Mixes narration + this video's music and effects (the same mix a render
+    /// would use) and plays it, so the level can be judged by ear before rendering.
+    private func hearMix(_ p: Project) {
+        if mixPlayer.playingID == "mix" { mixPlayer.stop(); return }
+        guard let narration = store.file(p, p.audioFile) else { return }
+        mixing = true
+        Task {
+            defer { mixing = false }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("mix-preview-\(UUID().uuidString).m4a")
+            let pipeline = Pipeline(store: store, projectID: projectID, resumeExisting: false)
+            let mixed = await pipeline.mixedAudio(project: p, channel: store.channel(for: p), narration: narration, into: url)
+            mixPlayer.toggle("mix", url: mixed)
+        }
+    }
+
+    private func previewCard(_ p: Project) -> some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14).fill(.black)
+                if let image = model.image {
+                    Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 14))
+                } else if model.failed {
+                    Text("Preview unavailable").font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(height: 280)
+            HStack(spacing: 12) {
+                Button { model.togglePlay() } label: {
+                    Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 28)
+                }
+                .buttonStyle(.glass)
+                .disabled(model.loading || model.failed)
+                Slider(value: Binding(get: { model.time }, set: { model.time = $0; model.show($0) }),
+                       in: 0...max(model.duration, 0.5))
+                    .disabled(model.loading || model.failed)
+                Text(String(format: "%d:%02d", Int(model.time) / 60, Int(model.time) % 60))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Button { hearMix(p) } label: {
+                Label(mixPlayer.playingID == "mix" ? "Stop" : "Hear the sound mix",
+                      systemImage: mixPlayer.playingID == "mix" ? "stop.circle" : "speaker.wave.2")
+            }
+            .buttonStyle(.glass)
+            .disabled(mixing)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
     private func form(_ p: Project) -> some View {
+        VStack(spacing: 0) {
+            previewCard(p)
+            settingsForm(p)
+        }
+        .glassSheetBackground(scroll: false)
+    }
+
+    private func settingsForm(_ p: Project) -> some View {
         Form {
             Section {
-                Text("Changes here apply to this video only. Nothing is rendered until you press Render, and the result is a new take, so the earlier ones stay.")
+                Text("Changes here apply to this video only. The preview is silent and approximate; Render makes a new take, so the earlier ones stay.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -93,7 +265,7 @@ struct EditorView: View {
                 .buttonStyle(.glassProminent)
             }
         }
-        .glassSheetBackground()
+        .scrollContentBackground(.hidden)
         .sheet(isPresented: $addingCard) { AddTitleCardSheet(projectID: projectID) }
     }
 

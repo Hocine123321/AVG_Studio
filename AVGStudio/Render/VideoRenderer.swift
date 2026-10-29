@@ -133,6 +133,69 @@ final class VideoRenderer {
     /// caption bitmap can be reused across several frames.
     private static let highlightSteps = 5
 
+    // MARK: - Preview
+
+    /// A video prepared once and then asked for any frame: the editor's scrub
+    /// bar. It draws with the same `plan` and the same CPU `draw` as a real
+    /// render (the GPU path is built to match it), so what it shows is what the
+    /// render will produce. Decoding and grading every image is the slow part,
+    /// so that happens once, in `init`; a frame is then a single draw.
+    ///
+    /// Not thread-safe: use it from one queue at a time.
+    final class Preview: @unchecked Sendable {
+        private let renderer: VideoRenderer
+        private var input: RenderInput
+        private let images: [CGImage?]
+        private let sizes: [CGSize?]
+        private let starts: [Double]
+        private let canvas: CGRect
+        /// Length of the video in seconds.
+        let total: Double
+
+        init(_ input: RenderInput) {
+            let r = VideoRenderer()
+            renderer = r
+            self.input = input
+            let w = Int(input.size.width), h = Int(input.size.height)
+            canvas = CGRect(x: 0, y: 0, width: w, height: h)
+            let prepared = r.prepareImages(input)
+            images = prepared
+            sizes = prepared.map { $0.map { CGSize(width: $0.width, height: $0.height) } }
+            var acc = 0.0
+            var begins: [Double] = []
+            for d in input.sceneDurations { begins.append(acc); acc += d }
+            starts = begins
+            total = max(acc, 0.5)
+        }
+
+        /// New cards or captions (the editor changed them); the images stay.
+        func update(cards: [TakeoverCard], cues: [CaptionCue]) {
+            input.cards = cards
+            input.cues = cues
+        }
+
+        /// The finished frame at `time` seconds, or nil if it could not be drawn.
+        func frame(at time: Double) -> CGImage? {
+            let t = min(max(0, time), max(0, total - 0.001))
+            let w = Int(canvas.width), h = Int(canvas.height)
+            var made: CVPixelBuffer?
+            let attributes = [kCVPixelBufferCGImageCompatibilityKey: true,
+                              kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary
+            guard CVPixelBufferCreate(nil, w, h, kCVPixelFormatType_32BGRA, attributes, &made) == kCVReturnSuccess,
+                  let buffer = made else { return nil }
+            let framePlan = renderer.plan(t: t, input: input, starts: starts, sizes: sizes, canvas: canvas)
+            renderer.draw(into: buffer, t: t, input: input, images: images, plan: framePlan)
+            CVPixelBufferLockBaseAddress(buffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(buffer),
+                  let ctx = CGContext(data: base, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+                                      space: renderer.rgbColorSpace, bitmapInfo: VideoRenderer.bitmapInfo)
+            else { return nil }
+            return ctx.makeImage()
+        }
+    }
+
     // MARK: - Render
 
     @discardableResult

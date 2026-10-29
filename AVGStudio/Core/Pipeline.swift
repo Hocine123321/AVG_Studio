@@ -983,39 +983,7 @@ struct Pipeline {
         let mixFile = folder.appendingPathComponent("render/mix_take_\(takeID).m4a")
         defer { try? FileManager.default.removeItem(at: mixFile) }
         let muxAudio = await mixedAudio(project: p, channel: ch, narration: audio, into: mixFile)
-        let input = RenderInput(
-            images: p.scenes.map { store.file(p, $0.imageFile) },
-            sceneDurations: p.sceneDurations,
-            audio: muxAudio,
-            cues: p.captions,
-            size: p.aspectRatio.size(shortEdge: s.shortEdge),
-            fps: s.fps,
-            kenBurns: s.kenBurns,
-            kbIntensity: s.kbIntensity,
-            // Empty (mismatched count, or planning never ran/failed) makes
-            // VideoRenderer fall back to its own deterministic heuristic -
-            // see planDirection()'s doc comment.
-            sceneDirections: p.sceneDirections.count == p.scenes.count ? p.sceneDirections : [],
-            gradeLook: p.gradeLook,
-            captions: CaptionStyle(
-                enabled: s.captionsEnabled,
-                fontSize: CGFloat(s.captionFontSize),
-                position: s.captionPosition,
-                animation: s.captionAnimationStyle,
-                accent: Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
-                accent1: Theme.color(hex: ch.accent1ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
-                accent2: Theme.color(hex: ch.accent2ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
-                fontFamily: ch.fontFamily,
-                overlay: ch.overlay
-            ),
-            filter: FilterSpec(style: s.filterStyle, intensity: s.filterIntensity),
-            cards: p.cards,
-            output: out,
-            codec: s.videoCodec,
-            encoderQuality: s.encoderQuality,
-            engine: s.renderEngine,
-            pauseWhenHot: s.pauseWhenHot
-        )
+        let input = renderInput(project: p, channel: ch, audio: muxAudio, output: out)
         let id = projectID
         let st = store
         // Renders take turns across every running video (RenderLease.swift);
@@ -1072,9 +1040,49 @@ struct Pipeline {
         store.record(projectID, "Finished “\(p.title)” (take \(takeID)).")
     }
 
+    /// Everything the renderer needs for this video, exactly as a real render
+    /// builds it. The editor's preview calls the same builder (at a small size),
+    /// so what it shows is what the render will draw.
+    func renderInput(project p: Project, channel ch: Channel, audio: URL, output: URL, shortEdge: Int? = nil) -> RenderInput {
+        let s = settings
+        return RenderInput(
+            images: p.scenes.map { store.file(p, $0.imageFile) },
+            sceneDurations: p.sceneDurations,
+            audio: audio,
+            cues: p.captions,
+            size: p.aspectRatio.size(shortEdge: shortEdge ?? s.shortEdge),
+            fps: s.fps,
+            kenBurns: s.kenBurns,
+            kbIntensity: s.kbIntensity,
+            // Empty (mismatched count, or planning never ran/failed) makes
+            // VideoRenderer fall back to its own deterministic heuristic -
+            // see planDirection()'s doc comment.
+            sceneDirections: p.sceneDirections.count == p.scenes.count ? p.sceneDirections : [],
+            gradeLook: p.gradeLook,
+            captions: CaptionStyle(
+                enabled: s.captionsEnabled,
+                fontSize: CGFloat(s.captionFontSize),
+                position: s.captionPosition,
+                animation: s.captionAnimationStyle,
+                accent: Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
+                accent1: Theme.color(hex: ch.accent1ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
+                accent2: Theme.color(hex: ch.accent2ColorHex) ?? Theme.color(hex: ch.accentColorHex) ?? Theme.accent,
+                fontFamily: ch.fontFamily,
+                overlay: ch.overlay
+            ),
+            filter: FilterSpec(style: s.filterStyle, intensity: s.filterIntensity),
+            cards: p.cards,
+            output: output,
+            codec: s.videoCodec,
+            encoderQuality: s.encoderQuality,
+            engine: s.renderEngine,
+            pauseWhenHot: s.pauseWhenHot
+        )
+    }
+
     /// The narration with the channel's music and sound effects mixed in, or the
     /// narration itself when there is neither (or none of it can be used).
-    private func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
+    func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
         var musicURL: URL?
         // This video's own choice (set in the editor) beats its channel's.
         let useAuto: Bool
