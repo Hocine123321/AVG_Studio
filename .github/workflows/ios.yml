@@ -4,8 +4,53 @@ on:
     branches: [ios-native]
     paths: ["AVGStudio/**", "AVGStudioTests/**", "project.yml", ".github/workflows/ios.yml"]
   workflow_dispatch:
+
+# Two independent jobs in the same run. They start together, so the IPA is
+# ready as soon as it has compiled, and a failing unit test can never stop it
+# from being built and uploaded. The run still shows red if either job fails.
 jobs:
   build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          echo "Using $X"; sudo xcode-select -s "$X"; xcodebuild -version
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+      - name: Build
+        run: |
+          xcodebuild -project AVGStudio.xcodeproj -scheme AVGStudio -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 \
+            || { grep -E "error:" build.log | sort -u | head -100; tail -40 build.log; exit 1; }
+      - name: Surface compiler errors as annotations
+        if: failure()
+        run: |
+          # The raw logs sit behind a blob host that is not always reachable
+          # from outside Actions; check-run annotations are always readable
+          # through the API, so repeat the failures there.
+          [ -f build.log ] || exit 0
+          grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+            msg=$(printf '%s' "$line" | sed 's/%/%25/g' | cut -c1-900)
+            echo "::error title=build.log::$msg"
+          done
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/AVGStudio.app Payload/
+          zip -qry AVGStudio-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with: { name: AVGStudio-ipa, path: AVGStudio-unsigned.ipa }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: build-logs, path: "*.log", if-no-files-found: ignore }
+
+  test:
+    name: Unit tests (simulator)
     runs-on: macos-26
     timeout-minutes: 40
     steps:
@@ -26,32 +71,14 @@ jobs:
             -destination "id=$UDID" -derivedDataPath build-test \
             CODE_SIGNING_ALLOWED=NO > test.log 2>&1 \
             || { grep -E "error:|failed|XCTAssert" test.log | sort -u | head -80; tail -40 test.log; exit 1; }
-      - name: Build
-        run: |
-          xcodebuild -project AVGStudio.xcodeproj -scheme AVGStudio -configuration Release \
-            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 \
-            || { grep -E "error:" build.log | sort -u | head -100; tail -40 build.log; exit 1; }
-      - name: Surface compiler and test errors as annotations
+      - name: Surface test errors as annotations
         if: failure()
         run: |
-          # The raw logs sit behind a blob host that is not always reachable
-          # from outside Actions; check-run annotations are always readable
-          # through the API, so repeat the failures there.
-          for f in test.log build.log; do
-            [ -f "$f" ] || continue
-            grep -E "error:|XCTAssert|failed" "$f" | sort -u | head -40 | while IFS= read -r line; do
-              msg=$(printf '%s' "$line" | sed 's/%/%25/g' | cut -c1-900)
-              echo "::error title=$f::$msg"
-            done
+          [ -f test.log ] || exit 0
+          grep -E "error:|XCTAssert|failed" test.log | sort -u | head -40 | while IFS= read -r line; do
+            msg=$(printf '%s' "$line" | sed 's/%/%25/g' | cut -c1-900)
+            echo "::error title=test.log::$msg"
           done
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/AVGStudio.app Payload/
-          zip -qry AVGStudio-unsigned.ipa Payload
-      - uses: actions/upload-artifact@v4
-        with: { name: AVGStudio-ipa, path: AVGStudio-unsigned.ipa }
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: build-logs, path: "*.log", if-no-files-found: ignore }
+        with: { name: test-logs, path: "test.log", if-no-files-found: ignore }
