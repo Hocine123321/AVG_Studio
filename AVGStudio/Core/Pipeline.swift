@@ -1076,7 +1076,16 @@ struct Pipeline {
     /// narration itself when there is neither (or none of it can be used).
     private func mixedAudio(project p: Project, channel ch: Channel, narration: URL, into mixFile: URL) async -> URL {
         var musicURL: URL?
-        let chosenID = ch.musicAuto ? autoMusicTrack(project: p, channel: ch) : ch.musicTrackID
+        // This video's own choice (set in the editor) beats its channel's.
+        let useAuto: Bool
+        let fixedID: String?
+        switch p.edits?.music {
+        case .some(.silent): useAuto = false; fixedID = nil
+        case .some(.auto): useAuto = true; fixedID = nil
+        case .some(.track(let id)): useAuto = false; fixedID = id
+        case .none: useAuto = ch.musicAuto; fixedID = ch.musicTrackID
+        }
+        let chosenID = useAuto ? autoMusicTrack(project: p, channel: ch) : fixedID
         if let trackID = chosenID {
             musicURL = store.audioLibrary.fileURL(for: trackID)
             if musicURL == nil {
@@ -1130,7 +1139,7 @@ struct Pipeline {
     /// The effects for this video: only for moments the channel gave a sound to,
     /// placed sparingly by `SFXPlanner`.
     private func soundEffects(project p: Project, channel ch: Channel) -> [Mixdown.Effect] {
-        guard ch.sfxEnabled, !p.sceneDurations.isEmpty else { return [] }
+        guard p.edits?.sfxEnabled ?? ch.sfxEnabled, !p.sceneDurations.isEmpty else { return [] }
         var files: [SFXMoment: (url: URL, length: Double)] = [:]
         for moment in SFXMoment.allCases {
             guard let id = ch.sfxMap[moment.rawValue],

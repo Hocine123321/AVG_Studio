@@ -102,6 +102,15 @@ final class Store {
     /// calls without the user asking isn't something this should do quietly.
     var interruptedProjectID: String?
 
+    /// The "edit it yourself?" card, while its 10 seconds run (EditGate.swift).
+    private(set) var editGate: EditGate?
+    /// False while the app is in the background: the gate never waits then.
+    var appActive = true
+    @ObservationIgnored private var editGateContinuation: CheckedContinuation<EditDecision, Never>?
+    /// Videos the person already got the choice for this session, so a failed
+    /// render that is retried does not ask a second time.
+    @ObservationIgnored private var gateAnswered: Set<String> = []
+
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
     /// The in-app chat assistant. It drives this store through `AgentHost`.
     let agent = Agent()
@@ -676,6 +685,11 @@ final class Store {
         clearSteps(id, from: start)
         for phase in PhaseID.allCases where phase.order >= start.order {
             if Task.isCancelled { break }
+            if phase == .render, await shouldHoldForEdit(id) {
+                record(id, "Ready to edit: the render waits until you press Render in the editor.")
+                break
+            }
+            if Task.isCancelled { break }
             // Captured BEFORE the phase runs: a setting changed mid-run must be
             // reported as a change next time, not silently absorbed.
             let inputs = currentInputs(phase, for: id)
@@ -770,6 +784,70 @@ final class Store {
                 if !(await Recovery.apply(action, plan: plan, store: self)) { throw error }
             }
         }
+    }
+
+    // MARK: The edit gate
+
+    /// True when the render should NOT start now because the person is taking
+    /// over the edit. Marks the project `awaitingEdit` in that case.
+    private func shouldHoldForEdit(_ id: String) async -> Bool {
+        guard let p = project(id) else { return false }
+        // Started by hand while held (or from the editor): they chose to render.
+        if p.awaitingEdit == true {
+            update(id) { $0.awaitingEdit = nil }
+            gateAnswered.insert(id)
+            return false
+        }
+        switch EditGatePolicy.outcome(mode: channel(for: p).editingMode, hasTakes: !p.takes.isEmpty,
+                                      alreadyAnswered: gateAnswered.contains(id), appActive: appActive) {
+        case .goOn:
+            return false
+        case .hold:
+            gateAnswered.insert(id)
+            update(id) { $0.awaitingEdit = true }
+            return true
+        case .ask:
+            let decision = await awaitEditDecision(id, title: p.title)
+            gateAnswered.insert(id)
+            if decision == .editMyself, !Task.isCancelled {
+                update(id) { $0.awaitingEdit = true }
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Shows the card and waits for the person - or for the 10 seconds to pass,
+    /// which means "let the AI finish". One card at a time: a second video that
+    /// gets here waits its turn.
+    private func awaitEditDecision(_ id: String, title: String) async -> EditDecision {
+        while editGate != nil { try? await Task.sleep(for: .milliseconds(250)) }
+        let gate = EditGate(projectID: id, title: title, deadline: Date().addingTimeInterval(EditGate.seconds))
+        editGate = gate
+        Haptics.light()
+        return await withCheckedContinuation { c in
+            editGateContinuation = c
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(EditGate.seconds))
+                self?.resolveEditGate(.letAIEdit, gateID: gate.id)
+            }
+        }
+    }
+
+    /// The card's buttons call this; the timer calls it with the gate's own id,
+    /// so a late timer can never answer a newer card.
+    func resolveEditGate(_ decision: EditDecision, gateID: UUID? = nil) {
+        guard let c = editGateContinuation, let gate = editGate, gateID == nil || gate.id == gateID else { return }
+        editGateContinuation = nil
+        editGate = nil
+        c.resume(returning: decision)
+    }
+
+    /// Renders a video the person just edited, without asking again.
+    func renderEdited(_ id: String) {
+        update(id) { $0.awaitingEdit = nil }
+        gateAnswered.insert(id)
+        start(id, from: .render)
     }
 
     /// A phase that calls an AI just finished: remember the model it ran on, so

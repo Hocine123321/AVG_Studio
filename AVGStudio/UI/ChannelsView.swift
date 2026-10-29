@@ -324,6 +324,14 @@ struct ChannelEditor: View {
                 }
 
                 Section {
+                    Picker("Before the first render", selection: $channel.editingMode) {
+                        ForEach(EditingMode.allCases) { Text($0.title).tag($0) }
+                    }
+                } header: { Text("Editing") } footer: {
+                    Text(channel.editingMode.detail)
+                }
+
+                Section {
                     Toggle("Choose a track for me", isOn: $channel.musicAuto)
                     if !channel.musicAuto {
                         Picker("Track", selection: $channel.musicTrackID) {

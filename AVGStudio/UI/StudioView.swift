@@ -27,6 +27,7 @@ struct StudioView: View {
     /// A take waiting on a confirmation before it is continued from / deleted.
     @State private var takeToContinue: Take?
     @State private var takeToDelete: Take?
+    @State private var showingEditor = false
 
     var body: some View {
         // Studio is a persistent tab now (Skin v2), not a pushed screen -
@@ -38,6 +39,7 @@ struct StudioView: View {
                     header(p)
                     playerCard(p)
                     staleBanner(p)
+                    editCard(p)
                     phasesCard(p)
                     liveListCard(p)
                     if !p.takes.isEmpty { takesCard(p) }
@@ -52,6 +54,7 @@ struct StudioView: View {
             .screenBackground()
             .navigationTitle(p.title)
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showingEditor) { EditorView(projectID: p.id) }
             .toolbar {
                 // Matches the PC's per-take "Log" toggle (Studio.tsx's
                 // TakeLogToggle) - the FULL run history, not the mock's
@@ -201,6 +204,30 @@ struct StudioView: View {
             }
         }
         .glassCard(30, padding: 12)
+    }
+
+    /// A video waiting for its edit gets a prominent card; any video that has
+    /// its captions gets a quiet "Edit this video" button.
+    @ViewBuilder private func editCard(_ p: Project) -> some View {
+        if p.awaitingEdit == true {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Ready for your edit", systemImage: "scissors").font(.headline)
+                Text("This video hasn't been rendered yet. Add music or effects, title cards, or fix captions, then render.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button("Open editor") { showingEditor = true }.buttonStyle(.glassProminent)
+                    Button("Render now") { store.renderEdited(p.id) }.buttonStyle(.glass)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassCard()
+        } else if p.phase(.captions).status == .done, !store.isRunning(p.id) {
+            Button { showingEditor = true } label: {
+                Label("Edit this video", systemImage: "scissors").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+        }
     }
 
     private func firstIncomplete(_ p: Project) -> PhaseID {

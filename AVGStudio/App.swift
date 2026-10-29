@@ -95,6 +95,16 @@ struct RootView: View {
             RecoverySheet(plan: plan) { store.resolveRecovery($0) }
         }
         .sheet(isPresented: $agent.isOpen) { AgentView() }
+        // "Edit it yourself?" - the 10-second card before a video's first render.
+        .overlay(alignment: .bottom) {
+            if let gate = store.editGate {
+                EditGateCard(gate: gate)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 96)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring, value: store.editGate?.id)
         // "Ready" / "stopped" announcements: felt even with the chat closed.
         .sensoryFeedback(trigger: store.agent.lastAnnouncement) { _, new in
             guard let new else { return nil }
@@ -112,6 +122,7 @@ struct RootView: View {
         }
         .task { await ModelAutoSetup.run(store: store, force: false) }
         .onChange(of: scenePhase) { _, phase in
+            store.appActive = (phase == .active)
             // Write any debounced settings edit before we can be suspended.
             if phase != .active { store.flushMeta() }
             if phase == .background { BackgroundRender.scheduleIfNeeded(store: store) }

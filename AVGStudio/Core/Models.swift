@@ -265,6 +265,11 @@ struct Project: Codable, Hashable, Identifiable {
     /// The library track `MusicPicker` chose for this video (when its channel
     /// picks automatically), kept so a re-render keeps the same music.
     var autoMusicID: String?
+    /// True while the video waits, before its first render, for the person to
+    /// edit it (see EditGate.swift). Cleared when they render.
+    var awaitingEdit: Bool?
+    /// What the person changed about this video beside its channel's settings.
+    var edits: ProjectEdits?
     /// The take whose content the working copy (the project's own fields and
     /// files) currently equals; nil once a run has started changing it.
     var workingTakeID: Int?
@@ -391,6 +396,9 @@ struct Channel: Codable, Hashable, Identifiable {
     /// newest first, so the same bed does not sit under every upload.
     var musicAuto = false
     var musicRecent: [String] = []
+    /// Whether to offer the person the edit before a video's first render
+    /// (EditGate.swift).
+    var editingMode: EditingMode = .ask
     /// Sound effects: off until the person turns them on, a sound (an
     /// `AudioLibrary` item id) per `SFXMoment` raw value, and a channel-wide
     /// level offset in dB applied on top of each moment's own level.
@@ -899,6 +907,7 @@ extension Channel {
         d.musicTrackID = c.value("musicTrackID", d.musicTrackID)
         d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
         d.musicAuto = c.value("musicAuto", d.musicAuto)
+        d.editingMode = c.value("editingMode", d.editingMode)
         d.musicRecent = c.value("musicRecent", d.musicRecent)
         d.sfxEnabled = c.value("sfxEnabled", d.sfxEnabled)
         d.sfxMap = c.value("sfxMap", d.sfxMap)
