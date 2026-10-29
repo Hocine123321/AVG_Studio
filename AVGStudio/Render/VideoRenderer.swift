@@ -187,12 +187,25 @@ final class VideoRenderer {
             renderer.draw(into: buffer, t: t, input: input, images: images, plan: framePlan)
             CVPixelBufferLockBaseAddress(buffer, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-            guard let base = CVPixelBufferGetBaseAddress(buffer),
-                  let ctx = CGContext(data: base, width: w, height: h, bitsPerComponent: 8,
-                                      bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-                                      space: renderer.rgbColorSpace, bitmapInfo: VideoRenderer.bitmapInfo)
-            else { return nil }
-            return ctx.makeImage()
+            guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+            // Copy the visible pixels row by row into a tightly packed,
+            // zero-initialised bitmap. A pixel buffer's rows are padded to an
+            // alignment boundary and `CVPixelBufferCreate` does not clear that
+            // padding, so wrapping the buffer directly leaked uninitialised
+            // bytes into the image: two identical frames then compared unequal.
+            let rowBytes = w * 4
+            let source = CVPixelBufferGetBytesPerRow(buffer)
+            var packed = Data(count: rowBytes * h)
+            packed.withUnsafeMutableBytes { dst in
+                guard let out = dst.baseAddress else { return }
+                for row in 0..<h {
+                    memcpy(out + row * rowBytes, base + row * source, rowBytes)
+                }
+            }
+            guard let provider = CGDataProvider(data: packed as CFData) else { return nil }
+            return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes,
+                           space: renderer.rgbColorSpace, bitmapInfo: CGBitmapInfo(rawValue: VideoRenderer.bitmapInfo),
+                           provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         }
     }
 
