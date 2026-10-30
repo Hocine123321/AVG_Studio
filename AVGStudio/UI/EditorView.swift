@@ -247,6 +247,7 @@ struct EditorView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            aiEditSection(p)
             musicSection(p)
             effectsSection(p)
             cardsSection(p)
@@ -267,6 +268,27 @@ struct EditorView: View {
         }
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $addingCard) { AddTitleCardSheet(projectID: projectID) }
+    }
+
+    // MARK: What the AI edit did
+
+    private func aiEditSection(_ p: Project) -> some View {
+        let ch = store.channel(for: p)
+        let plan = Pipeline(store: store, projectID: projectID, resumeExisting: false).editPlan(for: p, channel: ch)
+        return Section {
+            if let plan {
+                ForEach(plan.notes, id: \.self) { Text($0).font(.callout) }
+            } else {
+                Text(ch.editLevel == .off ? "Cuts and punch-ins are off for this channel."
+                                          : "No cuts or punch-ins: the scenes are short and no key words stood out.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("AI edit")
+        } footer: {
+            Text("The preview above includes these. Change them in the channel's Editing section.")
+        }
     }
 
     // MARK: Music

@@ -327,8 +327,11 @@ struct ChannelEditor: View {
                     Picker("Before the first render", selection: $channel.editingMode) {
                         ForEach(EditingMode.allCases) { Text($0.title).tag($0) }
                     }
+                    Picker("Cuts and punch-ins", selection: $channel.editLevel) {
+                        ForEach(EditLevel.allCases) { Text($0.title).tag($0) }
+                    }
                 } header: { Text("Editing") } footer: {
-                    Text(channel.editingMode.detail)
+                    Text(channel.editingMode.detail + "\n\n" + channel.editLevel.detail)
                 }
 
                 Section {

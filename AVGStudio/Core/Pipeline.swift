@@ -1076,8 +1076,23 @@ struct Pipeline {
             codec: s.videoCodec,
             encoderQuality: s.encoderQuality,
             engine: s.renderEngine,
-            pauseWhenHot: s.pauseWhenHot
+            pauseWhenHot: s.pauseWhenHot,
+            editPlan: editPlan(for: p, channel: ch)
         )
+    }
+
+    /// The shot cuts and punch-ins for this video, planned from the words the
+    /// captions already carry. Pure and cheap, so the preview and the render
+    /// ask for it separately and always get the same answer.
+    func editPlan(for p: Project, channel ch: Channel) -> EditPlan? {
+        guard ch.editLevel != .off, !p.sceneDurations.isEmpty else { return nil }
+        let total = p.sceneDurations.reduce(0, +)
+        let plan = EditPlanner.plan(EditPlanner.Input(
+            sceneDurations: p.sceneDurations,
+            words: p.captions.flatMap { $0.words },
+            zoomWords: (p.storyMap?.zoomWords ?? []).map { (scene: $0.scene, word: $0.word) },
+            shortForm: p.aspectRatio == .portrait || total <= 75))
+        return plan.isEmpty ? nil : plan
     }
 
     /// The narration with the channel's music and sound effects mixed in, or the

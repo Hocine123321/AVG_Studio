@@ -399,6 +399,8 @@ struct Channel: Codable, Hashable, Identifiable {
     /// Whether to offer the person the edit before a video's first render
     /// (EditGate.swift).
     var editingMode: EditingMode = .ask
+    /// Shot cuts and punch-ins inside scenes (EditPlan.swift).
+    var editLevel: EditLevel = .fast
     /// Sound effects: off until the person turns them on, a sound (an
     /// `AudioLibrary` item id) per `SFXMoment` raw value, and a channel-wide
     /// level offset in dB applied on top of each moment's own level.
@@ -908,6 +910,7 @@ extension Channel {
         d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
         d.musicAuto = c.value("musicAuto", d.musicAuto)
         d.editingMode = c.value("editingMode", d.editingMode)
+        d.editLevel = c.value("editLevel", d.editLevel)
         d.musicRecent = c.value("musicRecent", d.musicRecent)
         d.sfxEnabled = c.value("sfxEnabled", d.sfxEnabled)
         d.sfxMap = c.value("sfxMap", d.sfxMap)

@@ -74,6 +74,8 @@ struct RenderInput {
     var engine: RenderEngine = .auto
     /// Wait for the device to cool when it reports serious heat.
     var pauseWhenHot = true
+    /// Shot cuts and punch-ins inside scenes (EditPlan.swift); nil = none.
+    var editPlan: EditPlan? = nil
 }
 
 /// One scene image placed on the canvas for one frame.
@@ -457,7 +459,8 @@ final class VideoRenderer {
             }
             if let size = sizes[safe: idx, default: nil] {
                 let rect = Self.placement(size: size, canvas: canvas, sceneIndex: idx, p: local, input: input, motion: direction, extraDX: extraDX)
-                layers.append(ScenePlacement(index: idx, rect: rect, alpha: 1))
+                layers.append(ScenePlacement(index: idx, rect: Self.edited(rect, plan: input.editPlan, t: t, scene: idx,
+                                                                           sceneEnd: sceneStart + dur, size: size, canvas: canvas), alpha: 1))
             }
         } else {
             // No AI plan (planning never ran, or failed) - the original
@@ -465,7 +468,8 @@ final class VideoRenderer {
             // index, and a fixed crossfade into the next scene's opening.
             if let size = sizes[safe: idx, default: nil] {
                 let rect = Self.placement(size: size, canvas: canvas, sceneIndex: idx, p: local, input: input, motion: nil)
-                layers.append(ScenePlacement(index: idx, rect: rect, alpha: 1))
+                layers.append(ScenePlacement(index: idx, rect: Self.edited(rect, plan: input.editPlan, t: t, scene: idx,
+                                                                           sceneEnd: sceneStart + dur, size: size, canvas: canvas), alpha: 1))
             }
             let remaining = sceneStart + dur - t
             if remaining < crossfade, idx + 1 < sizes.count, let size = sizes[idx + 1] {
@@ -856,6 +860,33 @@ final class VideoRenderer {
     /// (slide/whip only), added on top of whatever the motion itself
     /// computes - the two are independent PC concerns (`_apply_ken_burns`
     /// vs `_apply_scene_transition`) composited exactly as there.
+    /// The scene's rectangle with the edit plan applied: after a shot cut, a
+    /// static crop (plus a slow push) replaces the scene's own motion; a
+    /// punch-in scales whatever is showing about the middle of the frame. Both
+    /// only ever ENLARGE the picture past `fill`, so no edge can show.
+    static func edited(_ base: CGRect, plan: EditPlan?, t: Double, scene: Int, sceneEnd: Double,
+                       size: CGSize, canvas: CGRect) -> CGRect {
+        guard let plan, !plan.isEmpty else { return base }
+        var rect = base
+        if let shot = plan.shot(at: t, scene: scene, sceneEnd: sceneEnd) {
+            let fill = max(canvas.width / max(size.width, 1), canvas.height / max(size.height, 1))
+            let scale = fill * CGFloat(shot.framing.zoom * (1 + EditPlan.drift * shot.progress))
+            let w = size.width * scale, h = size.height * scale
+            let slackX = max(0, (w - canvas.width) / 2), slackY = max(0, (h - canvas.height) / 2)
+            let dx = min(max(CGFloat(0.5 - shot.framing.fx) * w, -slackX), slackX)
+            let dy = min(max(CGFloat(shot.framing.fy - 0.5) * h, -slackY), slackY)
+            rect = CGRect(x: canvas.midX - w / 2 + dx, y: canvas.midY - h / 2 + dy, width: w, height: h)
+        }
+        let pulse = plan.pulse(at: t)
+        if pulse > 0 {
+            let k = CGFloat(1 + EditPlan.punchStrength * pulse)
+            let c = CGPoint(x: canvas.midX, y: canvas.midY)
+            rect = CGRect(x: c.x + (rect.minX - c.x) * k, y: c.y + (rect.minY - c.y) * k,
+                          width: rect.width * k, height: rect.height * k)
+        }
+        return rect
+    }
+
     static func placement(size: CGSize, canvas: CGRect, sceneIndex: Int, p: Double, input: RenderInput, motion: SceneDirection?, extraDX: CGFloat = 0, extraDY: CGFloat = 0) -> CGRect {
         let iw = max(size.width, 1), ih = max(size.height, 1)
         let fill = max(canvas.width / iw, canvas.height / ih)

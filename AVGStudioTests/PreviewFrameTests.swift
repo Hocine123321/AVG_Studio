@@ -13,11 +13,14 @@ final class PreviewFrameTests: XCTestCase {
 
     /// One blue 90x160 scene lasting two seconds, no camera motion and no
     /// filter, so two frames differ only when something was drawn on top.
-    private func input(cards: [TakeoverCard] = [], cues: [CaptionCue] = []) throws -> RenderInput {
+    private func input(cards: [TakeoverCard] = [], cues: [CaptionCue] = [], plan: EditPlan? = nil) throws -> RenderInput {
         let image = dir.appendingPathComponent("a.png")
+        // Two tones, so enlarging or re-cropping the picture visibly changes pixels.
         let png = UIGraphicsImageRenderer(size: CGSize(width: 90, height: 160)).pngData { ctx in
             UIColor.systemBlue.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: 90, height: 160))
+            UIColor.systemRed.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: 30, height: 80))
         }
         try png.write(to: image)
         let s = AppSettings()
@@ -28,7 +31,7 @@ final class PreviewFrameTests: XCTestCase {
             captions: CaptionStyle(enabled: true, fontSize: CGFloat(s.captionFontSize), position: s.captionPosition,
                                    animation: s.captionAnimationStyle, accent: Theme.accent, accent1: Theme.accent,
                                    accent2: Theme.accent, fontFamily: ch.fontFamily, overlay: ch.overlay),
-            cards: cards, output: dir.appendingPathComponent("unused.mp4"))
+            cards: cards, output: dir.appendingPathComponent("unused.mp4"), editPlan: plan)
     }
 
     private func bytes(_ image: CGImage?) -> Data? {
@@ -79,5 +82,26 @@ final class PreviewFrameTests: XCTestCase {
         let beforeEdit = bytes(preview.frame(at: 1.2))
         preview.update(cards: [], cues: [edited])
         XCTAssertNotEqual(bytes(preview.frame(at: 1.2)), beforeEdit, "a retyped caption changes the frame")
+    }
+
+    func testAPunchInPushesTheFrameAndSettlesBack() throws {
+        let preview = VideoRenderer.Preview(try input(plan: EditPlan(punches: [1.0])))
+        let before = bytes(preview.frame(at: 0.2))
+        XCTAssertNotEqual(bytes(preview.frame(at: 1.0)), before, "the picture is larger the instant the punch lands")
+        XCTAssertEqual(bytes(preview.frame(at: 1.6)), before, "and is back to normal once the pulse is over")
+    }
+
+    func testAShotCutReframesThePictureFromThatMomentOn() throws {
+        let cut = ShotCut(scene: 0, at: 1.0, framing: Framing(zoom: 1.5, fx: 0.25, fy: 0.5))
+        let preview = VideoRenderer.Preview(try input(plan: EditPlan(cuts: [cut])))
+        let before = bytes(preview.frame(at: 0.9))
+        XCTAssertEqual(before, bytes(preview.frame(at: 0.2)), "before the cut the scene looks as it always did")
+        XCTAssertNotEqual(bytes(preview.frame(at: 1.05)), before, "the cut changes the crop")
+    }
+
+    func testAnEmptyPlanChangesNothing() throws {
+        let plain = VideoRenderer.Preview(try input())
+        let empty = VideoRenderer.Preview(try input(plan: EditPlan()))
+        XCTAssertEqual(bytes(plain.frame(at: 1.0)), bytes(empty.frame(at: 1.0)))
     }
 }
