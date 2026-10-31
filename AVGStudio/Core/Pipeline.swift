@@ -973,6 +973,7 @@ struct Pipeline {
         } else {
             step(.render, "direction", .skipped, "Ken Burns is off")
         }
+        if ch.editLevel == .smart { p.focus = await ensureSubjectFocus(p, channel: ch) }
         let takeID = (p.takes.map(\.id).max() ?? 0) + 1
         let name = "render/take_\(takeID).mp4"
         let out = folder.appendingPathComponent(name)
@@ -1091,8 +1092,59 @@ struct Pipeline {
             sceneDurations: p.sceneDurations,
             words: p.captions.flatMap { $0.words },
             zoomWords: (p.storyMap?.zoomWords ?? []).map { (scene: $0.scene, word: $0.word) },
-            shortForm: p.aspectRatio == .portrait || total <= 75))
+            shortForm: p.aspectRatio == .portrait || total <= 75,
+            focus: currentFocus(p, channel: ch)))
         return plan.isEmpty ? nil : plan
+    }
+
+    /// The saved subject points, but only while they still describe THESE pictures.
+    private func currentFocus(_ p: Project, channel ch: Channel) -> [Int: (x: Double, y: Double)] {
+        guard ch.editLevel == .smart, let saved = p.focus, saved.signature == subjectSignature(p) else { return [:] }
+        var out: [Int: (x: Double, y: Double)] = [:]
+        for point in saved.points { out[point.scene] = (x: point.x, y: point.y) }
+        return out
+    }
+
+    /// A fingerprint of the scene pictures (names and file sizes).
+    func subjectSignature(_ p: Project) -> String {
+        var parts: [String] = []
+        for (i, scene) in p.scenes.enumerated() {
+            var size = 0
+            if let url = store.file(p, scene.imageFile), let values = try? url.resourceValues(forKeys: [.fileSizeKey]) {
+                size = values.fileSize ?? 0
+            }
+            parts.append("\(i):\(scene.imageFile ?? "-"):\(size)")
+        }
+        return SubjectFocus.signature(parts)
+    }
+
+    /// Smart level: asks Gemini where the subject is in each picture (one
+    /// request, thumbnails) so close-up crops aim at it. Reuses the saved answer
+    /// while the pictures are unchanged; never fatal - without a key, or when
+    /// the call fails (free quota used up, a blocked picture), the default
+    /// crops are used and the reason is logged.
+    private func ensureSubjectFocus(_ p: Project, channel ch: Channel) async -> SubjectFocus? {
+        let signature = subjectSignature(p)
+        if let saved = p.focus, saved.signature == signature { return saved }
+        guard let key = Keychain.get(.gemini) else {
+            store.record(projectID, "Smart crops need a Google key; using the default crops.")
+            return nil
+        }
+        var pictures: [(scene: Int, jpeg: Data)] = []
+        for (i, scene) in p.scenes.enumerated().prefix(24) {
+            if let url = store.file(p, scene.imageFile), let jpeg = SubjectImages.thumbnail(url) { pictures.append((scene: i, jpeg: jpeg)) }
+        }
+        guard !pictures.isEmpty else { return nil }
+        do {
+            let points = try await GeminiVision(key: key, model: settings.geminiModel).locateSubjects(pictures)
+            let focus = SubjectFocus(signature: signature, points: points)
+            store.update(projectID) { $0.focus = focus }
+            store.record(projectID, "Found the subject in \(points.count) of \(pictures.count) pictures.")
+            return focus
+        } catch {
+            store.record(projectID, "Couldn't find the subjects (\(error.localizedDescription)); using the default crops.")
+            return nil
+        }
     }
 
     /// The narration with the channel's music and sound effects mixed in, or the

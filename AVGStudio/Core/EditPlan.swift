@@ -71,7 +71,7 @@ struct EditPlan: Codable, Hashable {
 }
 
 enum EditLevel: String, Codable, CaseIterable, Identifiable {
-    case off, fast
+    case off, fast, smart
 
     var id: String { rawValue }
 
@@ -79,6 +79,7 @@ enum EditLevel: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .off: return "Off"
         case .fast: return "Shot cuts and punch-ins"
+        case .smart: return "Smart crops"
         }
     }
 
@@ -86,6 +87,7 @@ enum EditLevel: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .off: return "Each scene is one picture with its own slow motion, as before."
         case .fast: return "Long scenes are cut into several crops of the same picture on a spoken word, and key words (numbers, shouted words, the story's key terms) get a quick punch-in. No AI call, no cost."
+        case .smart: return "Everything in the previous option, and the crops aim at the subject of each picture. One small request per video to your Google key (the pictures as thumbnails); skipped, with the default crops, if there is no key or no free quota left."
         }
     }
 }

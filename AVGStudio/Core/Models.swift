@@ -270,6 +270,9 @@ struct Project: Codable, Hashable, Identifiable {
     var awaitingEdit: Bool?
     /// What the person changed about this video beside its channel's settings.
     var edits: ProjectEdits?
+    /// Where the subject sits in each picture, for the Smart edit level
+    /// (SubjectFocus.swift). Tied to the exact pictures it was asked about.
+    var focus: SubjectFocus?
     /// The take whose content the working copy (the project's own fields and
     /// files) currently equals; nil once a run has started changing it.
     var workingTakeID: Int?
