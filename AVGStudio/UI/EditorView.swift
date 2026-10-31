@@ -127,10 +127,49 @@ final class EditorPreviewModel {
     }
 }
 
+/// The Editor tab: the editor for whichever video is current (the same one
+/// Studio shows), with a menu to switch videos.
+struct EditorTab: View {
+    @Environment(Store.self) private var store
+
+    var body: some View {
+        Group {
+            if let p = store.currentProject {
+                // `.id` gives each video its own preview state.
+                EditorView(projectID: p.id).id(p.id)
+            } else {
+                ContentUnavailableView {
+                    Label("Nothing to edit yet", systemImage: "scissors")
+                } description: {
+                    Text("Create a video first, or open one from the Library.")
+                } actions: {
+                    Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
+                }
+            }
+        }
+        .navigationTitle(store.currentProject?.title ?? "Editor")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if store.projects.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        ForEach(store.projects) { p in
+                            Button(p.title) { store.currentProjectID = p.id }
+                        }
+                    } label: {
+                        Image(systemName: "film.stack")
+                    }
+                    .accessibilityLabel("Choose a video")
+                }
+            }
+        }
+    }
+}
+
+/// The editor itself - a page of the Editor tab, not a sheet.
 struct EditorView: View {
     let projectID: String
     @Environment(Store.self) private var store
-    @Environment(\.dismiss) private var dismiss
     @State private var addingCard = false
     @State private var model = EditorPreviewModel()
     @State private var mixPlayer = AudioPreview()
@@ -139,27 +178,19 @@ struct EditorView: View {
     private var project: Project? { store.project(projectID) }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let p = project {
-                    form(p)
-                } else {
-                    ContentUnavailableView("Video not found", systemImage: "film")
-                }
+        Group {
+            if let p = project {
+                form(p)
+            } else {
+                ContentUnavailableView("Video not found", systemImage: "film")
             }
-            .navigationTitle("Edit")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-            }
-            .tint(Theme.accent)
-            .task { await loadPreview() }
-            .onChange(of: project?.cards) { _, _ in refreshPreview() }
-            .onChange(of: project?.captions) { _, _ in refreshPreview() }
-            .onDisappear {
-                model.stop()
-                mixPlayer.stop()
-            }
+        }
+        .task(id: projectID) { await loadPreview() }
+        .onChange(of: project?.cards) { _, _ in refreshPreview() }
+        .onChange(of: project?.captions) { _, _ in refreshPreview() }
+        .onDisappear {
+            model.stop()
+            mixPlayer.stop()
         }
     }
 
@@ -237,7 +268,7 @@ struct EditorView: View {
             previewCard(p)
             settingsForm(p)
         }
-        .glassSheetBackground(scroll: false)
+        .screenBackground()
     }
 
     private func settingsForm(_ p: Project) -> some View {
@@ -259,7 +290,7 @@ struct EditorView: View {
             Section {
                 Button {
                     store.renderEdited(p.id)
-                    dismiss()
+                    store.selectForStudio(p.id)   // watch it render in Studio
                 } label: {
                     Text(p.takes.isEmpty ? "Render video" : "Render a new take").frame(maxWidth: .infinity)
                 }
@@ -489,7 +520,7 @@ struct CaptionsEditorView: View {
                 }
             }
         }
-        .glassSheetBackground()
+        .screenBackground()
         .navigationTitle("Captions")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {

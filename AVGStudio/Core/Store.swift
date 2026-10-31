@@ -4,7 +4,11 @@ import UIKit
 
 /// Order matches the mock's own floating tab bar exactly: Library,
 /// Studio, Create, Channels, Settings.
-enum AppTab: Hashable { case library, studio, create, channels, settings }
+enum AppTab: Hashable { case library, editor, create, channels, settings }
+
+/// What the Library tab can push. Studio used to be a tab of its own; it is now
+/// the screen a library card opens, so the Editor can have the tab.
+enum LibraryRoute: Hashable { case studio }
 
 struct JobState: Equatable {
     var phase: PhaseID
@@ -72,6 +76,8 @@ final class Store {
     /// Errors, kept across launches (see ErrorHistory.swift), newest first.
     var errorHistory: [ErrorRecord] = []
     var tab: AppTab = .library
+    /// The Library tab's navigation stack (Studio is pushed onto it).
+    var libraryPath: [LibraryRoute] = []
     /// What the Settings tab has pushed. Lives here (not in the view) so an
     /// error elsewhere - a bad key in the assistant chat, a failed render -
     /// can land the person on the exact settings page that fixes it.
@@ -221,7 +227,14 @@ final class Store {
     /// not a push.
     func selectForStudio(_ id: String) {
         currentProjectID = id
-        tab = .studio
+        libraryPath = [.studio]
+        tab = .library
+    }
+
+    /// Opens the Editor tab on this video.
+    func openEditor(_ id: String) {
+        currentProjectID = id
+        tab = .editor
     }
 
     func update(_ id: String, _ body: (inout Project) -> Void) {
@@ -811,6 +824,7 @@ final class Store {
             gateAnswered.insert(id)
             if decision == .editMyself, !Task.isCancelled {
                 update(id) { $0.awaitingEdit = true }
+                openEditor(id)
                 return true
             }
             return false

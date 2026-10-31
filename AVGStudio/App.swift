@@ -53,15 +53,16 @@ struct RootView: View {
                 // `Tab(value:)` syntax, so this just lets it - no hidden
                 // toolbar, no hand-rolled bar underneath duplicating it.
                 TabView(selection: $store.tab) {
+                    // A library card opens Studio on this stack (Store.selectForStudio).
+                    // Studio stopped being a tab so the Editor could have one.
                     Tab("Library", systemImage: "square.grid.2x2.fill", value: AppTab.library) {
-                        NavigationStack { HomeView() }
+                        NavigationStack(path: $store.libraryPath) {
+                            HomeView()
+                                .navigationDestination(for: LibraryRoute.self) { _ in StudioView() }
+                        }
                     }
-                    // Skin v2: Studio is a persistent tab now (shows
-                    // Store.currentProject), not a screen pushed from a
-                    // library card tap - see SKIN_V2_PLAN.md's "Navigation"
-                    // note and Store.selectForStudio.
-                    Tab("Studio", systemImage: "film.stack.fill", value: AppTab.studio) {
-                        NavigationStack { StudioView() }
+                    Tab("Editor", systemImage: "scissors", value: AppTab.editor) {
+                        NavigationStack { EditorTab() }
                     }
                     Tab("Create", systemImage: "sparkles", value: AppTab.create) {
                         NavigationStack { CreateView() }

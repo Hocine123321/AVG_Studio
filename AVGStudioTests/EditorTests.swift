@@ -152,3 +152,25 @@ final class CaptionEditTests: XCTestCase {
         XCTAssertEqual(CaptionEdit.parts("...").core, "")
     }
 }
+
+@MainActor
+final class TabNavigationTests: XCTestCase {
+    func testOpeningAVideoFromTheLibraryPushesStudioOntoTheLibraryTab() {
+        let store = Store()
+        store.tab = .create
+        store.selectForStudio("abc")
+        XCTAssertEqual(store.currentProjectID, "abc")
+        XCTAssertEqual(store.tab, .library)
+        XCTAssertEqual(store.libraryPath, [.studio], "one Studio screen, never a stack of them")
+        store.selectForStudio("def")
+        XCTAssertEqual(store.libraryPath, [.studio])
+        XCTAssertEqual(store.currentProjectID, "def")
+    }
+
+    func testOpeningTheEditorSwitchesToItsTabOnThatVideo() {
+        let store = Store()
+        store.openEditor("abc")
+        XCTAssertEqual(store.tab, .editor)
+        XCTAssertEqual(store.currentProjectID, "abc")
+    }
+}

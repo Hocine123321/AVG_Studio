@@ -27,7 +27,6 @@ struct StudioView: View {
     /// A take waiting on a confirmation before it is continued from / deleted.
     @State private var takeToContinue: Take?
     @State private var takeToDelete: Take?
-    @State private var showingEditor = false
 
     var body: some View {
         // Studio is a persistent tab now (Skin v2), not a pushed screen -
@@ -54,7 +53,6 @@ struct StudioView: View {
             .screenBackground()
             .navigationTitle(p.title)
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showingEditor) { EditorView(projectID: p.id) }
             .toolbar {
                 // Matches the PC's per-take "Log" toggle (Studio.tsx's
                 // TakeLogToggle) - the FULL run history, not the mock's
@@ -216,14 +214,14 @@ struct StudioView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
-                    Button("Open editor") { showingEditor = true }.buttonStyle(.glassProminent)
+                    Button("Open editor") { store.openEditor(p.id) }.buttonStyle(.glassProminent)
                     Button("Render now") { store.renderEdited(p.id) }.buttonStyle(.glass)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .glassCard()
         } else if p.phase(.captions).status == .done, !store.isRunning(p.id) {
-            Button { showingEditor = true } label: {
+            Button { store.openEditor(p.id) } label: {
                 Label("Edit this video", systemImage: "scissors").frame(maxWidth: .infinity)
             }
             .buttonStyle(.glass)
