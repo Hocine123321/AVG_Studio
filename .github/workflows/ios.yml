@@ -1,7 +1,7 @@
 name: iOS build (unsigned IPA)
 on:
   push:
-    branches: [ios-native]
+    branches: [iOS-native, ios-native]
     paths: ["AVGStudio/**", "AVGStudioTests/**", "project.yml", ".github/workflows/ios.yml"]
   workflow_dispatch:
 
