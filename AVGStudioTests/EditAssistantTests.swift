@@ -186,7 +186,8 @@ final class EditAssistantTests: XCTestCase {
             toolCall("add_title_card", #"{"text":"Hi","at_seconds":3}"#, id: "a"),
             toolCall("fix_caption_word", #"{"find":"wrld","replace":"world"}"#, id: "b"),
         ])
-        assistant.makeProvider = { _ in ScriptedProvider(queue: [.success(both), .success(.assistant(text: "Done."))]) }
+        let provider = ScriptedProvider(queue: [.success(both), .success(.assistant(text: "Done."))])
+        assistant.makeProvider = { _ in provider }
         await assistant.send("do two things").value
         XCTAssertEqual(project.cards.count, 1)
         XCTAssertEqual(project.captions[0].text, "Hello world")
@@ -199,9 +200,11 @@ final class EditAssistantTests: XCTestCase {
     }
 
     func testATurnThatChangesNothingLeavesNothingToUndo() async {
-        assistant.makeProvider = { _ in ScriptedProvider(queue: [.success(.calling("get_edit")), .success(.assistant(text: "It has 3 lines."))]) }
+        let provider = ScriptedProvider(queue: [.success(.calling("get_edit")), .success(.assistant(text: "It has 3 lines."))])
+        assistant.makeProvider = { _ in provider }
         await assistant.send("what is in this video?").value
         XCTAssertFalse(assistant.canUndo)
+        XCTAssertEqual(provider.calls.count, 2, "one tool call, then the answer")
     }
 
     func testItStopsAfterTheStepLimit() async {
@@ -231,7 +234,8 @@ final class EditAssistantTests: XCTestCase {
     }
 
     func testSwitchingVideosStartsAFreshChat() async {
-        assistant.makeProvider = { _ in ScriptedProvider(queue: [.success(.assistant(text: "ok"))]) }
+        let provider = ScriptedProvider(queue: [.success(.assistant(text: "ok"))])
+        assistant.makeProvider = { _ in provider }
         await assistant.send("hi").value
         XCTAssertFalse(assistant.lines.isEmpty)
         assistant.attach(store, projectID: "another-video")
