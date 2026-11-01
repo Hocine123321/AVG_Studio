@@ -171,6 +171,8 @@ struct EditorView: View {
     let projectID: String
     @Environment(Store.self) private var store
     @State private var addingCard = false
+    @State private var showAssistant = false
+    @State private var assistant = EditAssistant()
     @State private var model = EditorPreviewModel()
     @State private var mixPlayer = AudioPreview()
     @State private var mixing = false
@@ -185,7 +187,10 @@ struct EditorView: View {
                 ContentUnavailableView("Video not found", systemImage: "film")
             }
         }
-        .task(id: projectID) { await loadPreview() }
+        .task(id: projectID) {
+            assistant.attach(store, projectID: projectID)
+            await loadPreview()
+        }
         .onChange(of: project?.cards) { _, _ in refreshPreview() }
         .onChange(of: project?.captions) { _, _ in refreshPreview() }
         .onDisappear {
@@ -278,6 +283,13 @@ struct EditorView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Button { showAssistant = true } label: {
+                    Label("Ask the editing assistant", systemImage: "sparkles")
+                }
+            } footer: {
+                Text("Describe a change in your own words: fix a caption, add a title card, pick the music. It only edits this video.")
+            }
             aiEditSection(p)
             musicSection(p)
             effectsSection(p)
@@ -299,6 +311,7 @@ struct EditorView: View {
         }
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $addingCard) { AddTitleCardSheet(projectID: projectID) }
+        .sheet(isPresented: $showAssistant) { EditAssistantView(assistant: assistant) }
     }
 
     // MARK: What the AI edit did
@@ -470,12 +483,8 @@ private struct AddTitleCardSheet: View {
     }
 
     private func add() {
-        let end = total > 0 ? min(total, start + length) : start + length
         store.update(projectID) { proj in
-            // Cards are told apart by kind + scene number, so a hand-made one
-            // takes a number above every scene and every existing card.
-            let scene = max(1000, (proj.cards.map { $0.scene }.max() ?? 0) + 1)
-            proj.cards.append(TakeoverCard(scene: scene, text: text.trimmed, start: start, end: end, kind: "explainer"))
+            proj.cards.append(TitleCards.make(text: text, start: start, length: length, total: total, existing: proj.cards))
             proj.cards.sort { $0.start < $1.start }
         }
         dismiss()
