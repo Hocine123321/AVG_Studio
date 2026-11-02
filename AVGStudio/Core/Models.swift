@@ -721,6 +721,14 @@ struct AppSettings: Codable {
     var keepScreenAwake = true
     /// Keep working (more slowly) when you leave the app.
     var allowBackgroundRendering = true
+    /// Seconds offered to take over a video's edit before its first render
+    /// (EditGate.swift); 0 = never ask, the AI always finishes.
+    var editGateSeconds = EditGate.defaultSeconds
+    /// What a NEW channel starts with (existing channels keep their own).
+    var defaultEditingMode: EditingMode = .ask
+    var defaultEditLevel: EditLevel = .fast
+    /// The editor's preview at 540p instead of 360p.
+    var previewSharp = false
 
     // MARK: Assistant (the in-app chat agent; see AgentSettings.swift)
     var agentProvider: AgentProviderKind = .groq
@@ -801,6 +809,10 @@ struct AppSettings: Codable {
         pauseWhenHot = c.value("pauseWhenHot", pauseWhenHot)
         keepScreenAwake = c.value("keepScreenAwake", keepScreenAwake)
         allowBackgroundRendering = c.value("allowBackgroundRendering", allowBackgroundRendering)
+        editGateSeconds = c.value("editGateSeconds", editGateSeconds)
+        defaultEditingMode = c.value("defaultEditingMode", defaultEditingMode)
+        defaultEditLevel = c.value("defaultEditLevel", defaultEditLevel)
+        previewSharp = c.value("previewSharp", previewSharp)
         appFont = c.value("appFont", appFont)
         agentProvider = c.value("agentProvider", agentProvider)
         agentGroqModel = c.value("agentGroqModel", agentGroqModel)

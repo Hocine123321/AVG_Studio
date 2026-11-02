@@ -19,7 +19,7 @@ import SwiftUI
 
 /// Every screen the hub can open a setting on.
 enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
-    case writing, images, voice, captions, video, performance, assistant, keys, fallbacks, appearance
+    case writing, images, voice, captions, video, editing, performance, assistant, keys, fallbacks, appearance
     var id: String { rawValue }
 
     var title: String {
@@ -29,6 +29,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "Voice"
         case .captions: return "Captions"
         case .video: return "Video"
+        case .editing: return "Editing"
         case .performance: return "Performance"
         case .assistant: return "Assistant"
         case .keys: return "API keys"
@@ -44,6 +45,7 @@ enum SettingsCategory: String, Hashable, CaseIterable, Identifiable {
         case .voice: return "waveform"
         case .captions: return "captions.bubble"
         case .video: return "film"
+        case .editing: return "scissors"
         case .performance: return "speedometer"
         case .assistant: return "sparkle"
         case .keys: return "key.fill"
@@ -60,6 +62,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case voiceProvider, voicePick, voiceModel
     case captionsToggle, captionAnimation, captionWords, captionPosition, captionSize
     case quality, fps, kenBurns, motion, filterStyle, filterIntensity
+    case editGateSeconds, defaultEditingMode, defaultEditLevel, previewQuality
     case renderEngine, videoCodec, encoderQuality, parallelJobs, imageParallelism, pauseWhenHot, keepAwake, backgroundRendering
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
@@ -127,6 +130,10 @@ enum SettingsIndex {
         e("Pause when hot", .performance, .pauseWhenHot, "thermal heat temperature overheating cool throttle"),
         e("Keep screen on", .performance, .keepAwake, "auto-lock sleep awake idle screen timeout stall"),
         e("Keep working in background", .performance, .backgroundRendering, "background app switch leave continue"),
+        e("Offer to edit before the first render", .editing, .editGateSeconds, "edit it yourself gate countdown seconds never ask skip ai finish take over"),
+        e("New channels: when a video is ready", .editing, .defaultEditingMode, "default channel ask let ai finish edit every video manual"),
+        e("New channels: cuts and punch-ins", .editing, .defaultEditLevel, "default channel shot cuts punch smart crops subject zoom"),
+        e("Sharper editor preview", .editing, .previewQuality, "editor preview 540p 360p sharp battery"),
         e("Film filter", .video, .filterStyle, "filter grain light leak look"),
         e("Filter intensity", .video, .filterIntensity, "filter strength amount grain leak"),
         e("Assistant provider", .assistant, .assistantProvider, "assistant agent chat ai groq gemini service"),

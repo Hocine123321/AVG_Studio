@@ -229,6 +229,46 @@ struct VideoSettingsPage: View {
     }
 }
 
+// MARK: - Editing
+
+/// How the new editing features behave app-wide. What belongs to ONE channel
+/// (its editing mode, its cuts level, its music) stays in the channel editor;
+/// what belongs to one video stays in the Editor.
+struct EditingSettingsPage: View {
+    @Environment(Store.self) private var store
+    var focus: SettingAnchor?
+
+    var body: some View {
+        @Bindable var store = store
+        SettingsPage(title: "Editing", focus: focus) {
+            SettingsGroup(title: "Before the first render",
+                          footer: "A short window to take over a video's edit before it is first rendered: add music, title cards, fix captions. If you do nothing, the AI finishes it. Never means the AI always finishes, whatever a channel says.") {
+                SegmentRow(title: "Offer to edit", options: EditGate.choices,
+                           label: { $0 == 0 ? "Never" : "\($0) s" }, selection: $store.settings.editGateSeconds)
+                    .anchored(.editGateSeconds)
+            }
+
+            SettingsGroup(title: "New channels start with",
+                          footer: "Applies to channels you create from now on. Each channel can change its own under Channels → Editing. Smart crops use one small request to your Google key per video, and are skipped without a key or free quota.") {
+                ChoiceRow(title: "When a video is ready",
+                          options: EditingMode.allCases.map { ChoiceOption($0, $0.title) },
+                          selection: $store.settings.defaultEditingMode)
+                    .anchored(.defaultEditingMode)
+                ChoiceRow(title: "Cuts and punch-ins",
+                          options: EditLevel.allCases.map { ChoiceOption($0, $0.title) },
+                          selection: $store.settings.defaultEditLevel)
+                    .anchored(.defaultEditLevel)
+            }
+
+            SettingsGroup(title: "Editor") {
+                ToggleRow(title: "Sharper preview", subtitle: "540p instead of 360p: clearer, but slower to load and heavier on battery",
+                          isOn: $store.settings.previewSharp)
+                    .anchored(.previewQuality)
+            }
+        }
+    }
+}
+
 // MARK: - Performance
 
 /// The levers that decide how fast and how hard the iPhone works. The PC offers

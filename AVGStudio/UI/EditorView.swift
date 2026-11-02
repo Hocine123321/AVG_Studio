@@ -25,7 +25,7 @@ struct EditGateCard: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            ProgressView(timerInterval: gate.deadline.addingTimeInterval(-EditGate.seconds)...gate.deadline, countsDown: true) {
+            ProgressView(timerInterval: gate.deadline.addingTimeInterval(-gate.seconds)...gate.deadline, countsDown: true) {
                 EmptyView()
             } currentValueLabel: {
                 EmptyView()
@@ -187,7 +187,7 @@ struct EditorView: View {
                 ContentUnavailableView("Video not found", systemImage: "film")
             }
         }
-        .task(id: projectID) {
+        .task(id: "\(projectID)|\(store.settings.previewSharp)") {
             assistant.attach(store, projectID: projectID)
             await loadPreview()
         }
@@ -207,7 +207,7 @@ struct EditorView: View {
         let input = pipeline.renderInput(project: p, channel: store.channel(for: p),
                                          audio: store.file(p, p.audioFile) ?? URL(fileURLWithPath: "/dev/null"),
                                          output: FileManager.default.temporaryDirectory.appendingPathComponent("preview-unused.mp4"),
-                                         shortEdge: 360)
+                                         shortEdge: store.settings.previewSharp ? 540 : 360)
         await model.load(input)
     }
 

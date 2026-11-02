@@ -812,7 +812,8 @@ final class Store {
             return false
         }
         switch EditGatePolicy.outcome(mode: channel(for: p).editingMode, hasTakes: !p.takes.isEmpty,
-                                      alreadyAnswered: gateAnswered.contains(id), appActive: appActive) {
+                                      alreadyAnswered: gateAnswered.contains(id), appActive: appActive,
+                                      gateSeconds: settings.editGateSeconds) {
         case .goOn:
             return false
         case .hold:
@@ -836,13 +837,14 @@ final class Store {
     /// gets here waits its turn.
     private func awaitEditDecision(_ id: String, title: String) async -> EditDecision {
         while editGate != nil { try? await Task.sleep(for: .milliseconds(250)) }
-        let gate = EditGate(projectID: id, title: title, deadline: Date().addingTimeInterval(EditGate.seconds))
+        let seconds = Double(max(1, settings.editGateSeconds))
+        let gate = EditGate(projectID: id, title: title, deadline: Date().addingTimeInterval(seconds), seconds: seconds)
         editGate = gate
         Haptics.light()
         return await withCheckedContinuation { c in
             editGateContinuation = c
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(EditGate.seconds))
+                try? await Task.sleep(for: .seconds(seconds))
                 self?.resolveEditGate(.letAIEdit, gateID: gate.id)
             }
         }

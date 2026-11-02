@@ -63,6 +63,7 @@ struct SettingsView: View {
                 row(.voice, store.settings.voice.label)
                 row(.captions, captionsSummary)
                 row(.video, videoSummary)
+                row(.editing, editingSummary)
                 row(.performance, performanceSummary)
                 row(.assistant, assistantSummary)
             }
@@ -137,6 +138,12 @@ struct SettingsView: View {
         return "\(s.shortEdge)p · \(s.fps) fps · Ken Burns \(s.kenBurns ? "on" : "off")"
     }
 
+    private var editingSummary: String {
+        let s = store.settings
+        let gate = s.editGateSeconds <= 0 ? "Never asks" : "\(s.editGateSeconds) s to take over"
+        return "\(gate) · \(s.defaultEditLevel.title)"
+    }
+
     private var performanceSummary: String {
         let s = store.settings
         return "\(s.renderEngine == .auto ? "GPU" : "CPU") · \(s.videoCodec == .hevc ? "HEVC" : "H.264") · \(s.maxParallelJobs) at once"
@@ -202,6 +209,7 @@ struct SettingsView: View {
         case .voice: VoiceSettingsPage(focus: focus)
         case .captions: CaptionsSettingsPage(focus: focus)
         case .video: VideoSettingsPage(focus: focus)
+        case .editing: EditingSettingsPage(focus: focus)
         case .performance: PerformanceSettingsPage(focus: focus)
         case .assistant: AssistantSettingsPage(focus: focus)
         case .keys: KeysSettingsPage(focus: focus)

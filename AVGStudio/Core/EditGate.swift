@@ -50,9 +50,12 @@ struct EditGate: Identifiable, Equatable {
     let projectID: String
     let title: String
     let deadline: Date
+    /// How long this window is (the setting at the moment it opened).
+    let seconds: Double
 
-    /// How long the person has.
-    static let seconds = 10.0
+    static let defaultSeconds = 10
+    /// What Settings offers, in seconds; 0 = never ask.
+    static let choices = [0, 5, 10, 20]
 }
 
 enum EditGatePolicy {
@@ -63,8 +66,11 @@ enum EditGatePolicy {
         case hold        // stop and wait for the person's edit
     }
 
-    static func outcome(mode: EditingMode, hasTakes: Bool, alreadyAnswered: Bool, appActive: Bool) -> Outcome {
-        if hasTakes || alreadyAnswered { return .goOn }
+    /// `gateSeconds` is the global setting: 0 means the person never wants to be
+    /// asked, so every mode goes straight on (the AI finishes the video).
+    static func outcome(mode: EditingMode, hasTakes: Bool, alreadyAnswered: Bool, appActive: Bool,
+                        gateSeconds: Int = EditGate.defaultSeconds) -> Outcome {
+        if hasTakes || alreadyAnswered || gateSeconds <= 0 { return .goOn }
         switch mode {
         case .auto: return .goOn
         case .manual: return .hold

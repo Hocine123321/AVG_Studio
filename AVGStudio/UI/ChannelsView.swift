@@ -46,7 +46,10 @@ struct ChannelsView: View {
 
                 Button {
                     Haptics.light()
-                    editing = Channel(name: "New Channel")
+                    var fresh = Channel(name: "New Channel")
+                    fresh.editingMode = store.settings.defaultEditingMode
+                    fresh.editLevel = store.settings.defaultEditLevel
+                    editing = fresh
                 } label: {
                     Label("New channel", systemImage: "plus").frame(maxWidth: .infinity).padding(.vertical, 4)
                 }

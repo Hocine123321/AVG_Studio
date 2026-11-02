@@ -29,7 +29,7 @@ final class EditGatePolicyTests: XCTestCase {
     }
 
     func testTheCountdownIsTenSeconds() {
-        XCTAssertEqual(EditGate.seconds, 10)
+        XCTAssertEqual(EditGate.defaultSeconds, 10)
     }
 }
 
