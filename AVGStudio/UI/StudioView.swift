@@ -118,7 +118,7 @@ struct StudioView: View {
     /// The mock's own `.row` under its `.lt` title: title + a one-line
     /// "format, status" subtitle. This screen still uses the system
     /// `.navigationTitle` for the title itself (the custom floating
-    /// scroll-reveal title bar is deferred - see SKIN_V2_PLAN.md), so this
+    /// scroll-reveal title bar is deferred), so this
     /// row supplies just the subtitle half.
     @ViewBuilder private func header(_ p: Project) -> some View {
         Text(statusLine(p))

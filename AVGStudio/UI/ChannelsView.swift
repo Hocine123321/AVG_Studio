@@ -155,7 +155,7 @@ struct ChannelEditor: View {
     /// the model id for whichever provider IS picked still comes from
     /// Settings' own per-provider fields (e.g. Gemini model), matching the
     /// simplification documented on Channel's phase-override properties.
-    // Phase 3 polish (ios/UI_POLISH_PLAN.md): these 4 phases were 4
+    // Phase 3 polish: these 4 phases were 4
     // separate Sections, each repeating the same header/footer chrome for
     // 3 near-identical pickers - a third of this sheet's 11 sections were
     // this one repeated shape. Merged into a single "Per-phase models"
@@ -511,7 +511,7 @@ struct ChannelEditor: View {
             // "Phase 3 polish" comment above on why it isn't split further)
             // sitting on the app's own warm background instead of the
             // system grouped-list one, tinted with the real accent - not
-            // hand-rolled glass rows per SKIN_V2_PLAN.md's own scope note
+            // hand-rolled glass rows (kept out of Skin v2's scope)
             // for this screen ("gets the new visual skin, not a re-split").
             .glassSheetBackground()
             .tint(Theme.accent)

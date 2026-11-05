@@ -148,8 +148,7 @@ Each of these has caused a real defect, or is a documented invariant carried ove
 
 Commits follow the branch's existing style: a short imperative subject, `iOS:` or `fix(ios):` prefix for a screen or bug, `docs:` for plan updates. One logical change per commit. Push to `ios-native`; CI builds every push that touches the app.
 
-- `SKIN_V2_PLAN.md`: the design plan. **All nine phases are done.** The plan text still describes the hand-rolled `FloatingTabBar`; the code uses the native tab bar (see the rule above). One inherited item is open: a Dynamic Type check on the card grid and Studio text, which needs a simulator.
-- `UI_POLISH_PLAN.md`: the earlier plan, superseded by Skin v2 except for that same Dynamic Type item.
+- The Skin v2 and UI polish plans and the old HTML mockups were removed; the code and the native tab bar rule above are the source of truth. One item is open: a Dynamic Type check on the card grid and Studio text, which needs a simulator.
 - When a plan phase lands, tick it in the plan file in a separate `docs:` commit, as history shows.
 - `git log` is the ledger. There is no `.superpowers/sdd/progress.md` for the iOS side; the one under `Pc Version Reference (Linux)/` records the PC app's slices, not this app's.
 

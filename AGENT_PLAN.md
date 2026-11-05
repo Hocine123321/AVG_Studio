@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift (language mode 5.0), SwiftUI + Observation, `URLSession` through the existing `HTTP` layer, XCTest, XcodeGen, GitHub Actions on `macos-26`.
 
-**Spec:** the "Spec and research findings" section of this file. The iOS repo has no `docs/` tree (its plans live at the root, like `SKIN_V2_PLAN.md`), so there is no separate spec file.
+**Spec:** the "Spec and research findings" section of this file. The iOS repo has no `docs/` tree (its plans live at the root), so there is no separate spec file.
 
 ## Global Constraints
 

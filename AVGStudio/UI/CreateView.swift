@@ -10,7 +10,7 @@ import SwiftUI
 /// READ-ONLY rows that jump to Settings instead of a fake inline picker
 /// that would silently do nothing; Scenes and the mock's static "Free"/
 /// "about $0.12" per-phase cost table are both dropped rather than faked
-/// (flagged in SKIN_V2_PLAN.md).
+/// (dropped on purpose).
 struct CreateView: View {
     @Environment(Store.self) private var store
     @State private var topic = ""

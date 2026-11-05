@@ -153,7 +153,6 @@ with `@testable import AVGStudio`.
 | `AVGStudioTests/` | The unit tests. See §10 |
 | `AVGStudio/Resources/` | `Caprasimo-Regular.ttf` and its OFL licence |
 | `AVGStudio/Assets.xcassets/` | The app icon (light, dark and tinted variants) |
-| `SKIN_V2_PLAN.md`, `UI_POLISH_PLAN.md` | The design plans. Skin v2 is complete; see §7 |
 
 ---
 
@@ -356,9 +355,8 @@ value is a direct copy of the mock's custom property.
 | Status colours | `Theme.ok` (sage), `Theme.bad` (`#c4544a`), `Theme.accent`. Screens do not use `.red` / `.green` / `.yellow` |
 
 The tab bar is the **native iOS 26 Liquid Glass tab bar**. A hand-rolled
-`FloatingTabBar` was tried and removed (`680410e`); `SKIN_V2_PLAN.md` still
-describes it. Skin v2 is closed out (all nine phases). The only open item is a
-Dynamic Type check in the simulator.
+`FloatingTabBar` was tried and removed (`680410e`). Skin v2 is closed out (all
+nine phases). The only open item is a Dynamic Type check in the simulator.
 
 ---
 
@@ -457,7 +455,6 @@ Views keep almost none. Anything a screen shows comes from `store`; local
 /                                  the iOS app
   AVGStudio/                       Swift sources, assets, fonts
   project.yml                      XcodeGen spec
-  SKIN_V2_PLAN.md, UI_POLISH_PLAN.md
   .github/workflows/ios.yml        unsigned-IPA build
 Pc Version Reference (Linux)/      the desktop app, read-only reference
   README.md, CLAUDE.md             its own guides (they describe the old layout)

@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Skin v2 - see `ios/SKIN_V2_PLAN.md`. Every value below is a direct port
-/// of the owner's HTML mock's `:root` custom properties (and its dark-mode
+/// Skin v2. Every value below is a direct port
+/// of the owner's original HTML mock's `:root` custom properties (and its dark-mode
 /// override block), not a fresh design - if a color/shape/timing looks odd,
 /// check the mock before assuming this file drifted from it.
 private struct GlassLevelKey: EnvironmentKey { static let defaultValue: Double = 1.0 }
