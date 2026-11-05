@@ -218,30 +218,81 @@ final class EditAssistant {
             return "Removed card \(number): \(gone.text)"
 
         case "set_music":
-            guard let choice = args.string("choice") else { return "Say channel, none, auto, or a track name." }
-            switch EditTools.musicChoice(choice, library: store.audioLibrary.music) {
-            case .success(let override):
-                mutate { p in
-                    var e = p.edits ?? ProjectEdits()
-                    e.music = override
-                    p.edits = e.isEmpty ? nil : e
+            let level = args.int("level_db")
+            let choice = args.string("choice")
+            guard choice != nil || level != nil else {
+                return "Say channel, none, auto, or a track name, and/or a level in dB."
+            }
+            var picked: MusicOverride?
+            if let choice {
+                switch EditTools.musicChoice(choice, library: store.audioLibrary.music) {
+                case .success(let parsed): picked = parsed
+                case .failure(let message): return message   // nothing is applied
                 }
-                return "Music for this video: \(EditTools.name(of: override, library: store.audioLibrary.music))."
-            case .failure(let message):
-                return message
             }
-
-        case "set_sound_effects":
-            guard let mode = args.string("mode")?.lowercased(), ["channel", "on", "off"].contains(mode) else {
-                return "Say channel, on or off."
+            // Level: the value given, clamped to the slider's range; "channel" puts it back.
+            var gain: Double??
+            var clampedFrom: Int?
+            if let level {
+                let kept = EditResolution.clamp(Double(level), to: EditResolution.musicGainRange)
+                if kept != Double(level) { clampedFrom = level }
+                gain = .some(kept)
+            } else if choice != nil, picked == nil {
+                gain = .some(nil)   // "channel" also gives the channel's level back
             }
-            let value: Bool? = mode == "channel" ? nil : (mode == "on")
             mutate { p in
                 var e = p.edits ?? ProjectEdits()
-                e.sfxEnabled = value
+                if choice != nil { e.music = picked }
+                if let gain { e.musicGainDB = gain }
                 p.edits = e.isEmpty ? nil : e
             }
-            return "Sound effects for this video: \(mode == "channel" ? "same as the channel" : mode)."
+            var parts: [String] = []
+            if choice != nil { parts.append("Music for this video: \(EditTools.name(of: picked, library: store.audioLibrary.music)).") }
+            if let gain {
+                parts.append(EditTools.levelReply("Music level", gain, unit: " under the voice",
+                                                  clampedFrom: clampedFrom, range: EditResolution.musicGainRange))
+            }
+            return parts.joined(separator: " ")
+
+        case "set_sound_effects":
+            let level = args.int("level_db")
+            let rawMode = args.string("mode")?.lowercased()
+            if let rawMode, !["channel", "on", "off"].contains(rawMode) { return "Say channel, on or off." }
+            guard rawMode != nil || level != nil else { return "Say channel, on or off, and/or a level in dB." }
+            let value: Bool? = (rawMode == nil || rawMode == "channel") ? nil : (rawMode == "on")
+            var gain: Double??
+            var clampedFrom: Int?
+            if let level {
+                let kept = EditResolution.clamp(Double(level), to: EditResolution.sfxGainRange)
+                if kept != Double(level) { clampedFrom = level }
+                gain = .some(kept)
+            } else if rawMode == "channel" {
+                gain = .some(nil)
+            }
+            mutate { p in
+                var e = p.edits ?? ProjectEdits()
+                if rawMode != nil { e.sfxEnabled = value }
+                if let gain { e.sfxGainDB = gain }
+                p.edits = e.isEmpty ? nil : e
+            }
+            var parts: [String] = []
+            if let rawMode { parts.append("Sound effects for this video: \(rawMode == "channel" ? "same as the channel" : rawMode).") }
+            if let gain {
+                parts.append(EditTools.levelReply("Effects level", gain, unit: "",
+                                                  clampedFrom: clampedFrom, range: EditResolution.sfxGainRange))
+            }
+            return parts.joined(separator: " ")
+
+        case "set_cuts":
+            guard let raw = args.string("level")?.lowercased(), let parsed = EditTools.cutsChoice(raw) else {
+                return "Say channel, off, cuts or smart."
+            }
+            mutate { p in
+                var e = p.edits ?? ProjectEdits()
+                e.editLevel = parsed.level
+                p.edits = e.isEmpty ? nil : e
+            }
+            return "Cuts and punch-ins for this video: \(parsed.label)."
 
         case "undo":
             guard canUndo else { return "Nothing to undo." }
@@ -249,7 +300,7 @@ final class EditAssistant {
             return "Undone."
 
         default:
-            return "I can't do that here. I can only change this video's captions, title cards, music and sound effects."
+            return "I can't do that here. I can only change this video's captions, title cards, music, sound effects and cuts."
         }
     }
 
@@ -270,11 +321,11 @@ final class EditAssistant {
 enum EditTools {
     static let systemPrompt = """
         You are the editing assistant inside a video editor, working on ONE video. You can only change this video's \
-        captions, title cards, music choice and sound-effects switch, with your tools. You cannot change app settings, \
+        captions, title cards, music (choice and level), sound effects (switch and level) and cuts and punch-ins, with your tools. You cannot change app settings, \
         channels, API keys, images or voices, create music, or render - if asked, say that is outside what you can do \
         here. Never guess a line or card number: call list_captions or get_edit first. Make the smallest change that \
         does what was asked, one tool call per change, then say in one short sentence what you did. Times are seconds \
-        from the start of the video.
+        from the start of the video. Levels are in dB: lower is quieter.
         """
 
     static let specs: [AgentToolSpec] = [
@@ -293,10 +344,14 @@ enum EditTools {
                                AgentToolParam(name: "for_seconds", kind: .integer, summary: "How long it stays, 1 to 6 (default 3).", required: false)]),
         AgentToolSpec(name: "remove_title_card", summary: "Remove a title card by its number from get_edit.",
                       params: [AgentToolParam(name: "number", kind: .integer, summary: "The card number.")]),
-        AgentToolSpec(name: "set_music", summary: "Choose this video's music.",
-                      params: [AgentToolParam(name: "choice", kind: .string, summary: "channel, none, auto, or the name of a track in the library.")]),
-        AgentToolSpec(name: "set_sound_effects", summary: "Turn this video's sound effects on or off, or follow the channel.",
-                      params: [AgentToolParam(name: "mode", kind: .string, summary: "channel, on or off.", allowed: ["channel", "on", "off"])]),
+        AgentToolSpec(name: "set_music", summary: "Choose this video's music and/or how loud it is under the voice.",
+                      params: [AgentToolParam(name: "choice", kind: .string, summary: "channel (also resets the level), none, auto, or the name of a track in the library.", required: false),
+                               AgentToolParam(name: "level_db", kind: .integer, summary: "Level under the voice in dB, -35 (quiet) to -10 (loud).", required: false)]),
+        AgentToolSpec(name: "set_sound_effects", summary: "Turn this video's sound effects on or off, follow the channel, and/or set their level.",
+                      params: [AgentToolParam(name: "mode", kind: .string, summary: "channel (also resets the level), on or off.", required: false, allowed: ["channel", "on", "off"]),
+                               AgentToolParam(name: "level_db", kind: .integer, summary: "Level offset in dB, -12 (quieter) to 6 (louder).", required: false)]),
+        AgentToolSpec(name: "set_cuts", summary: "Set this video's shot cuts and punch-ins, or follow the channel.",
+                      params: [AgentToolParam(name: "level", kind: .string, summary: "channel, off, cuts (cuts and punch-ins) or smart (also aims crops at the subject).", allowed: ["channel", "off", "cuts", "smart"])]),
         AgentToolSpec(name: "undo", summary: "Undo the last change you made.", params: []),
     ]
 
@@ -310,6 +365,7 @@ enum EditTools {
         case "remove_title_card": return "Removing a title card..."
         case "set_music": return "Choosing music..."
         case "set_sound_effects": return "Setting sound effects..."
+        case "set_cuts": return "Setting cuts..."
         case "undo": return "Undoing..."
         default: return "Working..."
         }
@@ -340,14 +396,19 @@ enum EditTools {
         } else {
             musicText = "none (channel default)"
         }
-        out.append("Music: \(musicText).")
+        let resolved = EditResolution(project: p, channel: channel)
+        let ownMusicLevel = p.edits?.musicGainDB != nil
+        out.append("Music: \(musicText), level \(Int(resolved.musicGainDB)) dB under the voice\(ownMusicLevel ? "" : " (channel)").")
         let effectsText: String
         if let own = p.edits?.sfxEnabled {
             effectsText = own ? "on" : "off"
         } else {
             effectsText = channel.sfxEnabled ? "on (channel)" : "off (channel)"
         }
-        out.append("Sound effects: \(effectsText).")
+        let ownEffectsLevel = p.edits?.sfxGainDB != nil
+        out.append("Sound effects: \(effectsText), level \(Int(resolved.sfxGainDB)) dB\(ownEffectsLevel ? "" : " (channel)").")
+        let cutsOwn = p.edits?.editLevel != nil
+        out.append("Cuts and punch-ins: \(cutsChoiceLabel(resolved.editLevel))\(cutsOwn ? "" : " (channel)").")
         out.append("Captions: \(p.captions.count) lines.")
         out.append("Tracks in the library: \(library.isEmpty ? "none" : library.prefix(12).map { $0.name }.joined(separator: ", ")).")
         return out.joined(separator: "\n")
@@ -384,6 +445,36 @@ enum EditTools {
         return .failure(partial.count > 1
             ? "More than one track matches \"\(raw)\". Use the full name: \(partial.prefix(8).map { "\"\($0.name)\"" }.joined(separator: ", "))."
             : "No track named \"\(raw)\". " + (library.isEmpty ? "The library has no tracks." : "Available: \(names)."))
+    }
+
+    /// "Music level: -22 dB under the voice." / "... (-50 was outside the range -35 to -10)." /
+    /// "Music level: same as the channel." (nil value).
+    static func levelReply(_ title: String, _ value: Double?, unit: String, clampedFrom: Int?, range: ClosedRange<Double>) -> String {
+        guard let value else { return "\(title): same as the channel." }
+        var text = "\(title): \(Int(value)) dB\(unit)"
+        if let from = clampedFrom {
+            text += " (\(from) was outside the range \(Int(range.lowerBound)) to \(Int(range.upperBound)))"
+        }
+        return text + "."
+    }
+
+    /// "channel" -> follow the channel (nil), "off", "cuts" (or "fast"), "smart".
+    static func cutsChoice(_ raw: String) -> (level: EditLevel?, label: String)? {
+        switch raw.trimmed.lowercased() {
+        case "channel", "same as channel", "default": return (nil, "same as the channel")
+        case "off", "none", "no": return (.off, "off")
+        case "cuts", "fast", "on", "cuts and punch-ins": return (.fast, "cuts and punch-ins")
+        case "smart", "smart crops": return (.smart, "smart crops (found when the video renders; needs a Google key)")
+        default: return nil
+        }
+    }
+
+    static func cutsChoiceLabel(_ level: EditLevel) -> String {
+        switch level {
+        case .off: return "off"
+        case .fast: return "cuts and punch-ins"
+        case .smart: return "smart crops"
+        }
     }
 
     static func name(of override: MusicOverride?, library: [AudioItem]) -> String {

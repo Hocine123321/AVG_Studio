@@ -84,8 +84,42 @@ enum EditGatePolicy {
 struct ProjectEdits: Codable, Hashable {
     var music: MusicOverride?
     var sfxEnabled: Bool?
+    /// How loud the music sits under the voice, in dB, for this video only.
+    var musicGainDB: Double?
+    /// The sound effects' level offset, in dB, for this video only.
+    var sfxGainDB: Double?
+    /// Cuts and punch-ins for this video only.
+    var editLevel: EditLevel?
 
-    var isEmpty: Bool { music == nil && sfxEnabled == nil }
+    var isEmpty: Bool {
+        music == nil && sfxEnabled == nil && musicGainDB == nil && sfxGainDB == nil && editLevel == nil
+    }
+}
+
+/// What ONE video actually uses: its own choice where it made one, else its
+/// channel's. The render, the editor's preview and the editor itself all ask
+/// here, so they can never disagree about which one wins.
+struct EditResolution: Equatable {
+    /// The same ranges as the channel's sliders; a video's own value is kept inside them.
+    static let musicGainRange: ClosedRange<Double> = -35 ... -10
+    static let sfxGainRange: ClosedRange<Double> = -12 ... 6
+
+    let musicGainDB: Double
+    let sfxGainDB: Double
+    let sfxEnabled: Bool
+    let editLevel: EditLevel
+
+    init(project: Project, channel: Channel) {
+        let own = project.edits
+        musicGainDB = own?.musicGainDB.map { Self.clamp($0, to: Self.musicGainRange) } ?? channel.musicGainDB
+        sfxGainDB = own?.sfxGainDB.map { Self.clamp($0, to: Self.sfxGainRange) } ?? channel.sfxGainDB
+        sfxEnabled = own?.sfxEnabled ?? channel.sfxEnabled
+        editLevel = own?.editLevel ?? channel.editLevel
+    }
+
+    static func clamp(_ value: Double, to range: ClosedRange<Double>) -> Double {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
 }
 
 enum MusicOverride: Codable, Hashable {

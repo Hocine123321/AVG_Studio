@@ -187,7 +187,8 @@ struct EditorView: View {
                 ContentUnavailableView("Video not found", systemImage: "film")
             }
         }
-        .task(id: "\(projectID)|\(store.settings.previewSharp)") {
+        // The cuts level is part of the id: changing it for this video re-plans the preview.
+        .task(id: "\(projectID)|\(store.settings.previewSharp)|\(project?.edits?.editLevel?.rawValue ?? "-")") {
             assistant.attach(store, projectID: projectID)
             await loadPreview()
         }
@@ -318,21 +319,43 @@ struct EditorView: View {
 
     private func aiEditSection(_ p: Project) -> some View {
         let ch = store.channel(for: p)
+        let level = EditResolution(project: p, channel: ch).editLevel
         let plan = Pipeline(store: store, projectID: projectID, resumeExisting: false).editPlan(for: p, channel: ch)
         return Section {
+            Picker("Cuts and punch-ins", selection: cutsBinding) {
+                Text("Same as channel").tag(EditLevel?.none)
+                Text("Off").tag(EditLevel?.some(.off))
+                Text("Cuts").tag(EditLevel?.some(.fast))
+                Text("Smart").tag(EditLevel?.some(.smart))
+            }
             if let plan {
                 ForEach(plan.notes, id: \.self) { Text($0).font(.callout) }
             } else {
-                Text(ch.editLevel == .off ? "Cuts and punch-ins are off for this channel."
-                                          : "No cuts or punch-ins: the scenes are short and no key words stood out.")
+                Text(level == .off ? (p.edits?.editLevel != nil ? "Cuts and punch-ins are off for this video."
+                                                                : "Cuts and punch-ins are off for this channel.")
+                                   : "No cuts or punch-ins: the scenes are short and no key words stood out.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         } header: {
             Text("AI edit")
         } footer: {
-            Text("The preview above includes these. Change them in the channel's Editing section.")
+            Text("The preview above includes these. “Same as channel” follows the channel's Editing section."
+                 + (level == .smart ? " Smart crops need a Google key and are found when the video renders." : ""))
         }
+    }
+
+    private var cutsBinding: Binding<EditLevel?> {
+        Binding(
+            get: { store.project(projectID)?.edits?.editLevel },
+            set: { value in
+                store.update(projectID) { proj in
+                    var edits = proj.edits ?? ProjectEdits()
+                    edits.editLevel = value
+                    proj.edits = edits.isEmpty ? nil : edits
+                }
+            }
+        )
     }
 
     // MARK: Music
@@ -344,6 +367,16 @@ struct EditorView: View {
                 Text("No music").tag(MusicOverride?.some(.silent))
                 Text("Choose for me").tag(MusicOverride?.some(.auto))
                 ForEach(store.audioLibrary.music) { Text($0.name).tag(MusicOverride?.some(.track($0.id))) }
+            }
+            if musicIsOn(p) {
+                let ch = store.channel(for: p)
+                VStack(alignment: .leading) {
+                    Text("Music level: \(Int(EditResolution(project: p, channel: ch).musicGainDB)) dB under the voice")
+                    Slider(value: musicLevelBinding(ch), in: EditResolution.musicGainRange, step: 1)
+                }
+                if p.edits?.musicGainDB != nil {
+                    Button("Use the channel's level") { setOwnLevel(music: nil) }
+                }
             }
         } header: {
             Text("Music")
@@ -365,6 +398,49 @@ struct EditorView: View {
         )
     }
 
+    /// Whether this video will have music: its own choice, else its channel's.
+    private func musicIsOn(_ p: Project) -> Bool {
+        switch p.edits?.music {
+        case .some(.silent): return false
+        case .some: return true
+        case .none:
+            let ch = store.channel(for: p)
+            return ch.musicAuto || ch.musicTrackID != nil
+        }
+    }
+
+    private func musicLevelBinding(_ channel: Channel) -> Binding<Double> {
+        Binding(
+            get: { store.project(projectID).map { EditResolution(project: $0, channel: channel).musicGainDB } ?? channel.musicGainDB },
+            set: { setOwnLevel(music: $0) }
+        )
+    }
+
+    private func effectsLevelBinding(_ channel: Channel) -> Binding<Double> {
+        Binding(
+            get: { store.project(projectID).map { EditResolution(project: $0, channel: channel).sfxGainDB } ?? channel.sfxGainDB },
+            set: { setOwnLevel(effects: $0) }
+        )
+    }
+
+    /// Sets or clears this video's own music level (`music:`) or effects level
+    /// (`effects:`); passing nil goes back to the channel's.
+    private func setOwnLevel(music: Double?) {
+        store.update(projectID) { proj in
+            var edits = proj.edits ?? ProjectEdits()
+            edits.musicGainDB = music
+            proj.edits = edits.isEmpty ? nil : edits
+        }
+    }
+
+    private func setOwnLevel(effects: Double?) {
+        store.update(projectID) { proj in
+            var edits = proj.edits ?? ProjectEdits()
+            edits.sfxGainDB = effects
+            proj.edits = edits.isEmpty ? nil : edits
+        }
+    }
+
     private func channelMusicNote(_ p: Project) -> String {
         let ch = store.channel(for: p)
         if ch.musicAuto { return "This channel picks its music for each video." }
@@ -380,6 +456,16 @@ struct EditorView: View {
                 Text("Same as channel").tag(Bool?.none)
                 Text("On").tag(Bool?.some(true))
                 Text("Off").tag(Bool?.some(false))
+            }
+            if EditResolution(project: p, channel: store.channel(for: p)).sfxEnabled {
+                let ch = store.channel(for: p)
+                VStack(alignment: .leading) {
+                    Text("Effects level: \(Int(EditResolution(project: p, channel: ch).sfxGainDB)) dB")
+                    Slider(value: effectsLevelBinding(ch), in: EditResolution.sfxGainRange, step: 1)
+                }
+                if p.edits?.sfxGainDB != nil {
+                    Button("Use the channel's level") { setOwnLevel(effects: nil) }
+                }
             }
         } header: {
             Text("Sound effects")

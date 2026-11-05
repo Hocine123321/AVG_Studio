@@ -973,7 +973,7 @@ struct Pipeline {
         } else {
             step(.render, "direction", .skipped, "Ken Burns is off")
         }
-        if ch.editLevel == .smart { p.focus = await ensureSubjectFocus(p, channel: ch) }
+        if EditResolution(project: p, channel: ch).editLevel == .smart { p.focus = await ensureSubjectFocus(p, channel: ch) }
         let takeID = (p.takes.map(\.id).max() ?? 0) + 1
         let name = "render/take_\(takeID).mp4"
         let out = folder.appendingPathComponent(name)
@@ -1086,7 +1086,7 @@ struct Pipeline {
     /// captions already carry. Pure and cheap, so the preview and the render
     /// ask for it separately and always get the same answer.
     func editPlan(for p: Project, channel ch: Channel) -> EditPlan? {
-        guard ch.editLevel != .off, !p.sceneDurations.isEmpty else { return nil }
+        guard EditResolution(project: p, channel: ch).editLevel != .off, !p.sceneDurations.isEmpty else { return nil }
         let total = p.sceneDurations.reduce(0, +)
         let plan = EditPlanner.plan(EditPlanner.Input(
             sceneDurations: p.sceneDurations,
@@ -1099,7 +1099,8 @@ struct Pipeline {
 
     /// The saved subject points, but only while they still describe THESE pictures.
     private func currentFocus(_ p: Project, channel ch: Channel) -> [Int: (x: Double, y: Double)] {
-        guard ch.editLevel == .smart, let saved = p.focus, saved.signature == subjectSignature(p) else { return [:] }
+        guard EditResolution(project: p, channel: ch).editLevel == .smart, let saved = p.focus,
+              saved.signature == subjectSignature(p) else { return [:] }
         var out: [Int: (x: Double, y: Double)] = [:]
         for point in saved.points { out[point.scene] = (x: point.x, y: point.y) }
         return out
@@ -1169,16 +1170,17 @@ struct Pipeline {
         }
         let effects = soundEffects(project: p, channel: ch)
         guard musicURL != nil || !effects.isEmpty else { return narration }
+        let resolved = EditResolution(project: p, channel: ch)
 
         let speech = (p.audioSegments ?? []).map { (start: $0.start, end: $0.end) }
         do {
             let result = try await Mixdown.render(
-                Mixdown.Input(voice: narration, speech: speech, music: musicURL, musicGainDB: ch.musicGainDB, effects: effects),
+                Mixdown.Input(voice: narration, speech: speech, music: musicURL, musicGainDB: resolved.musicGainDB, effects: effects),
                 to: mixFile)
             var parts: [String] = []
             if musicURL != nil {
                 let title = chosenID.flatMap { store.audioLibrary.item($0)?.name } ?? "music"
-                parts.append("music “\(title)” at \(Int(ch.musicGainDB)) dB under the voice"
+                parts.append("music “\(title)” at \(Int(resolved.musicGainDB)) dB under the voice"
                              + (result.loops > 0 ? " (repeated \(result.loops)x to fit)" : ""))
             }
             if !effects.isEmpty { parts.append("\(effects.count) sound effect\(effects.count == 1 ? "" : "s")") }
@@ -1214,7 +1216,8 @@ struct Pipeline {
     /// The effects for this video: only for moments the channel gave a sound to,
     /// placed sparingly by `SFXPlanner`.
     private func soundEffects(project p: Project, channel ch: Channel) -> [Mixdown.Effect] {
-        guard p.edits?.sfxEnabled ?? ch.sfxEnabled, !p.sceneDurations.isEmpty else { return [] }
+        let resolved = EditResolution(project: p, channel: ch)
+        guard resolved.sfxEnabled, !p.sceneDurations.isEmpty else { return [] }
         var files: [SFXMoment: (url: URL, length: Double)] = [:]
         for moment in SFXMoment.allCases {
             guard let id = ch.sfxMap[moment.rawValue],
@@ -1236,7 +1239,7 @@ struct Pipeline {
             soundLength: files.mapValues { $0.length }))
         return cues.compactMap { cue in
             guard let file = files[cue.moment] else { return nil }
-            return Mixdown.Effect(url: file.url, at: cue.at, gainDB: cue.moment.defaultGainDB + ch.sfxGainDB)
+            return Mixdown.Effect(url: file.url, at: cue.at, gainDB: cue.moment.defaultGainDB + resolved.sfxGainDB)
         }
     }
 
