@@ -167,7 +167,7 @@ struct EditorTab: View {
 }
 
 /// The editor's three pages.
-private enum EditorTab: String, CaseIterable, Identifiable {
+private enum EditorPage: String, CaseIterable, Identifiable {
     case cuts, sound, text
     var id: String { rawValue }
     var title: String {
@@ -189,7 +189,7 @@ struct EditorView: View {
     @State private var model = EditorPreviewModel()
     @State private var mixPlayer = AudioPreview()
     @State private var mixing = false
-    @State private var tab: EditorTab = .cuts
+    @State private var tab: EditorPage = .cuts
     @State private var confirmingReset = false
 
     private var project: Project? { store.project(projectID) }
@@ -324,7 +324,7 @@ struct EditorView: View {
         VStack(spacing: 0) {
             previewCard(p)
             Picker("Page", selection: $tab) {
-                ForEach(EditorTab.allCases) { Text($0.title).tag($0) }
+                ForEach(EditorPage.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
