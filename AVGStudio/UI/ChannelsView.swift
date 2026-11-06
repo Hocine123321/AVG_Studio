@@ -237,7 +237,7 @@ struct ChannelEditor: View {
                     }
                     Toggle("Research the topic first", isOn: $channel.topicResearchEnabled)
                 } header: { Text("Videos") } footer: {
-                    Text("Research spends one extra AI call gathering facts about the topic before the brief is written, matching the PC's topic_research.")
+                    Text("Research spends one extra AI call gathering facts about the topic before the brief is written, matching the PC’s topic_research.")
                 }
 
                 Section {
@@ -290,7 +290,7 @@ struct ChannelEditor: View {
                         TextField("Font family name", text: $channel.fontFamily)
                     }
                 } header: { Text("Brand") } footer: {
-                    Text("Highlight tints captions' typewriter fill and a card's rule; Accent 1/2 tint takeover-card decoration. Font is shared by captions and cards, like the PC's font_family.")
+                    Text("Highlight tints captions' typewriter fill and a card’s rule; Accent 1/2 tint takeover-card decoration. Font is shared by captions and cards, like the PC’s font_family.")
                 }
 
                 Section {
@@ -401,7 +401,7 @@ struct ChannelEditor: View {
                         Slider(value: $channel.voiceMaxRemovableSilencePct, in: 0...100, step: 5)
                     }
                 } header: { Text("Voice cleanup") } footer: {
-                    Text("How readily dead-air removal treats a quiet stretch in the narration as silence to cut, matching the PC's voice_trim_aggressiveness.")
+                    Text("How readily dead-air removal treats a quiet stretch in the narration as silence to cut, matching the PC’s voice_trim_aggressiveness.")
                 }
 
                 Section {
@@ -418,10 +418,10 @@ struct ChannelEditor: View {
                         }
                     }
                     if store.settings.voice == .gemini {
-                        Text("Gemini voices don't take a speed or stability setting.").foregroundStyle(.secondary)
+                        Text("Gemini voices don’t take a speed or stability setting.").foregroundStyle(.secondary)
                     }
                 } header: { Text("Voice delivery") } footer: {
-                    Text("Stability: lower is more expressive and varied, higher is more even (ElevenLabs only). Speed: 0.7x to 1.2x (ElevenLabs and the built-in voices). Both are the PC's voice_stability and voice_speed.")
+                    Text("Stability: lower is more expressive and varied, higher is more even (ElevenLabs only). Speed: 0.7x to 1.2x (ElevenLabs and the built-in voices). Both are the PC’s voice_stability and voice_speed.")
                 }
 
                 Section {
@@ -475,7 +475,7 @@ struct ChannelEditor: View {
                 Section {
                     modelPhaseGroup(
                         title: "Brief",
-                        footer: "Governs the creative brief AND the optional topic-research call ahead of it - the PC's own router shares one model between the two.",
+                        footer: "Governs the creative brief AND the optional topic-research call ahead of it - the PC’s own router shares one model between the two.",
                         provider: $channel.briefTextProvider, backup: $channel.briefTextBackup, onFailure: $channel.briefOnFailure
                     )
                     modelPhaseGroup(
@@ -490,11 +490,11 @@ struct ChannelEditor: View {
                     )
                     modelPhaseGroup(
                         title: "Direction (motion & grade)",
-                        footer: "Governs the Director II call that plans each scene's camera move, entrance transition, and the video's one overall colour grade, right before render.",
+                        footer: "Governs the Director II call that plans each scene’s camera move, entrance transition, and the video’s one overall colour grade, right before render.",
                         provider: $channel.director2TextProvider, backup: $channel.director2TextBackup, onFailure: $channel.director2OnFailure
                     )
                 } header: { Text("Per-phase models") } footer: {
-                    Text("Leave a phase on Default to use the channel's global text provider above.")
+                    Text("Leave a phase on Default to use the channel’s global text provider above.")
                 }
             }
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)

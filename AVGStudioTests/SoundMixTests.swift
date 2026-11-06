@@ -252,4 +252,39 @@ final class StoreMusicTests: XCTestCase {
         XCTAssertEqual(store.channels.first { $0.id == other.id }?.musicTrackID, "someone-elses-track",
                        "only channels that used the removed track are touched")
     }
+
+    func testRemovingASoundAlsoClearsMomentsRecentPicksAndVideosThatChoseIt() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("storemusic-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = Store()
+        let tone = try makeTestTone(seconds: 1, in: dir)
+        let item = try await store.audioLibrary.importFile(tone, kind: .sfx, name: "Test hit")
+
+        var ch = Channel(name: "Uses sounds")
+        ch.sfxMap = [SFXMoment.impact.rawValue: item.id, SFXMoment.whoosh.rawValue: "keep-me"]
+        ch.musicRecent = [item.id, "older"]
+        store.channels.append(ch)
+        defer { store.channels.removeAll { $0.id == ch.id } }
+
+        var chose = Project(id: "chose-\(UUID().uuidString)", title: "Chose it", topic: "t")
+        chose.edits = ProjectEdits(music: .track(item.id), musicGainDB: -20)
+        var kept = Project(id: "kept-\(UUID().uuidString)", title: "Chose another", topic: "t")
+        kept.edits = ProjectEdits(music: .track("another"))
+        store.projects.append(contentsOf: [chose, kept])
+        defer { store.projects.removeAll { $0.id == chose.id || $0.id == kept.id } }
+
+        XCTAssertEqual(store.channelsUsing(audioItem: item.id).map(\.id), [ch.id])
+
+        store.removeAudioItem(item.id)
+
+        let after = store.channels.first { $0.id == ch.id }
+        XCTAssertEqual(after?.sfxMap, [SFXMoment.whoosh.rawValue: "keep-me"], "only the removed sound's moments are cleared")
+        XCTAssertEqual(after?.musicRecent, ["older"])
+        XCTAssertTrue(store.channelsUsing(audioItem: item.id).isEmpty)
+
+        let choseAfter = store.project(chose.id)?.edits
+        XCTAssertNil(choseAfter?.music, "a video that chose it goes back to its channel's music")
+        XCTAssertEqual(choseAfter?.musicGainDB, -20, "its other choices stay")
+        XCTAssertEqual(store.project(kept.id)?.edits?.music, .track("another"))
+    }
 }

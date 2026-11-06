@@ -2,10 +2,10 @@ import SwiftUI
 
 // The editor: the person's own turn at a video before (or after) the AI's.
 //
-// This first version works on what the renderer already understands - the
-// music bed, sound effects, full-screen text cards and the caption text - and
-// has no live preview yet: changes apply when "Render" is pressed, and the
-// result arrives as a new take, so nothing the AI made is ever lost.
+// A silent, approximate live preview sits on top, with a timeline showing the
+// title cards, cuts and punch-ins. Below it, three pages - Cuts, Sound, Text -
+// change this one video beside its channel. Changes show in the preview where
+// they can; "Render" makes a new take, so nothing the AI made is ever lost.
 
 /// The 10-second card ("Edit it yourself?") shown over any screen.
 struct EditGateCard: View {
@@ -166,6 +166,19 @@ struct EditorTab: View {
     }
 }
 
+/// The editor's three pages.
+private enum EditorTab: String, CaseIterable, Identifiable {
+    case cuts, sound, text
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .cuts: return "Cuts"
+        case .sound: return "Sound"
+        case .text: return "Text"
+        }
+    }
+}
+
 /// The editor itself - a page of the Editor tab, not a sheet.
 struct EditorView: View {
     let projectID: String
@@ -176,6 +189,8 @@ struct EditorView: View {
     @State private var model = EditorPreviewModel()
     @State private var mixPlayer = AudioPreview()
     @State private var mixing = false
+    @State private var tab: EditorTab = .cuts
+    @State private var confirmingReset = false
 
     private var project: Project? { store.project(projectID) }
 
@@ -244,7 +259,7 @@ struct EditorView: View {
                     ProgressView()
                 }
             }
-            .frame(height: 280)
+            .frame(height: 240)
             HStack(spacing: 12) {
                 Button { model.togglePlay() } label: {
                     Image(systemName: model.playing ? "pause.fill" : "play.fill").frame(width: 28)
@@ -258,61 +273,161 @@ struct EditorView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Button { hearMix(p) } label: {
-                Label(mixPlayer.playingID == "mix" ? "Stop" : "Hear the sound mix",
-                      systemImage: mixPlayer.playingID == "mix" ? "stop.circle" : "speaker.wave.2")
-            }
-            .buttonStyle(.glass)
-            .disabled(mixing)
+            timelineStrip(p)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
+    /// Title cards (bars), cuts (ticks) and punch-ins (dots) along the video;
+    /// tap or drag to jump the preview.
+    private func timelineStrip(_ p: Project) -> some View {
+        let total = max(model.duration, 0.5)
+        let plan = Pipeline(store: store, projectID: projectID, resumeExisting: false)
+            .editPlan(for: p, channel: store.channel(for: p))
+        return VStack(spacing: 4) {
+            GeometryReader { geo in
+                let w = max(geo.size.width, 1)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary).frame(height: 6)
+                    ForEach(p.cards) { card in
+                        Capsule()
+                            .fill(Theme.accent.opacity(0.7))
+                            .frame(width: max(4, w * (card.end - card.start) / total), height: 6)
+                            .offset(x: w * card.start / total)
+                    }
+                    ForEach(Array((plan?.cuts ?? []).enumerated()), id: \.offset) { _, cut in
+                        Rectangle().fill(.secondary).frame(width: 2, height: 12).offset(x: w * cut.at / total - 1)
+                    }
+                    ForEach(Array((plan?.punches ?? []).enumerated()), id: \.offset) { _, t in
+                        Circle().fill(.secondary).frame(width: 5, height: 5).offset(x: w * t / total - 2.5)
+                    }
+                    Rectangle().fill(.primary).frame(width: 2, height: 16).offset(x: w * model.time / total - 1)
+                }
+                .frame(height: 16)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                    let t = min(max(g.location.x / w, 0), 1) * total
+                    model.time = t
+                    model.show(t)
+                })
+            }
+            .frame(height: 16)
+            .disabled(model.loading || model.failed)
+            Text("Bars are title cards, ticks are cuts, dots are punch-ins.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func form(_ p: Project) -> some View {
         VStack(spacing: 0) {
             previewCard(p)
+            Picker("Page", selection: $tab) {
+                ForEach(EditorTab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
             settingsForm(p)
         }
         .screenBackground()
+        .safeAreaInset(edge: .bottom) { actionBar(p) }
+    }
+
+    /// Always in reach: ask the assistant, or render without scrolling to the end.
+    private func actionBar(_ p: Project) -> some View {
+        HStack(spacing: 10) {
+            Button { showAssistant = true } label: {
+                Label("Assistant", systemImage: "sparkles")
+            }
+            .buttonStyle(.glass)
+            Button {
+                store.renderEdited(p.id)
+                store.selectForStudio(p.id)   // watch it render in Studio
+            } label: {
+                Text(p.takes.isEmpty ? "Render video" : "Render a new take").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
     }
 
     private func settingsForm(_ p: Project) -> some View {
         Form {
-            Section {
-                Text("Changes here apply to this video only. The preview is silent and approximate; Render makes a new take, so the earlier ones stay.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Section {
-                Button { showAssistant = true } label: {
-                    Label("Ask the editing assistant", systemImage: "sparkles")
+            differencesSection(p)
+            switch tab {
+            case .cuts:
+                aiEditSection(p)
+            case .sound:
+                hearSection(p)
+                musicSection(p)
+                effectsSection(p)
+            case .text:
+                cardsSection(p)
+                Section {
+                    NavigationLink("Captions") { CaptionsEditorView(projectID: projectID) }
+                } footer: {
+                    Text("Fix a misheard word or retype a line.")
                 }
-            } footer: {
-                Text("Describe a change in your own words: fix a caption, add a title card, pick the music. It only edits this video.")
-            }
-            aiEditSection(p)
-            musicSection(p)
-            effectsSection(p)
-            cardsSection(p)
-            Section {
-                NavigationLink("Captions") { CaptionsEditorView(projectID: projectID) }
-            } footer: {
-                Text("Fix a misheard word or retype a line.")
-            }
-            Section {
-                Button {
-                    store.renderEdited(p.id)
-                    store.selectForStudio(p.id)   // watch it render in Studio
-                } label: {
-                    Text(p.takes.isEmpty ? "Render video" : "Render a new take").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
             }
         }
         .scrollContentBackground(.hidden)
         .sheet(isPresented: $addingCard) { AddTitleCardSheet(projectID: projectID) }
         .sheet(isPresented: $showAssistant) { EditAssistantView(assistant: assistant) }
+        .confirmationDialog("Put music, effects and cuts back to the channel’s?",
+                            isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) {
+                store.update(projectID) { $0.edits = nil }
+            }
+        } message: {
+            Text("Title cards and captions are not changed.")
+        }
+    }
+
+    // MARK: Where this video differs from its channel
+
+    private func differences(_ p: Project) -> [String] {
+        guard let e = p.edits else { return [] }
+        var out: [String] = []
+        if e.editLevel != nil { out.append("cuts") }
+        if e.music != nil { out.append("music") }
+        if e.musicGainDB != nil { out.append("music level") }
+        if e.sfxEnabled != nil { out.append("effects") }
+        if e.sfxGainDB != nil { out.append("effects level") }
+        return out
+    }
+
+    private func differencesSection(_ p: Project) -> some View {
+        let changed = differences(p)
+        return Section {
+            if changed.isEmpty {
+                Text("This video follows its channel’s music, effects and cuts.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Different from the channel: \(changed.joined(separator: ", ")).").font(.callout)
+                Button("Reset to the channel’s", role: .destructive) { confirmingReset = true }
+            }
+        } footer: {
+            Text("Changes here apply to this video only. The preview is silent and approximate; Render makes a new take, so the earlier ones stay.")
+        }
+    }
+
+    // MARK: Hearing the mix
+
+    private func hearSection(_ p: Project) -> some View {
+        Section {
+            Button { hearMix(p) } label: {
+                Label(mixPlayer.playingID == "mix" ? "Stop" : "Hear the sound mix",
+                      systemImage: mixPlayer.playingID == "mix" ? "stop.circle" : "speaker.wave.2")
+            }
+            .disabled(mixing)
+        } footer: {
+            Text("Plays the narration with this video’s music and effects, the way a render would mix them.")
+        }
     }
 
     // MARK: What the AI edit did
@@ -340,7 +455,7 @@ struct EditorView: View {
         } header: {
             Text("AI edit")
         } footer: {
-            Text("The preview above includes these. “Same as channel” follows the channel's Editing section."
+            Text("The preview above includes these. “Same as channel” follows the channel’s Editing section."
                  + (level == .smart ? " Smart crops need a Google key and are found when the video renders." : ""))
         }
     }
@@ -375,7 +490,7 @@ struct EditorView: View {
                     Slider(value: musicLevelBinding(ch), in: EditResolution.musicGainRange, step: 1)
                 }
                 if p.edits?.musicGainDB != nil {
-                    Button("Use the channel's level") { setOwnLevel(music: nil) }
+                    Button("Use the channel’s level") { setOwnLevel(music: nil) }
                 }
             }
         } header: {
@@ -464,14 +579,14 @@ struct EditorView: View {
                     Slider(value: effectsLevelBinding(ch), in: EditResolution.sfxGainRange, step: 1)
                 }
                 if p.edits?.sfxGainDB != nil {
-                    Button("Use the channel's level") { setOwnLevel(effects: nil) }
+                    Button("Use the channel’s level") { setOwnLevel(effects: nil) }
                 }
             }
         } header: {
             Text("Sound effects")
         } footer: {
             Text(store.channel(for: p).sfxEnabled
-                 ? "This channel has effects on. Choose their sounds in the channel's Sound effects section."
+                 ? "This channel has effects on. Choose their sounds in the channel’s Sound effects section."
                  : "This channel has effects off. Turning them on here still needs sounds chosen in the channel.")
         }
     }
@@ -493,12 +608,21 @@ struct EditorView: View {
 
     private func cardsSection(_ p: Project) -> some View {
         Section {
+            if p.cards.isEmpty {
+                Text("No title cards in this video.").foregroundStyle(.secondary)
+            }
             ForEach(p.cards.sorted { $0.start < $1.start }) { card in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(card.text).lineLimit(2)
                     Text("\(timeLabel(card.start)) to \(timeLabel(card.end)) · \(cardKind(card))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.time = card.start
+                    model.show(card.start)
                 }
                 .swipeActions {
                     Button("Delete", systemImage: "trash", role: .destructive) {
@@ -510,7 +634,7 @@ struct EditorView: View {
         } header: {
             Text("Title cards")
         } footer: {
-            Text("Full-screen text cards. Swipe to remove one the AI added. Redoing the captions step replaces all cards.")
+            Text("Full-screen text cards. Tap one to jump the preview to it; swipe to remove one. Redoing the captions step replaces all cards.")
         }
     }
 

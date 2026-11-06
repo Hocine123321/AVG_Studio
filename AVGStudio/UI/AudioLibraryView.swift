@@ -32,6 +32,13 @@ final class AudioPreview: NSObject, AVAudioPlayerDelegate {
         playingID = nil
     }
 
+    /// How far through the playing track we are, 0...1 (read on a timer: the
+    /// player itself is not observable).
+    var progress: Double {
+        guard let player, player.duration > 0 else { return 0 }
+        return min(max(player.currentTime / player.duration, 0), 1)
+    }
+
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in self.stop() }
     }
@@ -50,6 +57,37 @@ struct AudioLibraryView: View {
     @State private var editing: AudioItem?
     @State private var generating = false
     @State private var confirmingPack = false
+    @State private var search = ""
+    @State private var sort: Sort = .newest
+    @State private var tagFilter: String?
+    @State private var pendingDelete: AudioItem?
+
+    private enum Sort: String, CaseIterable, Identifiable {
+        case newest = "Newest", name = "Name", length = "Length"
+        var id: String { rawValue }
+    }
+
+    /// Everything of this kind on the shelf, before search and filter.
+    private var allItems: [AudioItem] { store.audioLibrary.items.filter { $0.kind == kind } }
+
+    private var tags: [String] { Array(Set(allItems.flatMap(\.tags))).sorted() }
+
+    /// What the page shows: searched, filtered by tag, sorted.
+    private var visibleItems: [AudioItem] {
+        let query = search.trimmed.lowercased()
+        let found = allItems.filter { item in
+            if let tag = tagFilter, !item.tags.contains(tag) { return false }
+            if query.isEmpty { return true }
+            return item.name.lowercased().contains(query)
+                || item.tags.contains { $0.contains(query) }
+                || item.license.lowercased().contains(query)
+        }
+        switch sort {
+        case .newest: return found.sorted { $0.added > $1.added }
+        case .name: return found.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .length: return found.sorted { $0.duration > $1.duration }
+        }
+    }
 
     private var errorShown: Binding<Bool> {
         Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
@@ -80,22 +118,49 @@ struct AudioLibraryView: View {
                      : "Short sounds only (up to 30 seconds). Use sounds you have the right to use, and keep the licence in each sound’s details.")
             }
 
-            let tracks = store.audioLibrary.items.filter { $0.kind == kind }
-            if tracks.isEmpty {
+            let tracks = visibleItems
+            if allItems.isEmpty {
                 Section {
                     Text(kind == .music
                          ? "No music yet. Upload an mp3, m4a or wav, then pick it for a channel in the channel’s Music section."
                          : "No sounds yet. Upload a short mp3, m4a or wav, then give it a moment in a channel’s Sound effects section.")
                         .foregroundStyle(.secondary)
                 }
+            } else if tracks.isEmpty {
+                Section {
+                    ContentUnavailableView("Nothing matches", systemImage: "magnifyingglass",
+                                           description: Text("Try another word, or clear the tag filter."))
+                }
             } else {
-                Section("\(kind == .music ? "Your music" : "Your sounds") (\(tracks.count))") {
+                let total = tracks.reduce(0) { $0 + $1.duration }
+                Section {
                     ForEach(tracks) { item in row(item) }
+                } header: {
+                    Text("\(kind == .music ? "Your music" : "Your sounds") (\(tracks.count) · \(clock(total)))")
                 }
             }
         }
         .screenBackground()
         .navigationTitle(kind == .music ? "Music" : "Sound effects")
+        .searchable(text: $search, prompt: kind == .music ? "Search music" : "Search sounds")
+        .toolbar {
+            if !allItems.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) { sortMenu }
+            }
+        }
+        .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let item = pendingDelete {
+                    preview.stop()
+                    store.removeAudioItem(item.id)
+                }
+                pendingDelete = nil
+            }
+        } message: {
+            Text(deleteMessage)
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { handle($0) }
         .sheet(isPresented: $generating) { GenerateMusicSheet() }
         .confirmationDialog("Add a starter pack?", isPresented: $confirmingPack, titleVisibility: .visible) {
@@ -113,6 +178,22 @@ struct AudioLibraryView: View {
         .onDisappear { preview.stop() }
     }
 
+    private var sortMenu: some View {
+        Menu {
+            Picker("Sort by", selection: $sort) {
+                ForEach(Sort.allCases) { Text($0.rawValue).tag($0) }
+            }
+            if !tags.isEmpty {
+                Picker("Tag", selection: $tagFilter) {
+                    Text("All tags").tag(String?.none)
+                    ForEach(tags, id: \.self) { Text($0).tag(String?.some($0)) }
+                }
+            }
+        } label: {
+            Image(systemName: tagFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        }
+    }
+
     private func row(_ item: AudioItem) -> some View {
         HStack(spacing: 12) {
             Button {
@@ -126,24 +207,56 @@ struct AudioLibraryView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.body.weight(.semibold)).lineLimit(1)
                 Text(detail(item)).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                if preview.playingID == item.id {
+                    TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                        ProgressView(value: preview.progress).tint(Theme.accent)
+                    }
+                }
             }
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
         .onTapGesture { editing = item }
         .swipeActions {
-            Button("Delete", systemImage: "trash", role: .destructive) {
-                preview.stop()
-                store.removeAudioItem(item.id)
-            }
+            Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(item) }
+        }
+        .contextMenu {
+            Button("Details", systemImage: "pencil") { editing = item }
+            Button("Delete", systemImage: "trash", role: .destructive) { requestDelete(item) }
         }
     }
 
+    /// Deleting something a channel uses asks first; an unused one just goes.
+    private func requestDelete(_ item: AudioItem) {
+        if store.channelsUsing(audioItem: item.id).isEmpty {
+            preview.stop()
+            store.removeAudioItem(item.id)
+        } else {
+            pendingDelete = item
+        }
+    }
+
+    private var deleteMessage: String {
+        guard let item = pendingDelete else { return "" }
+        return "\(usedBy(item)) It will stop being used there."
+    }
+
+    private func usedBy(_ item: AudioItem) -> String {
+        let names = store.channelsUsing(audioItem: item.id).map(\.name)
+        return names.isEmpty ? "" : "Used by \(names.joined(separator: ", "))."
+    }
+
+    private func clock(_ seconds: Double) -> String {
+        let s = Int(seconds.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
     private func detail(_ item: AudioItem) -> String {
-        let seconds = Int(item.duration.rounded())
-        var parts = [String(format: "%d:%02d", seconds / 60, seconds % 60)]
+        var parts = [clock(item.duration)]
         if !item.tags.isEmpty { parts.append(item.tags.joined(separator: ", ")) }
         parts.append(item.license)
+        let uses = store.channelsUsing(audioItem: item.id).count
+        if uses > 0 { parts.append("in use (\(uses))") }
         return parts.joined(separator: " · ")
     }
 
@@ -203,7 +316,7 @@ private struct AudioItemEditor: View {
         NavigationStack {
             Form {
                 Section("Name") {
-                    TextField("Track name", text: $name)
+                    TextField(item.kind == .music ? "Track name" : "Sound name", text: $name)
                 }
                 Section {
                     TextField("calm, upbeat, cinematic", text: $tags)
@@ -223,7 +336,7 @@ private struct AudioItemEditor: View {
                     Text("“Mine” means you made it or own it. For anything else, note the licence so you can show it if a video is ever claimed.")
                 }
             }
-            .navigationTitle("Track details")
+            .navigationTitle(item.kind == .music ? "Track details" : "Sound details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -274,7 +387,7 @@ private struct GenerateMusicSheet: View {
                     Text("Uses your Google key and needs a paid Google plan: Lyria has no free tier. The track is saved to your music, so you pay once and can reuse it in every video.")
                 }
                 if let errorMessage {
-                    Section { Text(errorMessage).foregroundStyle(.red) }
+                    Section { Text(errorMessage).foregroundStyle(Theme.bad) }
                 }
             }
             .navigationTitle("Generate music")

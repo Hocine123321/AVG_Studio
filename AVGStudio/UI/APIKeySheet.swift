@@ -64,7 +64,7 @@ struct APIKeySheet: View {
                     if saveFailed {
                         Text("The Keychain refused the key. Try again.").foregroundStyle(Theme.bad)
                     } else {
-                        Text("Kept in your iPhone's Keychain, on this device only. It is never shown again and never written into a project.")
+                        Text("Kept in your iPhone’s Keychain, on this device only. It is never shown again and never written into a project.")
                     }
                 }
                 if hasSaved {

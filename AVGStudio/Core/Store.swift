@@ -444,9 +444,30 @@ final class Store {
 
     /// Removes a library track and clears it from any channel that used it, so a
     /// channel never points at a file that is gone.
+    /// The channels that use this library item: as their music track, or as the
+    /// sound for one of their moments.
+    func channelsUsing(audioItem id: String) -> [Channel] {
+        channels.filter { $0.musicTrackID == id || $0.sfxMap.values.contains(id) }
+    }
+
+    /// Removes a track or sound and every reference to it, so nothing is left
+    /// pointing at a file that is gone: channels' music pick, recent picks and
+    /// sound-effect moments, and any video that chose it for itself.
     func removeAudioItem(_ id: String) {
         audioLibrary.remove(id)
-        for i in channels.indices where channels[i].musicTrackID == id { channels[i].musicTrackID = nil }
+        for i in channels.indices {
+            if channels[i].musicTrackID == id { channels[i].musicTrackID = nil }
+            channels[i].musicRecent.removeAll { $0 == id }
+            channels[i].sfxMap = channels[i].sfxMap.filter { $0.value != id }
+        }
+        for p in projects {
+            guard case .track(let chosen)? = p.edits?.music, chosen == id else { continue }
+            update(p.id) { proj in
+                var edits = proj.edits ?? ProjectEdits()
+                edits.music = nil
+                proj.edits = edits.isEmpty ? nil : edits
+            }
+        }
     }
 
     func reusableImageURL(_ r: ReusableImage) -> URL { Self.reusableImagesDir.appendingPathComponent(r.fileName) }

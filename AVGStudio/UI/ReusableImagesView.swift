@@ -21,7 +21,7 @@ struct ReusableImagesView: View {
                 }
                 .disabled(isImporting)
             } footer: {
-                Text("The writer can reuse one of these instead of generating fresh art for a scene, when a channel's Recycle setting is on.")
+                Text("The writer can reuse one of these instead of generating fresh art for a scene, when a channel’s Recycle setting is on.")
             }
             if !store.reusableImages.isEmpty {
                 Section("Pool (\(store.reusableImages.count))") {

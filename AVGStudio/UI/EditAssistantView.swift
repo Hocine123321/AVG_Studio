@@ -83,9 +83,9 @@ struct EditAssistantView: View {
         case .error:
             Text(line.text)
                 .font(.callout)
-                .foregroundStyle(.red)
+                .foregroundStyle(Theme.bad)
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.red.opacity(0.12), in: .rect(cornerRadius: 16))
+                .background(Theme.bad.opacity(0.12), in: .rect(cornerRadius: 16))
         }
     }
 

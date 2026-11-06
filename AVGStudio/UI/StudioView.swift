@@ -89,7 +89,7 @@ struct StudioView: View {
             ContentUnavailableView {
                 Label("No videos yet", systemImage: "clapperboard")
             } description: {
-                Text("Create your first video and it'll show up here.")
+                Text("Create your first video and it’ll show up here.")
             } actions: {
                 Button("Create a video") { store.tab = .create }.buttonStyle(.glassProminent)
             }
@@ -210,7 +210,7 @@ struct StudioView: View {
         if p.awaitingEdit == true {
             VStack(alignment: .leading, spacing: 10) {
                 Label("Ready for your edit", systemImage: "scissors").font(.headline)
-                Text("This video hasn't been rendered yet. Add music or effects, title cards, or fix captions, then render.")
+                Text("This video hasn’t been rendered yet. Add music or effects, title cards, or fix captions, then render.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 10) {
@@ -280,7 +280,7 @@ struct StudioView: View {
                 phaseHeader(p, ph, r, open: open, stale: stale)
             }
             .buttonStyle(.plain)
-            .accessibilityHint(open ? "Hides this phase's steps" : "Shows this phase's steps")
+            .accessibilityHint(open ? "Hides this phase’s steps" : "Shows this phase’s steps")
 
             if open { stepsList(p, ph, r) }
         }

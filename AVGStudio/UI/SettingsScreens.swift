@@ -214,7 +214,7 @@ struct VideoSettingsPage: View {
             }
 
             SettingsGroup(title: "Look",
-                          footer: "Filters are an on-device stand-in for the PC's grain/light-leak look, generated procedurally rather than from the same source footage.") {
+                          footer: "Filters are an on-device stand-in for the PC’s grain/light-leak look, generated procedurally rather than from the same source footage.") {
                 ChoiceRow(title: "Film filter",
                           options: FilterStyle.allCases.map { ChoiceOption($0, $0.label) },
                           selection: $store.settings.filterStyle)
@@ -242,7 +242,7 @@ struct EditingSettingsPage: View {
         @Bindable var store = store
         SettingsPage(title: "Editing", focus: focus) {
             SettingsGroup(title: "Before the first render",
-                          footer: "A short window to take over a video's edit before it is first rendered: add music, title cards, fix captions. If you do nothing, the AI finishes it. Never means the AI always finishes, whatever a channel says.") {
+                          footer: "A short window to take over a video’s edit before it is first rendered: add music, title cards, fix captions. If you do nothing, the AI finishes it. Never means the AI always finishes, whatever a channel says.") {
                 SegmentRow(title: "Offer to edit", options: EditGate.choices,
                            label: { $0 == 0 ? "Never" : "\($0) s" }, selection: $store.settings.editGateSeconds)
                     .anchored(.editGateSeconds)
@@ -284,7 +284,7 @@ struct PerformanceSettingsPage: View {
         @Bindable var store = store
         SettingsPage(title: "Performance", focus: focus) {
             SettingsGroup(title: "Rendering",
-                          footer: "Automatic draws every frame on the GPU and falls back to the CPU only when iOS won't allow the GPU (the app in the background). CPU only is slower but never touches the GPU. HEVC makes smaller files; H.264 plays everywhere. Encoder quality sets how much detail the file keeps: Automatic lets iOS decide, the others ask for a fixed amount.") {
+                          footer: "Automatic draws every frame on the GPU and falls back to the CPU only when iOS won’t allow the GPU (the app in the background). CPU only is slower but never touches the GPU. HEVC makes smaller files; H.264 plays everywhere. Encoder quality sets how much detail the file keeps: Automatic lets iOS decide, the others ask for a fixed amount.") {
                 ChoiceRow(title: "Render engine",
                           options: RenderEngine.allCases.map { ChoiceOption($0, $0.label) },
                           selection: $store.settings.renderEngine)
@@ -333,7 +333,7 @@ struct KeysSettingsPage: View {
 
     var body: some View {
         SettingsPage(title: "API keys", focus: focus) {
-            SettingsGroup(footer: "Stored in your iPhone's Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy. Tap a service to also add a backup key: if the main one fails, the app uses the backup for 30 minutes.") {
+            SettingsGroup(footer: "Stored in your iPhone’s Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy. Tap a service to also add a backup key: if the main one fails, the app uses the backup for 30 minutes.") {
                 ForEach(Array(APIKey.allCases.enumerated()), id: \.element) { i, key in
                     Button {
                         Haptics.light()
@@ -359,7 +359,7 @@ struct KeysSettingsPage: View {
             }
 
             SettingsGroup(title: "Model lists",
-                          footer: "Re-fetches every provider's live model list at once, instead of one at a time from its own picker.") {
+                          footer: "Re-fetches every provider’s live model list at once, instead of one at a time from its own picker.") {
                 Button {
                     Haptics.light()
                     refreshing = true
@@ -412,13 +412,13 @@ struct FallbacksSettingsPage: View {
             // The automatic-switch toggle governs ALL three fallbacks, so it
             // leads the page; it used to hang off the end of the voice
             // section, three sections below the ones it controls.
-            SettingsGroup(footer: "With the switch on, a quota or billing error moves the writer, image or voice step to its fallback without asking. Otherwise you're asked first.") {
+            SettingsGroup(footer: "With the switch on, a quota or billing error moves the writer, image or voice step to its fallback without asking. Otherwise you’re asked first.") {
                 ToggleRow(title: "Switch automatically", subtitle: "When a model is over quota or too expensive",
                           isOn: $store.settings.autoUseFallback)
                     .anchored(.autoFallback)
             }
 
-            SettingsGroup(title: "Writer fallback", footer: "Used when the writer's main model is over quota, out of credit or too expensive.") {
+            SettingsGroup(title: "Writer fallback", footer: "Used when the writer’s main model is over quota, out of credit or too expensive.") {
                 if let c = catalogs.writerCatalog(store.settings) {
                     ModelRow(title: "Fallback model", value: $store.settings.writerFallbackModel, catalog: c)
                         .anchored(.writerFallback)
@@ -579,7 +579,7 @@ struct AssistantSettingsPage: View {
             }
 
             SettingsGroup(title: "Reliability",
-                          footer: "Separate from the writer's fallbacks. Needs a key for the other service.") {
+                          footer: "Separate from the writer’s fallbacks. Needs a key for the other service.") {
                 ToggleRow(title: "Switch assistant on limits",
                           subtitle: "If this service is rate-limited or out of quota, try the other one.",
                           isOn: $store.settings.agentFailover)
@@ -630,7 +630,7 @@ struct AssistantSettingsPage: View {
             }
 
             SettingsGroup(title: "Custom instructions",
-                          footer: "Sent with every message. They never turn off asking. Don't put keys here.") {
+                          footer: "Sent with every message. They never turn off asking. Don’t put keys here.") {
                 FieldRow(title: "Custom instructions", placeholder: "For example: use my Facts channel",
                          text: Binding(
                             get: { store.settings.agentInstructions },

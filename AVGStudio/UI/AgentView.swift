@@ -107,7 +107,7 @@ struct AgentView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 8) {
-                suggestion("What's in my library?", symbol: "square.grid.2x2") { agent.send("What's in my library?") }
+                suggestion("What’s in my library?", symbol: "square.grid.2x2") { agent.send("What’s in my library?") }
                 suggestion("How is my video going?", symbol: "gauge.with.dots.needle.50percent") { agent.send("How is my latest video going?") }
                 suggestion("What can you do?", symbol: "sparkles") { agent.send("What can you do?") }
                 suggestion("Make a video about…", symbol: "wand.and.stars") {
@@ -230,7 +230,7 @@ struct AgentView: View {
             Image(systemName: "key.fill").font(.largeTitle).foregroundStyle(.secondary)
             Text("Add your \(provider.label) key to use the assistant.")
                 .font(.headline).multilineTextAlignment(.center)
-            Text("Your messages go to \(provider.label). Keys stay in this phone's Keychain.")
+            Text("Your messages go to \(provider.label). Keys stay in this phone’s Keychain.")
                 .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Open API keys", systemImage: "key") {
                 apply(.openKeys)

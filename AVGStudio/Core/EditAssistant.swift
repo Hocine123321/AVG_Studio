@@ -359,15 +359,15 @@ enum EditTools {
 
     static func activity(for name: String) -> String {
         switch name {
-        case "get_edit", "list_captions": return "Looking at the edit..."
-        case "fix_caption_word", "set_caption_line": return "Fixing captions..."
-        case "add_title_card": return "Adding a title card..."
-        case "remove_title_card": return "Removing a title card..."
-        case "set_music": return "Choosing music..."
-        case "set_sound_effects": return "Setting sound effects..."
-        case "set_cuts": return "Setting cuts..."
-        case "undo": return "Undoing..."
-        default: return "Working..."
+        case "get_edit", "list_captions": return "Looking at the edit…"
+        case "fix_caption_word", "set_caption_line": return "Fixing captions…"
+        case "add_title_card": return "Adding a title card…"
+        case "remove_title_card": return "Removing a title card…"
+        case "set_music": return "Choosing music…"
+        case "set_sound_effects": return "Setting sound effects…"
+        case "set_cuts": return "Setting cuts…"
+        case "undo": return "Undoing…"
+        default: return "Working…"
         }
     }
 

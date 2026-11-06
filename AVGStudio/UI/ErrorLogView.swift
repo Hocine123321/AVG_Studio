@@ -57,7 +57,7 @@ struct ErrorLogView: View {
             Button("Clear", role: .destructive) { store.clearErrorHistory() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the saved errors from this iPhone. It doesn't change any video.")
+            Text("This removes the saved errors from this iPhone. It doesn’t change any video.")
         }
     }
 

@@ -196,7 +196,7 @@ struct WelcomeView: View {
                     .textInputAutocapitalization(.words)
                     .onSubmit { field = .niche }
                     .fieldStyle(14)
-                TextField("What's it about? (e.g. space facts)", text: $niche)
+                TextField("What’s it about? (e.g. space facts)", text: $niche)
                     .focused($field, equals: .niche)
                     .submitLabel(.done)
                     .onSubmit { field = nil }
@@ -259,7 +259,7 @@ struct WelcomeView: View {
             .padding(.horizontal, 14)
             .glassCard(24, padding: 6)
 
-            Text("Keys stay in your iPhone's Keychain, on this device only. When you add one, the app checks its models and picks the best one that works.")
+            Text("Keys stay in your iPhone’s Keychain, on this device only. When you add one, the app checks its models and picks the best one that works.")
                 .font(.caption).foregroundStyle(Theme.ink2)
                 .padding(.horizontal, 4)
         }
@@ -316,7 +316,7 @@ struct WelcomeView: View {
         if !store.modelPrefs.sweeping.isEmpty {
             HStack(spacing: 10) {
                 ProgressView()
-                Text("Checking your models...").font(.callout).foregroundStyle(Theme.ink2)
+                Text("Checking your models…").font(.callout).foregroundStyle(Theme.ink2)
             }
             .padding(.horizontal, 6)
         } else if let note = store.modelPrefs.setupNotes.last {
@@ -348,7 +348,7 @@ struct WelcomeView: View {
                 .glassCircle()
                 .padding(.top, 8)
                 .accessibilityHidden(true)
-            titleText("You're all set").multilineTextAlignment(.center)
+            titleText("You’re all set").multilineTextAlignment(.center)
             leadText("Start with a topic, or open your library.").multilineTextAlignment(.center)
             VStack(spacing: 0) {
                 summaryRow("Channel", resolvedChannelName)

@@ -137,7 +137,7 @@ with `@testable import AVGStudio`.
 | `ErrorLogView.swift` | The Activity screen: All / Errors filter over `store.log` |
 | `HealthView.swift` | App Health: required and optional checks, summary tiles, recent activity. Checks are computed once per appearance, not on every read |
 | `WelcomeView.swift` | First-run five-step onboarding; step 3 is "Your AI team" (`AITeamPreset`) |
-| `EditorView.swift` | `EditGateCard` (the 10-second card, shown over any screen), `EditorView` (this video's music and sound effects, title cards, captions; Render makes a new take) and the caption editor. No live preview yet |
+| `EditorView.swift` | `EditGateCard` (the 10-second card, shown over any screen), `EditorView` (a silent live preview with a timeline of cards, cuts and punch-ins; three pages: Cuts, Sound, Text; a pinned Assistant and Render bar; Render makes a new take) and the caption editor |
 | `ModelRow.swift` | One 56 pt row over a `ModelCatalog`; tapping opens a bottom sheet with search and Refresh. Always editable: typing an id works with no list |
 | `AgentView.swift` | The assistant's chat sheet (opened from a toolbar button on Library, Studio and Create) and `AgentToolbarButton`. Everything needing attention is one glass stack above the composer: a paused video's recovery choices, the approval, live progress for videos it started. Errors show in plain words with fix buttons. The one filled button in it is Approve |
 | `ProjectLogView.swift` | The live log sheet |

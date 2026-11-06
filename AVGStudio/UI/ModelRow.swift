@@ -164,7 +164,7 @@ private struct ModelSheet: View {
             HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Refreshing the live list…") }
                 .font(.caption).foregroundStyle(Theme.ink2)
         case .failed(let message, let hasCache):
-            Text("Couldn't fetch a live list (\(message)). \(hasCache ? "Showing the last list that worked." : "Type an id below, or tap refresh to try again.")")
+            Text("Couldn’t fetch a live list (\(message)). \(hasCache ? "Showing the last list that worked." : "Type an id below, or tap refresh to try again.")")
                 .font(.caption).foregroundStyle(Theme.ink2)
         case .loaded(let date):
             Text("\(catalog.entries.count) available · updated \(date.formatted(date: .omitted, time: .shortened))")
