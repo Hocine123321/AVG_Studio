@@ -338,10 +338,12 @@ struct EditorView: View {
     /// Always in reach: ask the assistant, or render without scrolling to the end.
     private func actionBar(_ p: Project) -> some View {
         HStack(spacing: 10) {
-            Button { showAssistant = true } label: {
-                Label("Assistant", systemImage: "sparkles")
+            if store.settings.editAssistantEnabled {
+                Button { showAssistant = true } label: {
+                    Label("Assistant", systemImage: "sparkles")
+                }
+                .buttonStyle(.glass)
             }
-            .buttonStyle(.glass)
             Button {
                 store.renderEdited(p.id)
                 store.selectForStudio(p.id)   // watch it render in Studio

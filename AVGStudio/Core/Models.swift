@@ -761,6 +761,21 @@ struct AppSettings: Codable {
     /// Standing preferences added to the system prompt; capped at 400.
     var agentInstructions = ""
 
+    // MARK: Editing assistant (the chat inside the editor; see EditAssistantSettings.swift)
+    /// Show the Assistant button in the editor.
+    var editAssistantEnabled = true
+    /// Off: it uses the chat assistant's provider and model.
+    var editAssistantOwnModel = false
+    var editAssistantProvider: AgentProviderKind = .groq
+    var editAssistantGroqModel = "llama-3.3-70b-versatile"
+    var editAssistantGeminiModel = "gemini-2.5-flash"
+    var editAllowCaptions = true
+    var editAllowCards = true
+    var editAllowMusic = true
+    var editAllowEffects = true
+    var editAllowCuts = true
+    var editAssistantInstructions = ""
+
     /// Tolerant decode: a key missing from an older save (i.e. any field
     /// added in an update) keeps its default instead of failing the whole
     /// settings blob - which used to reset EVERY setting on each update.
@@ -818,6 +833,17 @@ struct AppSettings: Codable {
         defaultEditLevel = c.value("defaultEditLevel", defaultEditLevel)
         previewSharp = c.value("previewSharp", previewSharp)
         appFont = c.value("appFont", appFont)
+        editAssistantEnabled = c.value("editAssistantEnabled", editAssistantEnabled)
+        editAssistantOwnModel = c.value("editAssistantOwnModel", editAssistantOwnModel)
+        editAssistantProvider = c.value("editAssistantProvider", editAssistantProvider)
+        editAssistantGroqModel = c.value("editAssistantGroqModel", editAssistantGroqModel)
+        editAssistantGeminiModel = c.value("editAssistantGeminiModel", editAssistantGeminiModel)
+        editAllowCaptions = c.value("editAllowCaptions", editAllowCaptions)
+        editAllowCards = c.value("editAllowCards", editAllowCards)
+        editAllowMusic = c.value("editAllowMusic", editAllowMusic)
+        editAllowEffects = c.value("editAllowEffects", editAllowEffects)
+        editAllowCuts = c.value("editAllowCuts", editAllowCuts)
+        editAssistantInstructions = c.value("editAssistantInstructions", editAssistantInstructions)
         agentProvider = c.value("agentProvider", agentProvider)
         agentGroqModel = c.value("agentGroqModel", agentGroqModel)
         agentGeminiModel = c.value("agentGeminiModel", agentGeminiModel)

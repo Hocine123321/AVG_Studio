@@ -110,8 +110,8 @@ final class EditAssistant {
         guard let store else { return }
         snapshotTakenThisTurn = false
         wire.append(.user(userText))
-        let system = EditTools.systemPrompt
-        let tools = EditTools.specs
+        let system = EditTools.prompt(for: store.settings)
+        let tools = EditTools.offeredSpecs(for: store.settings)
         var steps = 0
         var nudges = 0
 
@@ -124,7 +124,7 @@ final class EditAssistant {
             }
             let reply: AgentMessage
             do {
-                let provider = try makeProvider(store.settings)
+                let provider = try makeProvider(EditTools.providerSettings(from: store.settings))
                 let history = AgentHistory.trimmed(wire, keepLast: Self.historyWindow)
                 reply = try await provider.respond(system: system, messages: history, tools: tools)
             } catch {
@@ -171,6 +171,9 @@ final class EditAssistant {
     func run(_ call: AgentToolCall) -> String {
         guard let store, let p = store.project(projectID) else { return "That video is no longer available." }
         let args = AgentArgs(json: call.argumentsJSON)
+        if let capability = EditCapability.governing(tool: call.name), !store.settings[keyPath: capability.keyPath] {
+            return EditTools.switchedOff(capability)
+        }
         switch call.name {
         case "get_edit":
             return EditTools.describe(p, channel: store.channel(for: p), library: store.audioLibrary.music)

@@ -73,6 +73,8 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case assistantAllowManage, assistantAllowSettings, assistantAllowChannels, assistantAllowDiagnostics
     case assistantApproval, assistantSpendCap, assistantReplyStyle, assistantAnnounce
     case assistantKeepChat, assistantClear, assistantInstructions
+    case editAssistantEnabled, editAssistantOwnModel, editAssistantProvider
+    case editAllowCaptions, editAllowCards, editAllowMusic, editAllowEffects, editAllowCuts, editAssistantInstructions
 }
 
 enum SettingsRoute: Hashable {
@@ -156,6 +158,15 @@ enum SettingsIndex {
         e("Keep chat", .assistant, .assistantKeepChat, "assistant agent memory history save remember conversation"),
         e("Clear saved chat", .assistant, .assistantClear, "assistant agent delete erase memory history conversation"),
         e("Custom instructions", .assistant, .assistantInstructions, "assistant agent prompt rules preferences standing system"),
+        e("Editing assistant", .assistant, .editAssistantEnabled, "assistant editor editing chat button show hide video"),
+        e("Editing assistant model", .assistant, .editAssistantOwnModel, "assistant editor editing own separate model provider groq gemini"),
+        e("Editing assistant provider", .assistant, .editAssistantProvider, "assistant editor editing provider service groq gemini llama"),
+        e("Change captions", .assistant, .editAllowCaptions, "assistant editor editing capabilities tools permission allow captions words lines"),
+        e("Change title cards", .assistant, .editAllowCards, "assistant editor editing capabilities tools permission allow title cards text"),
+        e("Change music", .assistant, .editAllowMusic, "assistant editor editing capabilities tools permission allow music track level"),
+        e("Change sound effects", .assistant, .editAllowEffects, "assistant editor editing capabilities tools permission allow sound effects sfx level"),
+        e("Change cuts and punch-ins", .assistant, .editAllowCuts, "assistant editor editing capabilities tools permission allow cuts punch zoom smart"),
+        e("Editing instructions", .assistant, .editAssistantInstructions, "assistant editor editing prompt rules preferences standing captions style"),
         e("API keys", .keys, .apiKeys, "keychain gemini groq openai elevenlabs assemblyai stable horde pollinations"),
         e("Refresh model lists", .keys, .refreshLists, "model cache catalog update"),
         e("Switch automatically", .fallbacks, .autoFallback, "fallback quota billing expensive cheaper"),

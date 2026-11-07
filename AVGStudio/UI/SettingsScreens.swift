@@ -641,10 +641,79 @@ struct AssistantSettingsPage: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.bottom, 8)
             }
+
+            editingAssistantGroups
         }
         .onChange(of: store.settings.agentProvider) { _, _ in testResult = nil }
         .onChange(of: store.settings.agentKeepChat) { _, on in
             if !on { store.agent.deleteSavedChat() }
+        }
+    }
+
+    // MARK: Editing assistant (the chat inside the editor)
+
+    @ViewBuilder
+    private var editingAssistantGroups: some View {
+        @Bindable var store = store
+        SettingsGroup(title: "Editing assistant",
+                      footer: "The chat inside the editor. It only ever changes the one video that is open, every change can be undone, and it can never render, spend money or touch keys and settings.") {
+            ToggleRow(title: "Show the editing assistant",
+                      subtitle: "The Assistant button in the editor.",
+                      isOn: $store.settings.editAssistantEnabled)
+                .anchored(.editAssistantEnabled)
+        }
+
+        SettingsGroup(title: "Editing assistant model",
+                      footer: "Quick edits do not need a big model. A separate one keeps them from using the chat assistant’s limits.") {
+            ToggleRow(title: "Use its own model",
+                      subtitle: "Off: it uses the model chosen under Model above.",
+                      isOn: $store.settings.editAssistantOwnModel)
+                .anchored(.editAssistantOwnModel)
+            if store.settings.editAssistantOwnModel {
+                ChoiceRow(title: "Editing provider",
+                          options: AgentProviderKind.allCases.map { ChoiceOption($0, $0.label) },
+                          selection: $store.settings.editAssistantProvider)
+                    .anchored(.editAssistantProvider)
+                switch store.settings.editAssistantProvider {
+                case .groq:
+                    ModelRow(title: "Groq model", value: $store.settings.editAssistantGroqModel, catalog: catalogs.groqText)
+                case .gemini:
+                    ModelRow(title: "Gemini model", value: $store.settings.editAssistantGeminiModel, catalog: catalogs.geminiText)
+                }
+            }
+        }
+
+        SettingsGroup(title: "Editing assistant changes · \(EditCapability.enabledCount(store.settings)) of \(EditCapability.allCases.count) on",
+                      footer: "What the editing assistant may change. A switch that is off means it is not offered that tool at all. Reading the edit and undoing a change are always on.") {
+            ForEach(EditCapability.allCases) { capability in
+                ToggleRow(title: capability.title, subtitle: capability.summary,
+                          isOn: Binding(get: { store.settings[keyPath: capability.keyPath] },
+                                        set: { store.settings[keyPath: capability.keyPath] = $0 }))
+                    .anchored(Self.editAnchor(for: capability))
+            }
+        }
+
+        SettingsGroup(title: "Editing instructions",
+                      footer: "Sent with every editing message, for example how you like captions written. They never allow more than the switches above.") {
+            FieldRow(title: "Editing instructions", placeholder: "For example: keep captions in sentence case",
+                     text: Binding(
+                        get: { store.settings.editAssistantInstructions },
+                        set: { store.settings.editAssistantInstructions = String($0.prefix(AgentSettingsRules.instructionsLimit)) }))
+                .anchored(.editAssistantInstructions)
+            Text("\(store.settings.editAssistantInstructions.count)/\(AgentSettingsRules.instructionsLimit)")
+                .font(.caption2).foregroundStyle(Theme.ink2)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.bottom, 8)
+        }
+    }
+
+    private static func editAnchor(for capability: EditCapability) -> SettingAnchor {
+        switch capability {
+        case .captions: return .editAllowCaptions
+        case .titleCards: return .editAllowCards
+        case .music: return .editAllowMusic
+        case .soundEffects: return .editAllowEffects
+        case .cuts: return .editAllowCuts
         }
     }
 
