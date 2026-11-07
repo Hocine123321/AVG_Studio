@@ -271,6 +271,16 @@ final class ModelPrefs {
         Self.write(autoPicks, to: autoPicksURL)
     }
 
+    func clearAutoPick(_ catalogKey: String) {
+        autoPicks.byCatalog[catalogKey] = nil
+        Self.write(autoPicks, to: autoPicksURL)
+    }
+
+    /// When the newest probe of any model finished, or nil if nothing was ever checked.
+    var lastChecked: Date? {
+        probes.byCatalog.values.flatMap { $0.values.map(\.checked) }.max()
+    }
+
     func addSetupNote(_ line: String) {
         setupNotes.append(line)
         if setupNotes.count > 20 { setupNotes.removeFirst(setupNotes.count - 20) }

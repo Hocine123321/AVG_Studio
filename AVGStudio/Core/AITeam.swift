@@ -46,7 +46,26 @@ struct TeamAssignment: Equatable {
     var needs: [APIKey]
 }
 
+extension TeamAssignment {
+    /// Puts this team in charge of the writer, the image maker and the narrator.
+    func apply(to settings: inout AppSettings) {
+        settings.text = text
+        settings.image = image
+        settings.voice = voice
+    }
+}
+
 extension AITeamPreset {
+    /// The preset whose staffing is exactly what the settings say right now, or
+    /// nil when the person has mixed their own team.
+    static func matching(text: TextProviderKind, image: ImageProviderKind, voice: VoiceProviderKind,
+                         keys: Set<APIKey>, appleAvailable: Bool) -> AITeamPreset? {
+        allCases.first {
+            let team = assignment($0, keys: keys, appleAvailable: appleAvailable)
+            return team.text == text && team.image == image && team.voice == voice
+        }
+    }
+
     /// Who staffs each role for `preset`, given the keys saved right now.
     /// `appleAvailable` is whether the on-device writer exists on this iPhone;
     /// without it the free writer is Pollinations.

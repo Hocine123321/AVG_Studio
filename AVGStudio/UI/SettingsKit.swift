@@ -63,6 +63,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case captionsToggle, captionAnimation, captionWords, captionPosition, captionSize
     case quality, fps, kenBurns, motion, filterStyle, filterIntensity
     case editGateSeconds, defaultEditingMode, defaultEditLevel, previewQuality
+    case aiTeam, autoPickModels
     case renderEngine, videoCodec, encoderQuality, parallelJobs, imageParallelism, pauseWhenHot, keepAwake, backgroundRendering
     case apiKeys, refreshLists
     case autoFallback, writerFallback, imageFallback, voiceFallback
@@ -81,6 +82,7 @@ enum SettingsRoute: Hashable {
     case reusableImages
     case music
     case soundEffects
+    case aiTeam(focus: SettingAnchor?)
 }
 
 /// The searchable list of settings. `SettingAnchor.allCases` must all appear
@@ -163,6 +165,12 @@ enum SettingsIndex {
         e("Theme", .appearance, .theme, "night day auto dark light appearance"),
         e("Font", .appearance, .font, "typeface caprasimo system text"),
         e("Glass transparency", .appearance, .glass, "opacity blur translucent see through"),
+        Entry(title: "AI team", place: "AI team", symbol: "person.3.fill",
+              keywords: "preset free balanced premium who writes images voice narrator staff team keys",
+              route: .aiTeam(focus: .aiTeam), anchor: .aiTeam),
+        Entry(title: "Pick the best model automatically", place: "AI team", symbol: "person.3.fill",
+              keywords: "auto pick model when key added check models undo automatic newest working",
+              route: .aiTeam(focus: .autoPickModels), anchor: .autoPickModels),
         Entry(title: "App health", place: "App", symbol: "heart.text.square", keywords: "status providers keys storage diagnostics check",
               route: .health, anchor: nil),
         Entry(title: "Activity & errors", place: "App", symbol: "list.bullet.rectangle", keywords: "log errors history problems",
@@ -303,6 +311,40 @@ struct RowText: View {
                 Text(subtitle).font(.caption).foregroundStyle(Theme.ink2)
             }
         }
+    }
+}
+
+/// A full-width row that DOES something (check, undo, apply), with an optional
+/// spinner while it works. The whole row is the tap target.
+struct ActionRow: View {
+    let title: String
+    var subtitle: String?
+    var symbol: String?
+    var busy = false
+    var enabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            Haptics.light()
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                RowText(title: title, subtitle: subtitle)
+                Spacer(minLength: 8)
+                if busy {
+                    ProgressView()
+                } else if let symbol {
+                    Image(systemName: symbol).foregroundStyle(Theme.ink2)
+                }
+            }
+            .frame(minHeight: settingsRowMinHeight)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(busy || !enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .accessibilityLabel(title)
     }
 }
 

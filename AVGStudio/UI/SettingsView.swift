@@ -58,6 +58,10 @@ struct SettingsView: View {
     private var hub: some View {
         VStack(spacing: 20) {
             SettingsGroup(title: "Create") {
+                NavigationLink(value: SettingsRoute.aiTeam(focus: nil)) {
+                    NavRow(symbol: "person.3.fill", title: "AI team", detail: teamSummary)
+                }
+                .buttonStyle(.plain)
                 row(.writing, writingSummary)
                 row(.images, imagesSummary)
                 row(.voice, store.settings.voice.label)
@@ -103,6 +107,14 @@ struct SettingsView: View {
     }
 
     // Live summaries: the hub answers "what is it set to?" without a tap.
+
+    private var teamSummary: String {
+        let s = store.settings
+        let keys = Set(APIKey.allCases.filter { Keychain.has($0) })
+        let name = AITeamPreset.matching(text: s.text, image: s.image, voice: s.voice,
+                                         keys: keys, appleAvailable: AppleText.isAvailable)?.title ?? "Custom"
+        return "\(name) · \(s.text.label) writes"
+    }
 
     private var writingSummary: String {
         let s = store.settings
@@ -199,6 +211,8 @@ struct SettingsView: View {
             AudioLibraryView(kind: .music)
         case .soundEffects:
             AudioLibraryView(kind: .sfx)
+        case .aiTeam(let focus):
+            AITeamSettingsPage(focus: focus)
         }
     }
 

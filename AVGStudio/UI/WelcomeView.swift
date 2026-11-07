@@ -484,9 +484,7 @@ struct WelcomeView: View {
         // right now. This also covers the old rule that the writer falls back to
         // Pollinations where Apple Intelligence is unavailable.
         let staffed = team
-        store.settings.text = staffed.text
-        store.settings.image = staffed.image
-        store.settings.voice = staffed.voice
+        staffed.apply(to: &store.settings)
         field = nil
         Haptics.success()
         store.tab = destination

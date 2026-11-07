@@ -41,6 +41,7 @@ enum ModelAutoSetup {
     /// runs when a saved key has no recent result for the model in use, and at
     /// most once per launch, so a flaky network is never retried in a loop.
     static func run(store: Store, force: Bool = true) async {
+        guard store.settings.autoPickModels else { return }
         if running { again = true; return }
         if !force {
             guard !checkedThisLaunch, isDue(store) else { return }
@@ -142,6 +143,38 @@ enum ModelAutoSetup {
                   pick: pick, listed: ids.contains(current),
                   currentWorks: prefs.result(current, in: "groq_text")?.works, upgrade: false)
         }
+    }
+
+    // MARK: Undo
+
+    /// Every model setting this code may have changed on its own, by the model
+    /// list it came from.
+    static let pickable: [(catalog: String, label: String, path: WritableKeyPath<AppSettings, String>)] = [
+        ("gemini_text", "Gemini writer", \.geminiModel),
+        ("groq_text", "Groq writer", \.groqModel),
+        ("gemini_image", "Gemini images", \.geminiImageModel),
+        ("gemini_voice_model", "Gemini voice", \.geminiVoiceModel),
+    ]
+
+    /// Puts every model the app picked on its own back to the factory default.
+    /// Only a model that is STILL the automatic pick is touched: if the person
+    /// chose another one since, it is theirs. The records are cleared either
+    /// way. Returns what changed, in plain words (also added to the status lines).
+    @discardableResult
+    static func undoAutoPicks(store: Store) -> [String] {
+        var notes: [String] = []
+        for entry in pickable {
+            guard let picked = store.modelPrefs.autoPick(entry.catalog) else { continue }
+            let current = store.settings[keyPath: entry.path]
+            let factory = AppSettings()[keyPath: entry.path]
+            if current == picked, current != factory {
+                store.settings[keyPath: entry.path] = factory
+                notes.append("\(entry.label): back to \(factory) (was \(current))")
+            }
+            store.modelPrefs.clearAutoPick(entry.catalog)
+        }
+        for note in notes { store.modelPrefs.addSetupNote(note) }
+        return notes
     }
 
     private static func apply(_ store: Store, catalog: String, label: String,

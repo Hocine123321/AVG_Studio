@@ -650,6 +650,9 @@ struct AppSettings: Codable {
     /// When on, a quota/billing/"too expensive" failure switches to the
     /// fallback model by itself (and says so in the log) instead of asking.
     var autoUseFallback = false
+    /// When a key is saved (and at launch, weekly), pick the best working model
+    /// for it automatically (ModelAutoSetup). Off = the manual pickers decide.
+    var autoPickModels = true
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple
@@ -773,6 +776,7 @@ struct AppSettings: Codable {
         imageFallbackModel = c.value("imageFallbackModel", imageFallbackModel)
         voiceFallbackModel = c.value("voiceFallbackModel", voiceFallbackModel)
         autoUseFallback = c.value("autoUseFallback", autoUseFallback)
+        autoPickModels = c.value("autoPickModels", autoPickModels)
         text = c.value("text", text)
         image = c.value("image", image)
         voice = c.value("voice", voice)

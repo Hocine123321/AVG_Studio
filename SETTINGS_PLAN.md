@@ -1,7 +1,7 @@
 # AVG Studio — Settings plan for the new features
 
 > Written as a Claude doc on November 1, 2026, approved the same day, and copied here so it lives with the code.
-> Progress is tracked in `REMAINING_UPDATES.md`. Steps S1 (the Editing page) and S2 (per-video overrides) are done; S3 onward is not.
+> Progress is tracked in `REMAINING_UPDATES.md`. Steps S1 (the Editing page), S2 (per-video overrides) and S3 (the AI team page) are done; S4 onward is not.
 
 *Plan · November 1, 2026 · covers everything added since the Director’s Cut plan: the AI team and automatic model setup, music and sound effects, the edit gate, the editor (now its own tab), shot cuts and Smart crops, and the editing assistant.*
 
@@ -104,7 +104,7 @@ Each step ships on its own, with CI green before the next.
 
 1. **S1 — Editing page + gate seconds** (small). DONE.
 2. **S2 — Per-video overrides + assistant tools** (small). Level sliders, the cuts switch, `level_db`, `set_cuts`. DONE.
-3. **S3 — AI team page** (medium). Preset picker, auto-pick toggle, re-check, undo automatic picks.
+3. **S3 — AI team page** (medium). Preset picker, auto-pick toggle, re-check, undo automatic picks. DONE.
 4. **S4 — Search and Quick settings** (small). Standalone-route index entries for Music, Sound effects and the AI team; the gate picker in Quick settings; an Activity line for automatic model changes.
 5. **S5 — Audio shelf housekeeping** (small). Storage line and “Remove unused”.
 6. **S6 — Docs.** README and CLAUDE.md rows for each new setting and the rule that a constant is not a setting.
