@@ -450,6 +450,28 @@ final class Store {
         channels.filter { $0.musicTrackID == id || $0.sfxMap.values.contains(id) }
     }
 
+    /// Library items of one kind that nothing uses: no channel has it as its
+    /// music track or as a moment's sound, and no video chose it. Music is
+    /// never "unused" while a channel picks music automatically, because that
+    /// can choose any track.
+    func unusedAudioItems(kind: AudioItem.Kind) -> [AudioItem] {
+        if kind == .music, musicIsPickedAutomatically { return [] }
+        var chosen = Set<String>()
+        for p in projects {
+            if case .track(let id)? = p.edits?.music { chosen.insert(id) }
+        }
+        return audioLibrary.items.filter {
+            $0.kind == kind && !chosen.contains($0.id) && channelsUsing(audioItem: $0.id).isEmpty
+        }
+    }
+
+    /// True when some channel lets the app pick its music from the library.
+    var musicIsPickedAutomatically: Bool { channels.contains { $0.musicAuto } }
+
+    func removeAudioItems(_ ids: [String]) {
+        for id in ids { removeAudioItem(id) }
+    }
+
     /// Removes a track or sound and every reference to it, so nothing is left
     /// pointing at a file that is gone: channels' music pick, recent picks and
     /// sound-effect moments, and any video that chose it for itself.

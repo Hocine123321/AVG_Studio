@@ -71,3 +71,13 @@ final class SettingsIndexTests: XCTestCase {
         }
     }
 }
+
+final class ShelfSearchTests: XCTestCase {
+    func testMusicAndSoundEffectsHaveTheirOwnSearchEntries() {
+        let music = SettingsIndex.search("music").first { $0.title == "Music" }
+        guard case .music? = music?.route else { return XCTFail("Music opens the Music page") }
+        let sounds = SettingsIndex.search("whoosh").first { $0.title == "Sound effects" }
+        guard case .soundEffects? = sounds?.route else { return XCTFail("Sound effects opens its page") }
+        XCTAssertTrue(SettingsIndex.search("unused").contains { $0.title == "Music" })
+    }
+}

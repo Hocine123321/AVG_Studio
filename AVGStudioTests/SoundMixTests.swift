@@ -288,3 +288,56 @@ final class StoreMusicTests: XCTestCase {
         XCTAssertEqual(store.project(kept.id)?.edits?.music, .track("another"))
     }
 }
+
+@MainActor
+final class UnusedAudioTests: XCTestCase {
+    func testOnlyItemsNothingUsesAreUnused() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("unused-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = Store()
+        let before = store.unusedAudioItems(kind: .sfx).map(\.id)
+
+        let tone = try makeTestTone(seconds: 1, in: dir)
+        let used = try await store.audioLibrary.importFile(tone, kind: .sfx, name: "Used hit")
+        let idle = try await store.audioLibrary.importFile(tone, kind: .sfx, name: "Idle hit")
+        defer { store.removeAudioItems([used.id, idle.id]) }
+
+        var ch = Channel(name: "Unused test")
+        ch.sfxMap = [SFXMoment.impact.rawValue: used.id]
+        store.channels.append(ch)
+        defer { store.channels.removeAll { $0.id == ch.id } }
+
+        let unused = Set(store.unusedAudioItems(kind: .sfx).map(\.id)).subtracting(before)
+        XCTAssertEqual(unused, [idle.id], "the sound a channel uses is kept out of the list")
+        XCTAssertTrue(store.audioLibrary.byteSize(of: idle.id) > 0, "its size is read from the file")
+    }
+
+    func testAVideoThatChoseATrackKeepsItUsed() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("unused-music-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = Store()
+        // An automatic-music channel makes every track "possibly used", so this
+        // check only means something without one.
+        try XCTSkipIf(store.musicIsPickedAutomatically)
+        let tone = try makeTestTone(seconds: 1, in: dir)
+        let track = try await store.audioLibrary.importFile(tone, kind: .music, name: "Chosen track")
+        defer { store.removeAudioItems([track.id]) }
+        XCTAssertTrue(store.unusedAudioItems(kind: .music).contains { $0.id == track.id })
+
+        var p = Project(id: "chose-\(UUID().uuidString)", title: "Chose it", topic: "t")
+        p.edits = ProjectEdits(music: .track(track.id))
+        store.projects.append(p)
+        defer { store.projects.removeAll { $0.id == p.id } }
+        XCTAssertFalse(store.unusedAudioItems(kind: .music).contains { $0.id == track.id })
+    }
+
+    func testAutomaticMusicMeansNoTrackIsUnused() async throws {
+        let store = Store()
+        var ch = Channel(name: "Auto music")
+        ch.musicAuto = true
+        store.channels.append(ch)
+        defer { store.channels.removeAll { $0.id == ch.id } }
+        XCTAssertTrue(store.musicIsPickedAutomatically)
+        XCTAssertTrue(store.unusedAudioItems(kind: .music).isEmpty)
+    }
+}

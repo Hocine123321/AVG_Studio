@@ -11,20 +11,21 @@ What is left to build, in order. Written November 1, 2026 (branch `iOS-native`).
 - **M4.1 / M4.2** shot cuts and punch-ins, Smart crops (one vision request finds each picture's subject).
 - **M5** the editing assistant (chat inside the Editor, edits this one video only).
 - **S1** Settings → Editing (gate length, new-channel defaults, preview quality).
+- **S4** search entries for Music, Sound effects and AI team; the gate picker in Quick settings; Activity lines for automatic model changes and undo.
+- **S5** audio shelf: storage line and "Remove unused" (with in-use tracking and a cleaned-up delete).
+- **S6** docs (README rows, CLAUDE.md rule "a constant is not a setting"). Pushed uncompiled until CI confirms.
 - **S3** Settings → AI team page (preset picker, `autoPickModels`, check now, undo automatic picks). Pushed uncompiled until CI confirms.
 - **S2** per-video overrides (music level, effects level, cuts level; `EditResolution`; assistant `level_db` and `set_cuts`). Pushed uncompiled until CI confirms.
 
 ## Next, in order
 
-1. **S4 — search and Quick settings** (3.6): standalone entries for Music, Sound effects and the AI team; the gate picker in Quick settings; an Activity line when a model is changed automatically.
-2. **S5 — audio shelf housekeeping** (3.3): storage line and "Remove unused".
-3. **S6 — docs**: README and CLAUDE.md rows for the new settings.
+The settings plan (S1 to S6) is finished. What is left is the Director's Cut plan below, plus the one simulator-only check: Dynamic Type on the Library card grid and Studio text.
 
 ## Then, from the Director's Cut plan
 
-4. **M4.3 — "Thorough" edit level**: a draft-video critique with Gemini video input (budgeted, skipped without quota), and optional hero shots with Veo (paid, off by default).
-5. **M6 — Playground and the human layer**: Style Lab, Hook Bench, storyboard-first, rehearsal render, response cache, token meter, recipes; Director's Brief on Create, review gates, record-your-own-voice, import your own footage and photos.
-6. **Publish kit** (later, not planned in detail): title options, thumbnail, description, chapters, AI-disclosure checklist.
+1. **M4.3 — "Thorough" edit level**: a draft-video critique with Gemini video input (budgeted, skipped without quota), and optional hero shots with Veo (paid, off by default).
+2. **M6 — Playground and the human layer**: Style Lab, Hook Bench, storyboard-first, rehearsal render, response cache, token meter, recipes; Director's Brief on Create, review gates, record-your-own-voice, import your own footage and photos.
+3. **Publish kit** (later, not planned in detail): title options, thumbnail, description, chapters, AI-disclosure checklist.
 
 ## Not yet verified on a device
 

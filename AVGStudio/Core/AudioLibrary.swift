@@ -111,6 +111,16 @@ final class AudioLibrary {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// The size of an item's file on disk, 0 when it is missing.
+    func byteSize(of id: String) -> Int {
+        guard let url = fileURL(for: id) else { return 0 }
+        return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+    }
+
+    func totalBytes(of items: [AudioItem]) -> Int {
+        items.reduce(0) { $0 + byteSize(of: $1.id) }
+    }
+
     // MARK: Adding
 
     /// Copies `source` into the library after checking it is real, reasonably

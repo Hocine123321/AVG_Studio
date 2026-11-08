@@ -173,7 +173,10 @@ enum ModelAutoSetup {
             }
             store.modelPrefs.clearAutoPick(entry.catalog)
         }
-        for note in notes { store.modelPrefs.addSetupNote(note) }
+        for note in notes {
+            store.modelPrefs.addSetupNote(note)
+            store.record(nil, "Automatic pick undone - \(note)")
+        }
         return notes
     }
 
@@ -187,6 +190,8 @@ enum ModelAutoSetup {
                             currentWorks: currentWorks, upgrade: upgrade) else { return }
         store.settings[keyPath: path] = pick
         store.modelPrefs.setAutoPick(pick, for: catalog)
-        store.modelPrefs.addSetupNote("\(label): now \(pick) (was \(current))")
+        let line = "\(label): now \(pick) (was \(current))"
+        store.modelPrefs.addSetupNote(line)
+        store.record(nil, "Model picked automatically - \(line)")
     }
 }

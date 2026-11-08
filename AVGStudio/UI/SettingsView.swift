@@ -250,6 +250,8 @@ private struct QuickSettingsSheet: View {
                            selection: $store.settings.shortEdge)
                 SegmentRow(title: "Frame rate", options: [24, 30, 60], label: { "\($0) fps" },
                            selection: $store.settings.fps)
+                SegmentRow(title: "Offer to edit", options: EditGate.choices,
+                           label: { $0 == 0 ? "Never" : "\($0) s" }, selection: $store.settings.editGateSeconds)
             }
         }
     }

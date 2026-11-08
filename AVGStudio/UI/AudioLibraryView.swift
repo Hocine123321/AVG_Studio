@@ -61,6 +61,7 @@ struct AudioLibraryView: View {
     @State private var sort: Sort = .newest
     @State private var tagFilter: String?
     @State private var pendingDelete: AudioItem?
+    @State private var confirmingRemoveUnused = false
 
     private enum Sort: String, CaseIterable, Identifiable {
         case newest = "Newest", name = "Name", length = "Length"
@@ -137,6 +138,8 @@ struct AudioLibraryView: View {
                     ForEach(tracks) { item in row(item) }
                 } header: {
                     Text("\(kind == .music ? "Your music" : "Your sounds") (\(tracks.count) · \(clock(total)))")
+                } footer: {
+                    Text(storageLine)
                 }
             }
         }
@@ -147,6 +150,15 @@ struct AudioLibraryView: View {
             if !allItems.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) { sortMenu }
             }
+        }
+        .confirmationDialog("Remove \(unusedItems.count) unused \(kind == .music ? "track" : "sound")\(unusedItems.count == 1 ? "" : "s")?",
+                            isPresented: $confirmingRemoveUnused, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                preview.stop()
+                store.removeAudioItems(unusedItems.map(\.id))
+            }
+        } message: {
+            Text(removeUnusedMessage)
         }
         .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -189,6 +201,9 @@ struct AudioLibraryView: View {
                     ForEach(tags, id: \.self) { Text($0).tag(String?.some($0)) }
                 }
             }
+            Divider()
+            Button("Remove unused…", systemImage: "trash") { confirmingRemoveUnused = true }
+                .disabled(unusedItems.isEmpty)
         } label: {
             Image(systemName: tagFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
         }
@@ -234,6 +249,29 @@ struct AudioLibraryView: View {
         } else {
             pendingDelete = item
         }
+    }
+
+    /// Things on this shelf that no channel or video uses.
+    private var unusedItems: [AudioItem] { store.unusedAudioItems(kind: kind) }
+
+    /// "12 tracks use 8.4 MB on this iPhone. 3 are unused."
+    private var storageLine: String {
+        let bytes = ByteCountFormatter.string(fromByteCount: Int64(store.audioLibrary.totalBytes(of: allItems)), countStyle: .file)
+        let noun = kind == .music ? "track" : "sound"
+        var text = "\(allItems.count) \(noun)\(allItems.count == 1 ? "" : "s") use\(allItems.count == 1 ? "s" : "") \(bytes) on this iPhone."
+        if kind == .music, store.musicIsPickedAutomatically {
+            text += " A channel picks music automatically, so any track may be used."
+        } else if !unusedItems.isEmpty {
+            text += " \(unusedItems.count) not used by any channel or video."
+        }
+        return text
+    }
+
+    private var removeUnusedMessage: String {
+        let names = unusedItems.prefix(5).map(\.name).joined(separator: ", ")
+        let more = unusedItems.count > 5 ? " and \(unusedItems.count - 5) more" : ""
+        let bytes = ByteCountFormatter.string(fromByteCount: Int64(store.audioLibrary.totalBytes(of: unusedItems)), countStyle: .file)
+        return "\(names)\(more). Frees \(bytes). Nothing uses them now."
     }
 
     private var deleteMessage: String {
