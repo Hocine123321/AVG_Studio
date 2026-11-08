@@ -6,6 +6,7 @@ struct StudioView: View {
     @State private var player: AVPlayer?
     @State private var toastMessage: String?
     @State private var showLog = false
+    @State private var reviewTarget: ReviewTarget?
     @State private var showExportSheet = false
     @State private var logTail: [String] = []
     // CapCut export (ported from the PC's Slice 30 "My Videos" action -
@@ -38,6 +39,7 @@ struct StudioView: View {
                     header(p)
                     playerCard(p)
                     staleBanner(p)
+                    reviewCard(p)
                     editCard(p)
                     phasesCard(p)
                     liveListCard(p)
@@ -71,6 +73,7 @@ struct StudioView: View {
             .onChange(of: p.output) { old, new in if old != new, new != nil { Haptics.success() } }
             .toast($toastMessage)
             .sheet(isPresented: $showLog) { ProjectLogView(projectID: p.id, title: p.title) }
+            .sheet(item: $reviewTarget) { ReviewView(projectID: $0.id) }
             .sheet(isPresented: $showExportSheet) { exportSheet(p) }
             // Keyed on running-ness too: the old `.task(id: p.id)` polled once
             // and quit if nothing was running yet, so starting a render from
@@ -202,6 +205,28 @@ struct StudioView: View {
             }
         }
         .glassCard(30, padding: 12)
+    }
+
+    /// A video waiting for its review (the script is written, nothing paid yet).
+    @ViewBuilder private func reviewCard(_ p: Project) -> some View {
+        if p.awaitingReview == true {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(ReviewGatePolicy.title(store.channel(for: p)), systemImage: "checklist").font(.headline)
+                Text("The script is written. Nothing paid is made until you continue.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Button("Review") { reviewTarget = ReviewTarget(id: p.id) }.buttonStyle(.glassProminent)
+                    Button("Continue") {
+                        Haptics.light()
+                        store.continueAfterReview(p.id)
+                    }
+                    .buttonStyle(.glass)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassCard()
+        }
     }
 
     /// A video waiting for its edit gets a prominent card; any video that has

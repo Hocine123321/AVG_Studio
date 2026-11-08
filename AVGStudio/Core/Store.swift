@@ -631,6 +631,8 @@ final class Store {
     /// `project.json` is the bug that guard exists for.
     func start(_ id: String, from phase: PhaseID = .writing, note: String? = nil) {
         guard !isBusy(id) else { return }
+        // Starting by any route answers a waiting review: they chose to go on.
+        if project(id)?.awaitingReview == true { update(id) { $0.awaitingReview = nil } }
         if let note { pendingNotes[id] = note }
         if interruptedProjectID == id { interruptedProjectID = nil }
         let cap = max(1, settings.maxParallelJobs)
@@ -760,6 +762,11 @@ final class Store {
                     $0.phases[phase.rawValue]?.inputs = inputs
                 }
                 record(id, "\(phase.title) done.")
+                if phase == .writing, let p = project(id), ReviewGatePolicy.holds(channel(for: p)) {
+                    update(id) { $0.awaitingReview = true }
+                    record(id, "\(ReviewGatePolicy.title(channel(for: p))): nothing paid is made until you press Continue in Studio.")
+                    break
+                }
             } catch is CancellationError {
                 settleRunningSteps(id, phase, as: .pending)
                 update(id) { $0.phases[phase.rawValue] = PhaseRecord(status: .pending) }
@@ -900,6 +907,23 @@ final class Store {
         editGateContinuation = nil
         editGate = nil
         c.resume(returning: decision)
+    }
+
+    // MARK: Review gates (see ReviewGate.swift)
+
+    /// Saves the person's changes to the scenes while the video waits for review.
+    func saveReview(_ id: String, edits: [ReviewGatePolicy.SceneEdit]) {
+        update(id) { p in
+            let result = ReviewGatePolicy.apply(edits, to: p.scenes)
+            p.scenes = result.scenes
+            p.narration = result.narration
+        }
+    }
+
+    /// Carries on after a review, from the images.
+    func continueAfterReview(_ id: String) {
+        update(id) { $0.awaitingReview = nil }
+        start(id, from: .visuals)
     }
 
     /// Renders a video the person just edited, without asking again.

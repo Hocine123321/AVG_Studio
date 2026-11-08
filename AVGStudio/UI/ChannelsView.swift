@@ -323,7 +323,7 @@ struct ChannelEditor: View {
                         ForEach(ImageOnFailure.allCases) { Text($0.label).tag($0) }
                     }
                 } header: { Text("Images") } footer: {
-                    Text("A scene whose only provider fails stops the run by default, matching the PC. Set a backup and switch to \"fall back\" for resilience instead.")
+                    Text("A scene whose only provider fails stops the run by default, matching the PC. Set a backup and switch to “fall back” for resilience instead.")
                 }
 
                 Section {
@@ -335,6 +335,13 @@ struct ChannelEditor: View {
                     }
                 } header: { Text("Editing") } footer: {
                     Text(channel.editingMode.detail + "\n\n" + channel.editLevel.detail)
+                }
+
+                Section {
+                    Toggle("Review the script", isOn: $channel.reviewScript)
+                    Toggle("Review the storyboard", isOn: $channel.reviewStoryboard)
+                } header: { Text("Review before images") } footer: {
+                    Text("A video waits after its script is written, so you can fix the wording and each scene’s image prompt before anything paid is made. Studio has a Continue button. Off means it runs straight through.")
                 }
 
                 Section {

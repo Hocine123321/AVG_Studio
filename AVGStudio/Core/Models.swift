@@ -268,6 +268,9 @@ struct Project: Codable, Hashable, Identifiable {
     /// True while the video waits, before its first render, for the person to
     /// edit it (see EditGate.swift). Cleared when they render.
     var awaitingEdit: Bool?
+    /// True while the video waits, after its script is written, for the person
+    /// to review it (see ReviewGate.swift). Cleared when they continue.
+    var awaitingReview: Bool?
     /// What the person changed about this video beside its channel's settings.
     var edits: ProjectEdits?
     /// Where the subject sits in each picture, for the Smart edit level
@@ -402,6 +405,10 @@ struct Channel: Codable, Hashable, Identifiable {
     /// Whether to offer the person the edit before a video's first render
     /// (EditGate.swift).
     var editingMode: EditingMode = .ask
+    /// Wait after the script is written so the person can read and fix it (ReviewGate.swift).
+    var reviewScript = false
+    /// Wait so the person can check each scene's image prompt before any images are paid for.
+    var reviewStoryboard = false
     /// Shot cuts and punch-ins inside scenes (EditPlan.swift).
     var editLevel: EditLevel = .fast
     /// Sound effects: off until the person turns them on, a sound (an
@@ -959,6 +966,8 @@ extension Channel {
         d.musicGainDB = c.value("musicGainDB", d.musicGainDB)
         d.musicAuto = c.value("musicAuto", d.musicAuto)
         d.editingMode = c.value("editingMode", d.editingMode)
+        d.reviewScript = c.value("reviewScript", d.reviewScript)
+        d.reviewStoryboard = c.value("reviewStoryboard", d.reviewStoryboard)
         d.editLevel = c.value("editLevel", d.editLevel)
         d.musicRecent = c.value("musicRecent", d.musicRecent)
         d.sfxEnabled = c.value("sfxEnabled", d.sfxEnabled)
