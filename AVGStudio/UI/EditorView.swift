@@ -339,12 +339,16 @@ struct EditorView: View {
     private func actionBar(_ p: Project) -> some View {
         HStack(spacing: 10) {
             if store.settings.editAssistantEnabled {
-                Button { showAssistant = true } label: {
+                Button {
+                    Haptics.light()
+                    showAssistant = true
+                } label: {
                     Label("Assistant", systemImage: "sparkles")
                 }
                 .buttonStyle(.glass)
             }
             Button {
+                Haptics.success()
                 store.renderEdited(p.id)
                 store.selectForStudio(p.id)   // watch it render in Studio
             } label: {
@@ -382,6 +386,7 @@ struct EditorView: View {
         .confirmationDialog("Put music, effects and cuts back to the channel’s?",
                             isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) {
+                Haptics.warning()
                 store.update(projectID) { $0.edits = nil }
             }
         } message: {

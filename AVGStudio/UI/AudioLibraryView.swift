@@ -122,10 +122,11 @@ struct AudioLibraryView: View {
             let tracks = visibleItems
             if allItems.isEmpty {
                 Section {
-                    Text(kind == .music
-                         ? "No music yet. Upload an mp3, m4a or wav, then pick it for a channel in the channel’s Music section."
-                         : "No sounds yet. Upload a short mp3, m4a or wav, then give it a moment in a channel’s Sound effects section.")
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView(kind == .music ? "No music yet" : "No sounds yet",
+                                           systemImage: kind == .music ? "music.note" : "waveform",
+                                           description: Text(kind == .music
+                                                             ? "Upload an mp3, m4a or wav, then pick it for a channel in the channel’s Music section."
+                                                             : "Upload a short mp3, m4a or wav, then give it a moment in a channel’s Sound effects section."))
                 }
             } else if tracks.isEmpty {
                 Section {
@@ -154,6 +155,7 @@ struct AudioLibraryView: View {
         .confirmationDialog("Remove \(unusedItems.count) unused \(kind == .music ? "track" : "sound")\(unusedItems.count == 1 ? "" : "s")?",
                             isPresented: $confirmingRemoveUnused, titleVisibility: .visible) {
             Button("Remove", role: .destructive) {
+                Haptics.warning()
                 preview.stop()
                 store.removeAudioItems(unusedItems.map(\.id))
             }
@@ -164,6 +166,7 @@ struct AudioLibraryView: View {
                             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
+                Haptics.warning()
                 if let item = pendingDelete {
                     preview.stop()
                     store.removeAudioItem(item.id)
@@ -212,6 +215,7 @@ struct AudioLibraryView: View {
     private func row(_ item: AudioItem) -> some View {
         HStack(spacing: 12) {
             Button {
+                Haptics.light()
                 if let url = store.audioLibrary.fileURL(for: item.id) { preview.toggle(item.id, url: url) }
             } label: {
                 Image(systemName: preview.playingID == item.id ? "stop.circle.fill" : "play.circle.fill")
@@ -244,6 +248,7 @@ struct AudioLibraryView: View {
     /// Deleting something a channel uses asks first; an unused one just goes.
     private func requestDelete(_ item: AudioItem) {
         if store.channelsUsing(audioItem: item.id).isEmpty {
+            Haptics.warning()
             preview.stop()
             store.removeAudioItem(item.id)
         } else {

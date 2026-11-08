@@ -50,7 +50,7 @@ struct ProjectLogView: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Done", role: .close) { dismiss() } }
             }
             .task(id: projectID) { await refreshLoop() }
         }

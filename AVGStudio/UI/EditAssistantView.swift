@@ -45,7 +45,7 @@ struct EditAssistantView: View {
                         .disabled(!assistant.canUndo || assistant.isWorking)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done", role: .close) { dismiss() }
                 }
             }
             .tint(Theme.accent)
