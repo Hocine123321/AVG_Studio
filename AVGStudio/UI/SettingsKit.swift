@@ -65,7 +65,7 @@ enum SettingAnchor: String, Hashable, CaseIterable {
     case editGateSeconds, defaultEditingMode, defaultEditLevel, previewQuality
     case aiTeam, autoPickModels
     case renderEngine, videoCodec, encoderQuality, parallelJobs, imageParallelism, pauseWhenHot, keepAwake, backgroundRendering
-    case apiKeys, refreshLists
+    case apiKeys, refreshLists, videoSpendCap
     case autoFallback, writerFallback, imageFallback, voiceFallback
     case theme, font, glass
     case assistantProvider, assistantModel, assistantTest, assistantFailover
@@ -157,6 +157,7 @@ enum SettingsIndex {
         e("Announce finished videos", .assistant, .assistantAnnounce, "assistant agent notify ready done finished haptic"),
         e("Keep chat", .assistant, .assistantKeepChat, "assistant agent memory history save remember conversation"),
         e("Clear saved chat", .assistant, .assistantClear, "assistant agent delete erase memory history conversation"),
+        e("Spending limit per video", .keys, .videoSpendCap, "spend spending limit cap budget cost money paid estimate stop guard rail dollars"),
         e("Custom instructions", .assistant, .assistantInstructions, "assistant agent prompt rules preferences standing system"),
         e("Editing assistant", .assistant, .editAssistantEnabled, "assistant editor editing chat button show hide video"),
         e("Editing assistant model", .assistant, .editAssistantOwnModel, "assistant editor editing own separate model provider groq gemini"),

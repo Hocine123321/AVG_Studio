@@ -13,6 +13,7 @@ What is left to build, in order. Written November 1, 2026 (branch `iOS-native`).
 - **S1** Settings → Editing (gate length, new-channel defaults, preview quality).
 - **S4** search entries for Music, Sound effects and AI team; the gate picker in Quick settings; Activity lines for automatic model changes and undo.
 - **S5** audio shelf: storage line and "Remove unused" (with in-use tracking and a cleaned-up delete).
+- **M6 (part): spending limit per video** (Settings > API keys > Spending; off by default; `SpendLimit`, checked before each paid step). The rest of M6 (cache, token meter, Style Lab, Hook Bench, storyboard-first, rehearsal render, recipes, Director's Brief, review gates, own voice, own footage) is not started.
 - **S6** docs (README rows, CLAUDE.md rule "a constant is not a setting"). Pushed uncompiled until CI confirms.
 - **S3** Settings → AI team page (preset picker, `autoPickModels`, check now, undo automatic picks). Pushed uncompiled until CI confirms.
 - **S2** per-video overrides (music level, effects level, cuts level; `EditResolution`; assistant `level_db` and `set_cuts`). Pushed uncompiled until CI confirms.

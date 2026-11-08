@@ -47,6 +47,17 @@ struct Pipeline {
 
     // MARK: Providers
 
+    /// Stops a run before it spends past the per-video limit (see `SpendLimit`).
+    /// `next` is the estimated cost of the step about to run, 0 when only known as it runs.
+    private func enforceSpendLimit(next: Double = 0) throws {
+        let cap = settings.videoSpendCapUSD
+        guard cap > 0, let p = store.project(projectID) else { return }
+        let spent = p.estimatedCostUSD
+        if SpendLimit.blocks(spent: spent, next: next, cap: cap) {
+            throw AVGError.message(SpendLimit.message(spent: spent, next: next, cap: cap))
+        }
+    }
+
     private func textProvider() throws -> TextProvider {
         let s = settings
         switch s.text {
@@ -61,6 +72,7 @@ struct Pipeline {
     /// `textProvider()` (no argument) just calls this with the channel's
     /// global default, preserving every existing call site's behavior.
     private func textProvider(for kind: TextProviderKind) throws -> TextProvider {
+        if CostTable.textRate(kind) > 0 { try enforceSpendLimit() }
         let s = settings
         switch kind {
         case .apple: return AppleText()
@@ -438,6 +450,8 @@ struct Pipeline {
             // guaranteed to run on the main actor) must never call back
             // into it. `provider` above already follows this same rule.
             let backupProvider: ImageProvider? = (backupKind != nil && backupKind != requestedKind) ? try imageProvider(for: backupKind!) : nil
+            let perImage = CostTable.imageFlat(requestedKind, quality: ImageQuality.forVideo(shortEdge: settings.shortEdge))
+            if perImage > 0 { try enforceSpendLimit(next: perImage * Double(toGenerate.count)) }
             try await withThrowingTaskGroup(of: (Int, Data, ImageProviderKind).self) { group in
                 for s in toGenerate {
                     let base = s.imagePrompt.isEmpty ? s.text : s.imagePrompt
@@ -513,6 +527,7 @@ struct Pipeline {
         for (i, seg) in segments.enumerated() {
             try Task.checkCancellation()
             if segments.count > 1 { store.progress(projectID, 0.1 + 0.6 * Double(i) / Double(segments.count), "Segment \(i + 1) of \(segments.count)…") }
+            if CostTable.voiceRate(s.voice) > 0 { try enforceSpendLimit() }
             let name = try await provider.synthesize(seg, into: dir, name: "segment_\(i)")
             files.append(dir.appendingPathComponent(name))
             costVoice(s.voice, chars: seg.count)

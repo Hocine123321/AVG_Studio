@@ -325,6 +325,7 @@ struct PerformanceSettingsPage: View {
 // MARK: - API keys
 
 struct KeysSettingsPage: View {
+    @Environment(Store.self) private var store
     @Environment(SettingsCatalogs.self) private var catalogs
     var focus: SettingAnchor?
     @State private var savedKeys: Set<APIKey> = []
@@ -332,6 +333,7 @@ struct KeysSettingsPage: View {
     @State private var refreshing = false
 
     var body: some View {
+        @Bindable var store = store
         SettingsPage(title: "API keys", focus: focus) {
             SettingsGroup(footer: "Stored in your iPhone’s Keychain. Free options need no keys. AssemblyAI is optional and only affects caption timing accuracy. Tap a service to also add a backup key: if the main one fails, the app uses the backup for 30 minutes.") {
                 ForEach(Array(APIKey.allCases.enumerated()), id: \.element) { i, key in
@@ -356,6 +358,14 @@ struct KeysSettingsPage: View {
                     .accessibilityValue(savedKeys.contains(key) ? "Connected" : "No key")
                     .anchored(.apiKeys, if: i == 0)
                 }
+            }
+
+            SettingsGroup(title: "Spending",
+                          footer: "Stops a video before a paid step would take it past this amount. Costs are the app’s own estimates, not a bill, and free options never count. A step that is stopped can be retried after you raise the limit.") {
+                ChoiceRow(title: "Limit per video",
+                          options: SpendLimit.choices.map { ChoiceOption($0, SpendLimit.label($0)) },
+                          selection: $store.settings.videoSpendCapUSD)
+                    .anchored(.videoSpendCap)
             }
 
             SettingsGroup(title: "Model lists",

@@ -653,6 +653,9 @@ struct AppSettings: Codable {
     /// When a key is saved (and at launch, weekly), pick the best working model
     /// for it automatically (ModelAutoSetup). Off = the manual pickers decide.
     var autoPickModels = true
+    /// Stop a video before a paid step would take its estimated spend past this
+    /// many dollars (SpendLimit). 0 = no limit.
+    var videoSpendCapUSD = 0.0
     var text: TextProviderKind = .apple
     var image: ImageProviderKind = .pollinations
     var voice: VoiceProviderKind = .apple
@@ -792,6 +795,7 @@ struct AppSettings: Codable {
         voiceFallbackModel = c.value("voiceFallbackModel", voiceFallbackModel)
         autoUseFallback = c.value("autoUseFallback", autoUseFallback)
         autoPickModels = c.value("autoPickModels", autoPickModels)
+        videoSpendCapUSD = c.value("videoSpendCapUSD", videoSpendCapUSD)
         text = c.value("text", text)
         image = c.value("image", image)
         voice = c.value("voice", voice)
