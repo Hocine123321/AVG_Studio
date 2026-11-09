@@ -518,7 +518,14 @@ final class Store {
     // MARK: Projects
 
     @discardableResult
-    func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio, hook: String? = nil) -> Project {
+    func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio) -> Project {
+        createProject(topic: topic, title: title, channel: channel, aspect: aspect, hook: nil)
+    }
+
+    /// With the opening line the person chose in Hook Bench (nil or blank = none).
+    /// (A separate overload, not a default argument: `AgentHost` requires the
+    /// four-argument form, and a default does not satisfy a protocol requirement.)
+    func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio, hook: String?) -> Project {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let id = "\(stamp)-\(UUID().uuidString.prefix(6))"
         let t = title.trimmingCharacters(in: .whitespaces)
