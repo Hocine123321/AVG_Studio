@@ -271,6 +271,8 @@ struct Project: Codable, Hashable, Identifiable {
     /// True while the video waits, after its script is written, for the person
     /// to review it (see ReviewGate.swift). Cleared when they continue.
     var awaitingReview: Bool?
+    /// The opening line the person chose in Hook Bench: the script opens with it.
+    var hook: String?
     /// What the person changed about this video beside its channel's settings.
     var edits: ProjectEdits?
     /// Where the subject sits in each picture, for the Smart edit level

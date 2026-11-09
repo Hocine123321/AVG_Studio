@@ -518,11 +518,13 @@ final class Store {
     // MARK: Projects
 
     @discardableResult
-    func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio) -> Project {
+    func createProject(topic: String, title: String, channel: Channel, aspect: AspectRatio, hook: String? = nil) -> Project {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let id = "\(stamp)-\(UUID().uuidString.prefix(6))"
         let t = title.trimmingCharacters(in: .whitespaces)
-        let p = Project(id: id, title: t.isEmpty ? String(topic.prefix(48)) : t, topic: topic, channelID: channel.id, aspectRatio: aspect)
+        var p = Project(id: id, title: t.isEmpty ? String(topic.prefix(48)) : t, topic: topic, channelID: channel.id, aspectRatio: aspect)
+        let chosen = hook?.trimmed ?? ""
+        p.hook = chosen.isEmpty ? nil : chosen
         projects.insert(p, at: 0)
         save(p)
         return p

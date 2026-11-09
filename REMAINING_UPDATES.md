@@ -13,8 +13,9 @@ What is left to build, in order. Written November 1, 2026 (branch `iOS-native`).
 - **S1** Settings → Editing (gate length, new-channel defaults, preview quality).
 - **S4** search entries for Music, Sound effects and AI team; the gate picker in Quick settings; Activity lines for automatic model changes and undo.
 - **S5** audio shelf: storage line and "Remove unused" (with in-use tracking and a cleaned-up delete).
-- **M6 (part): spending limit per video** (Settings > API keys > Spending; off by default; `SpendLimit`, checked before each paid step). The rest of M6 (cache, token meter, Style Lab, Hook Bench, storyboard-first, rehearsal render, recipes, Director's Brief, own voice, own footage) is not started.
+- **M6 (part): spending limit per video** (Settings > API keys > Spending; off by default; `SpendLimit`, checked before each paid step). The rest of M6 (cache, token meter, Style Lab, storyboard-first, rehearsal render, recipes, Director's Brief, own voice, own footage) is not started.
 - **M6 (part): review gates** (per channel "Review the script" / "Review the storyboard": a video waits after its script is written, Studio shows Review and Continue; off by default so unattended runs never stall).
+- **M6 (part): Hook Bench** (Create: "Find an opening line", ten hooks from one short call, the script opens with the chosen one word for word; optional).
 - **S6** docs (README rows, CLAUDE.md rule "a constant is not a setting"). Pushed uncompiled until CI confirms.
 - **S3** Settings → AI team page (preset picker, `autoPickModels`, check now, undo automatic picks). Pushed uncompiled until CI confirms.
 - **S2** per-video overrides (music level, effects level, cuts level; `EditResolution`; assistant `level_db` and `set_cuts`). Pushed uncompiled until CI confirms.
@@ -26,7 +27,7 @@ The settings plan (S1 to S6) is finished. What is left is the Director's Cut pla
 ## Then, from the Director's Cut plan
 
 1. **M4.3 — "Thorough" edit level**: a draft-video critique with Gemini video input (budgeted, skipped without quota), and optional hero shots with Veo (paid, off by default).
-2. **M6 — Playground and the human layer**: Style Lab, Hook Bench, storyboard-first, rehearsal render, response cache, token meter, recipes; Director's Brief on Create, review gates, record-your-own-voice, import your own footage and photos.
+2. **M6 — Playground and the human layer**: Style Lab, storyboard-first, rehearsal render, response cache, token meter, recipes; Director's Brief on Create, review gates, record-your-own-voice, import your own footage and photos.
 3. **Publish kit** (later, not planned in detail): title options, thumbnail, description, chapters, AI-disclosure checklist.
 
 ## Not yet verified on a device

@@ -20,6 +20,8 @@ struct CreateView: View {
     @FocusState private var focused: Bool
     @State private var toastMessage: String?
     @State private var showChannelPicker = false
+    @State private var hook: String?
+    @State private var showHooks = false
 
     private var channel: Channel {
         store.channels.first { $0.id == channelID } ?? store.activeChannel
@@ -37,6 +39,7 @@ struct CreateView: View {
                     TextField("Title (optional)", text: $title)
                         .padding(14)
                         .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    hookRow
                 }
 
                 SegmentedFilter(options: AspectRatio.allCases, label: { $0.rawValue }, selection: $aspect)
@@ -88,6 +91,35 @@ struct CreateView: View {
         .scrollDismissesKeyboard(.interactively)
         .toast($toastMessage)
         .sheet(isPresented: $showChannelPicker) { channelSheet }
+        .sheet(isPresented: $showHooks) { HookBenchView(topic: topic.trimmed) { hook = $0 } }
+    }
+
+    /// The chosen opening line, or the way to find one.
+    @ViewBuilder private var hookRow: some View {
+        if let hook {
+            HStack(spacing: 10) {
+                Image(systemName: "text.quote").foregroundStyle(Theme.accent)
+                Text("“\(hook)”").font(.callout).foregroundStyle(Theme.ink).frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    self.hook = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.ink2)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove the opening line")
+            }
+            .padding(14)
+            .liquidGlass(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else {
+            Button {
+                focused = false
+                showHooks = true
+            } label: {
+                Label("Find an opening line", systemImage: "text.quote").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glass)
+            .disabled(topic.trimmed.isEmpty)
+        }
     }
 
     private var hairline: some View {
@@ -202,9 +234,9 @@ struct CreateView: View {
     private func create() {
         Haptics.light()
         let ch = store.channels.first { $0.id == channelID } ?? store.activeChannel
-        let p = store.createProject(topic: topic.trimmed, title: title, channel: ch, aspect: aspect)
+        let p = store.createProject(topic: topic.trimmed, title: title, channel: ch, aspect: aspect, hook: hook)
         store.start(p.id)
-        topic = ""; title = ""; focused = false
+        topic = ""; title = ""; hook = nil; focused = false
         // Matches the mock's own gen() action - back to Library (with the
         // new card visible there), NOT straight into Studio; still sets
         // currentProjectID so a direct tap on the Studio tab shows it.

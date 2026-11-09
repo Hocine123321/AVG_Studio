@@ -59,13 +59,7 @@ struct Pipeline {
     }
 
     private func textProvider() throws -> TextProvider {
-        let s = settings
-        switch s.text {
-        case .apple: return AppleText()
-        case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
-        case .groq: return ChatText.groq(key: try Keychain.require(.groq), model: s.groqModel)
-        case .pollinations: return ChatText.pollinations(key: Keychain.get(.pollinations), model: s.pollinationsTextModel)
-        }
+        try TextProviderFactory.make(settings.text, settings: settings)
     }
 
     /// Resolves a specific `TextProviderKind` to a provider instance -
@@ -73,13 +67,7 @@ struct Pipeline {
     /// global default, preserving every existing call site's behavior.
     private func textProvider(for kind: TextProviderKind) throws -> TextProvider {
         if CostTable.textRate(kind) > 0 { try enforceSpendLimit() }
-        let s = settings
-        switch kind {
-        case .apple: return AppleText()
-        case .gemini: return GeminiText(key: try Keychain.require(.gemini), model: s.geminiModel)
-        case .groq: return ChatText.groq(key: try Keychain.require(.groq), model: s.groqModel)
-        case .pollinations: return ChatText.pollinations(key: Keychain.get(.pollinations), model: s.pollinationsTextModel)
-        }
+        return try TextProviderFactory.make(kind, settings: settings)
     }
 
     /// Mirrors `avg.providers.text.router.generate()`'s attempt order for
@@ -262,7 +250,8 @@ struct Pipeline {
 
         step(.writing, "draft", .running)
         store.progress(projectID, 0.4, "Writing the narration…")
-        let extraContext = [briefValue.directionBlock, researchContext].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let extraContext = [briefValue.directionBlock, HookBench.directionBlock(hook: p.hook), researchContext]
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
         let narrationPrompt = CreativePrompts.narration(inputs, extraContext: extraContext)
         let (narrationRaw, narrationProvider) = try await routedComplete(
             primary: ch.scriptDraftTextProvider, backup: ch.scriptDraftTextBackup, onFailure: ch.scriptDraftOnFailure,
