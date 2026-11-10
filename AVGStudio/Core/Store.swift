@@ -28,10 +28,12 @@ private struct Meta: Codable {
     var channels: [Channel]
     var activeChannelID: UUID?
     var reusableImages: [ReusableImage] = []
+    var recipes: [Recipe] = []
 
-    init(settings: AppSettings, channels: [Channel], activeChannelID: UUID?, reusableImages: [ReusableImage]) {
+    init(settings: AppSettings, channels: [Channel], activeChannelID: UUID?, reusableImages: [ReusableImage], recipes: [Recipe]) {
         self.settings = settings; self.channels = channels
         self.activeChannelID = activeChannelID; self.reusableImages = reusableImages
+        self.recipes = recipes
     }
     // Each part decodes independently, so one bad/missing part can't take
     // the others down with it.
@@ -41,6 +43,7 @@ private struct Meta: Codable {
         channels = c.value("channels", [Channel]())
         activeChannelID = c.value("activeChannelID", UUID?.none)
         reusableImages = c.value("reusableImages", [ReusableImage]())
+        recipes = c.value("recipes", [Recipe]())
     }
 }
 
@@ -55,6 +58,8 @@ final class Store {
     // every keystroke and every slider tick.
     var settings = AppSettings() { didSet { scheduleMetaSave(); refreshIdleTimer() } }
     var reusableImages: [ReusableImage] = [] { didSet { scheduleMetaSave() } }
+    /// Saved looks and sounds (see Recipes.swift).
+    var recipes: [Recipe] = [] { didSet { scheduleMetaSave() } }
     var jobs: [String: JobState] = [:]
     /// Projects waiting for a free slot, in the order they were started.
     var queuedIDs: [String] = []
@@ -151,6 +156,7 @@ final class Store {
                 channels = m.channels
                 activeChannelID = m.activeChannelID
                 reusableImages = m.reusableImages
+                recipes = m.recipes
             } else {
                 // Unreadable (corrupt, or a future incompatible format):
                 // keep a copy BEFORE anything can overwrite it with
@@ -203,7 +209,7 @@ final class Store {
 
     func saveMeta() {
         guard !loading else { return }
-        let m = Meta(settings: settings, channels: channels, activeChannelID: activeChannelID, reusableImages: reusableImages)
+        let m = Meta(settings: settings, channels: channels, activeChannelID: activeChannelID, reusableImages: reusableImages, recipes: recipes)
         if let d = try? JSONEncoder.avg.encode(m) { try? d.write(to: Self.metaURL, options: .atomic) }
     }
 
@@ -450,6 +456,34 @@ final class Store {
         channels.filter { $0.musicTrackID == id || $0.sfxMap.values.contains(id) }
     }
 
+    // MARK: Recipes (see Recipes.swift)
+
+    /// Saves a channel's look, sound and editing under a name; a name already
+    /// in use (any case) is replaced rather than duplicated.
+    @discardableResult
+    func saveRecipe(name: String, from channel: Channel) -> Recipe? {
+        let trimmed = name.trimmed
+        guard !trimmed.isEmpty else { return nil }
+        var recipe = Recipe(name: trimmed, capturing: channel)
+        if let i = recipes.firstIndex(where: { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            recipe.id = recipes[i].id
+            recipes[i] = recipe
+        } else {
+            recipes.insert(recipe, at: 0)
+        }
+        return recipe
+    }
+
+    func deleteRecipe(_ id: UUID) {
+        recipes.removeAll { $0.id == id }
+    }
+
+    /// The recipe copied onto a channel; sounds it points at that are gone are dropped.
+    func applyRecipe(_ recipe: Recipe, toChannel id: UUID) {
+        guard let i = channels.firstIndex(where: { $0.id == id }) else { return }
+        recipe.apply(to: &channels[i], knownAudio: Set(audioLibrary.items.map(\.id)))
+    }
+
     /// Library items of one kind that nothing uses: no channel has it as its
     /// music track or as a moment's sound, and no video chose it. Music is
     /// never "unused" while a channel picks music automatically, because that
@@ -481,6 +515,10 @@ final class Store {
             if channels[i].musicTrackID == id { channels[i].musicTrackID = nil }
             channels[i].musicRecent.removeAll { $0 == id }
             channels[i].sfxMap = channels[i].sfxMap.filter { $0.value != id }
+        }
+        for i in recipes.indices {
+            if recipes[i].musicTrackID == id { recipes[i].musicTrackID = nil }
+            recipes[i].sfxMap = recipes[i].sfxMap.filter { $0.value != id }
         }
         for p in projects {
             guard case .track(let chosen)? = p.edits?.music, chosen == id else { continue }

@@ -111,6 +111,9 @@ struct ChannelEditor: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State var channel: Channel
+    @State private var savingRecipe = false
+    @State private var recipeName = ""
+    @State private var pickingRecipe = false
 
     private func soundBinding(_ moment: SFXMoment) -> Binding<String?> {
         Binding(
@@ -345,6 +348,16 @@ struct ChannelEditor: View {
                 }
 
                 Section {
+                    Button("Save as recipe…") {
+                        recipeName = channel.name
+                        savingRecipe = true
+                    }
+                    Button("Apply a recipe…") { pickingRecipe = true }
+                } header: { Text("Recipes") } footer: {
+                    Text("A recipe keeps this channel’s look, sound and editing so another channel can reuse it. Applying one fills in the form; nothing is saved until you press Save.")
+                }
+
+                Section {
                     Toggle("Choose a track for me", isOn: $channel.musicAuto)
                     if !channel.musicAuto {
                         Picker("Track", selection: $channel.musicTrackID) {
@@ -358,7 +371,7 @@ struct ChannelEditor: View {
                     if channel.musicAuto || channel.musicTrackID != nil {
                         VStack(alignment: .leading) {
                             Text("Under the voice: \(Int(channel.musicGainDB)) dB")
-                            Slider(value: $channel.musicGainDB, in: -35 ... -10, step: 1)
+                            Slider(value: $channel.musicGainDB, in: EditResolution.musicGainRange, step: 1)
                         }
                     }
                 } header: { Text("Music") } footer: {
@@ -390,7 +403,7 @@ struct ChannelEditor: View {
                         }
                         VStack(alignment: .leading) {
                             Text("Level: \(Int(channel.sfxGainDB)) dB")
-                            Slider(value: $channel.sfxGainDB, in: -12 ... 6, step: 1)
+                            Slider(value: $channel.sfxGainDB, in: EditResolution.sfxGainRange, step: 1)
                         }
                     }
                 } header: { Text("Sound effects") } footer: {
@@ -507,6 +520,18 @@ struct ChannelEditor: View {
             .navigationTitle(channel.name.isEmpty ? "Channel" : channel.name)
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
+            .alert("Save as recipe", isPresented: $savingRecipe) {
+                TextField("Name", text: $recipeName)
+                Button("Save") { store.saveRecipe(name: recipeName, from: channel) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("A name already used is replaced.")
+            }
+            .sheet(isPresented: $pickingRecipe) {
+                RecipePickerSheet(channelName: channel.name.isEmpty ? "this channel" : channel.name) { recipe in
+                    recipe.apply(to: &channel, knownAudio: Set(store.audioLibrary.items.map(\.id)))
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

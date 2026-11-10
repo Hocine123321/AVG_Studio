@@ -21,6 +21,7 @@ struct CreateView: View {
     @State private var toastMessage: String?
     @State private var showChannelPicker = false
     @State private var hook: String?
+    @State private var showRecipes = false
     @State private var showHooks = false
 
     private var channel: Channel {
@@ -47,6 +48,10 @@ struct CreateView: View {
                 VStack(spacing: 0) {
                     pickerRow("Channel", channel.name, icon: "chevron.right") { showChannelPicker = true }
                     hairline
+                    if !store.recipes.isEmpty {
+                        pickerRow("Recipe", "Apply one…", icon: "chevron.right") { showRecipes = true }
+                        hairline
+                    }
                     navRow("Writer", store.settings.text.label)
                     hairline
                     navRow("Images", store.settings.image.label)
@@ -92,6 +97,13 @@ struct CreateView: View {
         .toast($toastMessage)
         .sheet(isPresented: $showChannelPicker) { channelSheet }
         .sheet(isPresented: $showHooks) { HookBenchView(topic: topic.trimmed) { hook = $0 } }
+        .sheet(isPresented: $showRecipes) {
+            RecipePickerSheet(channelName: channel.name) { recipe in
+                store.applyRecipe(recipe, toChannel: channel.id)
+                aspect = recipe.aspectRatio
+                toastMessage = "Applied “\(recipe.name)” to \(channel.name)"
+            }
+        }
     }
 
     /// The chosen opening line, or the way to find one.
